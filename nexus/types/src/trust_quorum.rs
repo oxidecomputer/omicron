@@ -8,7 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::bail;
 use chrono::{DateTime, Utc};
+use omicron_common::api::external::Error;
+use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -172,7 +175,7 @@ impl TrustQuorumConfig {
                     )
                 })
                 .collect(),
-            time_created: Utc::now(),
+            time_created: now_db_precision(),
             time_committing: None,
             time_committed: None,
             time_aborted: None,
@@ -188,7 +191,7 @@ impl TrustQuorumConfig {
         let num_members = u8::try_from(initial_members.len()).unwrap();
         assert!(num_members >= 3);
         assert!(num_members <= 32);
-        let now = Utc::now();
+        let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
@@ -269,5 +272,293 @@ impl ProposedTrustQuorumConfig {
                 Some(last_committed_epoch)
             }
         }
+    }
+
+    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
+    // from the membership. Return an error if the sled is not a member of the
+    // `latest_committed_config`.
+    pub fn remove_sled(
+        latest_committed_config: &TrustQuorumConfig,
+        new_epoch: Epoch,
+        sled_to_remove: &BaseboardId,
+    ) -> Result<Self, Error> {
+        let rack_id = latest_committed_config.rack_id;
+        let mut members: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        if !members.remove(sled_to_remove) {
+            return Err(Error::invalid_request(format!(
+                "Sled {} is not a member of the trust quorum.",
+                sled_to_remove
+            )));
+        }
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members,
+        })
+    }
+}
+
+/// Given the current trust quorum config returned by
+/// `tq_load_latest_possible_committed_config`, determine whether the provided
+/// sled can be expunged.
+pub fn check_trust_quorum_allows_expunge(
+    sled_id: SledUuid,
+    baseboard_id: &BaseboardId,
+    config: &TrustQuorumConfig,
+) -> Result<(), Error> {
+    let rack_id = config.rack_id;
+    let epoch = config.epoch;
+    let state = config.state;
+
+    if config.members.contains_key(baseboard_id) {
+        return Err(Error::conflict(format!(
+            "Cannot expunge sled {sled_id}, as its baseboard {baseboard_id} \
+            is still a member of the latest trust quorum configuration for \
+            rack {rack_id} (epoch {epoch}, state {state:?})"
+        )));
+    }
+
+    match state {
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+            // Trust quorum reconfiguration can still be aborted at this point,
+            // so it's not safe to expunge the sled at this point.
+            Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest trust quorum \
+                configuration for rack {rack_id} (epoch {epoch}, state \
+                {state:?}) does not include baseboard {baseboard_id}, but it \
+                has not started committing and can still be aborted. Wait for \
+                the configuration at epoch {epoch} to start committing, then \
+                retry. If it is stuck, abort the rack membership change and \
+                propose a new configuration that removes this sled."
+            )))
+        }
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially => Ok(()),
+        TrustQuorumConfigState::Aborted => {
+            Err(Error::internal_error(&format!(
+                "Cannot expunge sled {sled_id}: the trust quorum \
+                configuration for rack {rack_id} at epoch {epoch}, loaded as \
+                the latest possibly committed configuration, is aborted \
+                (this is a programming error because we expect the provided config \
+                to be non-aborted)"
+            )))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    enum Membership {
+        Member,
+        NonMember,
+    }
+
+    #[derive(Debug)]
+    enum Expected {
+        Allowed,
+        MemberConflict,
+        PreparingConflict,
+        AbortedInternalError,
+    }
+
+    #[test]
+    fn test_check_trust_quorum_allows_expunge() {
+        use Expected::*;
+        use Membership::*;
+        use TrustQuorumConfigState as S;
+
+        let sled_id = SledUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        let epoch = Epoch(7);
+        let sled_baseboard = BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: "expunged".to_string(),
+        };
+        let other_members: Vec<BaseboardId> = (0..3)
+            .map(|i| BaseboardId {
+                part_number: "test-part".to_string(),
+                serial_number: format!("other-{i}"),
+            })
+            .collect();
+
+        let cases = [
+            (S::Preparing, Member, MemberConflict),
+            (S::Preparing, NonMember, PreparingConflict),
+            (S::PreparingLrtqUpgrade, Member, MemberConflict),
+            (S::PreparingLrtqUpgrade, NonMember, PreparingConflict),
+            (S::Committing, Member, MemberConflict),
+            (S::Committing, NonMember, Allowed),
+            (S::Committed, Member, MemberConflict),
+            (S::Committed, NonMember, Allowed),
+            (S::CommittedPartially, Member, MemberConflict),
+            (S::CommittedPartially, NonMember, Allowed),
+            (S::Aborted, Member, MemberConflict),
+            (S::Aborted, NonMember, AbortedInternalError),
+        ];
+
+        for (state, membership, expected) in cases {
+            let description = format!("{state:?}, {membership:?}");
+            let mut members: BTreeSet<BaseboardId> =
+                other_members.iter().cloned().collect();
+            match membership {
+                Member => {
+                    members.insert(sled_baseboard.clone());
+                }
+                NonMember => {}
+            }
+            let mut config = TrustQuorumConfig::new_rss_committed_config(
+                rack_id,
+                members,
+                other_members[0].clone(),
+            );
+            config.epoch = epoch;
+            config.state = state;
+
+            let result = check_trust_quorum_allows_expunge(
+                sled_id,
+                &sled_baseboard,
+                &config,
+            );
+
+            let (error, expected_parts) = match expected {
+                Allowed => {
+                    assert_eq!(result, Ok(()), "{description}");
+                    continue;
+                }
+                MemberConflict => (
+                    result.expect_err(&description),
+                    vec![format!(
+                        "Cannot expunge sled {sled_id}, as its baseboard \
+                         {sled_baseboard} is still a member of the latest \
+                         trust quorum configuration for rack {rack_id} \
+                         (epoch 7, state {state:?})"
+                    )],
+                ),
+                PreparingConflict => (
+                    result.expect_err(&description),
+                    vec![
+                        format!(
+                            "for rack {rack_id} (epoch 7, state {state:?}) \
+                             does not include baseboard {sled_baseboard}"
+                        ),
+                        "has not started committing and can still be aborted"
+                            .to_string(),
+                        "Wait for the configuration at epoch 7 to start \
+                         committing, then retry."
+                            .to_string(),
+                        "If it is stuck, abort the rack membership change and \
+                         propose a new configuration that removes this sled."
+                            .to_string(),
+                    ],
+                ),
+                AbortedInternalError => (
+                    result.expect_err(&description),
+                    vec![format!(
+                        "for rack {rack_id} at epoch 7, loaded as the latest \
+                         possibly committed configuration, is aborted"
+                    )],
+                ),
+            };
+
+            let message = match (&expected, &error) {
+                (
+                    MemberConflict | PreparingConflict,
+                    Error::Conflict { message },
+                ) => message.external_message().to_string(),
+                (
+                    AbortedInternalError,
+                    Error::InternalError { internal_message },
+                ) => internal_message.clone(),
+                (expected, error) => panic!(
+                    "{description}: expected {expected:?}, got {error:?}"
+                ),
+            };
+            for part in expected_parts {
+                assert!(
+                    message.contains(&part),
+                    "{description}: message {message:?} contains {part:?}"
+                );
+            }
+        }
+    }
+
+    fn test_baseboard(serial: &str) -> BaseboardId {
+        BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: serial.to_string(),
+        }
+    }
+
+    fn test_config(
+        num_members: usize,
+        epoch: Epoch,
+        state: TrustQuorumConfigState,
+    ) -> TrustQuorumConfig {
+        let members: BTreeSet<BaseboardId> = (0..num_members)
+            .map(|i| test_baseboard(&format!("member-{i}")))
+            .collect();
+        let coordinator = members.first().expect("at least one member").clone();
+        let mut config = TrustQuorumConfig::new_rss_committed_config(
+            RackUuid::new_v4(),
+            members,
+            coordinator,
+        );
+        config.epoch = epoch;
+        config.state = state;
+        config
+    }
+
+    #[test]
+    fn test_proposed_config_remove_sled() {
+        let config =
+            test_config(4, Epoch(5), TrustQuorumConfigState::Committed);
+        let sled_to_remove = test_baseboard("member-2");
+
+        let proposed = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect("member sled is removed");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id: config.rack_id,
+                epoch: Epoch(6),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(5),
+                },
+                members: [
+                    test_baseboard("member-0"),
+                    test_baseboard("member-1"),
+                    test_baseboard("member-3"),
+                ]
+                .into_iter()
+                .collect(),
+            }
+        );
+
+        let non_member = test_baseboard("not-a-member");
+        assert_eq!(
+            ProposedTrustQuorumConfig::remove_sled(
+                &config,
+                Epoch(6),
+                &non_member,
+            ),
+            Err(Error::invalid_request(format!(
+                "Sled {non_member} is not a member of the trust quorum."
+            ))),
+        );
     }
 }

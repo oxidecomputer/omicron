@@ -44,6 +44,7 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
@@ -190,6 +191,7 @@ impl<'a> Planner<'a> {
         let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
             input.parent_blueprint(),
+            ReflectsCollection::from(inventory),
             creator,
             rng,
         )?;

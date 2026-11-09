@@ -57,7 +57,9 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredSlots, PlanningReport,
 };
-use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
+use nexus_types::deployment::{
+    BlueprintPhysicalDiskConfig, BlueprintSource, ReflectsCollection,
+};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingAddrs,
@@ -66,6 +68,7 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::api::external::Error;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::{
     NexusGenerationKind, SledConfigGenerationKind, TargetReleaseGenerationKind,
@@ -73,9 +76,9 @@ use omicron_generation_kinds::{
 };
 use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::{
-    BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, GenericUuid,
-    MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind,
-    SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+    BlueprintKind, BlueprintUuid, CollectionKind, DatasetKind, ExternalIpKind,
+    GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
+    PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::inventory::NetworkInterface;
@@ -104,10 +107,66 @@ pub struct Blueprint {
     pub nexus_generation: DbTypedGeneration<NexusGenerationKind>,
     pub source: DbBpSource,
     pub external_networking_generation: Generation,
+
+    // These columns collectively represent a `ReflectsCollection` value. DB
+    // constraints ensure that either all or none of them are `Some(_)`; we keep
+    // the fields private to avoid exposing that to consumers, all of which
+    // instead work in terms of the richer `ReflectsCollection` type.
+    reflects_collection_id: Option<DbTypedUuid<CollectionKind>>,
+    reflects_collection_time_started: Option<DateTime<Utc>>,
+    reflects_collection_time_done: Option<DateTime<Utc>>,
+}
+
+impl Blueprint {
+    /// Returns which inventory collection this blueprint reflects
+    pub fn reflects_collection(&self) -> Result<ReflectsCollection, Error> {
+        match (
+            self.reflects_collection_id,
+            self.reflects_collection_time_started,
+            self.reflects_collection_time_done,
+        ) {
+            (Some(collection_id), Some(time_started), Some(time_done)) => {
+                Ok(ReflectsCollection::Collection {
+                    collection_id: collection_id.into(),
+                    time_started,
+                    time_done,
+                })
+            }
+            (None, None, None) => Ok(ReflectsCollection::Indeterminate),
+            (collection_id, time_started, time_done) => {
+                Err(Error::internal_error(format!(
+                    "database constraints violated for blueprint {}: \
+                     columns describing the reflected inventory collection \
+                     are only partially set \
+                     (collection_id = {collection_id:?}, \
+                     time_started = {time_started:?}, \
+                     time_done = {time_done:?})",
+                    self.id,
+                )))
+            }
+        }
+    }
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
     fn from(bp: &'_ nexus_types::deployment::Blueprint) -> Self {
+        let (
+            reflects_collection_id,
+            reflects_collection_time_started,
+            reflects_collection_time_done,
+        ) = match bp.reflects_collection {
+            ReflectsCollection::Collection {
+                collection_id,
+                time_started,
+                time_done,
+            } => (
+                Some(collection_id.into()),
+                Some(time_started),
+                Some(time_done),
+            ),
+            ReflectsCollection::Indeterminate => (None, None, None),
+        };
+
         Self {
             id: bp.id.into(),
             parent_blueprint_id: bp.parent_blueprint_id.map(From::from),
@@ -128,15 +187,22 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             external_networking_generation: Generation(
                 bp.external_networking_generation,
             ),
+            reflects_collection_id,
+            reflects_collection_time_started,
+            reflects_collection_time_done,
         }
     }
 }
 
-impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
-    fn from(value: Blueprint) -> Self {
-        Self {
+impl TryFrom<Blueprint> for nexus_types::deployment::BlueprintMetadata {
+    type Error = Error;
+
+    fn try_from(value: Blueprint) -> Result<Self, Self::Error> {
+        let reflects_collection = value.reflects_collection()?;
+        Ok(Self {
             id: value.id.into(),
             parent_blueprint_id: value.parent_blueprint_id.map(From::from),
+            reflects_collection,
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
             target_release_minimum_generation: value
@@ -155,7 +221,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             source: value.source.into(),
             external_networking_generation: *value
                 .external_networking_generation,
-        }
+        })
     }
 }
 

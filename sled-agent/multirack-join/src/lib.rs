@@ -21,13 +21,16 @@ use bootstrap_agent_lockstep_types::{
 };
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::get_64_subnet;
 use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::multirack::SledAgentStartState;
-use sled_agent_types::rack_init::rack_init_bootstore_generation;
 use sled_agent_types::sled::{
     StartSledAgentRequest, StartSledAgentRequestBody,
 };
@@ -35,6 +38,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,6 +58,7 @@ use trust_quorum_types::{
 };
 
 const INITIAL_TRUST_QUORUM_EPOCH: Epoch = Epoch(1);
+const INITIAL_BOOTSTORE_GENERATION: u64 = 1;
 const TRUST_QUORUM_RETRY_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Describes errors which may occur while operating the multirack join service.
@@ -155,17 +160,40 @@ impl StartSledAgentInfo {
     }
 }
 
+/// A multirack join request accepted by sled-agent
+#[derive(Clone, Debug)]
+pub struct MultirackJoinInput {
+    pub request: MultirackJoinRequest,
+    /// The bootstore generation, decided when the input is accepted.
+    pub bootstore_generation: u64,
+}
+
+impl MultirackJoinInput {
+    /// Replace the request with an accepted change.
+    ///
+    /// We bump the bootstore gen for each accepted change, even if it
+    /// hasn't been written yet.
+    pub fn update(&mut self, request: MultirackJoinRequest) {
+        self.request = request;
+        self.bootstore_generation += 1;
+    }
+}
+
 /// The interface to the Multirack Join Service.
 pub struct MultirackJoinServiceHandle {
+    // Returns the final bootstore generation on success
     pub join_handle:
-        tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
-    pub input_tx: watch::Sender<MultirackJoinRequest>,
+        tokio::task::JoinHandle<Result<u64, MultirackJoinServiceError>>,
+    pub input_tx: watch::Sender<MultirackJoinInput>,
     pub output_rx: watch::Receiver<MultirackJoinServiceState>,
 
     // Once we've initialized trust quorum, we no longer allow membership
     // changes. This allows helpful responses to user requests in case a
     // membership change is attempted too late in the process.
     pub membership_change_still_possible: Arc<AtomicBool>,
+
+    // The last bootstore generation written, or 0 before the first write.
+    pub written_bootstore_generation_rx: watch::Receiver<u64>,
 
     // Once Nexus on an existing rack succcessfully learns about this sled-agent
     // it sends a signal indicating that the join is now complete.
@@ -178,14 +206,18 @@ pub struct MultirackJoinServiceHandle {
 
 impl MultirackJoinServiceHandle {
     pub fn spawn(ctx: RssContext, request: MultirackJoinRequest) -> Self {
-        let (input_tx, input_rx) = watch::channel(request);
+        let (input_tx, input_rx) = watch::channel(MultirackJoinInput {
+            request,
+            bootstore_generation: INITIAL_BOOTSTORE_GENERATION,
+        });
         let state = MultirackJoinServiceState::Requested;
         let (output_tx, output_rx) = watch::channel(state.clone());
         let membership_change_still_possible = Arc::new(AtomicBool::new(true));
         let mcsp = membership_change_still_possible.clone();
+        let (written_bootstore_generation_tx, written_bootstore_generation_rx) =
+            watch::channel(0);
         let (rack_join_successful_tx, rack_join_successful_rx) =
             oneshot::channel();
-        let bootstore_generation = rack_init_bootstore_generation::RSS_INITIAL;
         let join_handle = tokio::task::spawn(async move {
             let log =
                 ctx.base_log.new(o!("component" => "MultirackJoinService"));
@@ -196,8 +228,8 @@ impl MultirackJoinServiceHandle {
                 input_rx,
                 output_tx,
                 membership_change_still_possible: mcsp,
+                written_bootstore_generation_tx,
                 rack_join_successful_rx,
-                bootstore_generation,
             };
             task.run().await
         });
@@ -207,6 +239,7 @@ impl MultirackJoinServiceHandle {
             input_tx,
             output_rx,
             membership_change_still_possible,
+            written_bootstore_generation_rx,
             rack_join_successful_tx,
         }
     }
@@ -216,7 +249,7 @@ impl MultirackJoinServiceHandle {
 struct MultirackJoinServiceTask {
     log: Logger,
     ctx: RssContext,
-    input_rx: watch::Receiver<MultirackJoinRequest>,
+    input_rx: watch::Receiver<MultirackJoinInput>,
     output_tx: watch::Sender<MultirackJoinServiceState>,
 
     // Once we've initialized trust quorum, we no longer allow membership
@@ -224,19 +257,20 @@ struct MultirackJoinServiceTask {
     // membership change is attempted too late in the process.
     membership_change_still_possible: Arc<AtomicBool>,
 
+    // The last bootstore generation written, or 0 before the first write
+    written_bootstore_generation_tx: watch::Sender<u64>,
+
     // Signal that indicates that the rack join is complete and the network
     // configuration can no longer be changed.
     rack_join_successful_rx: oneshot::Receiver<()>,
-
-    // The bootstore generation must be bumped upon each change of the network
-    // configuration. This can happen if the user uploads a new configuration
-    // before the `rack_join_successful_rx` message is received.
-    bootstore_generation: u64,
 }
 
 impl MultirackJoinServiceTask {
     /// The main loop of the Multirack Join Service
-    pub async fn run(&mut self) -> Result<(), MultirackJoinServiceError> {
+    ///
+    /// Returns the bootstore generation of the last written network
+    /// configuration.
+    pub async fn run(&mut self) -> Result<u64, MultirackJoinServiceError> {
         self.output_tx
             .send_modify(|state| *state = MultirackJoinServiceState::Starting);
 
@@ -274,7 +308,7 @@ impl MultirackJoinServiceTask {
         // We're done
         self.ctx.write_rss_completed_ledger(&self.log).await?;
 
-        Ok(())
+        Ok(*self.written_bootstore_generation_tx.borrow())
     }
 
     /// Loop until a message is received stating the multirack join is complete.
@@ -327,7 +361,6 @@ impl MultirackJoinServiceTask {
                 }
                 res = self.input_rx.changed() => {
                     res?;
-                    self.bootstore_generation += 1;
 
                     // This isn't subject to futurelock because
                     // `self.rack_join_successful_rx` above does not block
@@ -347,8 +380,7 @@ impl MultirackJoinServiceTask {
     async fn configure_networking(
         &mut self,
     ) -> Result<(), MultirackJoinServiceError> {
-        let rack_network_config =
-            self.input_rx.borrow_and_update().rack_network_config.clone();
+        let input = self.input_rx.borrow_and_update().clone();
 
         self.output_tx.send_modify(|state| match state {
             MultirackJoinServiceState::TrustQuorumCommitting(_) => {
@@ -377,24 +409,27 @@ impl MultirackJoinServiceTask {
         });
 
         let config = SystemNetworkingConfig {
-            rack_network_config,
+            rack_network_config: input.request.rack_network_config,
             blueprint_external_networking_config: None,
         };
 
         info!(
             self.log,
             "Writing network configuration to bootstore";
-            "generation" => self.bootstore_generation
+            "generation" => input.bootstore_generation
         );
         self.ctx
             .bootstore_node_handle
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&config)
                     .serialize_to_bootstore_with_generation(
-                        self.bootstore_generation,
+                        input.bootstore_generation,
                     ),
             )
             .await?;
+
+        self.written_bootstore_generation_tx
+            .send_replace(input.bootstore_generation);
 
         Ok(())
     }
@@ -415,9 +450,9 @@ impl MultirackJoinServiceTask {
         // config could come in right before this call. We'd miss that update in
         // `wait_for_networking` if we called `borrow_and_update` here, because
         // `changed()` wouldn't fire.
-        let req = self.input_rx.borrow().clone();
+        let req = self.input_rx.borrow().request.clone();
         let tq_members = req.trust_quorum_peers.clone();
-        let status = StartSledAgentsStatus::assign_ids_and_subnets(
+        let status = assign_ids_and_subnets(
             self.ctx.trust_quorum_handle.baseboard_id(),
             rack_id,
             req,
@@ -578,8 +613,12 @@ impl MultirackJoinServiceTask {
         &mut self,
         rack_id: RackUuid,
     ) -> Result<(), MultirackJoinServiceError> {
-        let members =
-            self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+        let members = self
+            .input_rx
+            .borrow_and_update()
+            .request
+            .trust_quorum_peers
+            .clone();
         let epoch = INITIAL_TRUST_QUORUM_EPOCH;
         let last_committed_epoch = None;
 
@@ -618,6 +657,7 @@ impl MultirackJoinServiceTask {
                 members = self
                     .input_rx
                     .borrow_and_update()
+                    .request
                     .trust_quorum_peers
                     .clone();
 
@@ -722,8 +762,12 @@ impl MultirackJoinServiceTask {
         // to date with the latest membership. Then in the loop below, anytime
         // the watch channel indicates a change we know that it must have
         // changed. This makes our reasonining local to this function.
-        let new_members =
-            self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+        let new_members = self
+            .input_rx
+            .borrow_and_update()
+            .request
+            .trust_quorum_peers
+            .clone();
         if new_members != members {
             return Ok(TqPrepareResult::ReconfigurationNeeded {
                 new_members,
@@ -974,6 +1018,7 @@ impl MultirackJoinServiceTask {
                     let new_members = self
                       .input_rx
                       .borrow_and_update()
+                      .request
                       .trust_quorum_peers.clone();
 
                     // Did the membership change?
@@ -1036,7 +1081,7 @@ impl MultirackJoinServiceTask {
         // changed we update our gate to prevent it from changing in the future.
         // Otherwise we start a reconfiguration.
         let guard = self.input_rx.borrow_and_update();
-        if guard.trust_quorum_peers == members {
+        if guard.request.trust_quorum_peers == members {
             // No membership change
             //
             // If an operator tries to change the set of peers for rack
@@ -1047,7 +1092,7 @@ impl MultirackJoinServiceTask {
             Ok(TqCommitResult::Committed)
         } else {
             // Membership change
-            let new_members = guard.trust_quorum_peers.clone();
+            let new_members = guard.request.trust_quorum_peers.clone();
             let just_committed_epoch = epoch;
             Ok(TqCommitResult::ReconfigurationNeeded {
                 new_members,
@@ -1066,8 +1111,12 @@ impl MultirackJoinServiceTask {
         members: &BTreeSet<BaseboardId>,
     ) -> Result<Option<BTreeSet<BaseboardId>>, MultirackJoinServiceError> {
         if self.input_rx.has_changed()? {
-            let new_members =
-                self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+            let new_members = self
+                .input_rx
+                .borrow_and_update()
+                .request
+                .trust_quorum_peers
+                .clone();
             if new_members != *members {
                 return Ok(Some(new_members));
             }
@@ -1076,6 +1125,59 @@ impl MultirackJoinServiceTask {
     }
 }
 
+// Create the allocations necessary to start all sled-agents in this rack
+// and return a preliminary state.
+//
+// This is specific to the multirack join service and therefore lives in
+// this module. It should only be called once.
+fn assign_ids_and_subnets(
+    this_nodes_baseboard_id: &BaseboardId,
+    rack_id: RackUuid,
+    req: MultirackJoinRequest,
+) -> StartSledAgentsStatus {
+    let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+        req.rack_network_config.rack_subnet.addr(),
+    );
+
+    let this_nodes_sled_id = SledUuid::new_v4();
+
+    let sleds = once(SledAgentInfo {
+        baseboard_id: this_nodes_baseboard_id.to_owned(),
+        sled_id: this_nodes_sled_id,
+        // Ensure that this node gets the first /64 prefix, which is
+        // why we start at index 2 in the loop below. Doing this allows
+        // us to deterministically find the sled-agent running this code.
+        // Specifically, we want to find the sled-agent hosting the multirack
+        // join service.
+        sled_subnet: get_64_subnet(rack_subnet, 1),
+        start_state: SledAgentStartState::InProgress { last_error: None },
+    })
+    .chain(
+        req.trust_quorum_peers
+            .into_iter()
+            .filter(|baseboard_id| baseboard_id != this_nodes_baseboard_id)
+            .enumerate()
+            .map(|(idx, baseboard_id)| {
+                let sled_id = SledUuid::new_v4();
+                // We always start numbering prefixes from 1. But we already
+                // reserved that for this node, so start at 2.
+                let idx =
+                    u8::try_from(idx + 2).expect("sled index should fit in u8");
+
+                SledAgentInfo {
+                    baseboard_id,
+                    sled_id,
+                    sled_subnet: get_64_subnet(rack_subnet, idx),
+                    start_state: SledAgentStartState::InProgress {
+                        last_error: None,
+                    },
+                }
+            }),
+    )
+    .collect();
+
+    StartSledAgentsStatus { this_nodes_sled_id, rack_id, sleds }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1103,7 +1205,7 @@ mod tests {
         }];
 
         RackNetworkConfig {
-            rack_subnet: "fd00:abcd:ffff::/56".parse().unwrap(),
+            rack_subnet: "fd00:abcd:ffff:100::/56".parse().unwrap(),
             infra_ip_first: "10.0.0.1".parse().unwrap(),
             infra_ip_last: "10.0.0.100".parse().unwrap(),
             ports: UplinkPorts::new(ports).unwrap(),
@@ -1130,7 +1232,7 @@ mod tests {
         };
 
         let coordinator = req.trust_quorum_peers.first().unwrap();
-        let status = StartSledAgentsStatus::assign_ids_and_subnets(
+        let status = assign_ids_and_subnets(
             coordinator,
             RackUuid::new_v4(),
             req.clone(),
@@ -1142,9 +1244,28 @@ mod tests {
         let expected_sled_subnets: BTreeSet<_> =
             (0..req.trust_quorum_peers.len())
                 .into_iter()
-                .map(|i| format!("fd00:abcd:ffff:{:x}::/64", i + 1))
+                .map(|i| format!("fd00:abcd:ffff:1{:02x}::/64", i + 1))
                 .collect();
 
         assert_eq!(actual_sled_subnets, expected_sled_subnets);
+    }
+
+    #[test]
+    fn first_subnet_assigned_to_this_node() {
+        let req = MultirackJoinRequest {
+            trust_quorum_peers: trust_quorum_peers(),
+            rack_network_config: rack_network_config(),
+        };
+
+        let this_node = req.trust_quorum_peers.iter().nth(5).unwrap().clone();
+        let status =
+            assign_ids_and_subnets(&this_node, RackUuid::new_v4(), req);
+
+        let this_nodes_assignment =
+            status.sleds.iter().find(|s| s.baseboard_id == this_node).unwrap();
+        assert_eq!(
+            this_nodes_assignment.sled_subnet.to_string(),
+            "fd00:abcd:ffff:101::/64"
+        );
     }
 }

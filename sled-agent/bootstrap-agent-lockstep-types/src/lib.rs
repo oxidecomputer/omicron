@@ -515,56 +515,6 @@ impl From<StartSledAgentsStatus> for MultirackJoinServiceStatus {
     }
 }
 
-impl StartSledAgentsStatus {
-    // Create the allocations necessary to start a sled-agent and return a
-    // preliminary state.
-    //
-    // This should only be called once.
-    pub fn assign_ids_and_subnets(
-        this_nodes_baseboard_id: &BaseboardId,
-        rack_id: RackUuid,
-        req: MultirackJoinRequest,
-    ) -> Self {
-        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
-            req.rack_network_config.rack_subnet.addr(),
-        );
-
-        // This is guaranteed to be filled in, because validating a trust
-        // quorum reconfiguration request ensures that this node is a member of
-        // `trust_quorum_peers`.
-        let mut this_nodes_sled_id = None;
-
-        let sleds = req
-            .trust_quorum_peers
-            .into_iter()
-            .enumerate()
-            .map(|(idx, baseboard_id)| {
-                let sled_id = SledUuid::new_v4();
-                if baseboard_id == *this_nodes_baseboard_id {
-                    this_nodes_sled_id = Some(sled_id);
-                }
-
-                SledAgentInfo {
-                    baseboard_id,
-                    sled_id,
-                    sled_subnet: get_64_subnet(
-                        rack_subnet,
-                        u8::try_from(idx + 1).expect("too many sleds"),
-                    ),
-                    start_state: SledAgentStartState::InProgress {
-                        last_error: None,
-                    },
-                }
-            })
-            .collect();
-
-        // SAFETY: Construction of the trust quorum ensures this node is a member
-        let this_nodes_sled_id = this_nodes_sled_id.unwrap();
-
-        StartSledAgentsStatus { this_nodes_sled_id, rack_id, sleds }
-    }
-}
-
 /// The current state of the `MultirackJoinService` as retrieved from the
 /// `output_rx` watch channel.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

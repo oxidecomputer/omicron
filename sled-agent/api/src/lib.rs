@@ -36,6 +36,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
+    (62, ADD_SLED_REGISTRATION_INFO),
     (61, TRUST_QUORUM_NULLABLE_RESPONSES),
     (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
     (59, INSTANCE_ATTACHED_SUBNETS_MAP),
@@ -1843,14 +1845,40 @@ pub trait SledAgentApi {
     /// Report that this sled's multirack join is complete.
     ///
     /// Sent by Nexus once it has observed this sled on the underlay network.
+    /// Returns the final bootstore generation written by the multirack join
+    /// service. Repeated requests return the same generation.
+    ///
+    /// Returns 409 Conflict if this request arrives while a new networking
+    /// configuration was accepted but not written. Returns 410 Gone if
+    /// sled-agent restarted after a completed join.
     #[endpoint {
         method = PUT,
         path = "/multirack-join-complete",
-        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..,
+        versions = VERSION_MULTIRACK_JOIN_COMPLETE_GENERATION..,
     }]
     async fn multirack_join_complete(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinCompleteResponse>,
+        HttpError,
+    >;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    #[endpoint {
+        operation_id = "multirack_join_complete",
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..VERSION_MULTIRACK_JOIN_COMPLETE_GENERATION,
+    }]
+    async fn multirack_join_complete_v56(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::multirack_join_complete(request_context)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
 
     /// Return the status of this sled's multirack join service.
     ///
@@ -1865,6 +1893,22 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<latest::multirack::MultirackJoinServiceStatus>,
+        HttpError,
+    >;
+
+    /// Return this sled's registration identity.
+    ///
+    /// Nexus calls this method synchronously while handling this sled's
+    /// `sled_agent_put`.
+    #[endpoint {
+        method = GET,
+        path = "/sled-registration-info",
+        versions = VERSION_ADD_SLED_REGISTRATION_INFO..,
+    }]
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::inventory::SledRegistrationInfo>,
         HttpError,
     >;
 }

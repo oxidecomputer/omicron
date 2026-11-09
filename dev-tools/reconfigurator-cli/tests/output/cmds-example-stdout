@@ -500,6 +500,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     created by::::::::::::::   test suite
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1
@@ -688,6 +689,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     created by::::::::::::::   test suite
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1
@@ -1510,6 +1512,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     created by::::::::::::::   test suite
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1

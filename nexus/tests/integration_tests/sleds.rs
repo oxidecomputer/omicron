@@ -5,10 +5,19 @@
 //! Tests for APIs against sled-based endpoints.
 
 use dropshot::test_util::ClientTestContext;
+use http::StatusCode;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
 use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
+use nexus_db_model::Sled as DbSled;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
+use nexus_lockstep_client::types::SledPolicy;
+use nexus_lockstep_client::types::SledProvisionPolicy;
+use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::background::run_inventory_collection;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
@@ -17,13 +26,27 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
+use nexus_types::trust_quorum::IsLrtqUpgrade;
+use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
+use nexus_types::trust_quorum::TrustQuorumConfig;
+use nexus_types::trust_quorum::TrustQuorumConfigState;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
+use omicron_generation_kinds::GenericGeneration;
+use omicron_generation_kinds::SledRegistrationGeneration;
 use omicron_sled_agent::sim;
 use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::BaseboardId;
+use std::collections::BTreeSet;
 use std::str::FromStr;
+use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::crypto::Sha3_256Digest;
+use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -213,4 +236,425 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(project.identity.name, sled_instances[0].project_name);
     assert_eq!(instance.identity.name, sled_instances[0].name);
+}
+
+fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone())
+}
+
+async fn fetch_sled(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) -> DbSled {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let (.., sled) = nexus
+        .sled_lookup(opctx, &sled_id)
+        .expect("built a sled lookup")
+        .fetch()
+        .await
+        .unwrap_or_else(|error| panic!("sled {sled_id} has a row: {error}"));
+    sled
+}
+
+async fn assert_no_sled_row(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let result = nexus
+        .sled_lookup(opctx, &sled_id)
+        .expect("built a sled lookup")
+        .fetch()
+        .await;
+    match result {
+        Ok((.., sled)) => {
+            panic!("expected no row for sled {sled_id}, found {sled:?}")
+        }
+        Err(error) => assert_eq!(
+            error,
+            LookupType::ById(sled_id.into_untyped_uuid())
+                .into_not_found(ResourceType::Sled),
+        ),
+    }
+}
+
+fn expect_error_response(
+    result: Result<
+        nexus_client::ResponseValue<()>,
+        nexus_client::Error<nexus_client::types::Error>,
+    >,
+) -> (StatusCode, nexus_client::types::Error) {
+    match result {
+        Err(nexus_client::Error::ErrorResponse(response)) => {
+            let status = response.status();
+            (status, response.into_inner())
+        }
+        other => panic!("expected an error response from Nexus, got {other:?}"),
+    }
+}
+
+/// Expunge and decommission a sled that the test registered, so that Nexus
+/// background tasks stop contacting its simulated Sled Agent.
+///
+/// We do this before shutting down the simulated Sled Agent to avoid cross-test
+/// contamination where a different service starts up on the same port and makes
+/// requests.
+async fn expunge_and_decommission(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let (authz_sled,) = nexus
+        .sled_lookup(opctx, &sled_id)
+        .expect("built a sled lookup")
+        .lookup_for(authz::Action::Modify)
+        .await
+        .unwrap_or_else(|e| panic!("looked up sled {sled_id}: {e}"));
+    datastore
+        .sled_set_policy_to_expunged(opctx, &authz_sled)
+        .await
+        .unwrap_or_else(|e| panic!("expunged sled {sled_id}: {e}"));
+    datastore
+        .sled_set_state_to_decommissioned(opctx, &authz_sled)
+        .await
+        .unwrap_or_else(|e| panic!("decommissioned sled {sled_id}: {e}"));
+}
+
+#[nexus_test]
+async fn test_sled_agent_put_checks_fetched_identity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let opctx = test_opctx(cptestctx);
+    let nexus = &cptestctx.server.server_context().nexus;
+    let internal_client = cptestctx.internal_client();
+
+    let existing_sled_id = cptestctx.first_sled_id();
+    let before = fetch_sled(cptestctx, &opctx, existing_sled_id).await;
+
+    // Simulate a Sled Agent that reports another sled's ID.
+    let impostor_sled_id = SledUuid::new_v4();
+    let impostor = cptestctx
+        .start_unregistered_sled(impostor_sled_id, nexus.rack_id())
+        .await;
+    assert_no_sled_row(cptestctx, &opctx, impostor_sled_id).await;
+    let impostor_address = impostor.http_server.local_addr();
+    let mut overwriting_body = impostor.sled_agent_info();
+    // Bump the generation to avoid this request being filtered out.
+    overwriting_body.generation =
+        SledRegistrationGeneration::from(before.sled_agent_gen)
+            .next()
+            .into_untyped_generation();
+    let (status, error) = expect_error_response(
+        internal_client
+            .sled_agent_put(&existing_sled_id, &overwriting_body)
+            .await,
+    );
+    assert_eq!(
+        (status, error.error_code.as_deref(), error.message.as_str()),
+        (
+            StatusCode::BAD_REQUEST,
+            Some("InvalidRequest"),
+            format!(
+                "sled agent at {impostor_address} reports sled ID \
+                 {impostor_sled_id}, which does not match sled ID \
+                 {existing_sled_id} in the request path; refusing to \
+                 register sled {existing_sled_id} with another sled's \
+                 information",
+            )
+            .as_str(),
+        ),
+    );
+    assert_eq!(
+        fetch_sled(cptestctx, &opctx, existing_sled_id).await,
+        before,
+        "a refused registration must not write the path sled's row",
+    );
+
+    // Simulate a sled on a second rack that hasn't joined the fleet yet.
+    let other_rack_id = RackUuid::new_v4();
+    assert_ne!(other_rack_id, nexus.rack_id());
+    let sled_id = SledUuid::new_v4();
+    let sim = cptestctx.start_unregistered_sled(sled_id, other_rack_id).await;
+    let body = sim.sled_agent_info();
+
+    // This will return a 503 until the rack has been adopted by the fleet.
+    let (status, error) = expect_error_response(
+        internal_client.sled_agent_put(&sled_id, &body).await,
+    );
+    assert_eq!(
+        (status, error.error_code.as_deref(), error.message.as_str()),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Some("ServiceNotAvailable"),
+            "Service Unavailable",
+        ),
+        "registration of a sled on a rack with no `rack` row should be \
+         refused as retryable",
+    );
+    assert_no_sled_row(cptestctx, &opctx, sled_id).await;
+
+    nexus
+        .datastore()
+        .rack_insert(&opctx, &nexus_db_model::Rack::new(other_rack_id))
+        .await
+        .unwrap_or_else(|e| panic!("inserted rack {other_rack_id}: {e}"));
+
+    // Retry this, now that the rack is adopted. This is the happy path.
+    internal_client
+        .sled_agent_put(&sled_id, &body)
+        .await
+        .expect("registration of a sled on an adopted rack was accepted");
+    assert_eq!(
+        fetch_sled(cptestctx, &opctx, sled_id).await.rack_id(),
+        other_rack_id,
+        "the row should hold the rack ID the sled agent reports, not this \
+         Nexus's rack ID {}",
+        nexus.rack_id(),
+    );
+
+    expunge_and_decommission(cptestctx, &opctx, sled_id).await;
+}
+
+struct TrustQuorumConfigDriver<'a> {
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    rack_id: RackUuid,
+}
+
+impl TrustQuorumConfigDriver<'_> {
+    fn authz_tq(&self) -> authz::TrustQuorumConfig {
+        authz::TrustQuorumConfig::for_rack_id(self.rack_id)
+    }
+
+    async fn config(&self, epoch: u64) -> TrustQuorumConfig {
+        self.datastore
+            .tq_get_config(self.opctx, self.authz_tq(), Epoch(epoch))
+            .await
+            .expect("loaded trust quorum config")
+            .unwrap_or_else(|| {
+                panic!("trust quorum config at epoch {epoch} exists")
+            })
+    }
+
+    async fn propose(
+        &self,
+        epoch: u64,
+        last_committed_epoch: u64,
+        members: &BTreeSet<BaseboardId>,
+    ) {
+        self.datastore
+            .tq_insert_latest_config(
+                self.opctx,
+                ProposedTrustQuorumConfig {
+                    rack_id: self.rack_id,
+                    epoch: Epoch(epoch),
+                    is_lrtq_upgrade: IsLrtqUpgrade::No {
+                        last_committed_epoch: Epoch(last_committed_epoch),
+                    },
+                    members: members.clone(),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!("inserted trust quorum config at epoch {epoch}: {error}")
+            });
+        assert_eq!(
+            self.config(epoch).await.state,
+            TrustQuorumConfigState::Preparing
+        );
+    }
+
+    async fn ack_all_prepares(&self, epoch: u64) {
+        let config = self.config(epoch).await;
+        let members: BTreeSet<_> = config.members.keys().cloned().collect();
+        let coordinator_config = Configuration {
+            rack_id: config.rack_id,
+            epoch: config.epoch,
+            coordinator: config.coordinator.clone(),
+            members: members
+                .iter()
+                .cloned()
+                .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                .collect(),
+            threshold: config.threshold,
+            encrypted_rack_secrets: None,
+        };
+        let state = self
+            .datastore
+            .tq_update_prepare_status(self.opctx, coordinator_config, members)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("acked prepares at epoch {epoch}: {error}")
+            });
+        assert_eq!(state, TrustQuorumConfigState::Committing);
+    }
+
+    async fn ack_commits(
+        &self,
+        epoch: u64,
+        acked: &BTreeSet<BaseboardId>,
+        expected_state: TrustQuorumConfigState,
+    ) {
+        let state = self
+            .datastore
+            .tq_update_commit_status(
+                self.opctx,
+                self.authz_tq(),
+                Epoch(epoch),
+                acked.clone(),
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!("acked commits at epoch {epoch}: {error}")
+            });
+        assert_eq!(state, expected_state);
+    }
+
+    async fn abort(&self, epoch: u64) {
+        self.datastore
+            .tq_abort_config(
+                self.opctx,
+                self.authz_tq(),
+                Epoch(epoch),
+                "aborted by test".to_string(),
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!("aborted trust quorum config at epoch {epoch}: {error}")
+            });
+        assert_eq!(
+            self.config(epoch).await.state,
+            TrustQuorumConfigState::Aborted
+        );
+    }
+}
+
+async fn expunge_sled(
+    client: &nexus_lockstep_client::Client,
+    sled_id: SledUuid,
+) -> Result<SledPolicy, (StatusCode, String)> {
+    match client
+        .sled_expunge(&SledSelector { sled: sled_id.into_untyped_uuid() })
+        .await
+    {
+        Ok(response) => Ok(response.into_inner()),
+        Err(nexus_lockstep_client::Error::ErrorResponse(response)) => {
+            let status = response.status();
+            Err((status, response.into_inner().message))
+        }
+        Err(error) => panic!("unexpected error expunging {sled_id}: {error}"),
+    }
+}
+
+#[track_caller]
+fn assert_rejected_as_member(
+    result: Result<SledPolicy, (StatusCode, String)>,
+    member_epoch: u64,
+    member_state: TrustQuorumConfigState,
+) {
+    let (status, message) = result.expect_err("expunge was rejected");
+    assert_eq!(status, StatusCode::CONFLICT, "message: {message}");
+    for expected in [
+        "is still a member of the latest trust quorum configuration for rack "
+            .to_string(),
+        format!("(epoch {member_epoch}, state {member_state:?})"),
+    ] {
+        assert!(
+            message.contains(&expected),
+            "message {message:?} contains {expected:?}"
+        );
+    }
+}
+
+#[track_caller]
+fn assert_rejected_as_preparing(
+    result: Result<SledPolicy, (StatusCode, String)>,
+    preparing_epoch: u64,
+) {
+    let (status, message) = result.expect_err("expunge was rejected");
+    assert_eq!(status, StatusCode::CONFLICT, "message: {message}");
+    for expected in [
+        format!("(epoch {preparing_epoch}, state Preparing) does not include"),
+        "has not started committing and can still be aborted".to_string(),
+        format!(
+            "Wait for the configuration at epoch {preparing_epoch} to start \
+             committing, then retry."
+        ),
+    ] {
+        assert!(
+            message.contains(&expected),
+            "message {message:?} contains {expected:?}"
+        );
+    }
+}
+
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_sled_expunge_trust_quorum_gate(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let lockstep_client = cptestctx.lockstep_client();
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let sled_id = cptestctx.second_sled_id();
+
+    // Run an inventory collection, which will cause the sled's hw_baseboard_id
+    // row to be inserted. Then it can be added to the trust quorum.
+    run_inventory_collection(&cptestctx.lockstep_client).await;
+
+    let (.., sled) = LookupPath::new(&opctx, datastore)
+        .sled_id(sled_id)
+        .fetch()
+        .await
+        .expect("looked up sled");
+    let sled_baseboard = BaseboardId {
+        part_number: sled.part_number().to_string(),
+        serial_number: sled.serial_number().to_string(),
+    };
+    let tq = TrustQuorumConfigDriver {
+        opctx: &opctx,
+        datastore,
+        rack_id: sled.rack_id(),
+    };
+
+    let initial_config = tq.config(1).await;
+    assert_eq!(initial_config.state, TrustQuorumConfigState::Committed);
+    let others: BTreeSet<_> = initial_config.members.keys().cloned().collect();
+    assert!(!others.contains(&sled_baseboard));
+    let with_sled: BTreeSet<_> =
+        others.iter().cloned().chain([sled_baseboard.clone()]).collect();
+
+    tq.propose(2, 1, &with_sled).await;
+    tq.ack_all_prepares(2).await;
+    tq.ack_commits(2, &with_sled, TrustQuorumConfigState::Committed).await;
+
+    tq.propose(3, 2, &others).await;
+    assert_rejected_as_preparing(
+        expunge_sled(&lockstep_client, sled_id).await,
+        3,
+    );
+
+    tq.abort(3).await;
+    assert_rejected_as_member(
+        expunge_sled(&lockstep_client, sled_id).await,
+        2,
+        TrustQuorumConfigState::Committed,
+    );
+
+    tq.propose(4, 2, &others).await;
+    assert_rejected_as_preparing(
+        expunge_sled(&lockstep_client, sled_id).await,
+        4,
+    );
+
+    tq.ack_all_prepares(4).await;
+    assert_eq!(
+        expunge_sled(&lockstep_client, sled_id).await,
+        Ok(SledPolicy::InService(SledProvisionPolicy::Provisionable)),
+    );
 }

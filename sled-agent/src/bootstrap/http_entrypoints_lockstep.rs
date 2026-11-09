@@ -137,7 +137,9 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
                 | RssAccessError::MembershipChangeNoLongerAllowed
                 | RssAccessError::RackSubnetChangeNotAllowed
                 | RssAccessError::MultirackJoinNotYetStarted
-                | RssAccessError::MultirackJoinStatusNotYetAvailable => {
+                | RssAccessError::MultirackJoinStatusNotYetAvailable
+                | RssAccessError::MultirackJoinGenerationUnavailable
+                | RssAccessError::MultirackJoinPendingConfigUpdate => {
                     HttpError::for_client_error(
                         Some(err.error_code().to_string()),
                         dropshot::ClientErrorStatusCode::CONFLICT,
@@ -224,7 +226,9 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
                 | RssAccessError::MembershipChangeNoLongerAllowed
                 | RssAccessError::RackSubnetChangeNotAllowed
                 | RssAccessError::MultirackJoinNotYetStarted
-                | RssAccessError::MultirackJoinStatusNotYetAvailable => {
+                | RssAccessError::MultirackJoinStatusNotYetAvailable
+                | RssAccessError::MultirackJoinGenerationUnavailable
+                | RssAccessError::MultirackJoinPendingConfigUpdate => {
                     HttpError::for_client_error(
                         Some(err.error_code().to_string()),
                         dropshot::ClientErrorStatusCode::CONFLICT,

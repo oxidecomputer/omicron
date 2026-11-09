@@ -4,3 +4,4 @@
 
 mod commands;
 mod early_network;
+mod sled_registration_info;

@@ -33,6 +33,7 @@ impl super::Nexus {
     ) -> Result<TrustQuorumConfig, Error> {
         let rack_id = authz_tq.rack().id();
         let (latest_committed_config, latest_epoch) = self
+            .db_datastore
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
 
@@ -104,16 +105,15 @@ impl super::Nexus {
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         let (latest_committed_config, latest_epoch) = self
+            .db_datastore
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
         let new_epoch = latest_epoch.next();
-        let proposed = self
-            .remove_sled_proposed_config(
-                latest_committed_config,
-                new_epoch,
-                sled_to_remove,
-            )
-            .await?;
+        let proposed = ProposedTrustQuorumConfig::remove_sled(
+            &latest_committed_config,
+            new_epoch,
+            &sled_to_remove,
+        )?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
@@ -369,36 +369,6 @@ impl super::Nexus {
         ))
     }
 
-    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
-    // from the membership. Return an error if the sled is not a member of the
-    // `latest_committed_config`.
-    async fn remove_sled_proposed_config(
-        &self,
-        latest_committed_config: TrustQuorumConfig,
-        new_epoch: Epoch,
-        sled_to_remove: BaseboardId,
-    ) -> Result<ProposedTrustQuorumConfig, Error> {
-        let rack_id = latest_committed_config.rack_id;
-        let mut members: BTreeSet<_> =
-            latest_committed_config.members.keys().cloned().collect();
-
-        if !members.remove(&sled_to_remove) {
-            return Err(Error::invalid_request(format!(
-                "Sled {} is not a member of the trust quorum.",
-                sled_to_remove
-            )));
-        }
-
-        Ok(ProposedTrustQuorumConfig {
-            rack_id,
-            epoch: new_epoch,
-            is_lrtq_upgrade: IsLrtqUpgrade::No {
-                last_committed_epoch: latest_committed_config.epoch,
-            },
-            members,
-        })
-    }
-
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
     // the membership. Return an error if any of the new sleds exist in the
     // `latest_committed_config` membership already.
@@ -429,64 +399,5 @@ impl super::Nexus {
             },
             members: new_sleds.union(&existing).cloned().collect(),
         })
-    }
-
-    // Load the latest committed trust quorum configuration for `rack_id` and
-    // return it along with the epoch for the latest configuration.
-    //
-    // If the configuration is aborted, then check to see what its latest
-    // `last_committed_epoch` is and load that configuration.
-    //
-    // Note that the configuration that comes back may not actually be committed
-    // yet if it's the latest configuration. That is ok because we will perform
-    // validation during insert of the any newly proposed config.
-    pub async fn tq_load_latest_possible_committed_config(
-        &self,
-        opctx: &OpContext,
-        authz_tq: authz::TrustQuorumConfig,
-    ) -> Result<(TrustQuorumConfig, Epoch), Error> {
-        let rack_id = authz_tq.rack().id();
-
-        // First get the latest configuration for this rack.
-        let Some(latest_config) = self
-            .db_datastore
-            .tq_get_latest_config(opctx, authz_tq.clone())
-            .await?
-        else {
-            return Err(Error::invalid_request(format!(
-                "Missing trust quorum configurations for rack {rack_id}. \
-                Upgrade to trust quorum required."
-            )));
-        };
-
-        let highest_epoch = latest_config.epoch;
-
-        // We assume this config is committed as long as it is not aborted.
-        //
-        // This assumption will be validated by the datastore code before
-        // insertion of the new configuration.
-        let latest_committed_config = if latest_config.state.is_aborted() {
-            let Some(epoch) = latest_config.last_committed_epoch else {
-                return Err(Error::invalid_request(format!(
-                    "No committed trust quorum configuration for \
-                    rack {rack_id}."
-                )));
-            };
-
-            // Load the configuration for the last commmitted epoch
-            let Some(latest_committed_config) =
-                self.db_datastore.tq_get_config(opctx, authz_tq, epoch).await?
-            else {
-                return Err(Error::invalid_request(format!(
-                    "Missing expected last committed trust quorum \
-                    configuration for rack {rack_id}, epoch {epoch}."
-                )));
-            };
-            latest_committed_config
-        } else {
-            latest_config
-        };
-
-        Ok((latest_committed_config, highest_epoch))
     }
 }

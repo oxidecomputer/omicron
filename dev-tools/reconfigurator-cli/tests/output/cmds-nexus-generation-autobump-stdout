@@ -1439,6 +1439,9 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     created by::::::::::::::   reconfigurator-sim
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   61f451b3-2121-4ed6-91c7-a550054f6c21
+    collection started::::::   <REDACTED_TIMESTAMP>
+    collection done:::::::::   <REDACTED_TIMESTAMP>
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1

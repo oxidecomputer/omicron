@@ -9,6 +9,8 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::multirack::UnadoptedRack;
+use crate::external_api::multirack::UnadoptedSled;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
@@ -1311,6 +1313,20 @@ impl IdOrdItem for DiscoveredRack {
     id_upcast!();
 }
 
+impl From<DiscoveredRack> for UnadoptedRack {
+    fn from(value: DiscoveredRack) -> Self {
+        Self {
+            rack_id: value.rack_id,
+            rack_subnet: value.rack_subnet.net(),
+            unadopted_sleds: value
+                .discovered_sleds
+                .into_iter()
+                .map(UnadoptedSled::from)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DiscoveredSled {
     /// ID of the sled, which will be the same ID used by the sled-agent to
@@ -1331,6 +1347,24 @@ impl IdOrdItem for DiscoveredSled {
         self.sled_id
     }
     id_upcast!();
+}
+
+impl From<DiscoveredSled> for UnadoptedSled {
+    fn from(value: DiscoveredSled) -> Self {
+        let (sled_agent_started, last_start_err) =
+            match value.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error)
+                }
+            };
+        Self {
+            sled_id: value.sled_id,
+            baseboard_id: value.baseboard_id,
+            sled_agent_started,
+            last_start_err,
+        }
+    }
 }
 
 #[cfg(test)]

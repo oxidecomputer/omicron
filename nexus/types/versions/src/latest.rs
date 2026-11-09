@@ -263,6 +263,11 @@ pub mod multicast {
     pub use crate::impls::multicast::validate_source_ip;
 }
 
+pub mod multirack {
+    pub use crate::v2026_11_04_00::multirack::UnadoptedRack;
+    pub use crate::v2026_11_04_00::multirack::UnadoptedSled;
+}
+
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;
@@ -459,9 +464,9 @@ pub mod update {
     pub use crate::v2026_10_13_00::update::TufRepo;
     pub use crate::v2026_10_13_00::update::TufRepoUpload;
 
-    pub use crate::v2026_11_05_00::update::OperatorNotes;
-    pub use crate::v2026_11_05_00::update::OperatorStatus;
-    pub use crate::v2026_11_05_00::update::UpdateStatus;
+    pub use crate::v2026_11_09_00::update::OperatorNotes;
+    pub use crate::v2026_11_09_00::update::OperatorStatus;
+    pub use crate::v2026_11_09_00::update::UpdateStatus;
 }
 
 pub mod vpc {
