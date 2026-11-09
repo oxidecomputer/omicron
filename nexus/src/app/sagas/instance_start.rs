@@ -368,11 +368,26 @@ async fn sis_destroy_vmm_record(
     osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
 
     // Now that the VMM record has been marked as `SagaUnwound`, the instance
-    // may be permitted to reincarnate. If it is, activate the instance
-    // reincarnation background task to help it along.
+    // may be permitted to reincarnate. If it is, and the reason for it to be
+    // started is not `SledEvacuation`, activate the instance reincarnation
+    // background task to help it along.
+    //
+    // We don't enforce the cooldown period for restarts due to sled
+    // evacuation. This means that activating the reincarnation background task
+    // here could turn into "spam reincarnations as fast as possible", if
+    // there's an instance that's failing to reincarnate. So, instead of
+    // activating the task here, we rely on its periodic run (every minute).
+    //
+    // Now, this `SledEvacuation` exception here sucks. Due to the urgency of
+    // delivering live update with sled evacuation, we're taking a small
+    // shortcut until https://github.com/oxidecomputer/omicron/issues/11707 is
+    // implemented.
     let karmic_status =
         db_instance.auto_restart.can_reincarnate(&db_instance.runtime());
-    if karmic_status == db::model::Reincarnatability::WillReincarnate {
+    let is_reason_sled_evacuation = params.reason == Reason::SledEvacuation;
+    if karmic_status == db::model::Reincarnatability::WillReincarnate
+        && !is_reason_sled_evacuation
+    {
         info!(
             osagactx.log(),
             "start saga unwound; instance may reincarnate";
@@ -385,6 +400,16 @@ async fn sis_destroy_vmm_record(
             .background_tasks
             .task_instance_reincarnation
             .activate();
+    } else if is_reason_sled_evacuation {
+        debug!(
+            osagactx.log(),
+            "start saga unwound; instance may reincarnate during the next \
+             periodic run of the instance reincarnation background task";
+            "instance_id" => %db_instance.id(),
+            "auto_restart_config" => ?db_instance.auto_restart,
+            "start_reason" => ?params.reason,
+            "karmic_status" => ?karmic_status,
+        );
     } else {
         debug!(
             osagactx.log(),
