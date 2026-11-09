@@ -157,25 +157,99 @@ async fn wait_until_oxide_api_is_available(
             .build()?,
     );
     let start = Instant::now();
+    // Print why the API is not answering, but only when the reason changes,
+    // so a slow start does not drown the output.
+    let mut last_reason = String::new();
     loop {
-        if let Ok(result) = oxide.ping().send().await.map(|x| x.into_inner()) {
-            if result.status == PingStatus::Ok {
+        let reason = match oxide.ping().send().await {
+            Ok(result) if result.status == PingStatus::Ok => {
                 println!("the api is up");
                 break;
             }
+            Ok(result) => format!("ping status {:?}", result.status),
+            Err(e) => {
+                // A 4xx from the unauthenticated, argument-free ping cannot
+                // change by waiting, so retrying until the deadline is futile.
+                if let Some(status) = e.status()
+                    && status.is_client_error()
+                {
+                    return Err(ping_rejected(&cli.oxide_api, status, &e));
+                }
+                describe(&e)
+            }
+        };
+        if reason != last_reason {
+            println!("api not ready: {reason}");
+            last_reason = reason;
         }
         if Instant::now().duration_since(start)
             > Into::<Duration>::into(cli.api_timeout)
         {
             return Err(anyhow!(
-                "{} deadline for system startup exceeded",
-                cli.api_timeout
+                "{} deadline for system startup exceeded (last error: {})",
+                cli.api_timeout,
+                last_reason,
             ));
         }
         println!("no api response yet, wating 3s ...");
         sleep(Duration::from_secs(3)).await;
     }
     Ok(())
+}
+
+/// The error for a ping the API rejected outright. A request for an API
+/// version newer than the server's is called out, since it means this
+/// commtest was built from a newer omicron than the rack it is testing.
+fn ping_rejected(
+    api: &str,
+    status: reqwest::StatusCode,
+    e: &oxide_client::Error<oxide_client::types::Error>,
+) -> anyhow::Error {
+    let message = match e {
+        oxide_client::Error::ErrorResponse(rv) => rv.message.clone(),
+        _ => describe(e),
+    };
+    // Dropshot's versioning sends this as a bare 400 with no error code.
+    if message.starts_with("server does not support this API version") {
+        use oxide_client::ClientInfo;
+        let version = oxide_client::Client::api_version();
+        return anyhow!(
+            "{api} rejected commtest's API version {version}: {message}. This \
+             commtest's oxide-client is from a newer omicron than the rack's \
+             Nexus; use a commtest built from the rack's omicron version (or \
+             an older one)"
+        );
+    }
+    anyhow!("{api} rejected the ping ({status}): {message}")
+}
+
+/// A short description of a failed API call: the status and the server's
+/// message for an error response (whose `Display` also dumps headers, which
+/// differ per response), the whole cause chain otherwise.
+fn describe(e: &oxide_client::Error<oxide_client::types::Error>) -> String {
+    match e {
+        oxide_client::Error::ErrorResponse(rv) => {
+            format!("{}: {}", rv.status(), rv.message)
+        }
+        _ => error_chain(e),
+    }
+}
+
+/// An error and all its sources on one line. reqwest's own `Display` stops at
+/// "error sending request", hiding the connect or TLS cause.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        // Some errors already include their source's text; skip repeats.
+        let text = s.to_string();
+        if !out.contains(&text) {
+            out.push_str(": ");
+            out.push_str(&text);
+        }
+        source = s.source();
+    }
+    out
 }
 
 macro_rules! api_retry {
