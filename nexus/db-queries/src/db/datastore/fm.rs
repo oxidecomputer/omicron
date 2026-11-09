@@ -19,6 +19,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
+use crate::db::model::fm::FmFactRow;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -159,12 +160,28 @@ fn insert_fact_for_case(
     })
 }
 
+/// Convert fact rows read from one table and add them to the per-case map.
+fn add_fact_rows_to_map<R: FmFactRow>(
+    by_case: &mut HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>,
+    rows: Vec<R>,
+) -> Result<(), Error> {
+    for row in rows {
+        let case_id = row.case_id();
+        let fact_id = row.id();
+        let fact = row.into_fact().with_internal_context(|| {
+            format!("failed to read fact {fact_id} on case {case_id}")
+        })?;
+        insert_fact_for_case(by_case, case_id, fact)?;
+    }
+    Ok(())
+}
+
 /// Declares one fact table per [`fm::FactPayload`] variant, and generates
 /// [`FactRows`] (to insert a sitrep's facts) and [`fm_facts_read`] (to read
 /// them back).
 ///
 /// Each `Variant` maps to the table `fm_fact_<variant>` and the model type
-/// `FmFact<Variant>`, which must provide `from_sitrep` and `into_fact`.
+/// `FmFact<Variant>`, which must implement [`FmFactRow`].
 macro_rules! fm_fact_tables {
     ($($variant:ident),* $(,)?) => { ::paste::paste! {
         /// A sitrep's facts, split by table for insertion.
@@ -266,18 +283,8 @@ macro_rules! fm_fact_tables {
                             ))
                     })?;
 
-                    paginator = p.found_batch(&batch, &|f| f.id);
-                    for row in batch {
-                        let case_id: CaseUuid = row.case_id.into();
-                        let fact_id = row.id;
-                        let fact = row.into_fact().with_internal_context(|| {
-                            format!(
-                                "failed to read fact {fact_id} on case \
-                                 {case_id}"
-                            )
-                        })?;
-                        insert_fact_for_case(&mut by_case, case_id, fact)?;
-                    }
+                    paginator = p.found_batch(&batch, &|f| f.id().into());
+                    add_fact_rows_to_map(&mut by_case, batch)?;
                 }
             })*
             Ok(by_case)

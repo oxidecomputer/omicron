@@ -9,6 +9,7 @@
 //! semantics.
 
 use crate::DbTypedUuid;
+use crate::fm::FmFactRow;
 use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_smf_service;
@@ -17,7 +18,8 @@ use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{FactPayload, SmfServiceFact, SmfServiceFactPayload};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
-    CaseKind, CollectionKind, FactKind, SitrepKind, SledKind,
+    CaseKind, CaseUuid, CollectionKind, FactKind, FactUuid, SitrepKind,
+    SitrepUuid, SledKind,
 };
 
 impl_enum_type!(
@@ -55,12 +57,12 @@ pub struct FmFactSmfService {
     pub time_observed: DateTime<Utc>,
 }
 
-impl FmFactSmfService {
-    /// Build a row from a fact's shared metadata (`metadata`) and its
-    /// already-dispatched SMF service payload (`smf_fact`).
-    pub fn from_sitrep(
-        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
-        case_id: impl Into<DbTypedUuid<CaseKind>>,
+impl FmFactRow for FmFactSmfService {
+    type Payload = SmfServiceFact;
+
+    fn from_sitrep(
+        sitrep_id: SitrepUuid,
+        case_id: CaseUuid,
         metadata: &FactMetadata,
         smf_fact: &SmfServiceFact,
     ) -> Self {
@@ -92,8 +94,15 @@ impl FmFactSmfService {
         }
     }
 
-    /// Reconstruct an in-memory fact from a row.
-    pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
+    fn id(&self) -> FactUuid {
+        self.id.into()
+    }
+
+    fn case_id(&self) -> CaseUuid {
+        self.case_id.into()
+    }
+
+    fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let payload = SmfServiceFactPayload {
             sled_id: self.sled_id.into(),
             zone_name: self.zone_name,
