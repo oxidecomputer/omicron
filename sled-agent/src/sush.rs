@@ -490,7 +490,7 @@ async fn trust_anchors(log: &Logger, config: &SushConfig) -> Vec<Utf8PathBuf> {
     })
     .await
     .context("fetching the platform identity")
-    .and_then(|result| result)
+    .flatten()
     {
         Ok(false) => info!(
             log,
