@@ -11548,7 +11548,7 @@
           {
             "in": "query",
             "name": "state",
-            "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
+            "description": "If this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
             "schema": {
               "$ref": "#/components/schemas/ProblemState"
             }
@@ -11763,7 +11763,7 @@
           {
             "in": "query",
             "name": "state",
-            "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
+            "description": "If this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
             "schema": {
               "$ref": "#/components/schemas/ProblemState"
             }
@@ -11841,7 +11841,7 @@
           {
             "in": "query",
             "name": "state",
-            "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
+            "description": "If this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
             "schema": {
               "$ref": "#/components/schemas/ProblemState"
             }
@@ -11918,7 +11918,7 @@
           {
             "in": "query",
             "name": "state",
-            "description": "Optional filter to determine whether to include only impacts in the specified state.\n\nIf this is not included, all impacts will be returned, regardless of their state.",
+            "description": "If this is included, only impacts in the specified state will be returned. Otherwise, all impacts will be returned.",
             "schema": {
               "$ref": "#/components/schemas/ImpactState"
             }

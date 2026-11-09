@@ -124,8 +124,6 @@ pub enum ProblemState {
 /// Query parameters for listing problems
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProblemListParams {
-    /// Optional state used to filter problems.
-    ///
     /// If this is included, only problems in the specified state will
     /// be returned. Otherwise, problems in all states will be returned.
     pub state: Option<ProblemState>,
@@ -255,10 +253,7 @@ pub enum ImpactState {
 /// Query parameters for listing resources impacted by an active problem.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ImpactListParams {
-    /// Optional filter to determine whether to include only impacts in the
-    /// specified state.
-    ///
-    /// If this is not included, all impacts will be returned, regardless of
-    /// their state.
+    /// If this is included, only impacts in the specified state will be
+    /// returned. Otherwise, all impacts will be returned.
     pub state: Option<ImpactState>,
 }
