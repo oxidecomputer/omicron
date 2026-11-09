@@ -262,14 +262,16 @@ impl super::Nexus {
         opctx: &OpContext,
         config: &TrustQuorumConfig,
     ) -> Result<(), Error> {
-        let client = self
-            .get_coordinator_client(
-                opctx,
-                authz::TrustQuorumConfig::for_rack_id(config.rack_id),
-                config.epoch,
-                &config.coordinator,
-            )
-            .await?;
+        let client = match self.get_coordinator_client(opctx, config).await {
+            Ok(client) => client,
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                self.background_tasks.task_trust_quorum_manager.activate();
+                return Err(coordinator_not_in_service_error(config));
+            }
+            Err(InServiceSledClientError::LookupFailed { error, .. }) => {
+                return Err(error);
+            }
+        };
         let req = trust_quorum_types::messages::ReconfigureMsg {
             rack_id: config.rack_id,
             epoch: config.epoch,
@@ -292,14 +294,16 @@ impl super::Nexus {
         opctx: &OpContext,
         config: &TrustQuorumConfig,
     ) -> Result<(), Error> {
-        let client = self
-            .get_coordinator_client(
-                opctx,
-                authz::TrustQuorumConfig::for_rack_id(config.rack_id),
-                config.epoch,
-                &config.coordinator,
-            )
-            .await?;
+        let client = match self.get_coordinator_client(opctx, config).await {
+            Ok(client) => client,
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                self.background_tasks.task_trust_quorum_manager.activate();
+                return Err(coordinator_not_in_service_error(config));
+            }
+            Err(InServiceSledClientError::LookupFailed { error, .. }) => {
+                return Err(error);
+            }
+        };
         let req = trust_quorum_types::messages::LrtqUpgradeMsg {
             rack_id: config.rack_id,
             epoch: config.epoch,
@@ -311,61 +315,30 @@ impl super::Nexus {
     }
 
     /// Retrieve a `Sled` from the database for a specific coordinator ID and
-    // create a client to talk to the coordinator sled agent.
+    /// create a client to talk to the coordinator sled agent.
+    ///
+    /// Return an error if the sled is no longer in service, or if the lookup
+    /// fails.
     async fn get_coordinator_client(
         &self,
         opctx: &OpContext,
-        authz_tq: authz::TrustQuorumConfig,
-        epoch: Epoch,
-        coordinator: &BaseboardId,
-    ) -> Result<sled_agent_client::Client, Error> {
-        let rack_id = authz_tq.rack().id();
+        config: &TrustQuorumConfig,
+    ) -> Result<sled_agent_client::Client, InServiceSledClientError> {
         let timeout = Duration::from_secs(60);
         let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
             .unwrap();
-        match sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
+        sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
             &self.db_datastore,
             opctx,
-            coordinator,
-            rack_id,
+            &config.coordinator,
+            config.rack_id,
             &self.log,
             reqwest_client,
         )
         .await
-        {
-            Ok(client) => Ok(client),
-            Err(InServiceSledClientError::NotInService { .. }) => {
-                let msg = format!(
-                    "Coordinator sled for trust quorum reconfiguration is no \
-                    longer in service or is present in another rack. \
-                    Configuration stored in database for this configuration \
-                    will be aborted. Expected rack_id: {rack_id}, \
-                    baseboard_id: {}.",
-                    coordinator
-                );
-
-                self.db_datastore
-                    .tq_abort_config(opctx, authz_tq, epoch, msg.clone())
-                    .await
-                    .map_err(|e| {
-                        Error::conflict(format!(
-                            "{}. Unfortunately, writing \
-                            the abort to the database also failed with error: \
-                            {e}. Abort will have to be performed explicitly by \
-                            the operator.",
-                            msg
-                        ))
-                    })?;
-
-                Err(Error::conflict(msg))
-            }
-            Err(InServiceSledClientError::LookupFailed { error, .. }) => {
-                Err(error)
-            }
-        }
     }
 
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
@@ -399,4 +372,14 @@ impl super::Nexus {
             members: new_sleds.union(&existing).cloned().collect(),
         })
     }
+}
+
+fn coordinator_not_in_service_error(config: &TrustQuorumConfig) -> Error {
+    Error::conflict(format!(
+        "Coordinator {} for the trust quorum configuration at epoch {} is no \
+         longer an in-service sled in rack {}, so the request was not sent to \
+         it. The trust quorum background task will abort this \
+         configuration; retry once it has been aborted.",
+        config.coordinator, config.epoch, config.rack_id
+    ))
 }
