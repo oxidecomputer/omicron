@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "61.0.0"
+    "version": "62.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -462,6 +462,35 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/peer-rack-prefixes": {
+      "get": {
+        "summary": "Get the rack prefixes this sled's ddm router has learned from peers.",
+        "operationId": "peer_rack_prefixes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Set_of_Ipv6Net",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ipv6Net"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
