@@ -29,6 +29,7 @@ use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::ReflectsCollection;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
@@ -190,6 +191,7 @@ fn blueprint_builder_based_on<'a>(
     BlueprintBuilder::new_based_on(
         log,
         parent,
+        ReflectsCollection::Indeterminate,
         "test-suite",
         PlannerRng::from_entropy(),
     )

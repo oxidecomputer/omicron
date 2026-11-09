@@ -2217,6 +2217,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
@@ -2366,6 +2367,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
