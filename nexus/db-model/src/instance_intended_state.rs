@@ -19,6 +19,7 @@ impl_enum_type!(
         FromSqlRow,
         Serialize,
         Deserialize,
+        strum::VariantArray,
     )]
     pub enum InstanceIntendedState;
 
@@ -30,12 +31,23 @@ impl_enum_type!(
 );
 
 impl InstanceIntendedState {
+    pub const ANY: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Running => "running",
             Self::Stopped => "stopped",
             Self::GuestShutdown => "guest_shutdown",
             Self::Destroyed => "destroyed",
+        }
+    }
+
+    pub const fn as_filter(&self) -> &'static [Self] {
+        match self {
+            Self::Running => &[Self::Running],
+            Self::Stopped => &[Self::Stopped],
+            Self::GuestShutdown => &[Self::GuestShutdown],
+            Self::Destroyed => &[Self::Destroyed],
         }
     }
 }

@@ -509,6 +509,12 @@ struct UpdatesRequired {
     /// instance has moved to a new sled, or deleting them if it is no longer
     /// incarnated.
     network_config: Option<NetworkConfigUpdate>,
+
+    /// If this is [`Some`], then the attempt to update the instance's runtime
+    /// state must be conditional on its [`InstanceIntendedState`] having this
+    /// value, and the new runtime state must be re-computed if the intended
+    /// state has changed while the update saga was running.
+    conditional_on_intent: Option<InstanceIntendedState>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -541,6 +547,7 @@ impl UpdatesRequired {
         new_runtime.generation =
             InstanceStateGeneration::from(new_runtime.generation).next().into();
         new_runtime.time_updated = Utc::now();
+        let current_intent = snapshot.instance.intended_state;
         let mut new_intent = None;
         let instance_id = snapshot.instance.id();
 
@@ -549,6 +556,9 @@ impl UpdatesRequired {
         let mut active_vmm_update_disposition_gen = None;
         let mut network_config = None;
         let mut update_sled_reservations_for_migration_success = None;
+        // In most cases, the same update should be applied regardless of the
+        // intended state at the end of the update saga.
+        let mut conditional_on_intent = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
@@ -574,8 +584,7 @@ impl UpdatesRequired {
                     .stop_for_update_disposition_generation {
                         active_vmm_update_disposition_gen = Some(generation);
 
-                    } else if snapshot.instance.intended_state
-                        == InstanceIntendedState::Running
+                    } else if current_intent == InstanceIntendedState::Running
                         && snapshot.migration.is_none()
                     {
                         // Did the active VMM shut itself down, when it was
@@ -752,8 +761,7 @@ impl UpdatesRequired {
             new_runtime.nexus_state = if active_vmm_failed {
                 InstanceState::Failed
             } else if let Some(g) = active_vmm_update_disposition_gen
-                && snapshot.instance.intended_state
-                    == InstanceIntendedState::Running
+                && current_intent == InstanceIntendedState::Running
             {
                 info!(
                     log,
@@ -763,6 +771,12 @@ impl UpdatesRequired {
                     "instance_id" => %instance_id,
                     "update_disposition_generation" => ?g
                 );
+                // Updates that set the instance state to `SledEvacuating` must
+                // be conditional on the intended state remaining `Running` when
+                // the update is committed. If the intended state changes while
+                // the saga is running, we may need to reevaluate the update to
+                // apply.
+                conditional_on_intent = Some(InstanceIntendedState::Running);
                 InstanceState::SledEvacuating
             } else {
                 InstanceState::NoVmm
@@ -795,6 +809,7 @@ impl UpdatesRequired {
             new_intent,
             new_runtime,
             destroy_active_vmm,
+            conditional_on_intent,
             update_sled_reservations_for_migration_success,
             destroy_target_vmm,
             deprovision,
@@ -949,6 +964,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         let UpdatesRequired {
             new_runtime: _,
             new_intent: _,
+            conditional_on_intent: _,
             destroy_active_vmm,
             update_sled_reservations_for_migration_success,
             destroy_target_vmm,
@@ -1357,7 +1373,7 @@ async fn siu_commit_instance_updates(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let RealParams { serialized_authn, authz_instance, ref update, .. } =
+    let RealParams { serialized_authn, authz_instance, update, .. } =
         sagactx.saga_params::<RealParams>()?;
     let lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
 
@@ -1368,32 +1384,94 @@ async fn siu_commit_instance_updates(
 
     let instance_id = authz_instance.id();
 
-    debug!(
-        log,
-        "instance update: committing new runtime state and unlocking...";
-        "instance_id" => %instance_id,
-        "new_runtime" => ?update.new_runtime,
-        "new_intent" => ?update.new_intent,
-        "lock" => ?lock,
-    );
+    let mut new_runtime = update.new_runtime;
+    let new_intent = update.new_intent;
+    let mut conditional_on_intent = update.conditional_on_intent;
+    let did_unlock = loop {
+        debug!(
+            log,
+            "instance update: committing new runtime state and unlocking...";
+            "instance_id" => %instance_id,
+            "new_runtime" => ?new_runtime,
+            "new_intent" => ?new_intent,
+            "conditional_on_intent" => ?conditional_on_intent,
+            "lock" => ?lock,
+        );
 
-    let did_unlock = osagactx
-        .datastore()
-        .instance_commit_update(
-            &opctx,
-            &authz_instance,
-            &lock,
-            &update.new_runtime,
-            update.new_intent,
-        )
-        .await
-        .map_err(saga_action_failed)?;
+        let to_commit = instance::UpdateToCommit {
+            new_runtime: &new_runtime,
+            conditional_on_intent,
+            new_intent,
+        };
+
+        let commit_result = osagactx
+            .datastore()
+            .instance_commit_update(&opctx, &authz_instance, &lock, to_commit)
+            .await;
+        match commit_result {
+            Ok(did_unlock) => break did_unlock,
+            Err(instance::CommitUpdateError::Other(e)) => {
+                return Err(saga_action_failed(e));
+            }
+            Err(instance::CommitUpdateError::IntendedStateChanged {
+                current_intent,
+            }) => {
+                info!(
+                    log,
+                    "instance update: tried to commit updates conditionally on \
+                     the instance's intended state remaining \
+                     {conditional_on_intent:?},  but it has changed to \
+                     {current_intent:?}";
+                    "instance_id" => %instance_id,
+                    "new_runtime" => ?new_runtime,
+                    "new_intent" => ?new_intent,
+                    "conditional_on_intent" => ?conditional_on_intent,
+                    "lock" => ?lock,
+                );
+                if new_runtime.nexus_state == InstanceState::SledEvacuating {
+                    match current_intent {
+                        InstanceIntendedState::Stopped
+                        | InstanceIntendedState::Destroyed
+                        // XXX(eliza): it's weird to see guest shutdown here,
+                        // but we should try to handle it gracefully i guess...
+                        | InstanceIntendedState::GuestShutdown => {
+                            new_runtime.nexus_state = InstanceState::NoVmm;
+                            conditional_on_intent =
+                                Some(current_intent);
+                        },
+                        InstanceIntendedState::Running => {
+                            return Err(saga_action_failed(Error::internal_error(
+                                "if transitioning to SledEvacuating, then \
+                                    running should have been the desired \
+                                    intended state, so this really shouldn't \
+                                    have happened!"
+                            )));
+                        },
+                    }
+                } else {
+                    // XXX(eliza): might there be other reasons we want to
+                    // perform conditional updates?
+                    return Err(saga_action_failed(Error::internal_error(
+                        format!(
+                            "committing an instance update conditionally on \
+                            the instance's intended state should currently only \
+                            occur for state transitions to SledEvacuating, but \
+                            {instance_id} attempted to transition to {} \
+                            conditional on {conditional_on_intent:?}",
+                            new_runtime.nexus_state
+                        ),
+                    )));
+                }
+            }
+        }
+    };
 
     info!(
         log,
         "instance update: committed update new runtime state!";
         "instance_id" => %instance_id,
-        "new_runtime" => ?update.new_runtime,
+        "new_runtime" => ?new_runtime,
+        "new_intent" => ?new_intent,
         "did_unlock" => ?did_unlock,
     );
 

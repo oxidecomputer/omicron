@@ -232,6 +232,28 @@ pub enum UpdaterLockError {
     Query(#[from] Error),
 }
 
+pub struct UpdateToCommit<'a> {
+    pub new_runtime: &'a InstanceRuntimeState,
+    /// Only commit the update if the instance's intended state matches this
+    /// value.
+    pub conditional_on_intent: Option<InstanceIntendedState>,
+    pub new_intent: Option<InstanceIntendedState>,
+}
+
+/// Errors returned by [`DataStore::instance_updater_lock`].
+#[derive(
+    Debug, thiserror::Error, PartialEq, serde::Serialize, serde::Deserialize,
+)]
+pub enum CommitUpdateError {
+    /// The commit operation was made conditional on the instance's intended
+    /// state, and the intended state has changed since the lock has been
+    /// acquired.
+    #[error("intended state changed to {current_intent:?}")]
+    IntendedStateChanged { current_intent: InstanceIntendedState },
+    #[error(transparent)]
+    Other(#[from] Error),
+}
+
 impl DataStore {
     /// Idempotently insert a database record for an Instance
     ///
@@ -2021,13 +2043,14 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         lock: &UpdaterLock,
-        new_runtime: &InstanceRuntimeState,
-        new_intent: Option<InstanceIntendedState>,
-    ) -> Result<bool, Error> {
+        update: UpdateToCommit<'_>,
+    ) -> Result<bool, CommitUpdateError> {
         use nexus_db_schema::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
         let UpdaterLock { updater_id, locked_gen } = *lock;
+        let UpdateToCommit { new_runtime, conditional_on_intent, new_intent } =
+            update;
 
         #[derive(diesel::AsChangeset)]
         #[diesel(table_name = nexus_db_schema::schema::instance)]
@@ -2035,9 +2058,15 @@ impl DataStore {
             intended_state: Option<InstanceIntendedState>,
         }
 
+        let intended_state_filter = conditional_on_intent
+            .as_ref()
+            .map(InstanceIntendedState::as_filter)
+            .unwrap_or(InstanceIntendedState::ANY);
+
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
+            .filter(dsl::intended_state.eq_any(intended_state_filter))
             // Only unlock the instance if:
             // - the provided updater ID matches that of the saga that has
             //   currently locked this instance.
@@ -2092,8 +2121,10 @@ impl DataStore {
                     "time_deleted" => ?found.time_deleted()
                 );
 
-                Err(LookupType::ById(instance_id)
-                    .into_not_found(ResourceType::Instance))
+                Err(CommitUpdateError::Other(
+                    LookupType::ById(instance_id)
+                        .into_not_found(ResourceType::Instance),
+                ))
             }
 
             // The instance exists, but both the lock generation *and* the state
@@ -2147,7 +2178,24 @@ impl DataStore {
                     "expected_state_gen" => ?new_runtime.generation,
                     "actual_state_gen" => ?found.runtime().generation,
                 );
-                Err(Error::conflict("instance state has changed"))
+                Err(CommitUpdateError::Other(Error::conflict(
+                    "instance state has changed",
+                )))
+            }
+
+            // We were asked to commit the update if, and only if the intended
+            // state matches `conditional_on_intent`. If this has changed since
+            // the desired state update was determined, return an error so that
+            // the caller can re-consider the state update and try again.
+            UpdateAndQueryResult { ref found, .. }
+                if conditional_on_intent
+                    .map(|intent| intent != found.intended_state)
+                    .unwrap_or(false)
+                    && found.updater_id == Some(updater_id) =>
+            {
+                Err(CommitUpdateError::IntendedStateChanged {
+                    current_intent: found.intended_state,
+                })
             }
 
             // The instance exists, but we could not update it because the lock
@@ -2165,7 +2213,7 @@ impl DataStore {
                         "found_gen" => ?found.updater_gen,
                         "locked_gen" => ?locked_gen,
                     );
-                    Err(Error::internal_error(MSG))
+                    Err(CommitUpdateError::Other(Error::internal_error(MSG)))
                 }
                 None => {
                     const MSG: &'static str = "cannot commit instance updates: the instance is \
@@ -2178,7 +2226,7 @@ impl DataStore {
                         "found_gen" => ?found.updater_gen,
                         "locked_gen" => ?locked_gen,
                     );
-                    Err(Error::internal_error(MSG))
+                    Err(CommitUpdateError::Other(Error::internal_error(MSG)))
                 }
             },
         }
@@ -3012,8 +3060,11 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    &new_runtime,
-                    None,
+                    UpdateToCommit {
+                        new_runtime,
+                        conditional_on_intent: None,
+                        new_intent: None,
+                    },
                 )
                 .await
         )
@@ -3027,8 +3078,11 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    &new_runtime,
-                    None,
+                    UpdateToCommit {
+                        new_runtime,
+                        conditional_on_intent: None,
+                        new_intent: None,
+                    },
                 )
                 .await
         )
@@ -3048,13 +3102,16 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    &InstanceRuntimeState {
-                        propolis_id: Some(Uuid::new_v4()),
-                        migration_id: Some(Uuid::new_v4()),
-                        dst_propolis_id: Some(Uuid::new_v4()),
-                        ..new_runtime.clone()
+                    UpdateToCommit {
+                        new_runtime: &InstanceRuntimeState {
+                            propolis_id: Some(Uuid::new_v4()),
+                            migration_id: Some(Uuid::new_v4()),
+                            dst_propolis_id: Some(Uuid::new_v4()),
+                            ..new_runtime.clone()
+                        },
+                        conditional_on_intent: None,
+                        new_intent: None,
                     },
-                    None,
                 )
                 .await
         )
@@ -3130,16 +3187,20 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    &InstanceRuntimeState {
-                        time_updated: Utc::now(),
-                        generation: InstanceStateGeneration::from_u32(2).into(),
-                        propolis_id: None,
-                        dst_propolis_id: None,
-                        migration_id: None,
-                        nexus_state: InstanceState::NoVmm,
-                        time_last_auto_restarted: None,
+                    UpdateToCommit {
+                        new_runtime: &InstanceRuntimeState {
+                            time_updated: Utc::now(),
+                            generation: InstanceStateGeneration::from_u32(2)
+                                .into(),
+                            propolis_id: None,
+                            dst_propolis_id: None,
+                            migration_id: None,
+                            nexus_state: InstanceState::NoVmm,
+                            time_last_auto_restarted: None,
+                        },
+                        conditional_on_intent: None,
+                        new_intent: None,
                     },
-                    None,
                 )
                 .await
         )
