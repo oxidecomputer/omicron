@@ -461,29 +461,14 @@ impl DataStore {
         self.transaction_retry_wrapper("tq_insert_latest_config")
             .transaction(&conn, |c| {
                 let err = err.clone();
+                let authz_tq = authz_tq.clone();
                 let proposed = proposed.clone();
 
                 async move {
-                    let validated =
-                        Self::validate_new_config_conn(&c, proposed)
-                            .await
-                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
-
-                    // Mark the old configuration as committed-partially
-                    if let Some(epoch) = validated.commit_partially_epoch {
-                        Self::updated_tq_state_committed_partially_conn(
-                            &c,
-                            validated.config.rack_id,
-                            epoch,
-                        )
+                    Self::tq_insert_latest_config_conn(&c, &authz_tq, proposed)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
-                    }
-
-                    // Save the new config
-                    Self::insert_tq_config_conn(&c, validated.config)
-                        .await
-                        .map_err(|txn_error| txn_error.into_diesel(&err))
+                    Ok(())
                 }
             })
             .await
@@ -491,6 +476,43 @@ impl DataStore {
                 Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })
+    }
+
+    /// The core logic for inserting a trust quorum config.
+    ///
+    /// Meant to be called inside a retryable transaction.
+    pub(super) async fn tq_insert_latest_config_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_tq: &authz::TrustQuorumConfig,
+        proposed: ProposedTrustQuorumConfig,
+    ) -> Result<TrustQuorumConfig, TransactionError<Error>> {
+        let rack_id = authz_tq.rack().id();
+        if proposed.rack_id != rack_id {
+            return Err(TransactionError::CustomError(Error::internal_error(
+                &format!(
+                    "trust quorum proposal is for rack {}, but the trust \
+                     quorum config authorized is for rack {rack_id}",
+                    proposed.rack_id,
+                ),
+            )));
+        }
+
+        let validated = Self::validate_new_config_conn(conn, proposed).await?;
+
+        // Mark the old configuration as committed-partially
+        if let Some(epoch) = validated.commit_partially_epoch {
+            Self::updated_tq_state_committed_partially_conn(
+                conn,
+                validated.config.rack_id,
+                epoch,
+            )
+            .await?;
+        }
+
+        // Save the new config
+        Self::insert_tq_config_conn(conn, validated.config.clone()).await?;
+
+        Ok(validated.config)
     }
 
     async fn validate_new_config_conn(
@@ -1809,6 +1831,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tq_insert_latest_config_conn_rejects_other_rack() {
+        let logctx = test_setup_log(
+            "test_tq_insert_latest_config_conn_rejects_other_rack",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let proposed_rack_id = RackUuid::new_v4();
+        let authorized_rack_id = RackUuid::new_v4();
+        let proposed = ProposedTrustQuorumConfig {
+            rack_id: proposed_rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+            members: hw_ids.iter().cloned().map(BaseboardId::from).collect(),
+        };
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        match DataStore::tq_insert_latest_config_conn(
+            &conn,
+            &make_authz_tq(authorized_rack_id),
+            proposed,
+        )
+        .await
+        {
+            Err(TransactionError::CustomError(error)) => assert_eq!(
+                error,
+                Error::internal_error(&format!(
+                    "trust quorum proposal is for rack {proposed_rack_id}, \
+                     but the trust quorum config authorized is for rack \
+                     {authorized_rack_id}"
+                )),
+            ),
+            result => panic!("expected a rack mismatch error, got {result:?}"),
+        }
+        assert_eq!(
+            datastore
+                .tq_get_latest_config(
+                    db.opctx(),
+                    make_authz_tq(proposed_rack_id)
+                )
+                .await
+                .expect("read the latest config"),
+            None,
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_tq_insert_latest_conflicts_while_reconfiguring() {
         let logctx = test_setup_log(
             "test_tq_insert_latest_conflicts_while_reconfiguring",
@@ -2400,7 +2473,37 @@ mod tests {
         // Now create a new config. This should succeed and we should
         // see the state of the old config move from `Committing` to
         // `CommittedPartially`.
-        datastore.tq_insert_latest_config(opctx, next_config).await.unwrap();
+        let err = OptionalError::new();
+        let inserted_config = datastore
+            .transaction_retry_wrapper(
+                "test_tq_update_prepare_and_commit_partially",
+            )
+            .transaction(&conn, |c| {
+                let err = err.clone();
+                let next_config = next_config.clone();
+                async move {
+                    DataStore::tq_insert_latest_config_conn(
+                        &c,
+                        &make_authz_tq(rack_id),
+                        next_config,
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+            .expect("inserted the epoch 3 config");
+
+        let stored_config = datastore
+            .tq_get_config(opctx, make_authz_tq(rack_id), next_config.epoch)
+            .await
+            .expect("no error")
+            .expect("returned config");
+        assert_eq!(inserted_config, stored_config);
 
         let read_config = datastore
             .tq_get_config(opctx, make_authz_tq(rack_id), Epoch(2))
@@ -2423,6 +2526,14 @@ mod tests {
                     |(_, info)| info.state == TrustQuorumMemberState::Committed
                 )
                 .count()
+        );
+        assert_eq!(
+            read_config
+                .members
+                .get(&inserted_config.coordinator)
+                .expect("epoch 3 coordinator is an epoch 2 member")
+                .state,
+            TrustQuorumMemberState::Committed,
         );
 
         db.terminate().await;
