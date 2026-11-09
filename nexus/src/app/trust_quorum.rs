@@ -10,7 +10,8 @@ use nexus_networking::InServiceSledClientError;
 use nexus_networking::sled_client_by_baseboard_id_and_rack_id_if_in_service_ext;
 use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::trust_quorum::{
-    IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
+    IsLrtqUpgrade, ProposedTrustQuorumConfig, RemoveSledError,
+    TRUST_QUORUM_MIN_MEMBERS, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
 use omicron_common::http_client::internal_http_client_builder;
@@ -96,7 +97,8 @@ impl super::Nexus {
             &latest_committed_config,
             new_epoch,
             &sled_to_remove,
-        )?;
+        )
+        .map_err(tq_remove_sled_refusal)?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
@@ -382,4 +384,20 @@ fn coordinator_not_in_service_error(config: &TrustQuorumConfig) -> Error {
          configuration; retry once it has been aborted.",
         config.coordinator, config.epoch, config.rack_id
     ))
+}
+
+// TODO-RAINCLAUDE: the lockstep (support) remove path's wording of ProposedTrustQuorumConfig::remove_sled's refusal; the sled expunge path words it separately for operators.
+fn tq_remove_sled_refusal(refusal: RemoveSledError) -> Error {
+    match refusal {
+        RemoveSledError::NotMember { sled } => Error::invalid_request(format!(
+            "Sled {sled} is not a member of the trust quorum."
+        )),
+        RemoveSledError::TooFewMembers { rack_id, sled, remaining } => {
+            Error::conflict(format!(
+                "Cannot remove sled {sled} from the trust quorum for rack \
+                 {rack_id}: {remaining} sleds would remain, but a trust \
+                 quorum must have at least {TRUST_QUORUM_MIN_MEMBERS}."
+            ))
+        }
+    }
 }

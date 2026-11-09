@@ -274,23 +274,27 @@ impl ProposedTrustQuorumConfig {
         }
     }
 
-    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
-    // from the membership. Return an error if the sled is not a member of the
-    // `latest_committed_config`.
+    // TODO-RAINCLAUDE: propose latest_committed_config's membership minus sled_to_remove; refuses with RemoveSledError::NotMember if the sled isn't a member, or RemoveSledError::TooFewMembers if fewer than TRUST_QUORUM_MIN_MEMBERS would remain.
     pub fn remove_sled(
         latest_committed_config: &TrustQuorumConfig,
         new_epoch: Epoch,
         sled_to_remove: &BaseboardId,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, RemoveSledError> {
         let rack_id = latest_committed_config.rack_id;
         let mut members: BTreeSet<_> =
             latest_committed_config.members.keys().cloned().collect();
 
         if !members.remove(sled_to_remove) {
-            return Err(Error::invalid_request(format!(
-                "Sled {} is not a member of the trust quorum.",
-                sled_to_remove
-            )));
+            return Err(RemoveSledError::NotMember {
+                sled: sled_to_remove.clone(),
+            });
+        }
+        if members.len() < TRUST_QUORUM_MIN_MEMBERS {
+            return Err(RemoveSledError::TooFewMembers {
+                rack_id,
+                sled: sled_to_remove.clone(),
+                remaining: members.len(),
+            });
         }
 
         Ok(ProposedTrustQuorumConfig {
@@ -302,6 +306,13 @@ impl ProposedTrustQuorumConfig {
             members,
         })
     }
+}
+
+// TODO-RAINCLAUDE: why ProposedTrustQuorumConfig::remove_sled refused; deliberately not convertible to Error, since each caller (lockstep remove, sled expunge) words the refusal for its own audience and remedy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoveSledError {
+    NotMember { sled: BaseboardId },
+    TooFewMembers { rack_id: RackUuid, sled: BaseboardId, remaining: usize },
 }
 
 /// The minimum number of members in a trust quorum.
@@ -556,15 +567,29 @@ mod tests {
         );
 
         let non_member = test_baseboard("not-a-member");
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &non_member,
+        )
+        .expect_err("removing a non-member sled is refused");
+        assert_eq!(error, RemoveSledError::NotMember { sled: non_member });
+
+        let minimum =
+            test_config(3, Epoch(5), TrustQuorumConfigState::Committed);
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &minimum,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect_err("removing from a minimum-size trust quorum is refused");
         assert_eq!(
-            ProposedTrustQuorumConfig::remove_sled(
-                &config,
-                Epoch(6),
-                &non_member,
-            ),
-            Err(Error::invalid_request(format!(
-                "Sled {non_member} is not a member of the trust quorum."
-            ))),
+            error,
+            RemoveSledError::TooFewMembers {
+                rack_id: minimum.rack_id,
+                sled: sled_to_remove,
+                remaining: 2,
+            },
         );
     }
 }

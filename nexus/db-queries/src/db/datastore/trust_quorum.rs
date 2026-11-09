@@ -631,14 +631,17 @@ impl DataStore {
         //
 
         // Check membership size
-        bail_unless!(
-            proposed.members.len() >= TRUST_QUORUM_MIN_MEMBERS
-                && proposed.members.len() <= TRUST_QUORUM_MAX_MEMBERS,
-            "Invalid Trust Quorum membership size ({}): \
-            must be between {TRUST_QUORUM_MIN_MEMBERS} and \
-            {TRUST_QUORUM_MAX_MEMBERS} nodes",
-            proposed.members.len()
-        );
+        let num_members = proposed.members.len();
+        if !(TRUST_QUORUM_MIN_MEMBERS..=TRUST_QUORUM_MAX_MEMBERS)
+            .contains(&num_members)
+        {
+            return Err(Error::invalid_request(format!(
+                "Invalid trust quorum membership size ({num_members}): \
+                 must be between {TRUST_QUORUM_MIN_MEMBERS} and \
+                 {TRUST_QUORUM_MAX_MEMBERS} sleds."
+            ))
+            .into());
+        }
 
         // Ensure all baseboards actually exist
         let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
@@ -1983,12 +1986,10 @@ mod tests {
                 .expect_err("a proposal outside 3 to 32 members is refused");
             assert_eq!(
                 error,
-                Error::InternalError {
-                    internal_message: format!(
-                        "Invalid Trust Quorum membership size \
-                         ({num_members}): must be between 3 and 32 nodes"
-                    ),
-                },
+                Error::invalid_request(format!(
+                    "Invalid trust quorum membership size ({num_members}): \
+                     must be between 3 and 32 sleds."
+                )),
             );
         }
 
