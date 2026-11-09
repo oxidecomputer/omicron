@@ -89,6 +89,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_04_00, UNADOPTED_RACK_LIST),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
     (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
@@ -7984,6 +7985,26 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::physical_disk::PhysicalDisk>>,
+        HttpError,
+    >;
+
+    // Multirack
+
+    /// List unadopted racks
+    ///
+    /// Lists racks that have joined the underlay network but have not yet been
+    /// adopted into the regional cluster.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_UNADOPTED_RACK_LIST..
+    }]
+    async fn rack_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multirack::UnadoptedRack>>,
         HttpError,
     >;
 

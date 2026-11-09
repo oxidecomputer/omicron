@@ -984,6 +984,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             SledCpuFamily::AmdMilan,
             sled_role,
             &self.simulated_upstairs,
+            sim::NexusRegistration::WaitForCompletion,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1122,6 +1123,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             SledCpuFamily::AmdMilan,
             SledRole::Gimlet,
             &self.simulated_upstairs,
+            sim::NexusRegistration::WaitForCompletion,
         )
         .await
         .expect("Failed to start sled agent");
@@ -2070,7 +2072,9 @@ impl SledIndexAllocator {
 ///
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
 /// `nexus_test` instead! To start a sled agent partway through a test, use
-/// [`ControlPlaneTestContext::add_sled`].
+/// [`ControlPlaneTestContext::add_sled`], or
+/// [`ControlPlaneTestContext::start_unregistered_sled`] for one that does not
+/// register with Nexus.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_sled_agent(
     log: Logger,
@@ -2082,6 +2086,7 @@ pub(crate) async fn start_sled_agent(
     cpu_family: SledCpuFamily,
     sled_role: SledRole,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+    nexus_registration: sim::NexusRegistration,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
     // (SimGimlet00, SimGimlet01, etc.) so that inventory can link sled agents
@@ -2098,8 +2103,14 @@ pub(crate) async fn start_sled_agent(
         Some(baseboard_serial),
         sled_role,
     );
-    start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
-        .await
+    start_sled_agent_with_config(
+        log,
+        &config,
+        sled_index,
+        simulated_upstairs,
+        nexus_registration,
+    )
+    .await
 }
 
 async fn start_sled_agent_with_config(
@@ -2107,11 +2118,12 @@ async fn start_sled_agent_with_config(
     config: &sim::Config,
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+    nexus_registration: sim::NexusRegistration,
 ) -> Result<sim::Server, String> {
     let server = sim::Server::start(
         &config,
         &log,
-        sim::NexusRegistration::WaitForCompletion,
+        nexus_registration,
         simulated_upstairs,
         sled_index,
     )

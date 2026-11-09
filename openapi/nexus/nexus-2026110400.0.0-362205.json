@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026110200.0.0"
+    "version": "2026110400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -8211,6 +8211,66 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/system/hardware/racks-unadopted": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List unadopted racks",
+        "description": "Lists racks that have joined the underlay network but have not yet been adopted into the regional cluster.",
+        "operationId": "rack_list_unadopted",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnadoptedRackResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -30530,6 +30590,76 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UnadoptedRack": {
+        "description": "View of a rack that's joined the underlay network but hasn't been adopted into the regional cluster yet",
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          },
+          "unadopted_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnadoptedSled"
+            }
+          }
+        },
+        "required": [
+          "rack_id",
+          "rack_subnet",
+          "unadopted_sleds"
+        ]
+      },
+      "UnadoptedRackResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnadoptedRack"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "UnadoptedSled": {
+        "description": "View of an unadopted sled in an unadopted rack\n\nThis is distinct from an `UninitializedSled`, which represents an uninitialized sled in an *adopted* rack; by contrast, this represents a sled in a rack that hasn't been adopted yet.",
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "last_start_err": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sled_agent_started": {
+            "type": "boolean"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "sled_agent_started",
+          "sled_id"
         ]
       },
       "UninitializedSled": {

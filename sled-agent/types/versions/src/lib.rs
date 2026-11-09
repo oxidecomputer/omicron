@@ -125,6 +125,10 @@ pub mod v6;
 pub mod v60;
 #[path = "trust_quorum_nullable_responses/mod.rs"]
 pub mod v61;
+#[path = "add_sled_registration_info/mod.rs"]
+pub mod v62;
+#[path = "multirack_join_complete_generation/mod.rs"]
+pub mod v63;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

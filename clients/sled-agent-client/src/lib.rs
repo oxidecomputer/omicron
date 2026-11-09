@@ -118,6 +118,7 @@ progenitor::generate_api!(
         Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
         SingleMeasurementInventory = sled_agent_types_versions::latest::inventory::SingleMeasurementInventory,
         SledAgentInfo = sled_agent_types_versions::latest::multirack::SledAgentInfo,
+        SledRegistrationInfo = sled_agent_types_versions::latest::inventory::SledRegistrationInfo,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
         SledVmmState = sled_agent_types_versions::latest::instance::SledVmmState,
         SourceNatConfigGeneric = sled_agent_types_versions::latest::inventory::SourceNatConfigGeneric,

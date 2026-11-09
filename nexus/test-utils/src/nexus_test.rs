@@ -43,6 +43,7 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
@@ -332,27 +333,17 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         sim_mode: sim::SimMode,
         cpu_family: SledCpuFamily,
     ) -> sim::Server {
-        let sled_index = self.sled_index_allocator.next();
-        let nexus_address = self.server.get_http_server_internal_address();
-
-        // `start_sled_agent` uses `NexusRegistration::WaitForCompletion`, so
-        // Nexus knows about the sled once this returns.
-        let sled_agent = start_sled_agent(
-            self.logctx.log.new(slog::o!(
-                "component" => "omicron_sled_agent::sim::Server",
-                "sled_id" => sled_id.to_string(),
-            )),
-            nexus_address,
-            sled_id,
-            RACK_UUID,
-            sled_index,
-            sim_mode,
-            cpu_family,
-            SledRole::Gimlet,
-            &self.first_sled_agent().simulated_upstairs,
-        )
-        .await
-        .expect("started simulated sled agent");
+        // Passing `NexusRegistration::WaitForCompletion` means Nexus knows
+        // about the sled once this returns.
+        let sled_agent = self
+            .start_sim_sled(
+                sled_id,
+                RACK_UUID,
+                sim_mode,
+                cpu_family,
+                sim::NexusRegistration::WaitForCompletion,
+            )
+            .await;
 
         // Ensure the sled shows up in inventory.
         self.collect_inventory_with_sled(sled_id).await;
@@ -362,6 +353,63 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.add_sled_to_target_blueprint(sled_id).await;
 
         sled_agent
+    }
+
+    /// Start a simulated sled agent that doesn't register itself with Nexus.
+    ///
+    /// The returned server must be held for as long as the sled should exist
+    /// (dropping it shuts the sled agent down).
+    ///
+    /// Because the sled is not registered, it does not show up in inventory.
+    /// This method also does not add the sled to the target blueprint
+    ///
+    /// Unlike sled agents started during setup, sleds added this way are not
+    /// included in [`Self::all_sled_agents`].
+    #[must_use = "dropping the returned server shuts the sled agent down"]
+    pub async fn start_unregistered_sled(
+        &self,
+        sled_id: SledUuid,
+        rack_id: RackUuid,
+    ) -> sim::Server {
+        self.start_sim_sled(
+            sled_id,
+            rack_id,
+            sim::SimMode::Explicit,
+            SledCpuFamily::AmdMilan,
+            // Manual means this Sled Agent doesn't register itself with Nexus.
+            sim::NexusRegistration::Manual,
+        )
+        .await
+    }
+
+    async fn start_sim_sled(
+        &self,
+        sled_id: SledUuid,
+        rack_id: RackUuid,
+        sim_mode: sim::SimMode,
+        cpu_family: SledCpuFamily,
+        nexus_registration: sim::NexusRegistration,
+    ) -> sim::Server {
+        let sled_index = self.sled_index_allocator.next();
+        let nexus_address = self.server.get_http_server_internal_address();
+
+        start_sled_agent(
+            self.logctx.log.new(slog::o!(
+                "component" => "omicron_sled_agent::sim::Server",
+                "sled_id" => sled_id.to_string(),
+            )),
+            nexus_address,
+            sled_id,
+            rack_id,
+            sled_index,
+            sim_mode,
+            cpu_family,
+            SledRole::Gimlet,
+            &self.first_sled_agent().simulated_upstairs,
+            nexus_registration,
+        )
+        .await
+        .expect("started simulated sled agent")
     }
 
     /// Returns the number of simulated service processors in this test.
