@@ -505,6 +505,70 @@ impl DataStore {
             })
     }
 
+    /// Transitions a VMM to the `Cancelling` state as part of an unwinding
+    /// saga. This is necessary to perform in the undo action that attempts to
+    /// ask the sled-agent to unregister the VMM, as it prevents any *other*
+    /// actor that might otherwise attempt to talk to the sled-agent about that
+    /// VMM (say, a stop request that comes in during the unwinding, the
+    /// `instance-watcher` background task, et cetera) from trying to send
+    /// requests for the VMM to the sled-agent and get 404ed.
+    ///
+    /// Executing this query transfers exclusive ownership of the VMM record's
+    /// state to the unwinding saga, which it kinda already had, but now it's,
+    /// like, REALLY exclusively owned by the unwinding saga.
+    ///
+    /// # Warning
+    ///
+    /// This may *only* be called by the saga that created a VMM record, as it
+    /// more or less unconditionally increments the generation number and
+    /// advances the VMM to the `Cancelling` state.
+    ///
+    /// This is necessary as it is executed in compensating actions for
+    /// unwinding saga nodes which cannot easily determine whether other
+    /// actions, which advance the VMM's generation, have executed before the
+    /// saga unwound.
+    pub async fn vmm_mark_saga_unwinding(
+        &self,
+        opctx: &OpContext,
+        vmm_id: &PropolisUuid,
+    ) -> Result<bool, Error> {
+        diesel::update(dsl::vmm)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            // if the VMM record is already in a potentially non-existent state,
+            // then we need not munge it now; the entire purpose of this thingy
+            // is to make sure it is considered q
+            .filter(
+                dsl::state.ne_all(DbVmmState::POTENTIALLY_NONEXISTENT_STATES),
+            )
+            .set((
+                dsl::state.eq(DbVmmState::Cancelling),
+                // We deliberately do not alter or unset the failure reason here
+                // to preserve historical failed information. In the future, if
+                // we start tracking the reason a saga was unwound, we would
+                // probably want to extend the schema to store that as a
+                // separate column (or maybe some kind of history table?)
+                dsl::time_state_updated.eq(chrono::Utc::now()),
+                dsl::state_generation.eq(dsl::state_generation + 1),
+            ))
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vmm,
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
+                    ),
+                )
+            })
+    }
+
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
     /// the supplied Propolis IP.
     ///
@@ -1112,8 +1176,12 @@ mod tests {
             }
         }
 
-        // There should be 25 unmarked rows. 6 unstoppable VMMs on each of
-        // sleds A and B, all 10 on sled C, plus the 3 deleted VMMs.
+        // There should be 28 unmarked rows. 7 unstoppable VMMs on each of
+        // sleds A and B, all 11 on sled C, plus the 3 deleted VMMs.
+        //
+        // Note: adding a new VMM state which should not be marked to stop for
+        // sled evacuation should increment this value by 3 (1 state * 3 sleds).
+        const N_UNMARKED_VMMS: usize = 28;
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         assert_eq!(
@@ -1121,7 +1189,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            25,
+            N_UNMARKED_VMMS,
             "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
@@ -1140,7 +1208,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            25
+            N_UNMARKED_VMMS,
         );
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
@@ -1204,7 +1272,7 @@ mod tests {
             "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
         assert_eq!(
-            null_count, 21,
+            null_count, 24,
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
@@ -1460,8 +1528,10 @@ mod tests {
             }
         }
 
-        // There should be 60 VMM rows. 2 VMMs (one marked, one not) per state
+        // There should be 66 VMM rows. 2 VMMs (one marked, one not) per state
         // per sled
+        //
+        // Note: this assertion will fail if you add a new VMM state.
         let row_count: i64 = dsl::vmm
             // Add a filter to ensure there is no full table scan
             .filter(dsl::id.ne(Uuid::nil()))
@@ -1469,7 +1539,7 @@ mod tests {
             .get_result_async(&*conn)
             .await
             .expect("VMMs should be counted");
-        assert_eq!(row_count, 60);
+        assert_eq!(row_count, 66);
 
         // Check there are 6 stoppable VMMs (3 per in-service sled).
         let expected_ids: BTreeSet<Uuid> = vmms

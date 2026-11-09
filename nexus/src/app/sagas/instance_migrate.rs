@@ -546,6 +546,11 @@ async fn sim_ensure_destination_propolis_undo(
 ) -> Result<(), anyhow::Error> {
     let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
@@ -567,7 +572,7 @@ async fn sim_ensure_destination_propolis_undo(
         || async {
             super::instance_common::ensure_vmm_unregistered(
                 &sagactx,
-                &params.serialized_authn,
+                &opctx,
                 instance_id,
                 dst_propolis_id,
                 dst_sled_id,
@@ -604,7 +609,7 @@ async fn sim_instance_migrate(
         &params.serialized_authn,
     );
 
-    let db_instance =
+    let mut db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
     let src_vmm_addr = SocketAddr::new(
@@ -618,6 +623,12 @@ async fn sim_instance_migrate(
           "instance_id" => %db_instance.id(),
           "dst_vmm_record" => ?dst_vmm,
           "src_propolis_id" => %src_propolis_id);
+
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
+        .instance_id(db_instance.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(saga_action_failed)?;
 
     // TODO-correctness: This needs to be retried if a transient error occurs to
     // avoid a problem like the following:
@@ -637,8 +648,9 @@ async fn sim_instance_migrate(
         .nexus()
         .instance_request_state(
             &opctx,
-            &db_instance,
-            &Some(dst_vmm),
+            &authz_instance,
+            &mut db_instance,
+            &mut Some(dst_vmm),
             InstanceStateChangeRequest::Migrate(
                 InstanceMigrationTargetParams {
                     src_propolis_addr: src_vmm_addr.to_string(),

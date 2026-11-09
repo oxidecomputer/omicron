@@ -402,6 +402,14 @@ impl InstanceRuntimeState {
     ///
     /// Fields not related to modifying the Nexus state remain unchanged from
     /// `self`.
+    ///
+    /// # Warning
+    ///
+    /// This function does **not** change the value of the `propolis_id` field.
+    /// This means that if the state is being advanced to `NoVmm` from a state
+    /// that had an active VMM, or to a state with an active VMM from one which
+    /// does not have an active VMM, the active VMM ID must also be set or unset
+    /// here.
     pub fn with_new_nexus_state(self, new_nexus_state: InstanceState) -> Self {
         let Self {
             // fields we overwrite
