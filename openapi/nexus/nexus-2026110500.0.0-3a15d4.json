@@ -11759,6 +11759,14 @@
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
             }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
+            "schema": {
+              "$ref": "#/components/schemas/ProblemState"
+            }
           }
         ],
         "responses": {
@@ -11828,6 +11836,14 @@
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
+            "schema": {
+              "$ref": "#/components/schemas/ProblemState"
             }
           }
         ],
@@ -27985,12 +28001,21 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "state": {
+            "description": "The current state of the related problem.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProblemState"
+              }
+            ]
           }
         },
         "required": [
           "id",
           "reason",
-          "revision_added"
+          "revision_added",
+          "state"
         ]
       },
       "RelatedProblemResultsPage": {

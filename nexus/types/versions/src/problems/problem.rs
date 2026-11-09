@@ -141,6 +141,8 @@ pub struct RelatedProblem {
     /// The revision of the requested problem in which this
     /// relationship was added.
     pub revision_added: u64,
+    /// The current state of the related problem.
+    pub state: ProblemState,
 }
 
 /// Path parameters to look up a problem by its ID.

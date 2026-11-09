@@ -9640,7 +9640,7 @@ pub trait NexusExternalApi {
     async fn problem_causes_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::problem::ProblemSelector>,
-        pagination: Query<PaginatedById>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
         HttpError,
@@ -9660,7 +9660,7 @@ pub trait NexusExternalApi {
     async fn problem_consequences_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::problem::ProblemSelector>,
-        pagination: Query<PaginatedById>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
         HttpError,

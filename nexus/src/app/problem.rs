@@ -62,6 +62,7 @@ impl Nexus {
     pub async fn problem_causes_list(
         &self,
         problem_lookup: &lookup::Problem<'_>,
+        _selector: &api::ProblemListParams,
         _pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<api::RelatedProblem> {
         let (.., _authz_problem) =
@@ -74,6 +75,7 @@ impl Nexus {
     pub async fn problem_consequences_list(
         &self,
         problem_lookup: &lookup::Problem<'_>,
+        _selector: &api::ProblemListParams,
         _pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<api::RelatedProblem> {
         let (.., _authz_problem) =

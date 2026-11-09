@@ -9097,7 +9097,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn problem_causes_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<problem::ProblemSelector>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedById<problem::ProblemListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<problem::RelatedProblem>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -9106,11 +9106,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let problem_lookup =
                 nexus.problem_lookup(&opctx, path_params.into_inner())?;
-            let causes =
-                nexus.problem_causes_list(&problem_lookup, &pag_params).await?;
+            let causes = nexus
+                .problem_causes_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 causes,
@@ -9129,7 +9135,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn problem_consequences_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<problem::ProblemSelector>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedById<problem::ProblemListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<problem::RelatedProblem>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -9138,11 +9144,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let query = query_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let problem_lookup =
                 nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let consequences = nexus
-                .problem_consequences_list(&problem_lookup, &pag_params)
+                .problem_consequences_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
                 .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
