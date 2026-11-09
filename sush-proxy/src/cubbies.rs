@@ -22,11 +22,13 @@ pub enum SledState {
 
     /// MGS found a sled with this baseboard ID.
     Present(BaseboardId),
+
+    /// MGS found a sled but could not identify it.
+    Unknown,
 }
 
 /// Ask `mgs` about the sled in each cubby and return a map of the results,
-/// or `None` if `mgs` does not answer. The map includes a cubby only if
-/// ignition reports it empty or the sled's SP reports its baseboard.
+/// or `None` if `mgs` does not answer.
 pub async fn poll_cubbies(
     log: &Logger,
     mgs: &MgsClient,
@@ -75,25 +77,28 @@ pub async fn poll_cubbies(
                             "cubby" => cubby,
                             "error" => %err,
                         );
+                        states.insert(cubby, SledState::Unknown);
                     }
                 }
             }
-            SpIgnition::Present { .. } => (),
+            SpIgnition::Present { .. } => {
+                states.insert(cubby, SledState::Unknown);
+            }
         }
     }
     Some(states)
 }
 
 /// Merge one round of sled states into an existing cubby map. If a cubby
-/// is not reported in the new round, it keeps any existing entry, so a
-/// sled that is rebooting or otherwise briefly unreachable stays in the
-/// map. An `Absent` cubby loses its entry. Duplicate baseboards are
+/// is not reported in the new round, it keeps any existing entry. An
+/// `Absent` or `Unknown` cubby loses its entry, since its old baseboard
+/// may no longer be the one in the cubby. Duplicate baseboards are
 /// handled by taking the newer entry, so a sled that moves or swaps places
 /// appears only once.
 pub fn merge_cubbies(cubbies: &mut Cubbies, states: BTreeMap<u8, SledState>) {
     for (cubby, state) in states {
         match state {
-            SledState::Absent => {
+            SledState::Absent | SledState::Unknown => {
                 cubbies.remove(&cubby);
             }
             SledState::Present(baseboard) => {
@@ -147,8 +152,12 @@ mod tests {
             Cubbies::from([(15, baseboard(3)), (20, baseboard(1))])
         );
 
+        // Sled 1's SP stops answering, so cubby 20 loses its entry.
+        merge_cubbies(&mut cubbies, BTreeMap::from([(20, SledState::Unknown)]));
+        assert_eq!(cubbies, Cubbies::from([(15, baseboard(3))]));
+
         // Sled 3 is pulled, leaving cubby 15 empty.
         merge_cubbies(&mut cubbies, BTreeMap::from([(15, SledState::Absent)]));
-        assert_eq!(cubbies, Cubbies::from([(20, baseboard(1))]));
+        assert_eq!(cubbies, Cubbies::new());
     }
 }
