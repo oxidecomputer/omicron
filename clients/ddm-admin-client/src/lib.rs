@@ -19,6 +19,7 @@ use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::SlogInlineError;
+use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -95,6 +96,15 @@ impl Client {
         &self,
     ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
         self.inner.get_originated().await.map(|resp| resp.into_inner())
+    }
+
+    pub async fn get_rack_prefixes(
+        &self,
+    ) -> Result<
+        HashMap<String, Vec<ddm_api_types::net::RackPrefixInfo>>,
+        Error<types::Error>,
+    > {
+        self.inner.get_rack_prefixes().await.map(|resp| resp.into_inner())
     }
 
     pub async fn enable_stats(

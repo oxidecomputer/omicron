@@ -9116,6 +9116,7 @@ name = "omicron-ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "ddm-admin-client",
+ "ddm-api-types",
  "either",
  "omicron-common",
  "omicron-workspace-hack",
@@ -14447,6 +14448,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",

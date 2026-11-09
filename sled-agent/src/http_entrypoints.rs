@@ -22,6 +22,8 @@ use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
+use omicron_ddm_admin_client::Client as DdmAdminClient;
+use oxnet::Ipv6Net;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::artifact::{
@@ -87,7 +89,7 @@ use sled_agent_types_versions::{v20, v25, v26, v30, v33, v39, v42, v47, v48};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -1944,6 +1946,41 @@ impl SledAgentApi for SledAgentImpl {
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
                 Ok(HttpResponseOk(sa.sled_registration_info()))
+            })
+            .await
+    }
+
+    async fn peer_rack_prefixes(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeSet<Ipv6Net>>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let client = DdmAdminClient::localhost(&request_context.log)
+                    .map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "failed to create ddmd client: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
+                let rack_prefixes =
+                    client.get_rack_prefixes().await.map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "failed to get rack prefixes from ddmd: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
+                let mut prefixes = BTreeSet::new();
+                for prefix in rack_prefixes.into_keys() {
+                    let prefix = prefix.parse::<Ipv6Net>().map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "failed to parse rack prefix {prefix:?} \
+                                 returned by ddmd: {e}",
+                        ))
+                    })?;
+                    prefixes.insert(prefix);
+                }
+                Ok(HttpResponseOk(prefixes))
             })
             .await
     }

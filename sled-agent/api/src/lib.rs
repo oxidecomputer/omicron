@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use camino::Utf8PathBuf;
 use dropshot::{
@@ -16,6 +16,7 @@ use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
+use oxnet::Ipv6Net;
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
     v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
@@ -36,6 +37,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (63, PEER_RACK_PREFIXES),
     (62, ADD_SLED_REGISTRATION_INFO),
     (61, TRUST_QUORUM_NULLABLE_RESPONSES),
     (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
@@ -1884,4 +1886,14 @@ pub trait SledAgentApi {
         HttpResponseOk<latest::inventory::SledRegistrationInfo>,
         HttpError,
     >;
+
+    /// Get the rack prefixes this sled's ddm router has learned from peers.
+    #[endpoint {
+        method = GET,
+        path = "/peer-rack-prefixes",
+        versions = VERSION_PEER_RACK_PREFIXES..,
+    }]
+    async fn peer_rack_prefixes(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeSet<Ipv6Net>>, HttpError>;
 }
