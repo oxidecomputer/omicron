@@ -148,7 +148,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(blueprints.into_iter().map(BlueprintMetadata::from).collect())
+        blueprints.into_iter().map(BlueprintMetadata::try_from).collect()
     }
 
     /// Store a complete blueprint into the database
@@ -1652,7 +1652,7 @@ impl DataStore {
         }
 
         // Parse blueprint row fields
-        let reflects_collection = blueprint_row.reflects_collection();
+        let reflects_collection = blueprint_row.reflects_collection()?;
         let parent_blueprint_id =
             blueprint_row.parent_blueprint_id.map(From::from);
         let internal_dns_version = *blueprint_row.internal_dns_version;
