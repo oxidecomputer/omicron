@@ -55,6 +55,12 @@ pub struct Problem {
     pub identity: AssetIdentityMetadata,
     /// The current state of this problem.
     pub state: ProblemState,
+    /// The time at which this problem entered its current `state`.
+    ///
+    /// For an active problem, this is the time at which the problem was first
+    /// detected. For a resolved problem, this is the time at which the problem
+    /// was determined to be resolved.
+    pub time_state_changed: DateTime<Utc>,
     /// The current revision number of this problem.
     ///
     /// The revision number is incremented each time the problem is
@@ -101,20 +107,8 @@ pub struct Problem {
 }
 
 /// The state of a problem.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    strum::EnumDiscriminants,
-)]
-#[strum_discriminants(name(ProblemStateFilter))]
-#[strum_discriminants(derive(Serialize, Deserialize, JsonSchema))]
-#[strum_discriminants(serde(rename_all = "snake_case"))]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ProblemState {
     /// The condition represented by the problem is still ongoing.
     Active,
@@ -124,10 +118,7 @@ pub enum ProblemState {
     /// detected again, a new problem with a new ID is created.
     ///
     /// Resolved problems are retained for historical purposes.
-    Resolved {
-        /// The time at which the problem was determined to be resolved.
-        time_resolved: DateTime<Utc>,
-    },
+    Resolved,
 }
 
 /// Query parameters for listing problems
@@ -137,7 +128,7 @@ pub struct ProblemListParams {
     ///
     /// If this is included, only problems in the specified state will
     /// be returned. Otherwise, problems in all states will be returned.
-    pub state: Option<ProblemStateFilter>,
+    pub state: Option<ProblemState>,
 }
 
 /// A problem that is a cause or consequence of another problem
@@ -180,6 +171,12 @@ pub struct ProblemImpact {
     pub time_detected: DateTime<Utc>,
     /// Whether or not the resource remains impacted by the problem.
     pub state: ImpactState,
+    /// The time at which this impact entered its current `state`.
+    ///
+    /// For an impact that is still active, this is the same as
+    /// `time_detected`. Otherwise, this is the time at which the resource
+    /// recovered or was removed from service.
+    pub time_state_changed: DateTime<Utc>,
     /// The revision of the problem in which this impact was added.
     pub revision_added: u64,
     /// A human-readable summary of how this resource is impacted by the
@@ -237,41 +234,31 @@ pub enum ImpactedResource {
 
 /// Describes whether a resource impacted by an active problem is currently
 /// impacted by that problem, or why it is no longer impacted.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    strum::EnumDiscriminants,
-)]
-#[strum_discriminants(name(ImpactStateFilter))]
-#[strum_discriminants(derive(Serialize, Deserialize, JsonSchema))]
-#[strum_discriminants(serde(rename_all = "snake_case"))]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ImpactState {
     /// The resource is currently impacted by the active problem.
     Active,
     /// The resource has returned to a healthy state due to automated response
     /// or operator actions. It is no longer impacted by this problem, even if
     /// the problem remains active.
-    Recovered { time_recovered: DateTime<Utc> },
+    Recovered,
     /// The resource is no longer impacted by the problem because the resource
     /// has been removed from service by an operator action.
     ///
     /// This occurs when an operator (or Oxide support) expunges a hardware
     /// resource (such as a physical disk or compute sled), or when a virtual
     /// resource (such as an instance or virtual disk) is deleted.
-    OutOfService { time_removed_from_service: DateTime<Utc> },
+    OutOfService,
 }
 
 /// Query parameters for listing resources impacted by an active problem.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ImpactListParams {
-    /// Optional filter to determine whether to include only impacts with the
-    /// specified `ImpactState`. If this is not included, all impacts will be
-    /// returned, regardless of their `ImpactState`.
-    pub state: Option<ImpactStateFilter>,
+    /// Optional filter to determine whether to include only impacts in the
+    /// specified state.
+    ///
+    /// If this is not included, all impacts will be returned, regardless of
+    /// their state.
+    pub state: Option<ImpactState>,
 }

@@ -123,10 +123,10 @@ impl DataStore {
         )
         .select((Problem::as_select(), ProblemRevision::as_select()));
         match filter.state {
-            Some(api::ProblemStateFilter::Active) => {
+            Some(api::ProblemState::Active) => {
                 query = query.filter(rev_dsl::time_resolved.is_null())
             }
-            Some(api::ProblemStateFilter::Resolved) => {
+            Some(api::ProblemState::Resolved) => {
                 query = query.filter(rev_dsl::time_resolved.is_not_null())
             }
             None => {}

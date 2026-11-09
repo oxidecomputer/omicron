@@ -171,16 +171,17 @@ impl From<ProblemView> for api::Problem {
             description,
             action_required,
         } = view;
-        let state = match time_resolved {
-            Some(time_resolved) => {
-                api::ProblemState::Resolved { time_resolved }
-            }
-            None => api::ProblemState::Active,
+        let (state, time_state_changed) = match time_resolved {
+            Some(time_resolved) => (api::ProblemState::Resolved, time_resolved),
+            // A problem becomes active when it is created, so the time at which
+            // an active problem entered its state is the time it was created.
+            None => (api::ProblemState::Active, identity.time_created),
         };
         Self {
             identity,
             revision: revision.as_u64(),
             state,
+            time_state_changed,
             code: code.into(),
             class: code.description().class.to_string(),
             summary,

@@ -11550,7 +11550,7 @@
             "name": "state",
             "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
             "schema": {
-              "$ref": "#/components/schemas/ProblemStateFilter"
+              "$ref": "#/components/schemas/ProblemState"
             }
           }
         ],
@@ -11765,7 +11765,7 @@
             "name": "state",
             "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
             "schema": {
-              "$ref": "#/components/schemas/ProblemStateFilter"
+              "$ref": "#/components/schemas/ProblemState"
             }
           }
         ],
@@ -11843,7 +11843,7 @@
             "name": "state",
             "description": "Optional state used to filter problems.\n\nIf this is included, only problems in the specified state will be returned. Otherwise, problems in all states will be returned.",
             "schema": {
-              "$ref": "#/components/schemas/ProblemStateFilter"
+              "$ref": "#/components/schemas/ProblemState"
             }
           }
         ],
@@ -11918,9 +11918,9 @@
           {
             "in": "query",
             "name": "state",
-            "description": "Optional filter to determine whether to include only impacts with the specified `ImpactState`. If this is not included, all impacts will be returned, regardless of their `ImpactState`.",
+            "description": "Optional filter to determine whether to include only impacts in the specified state.\n\nIf this is not included, all impacts will be returned, regardless of their state.",
             "schema": {
-              "$ref": "#/components/schemas/ImpactStateFilter"
+              "$ref": "#/components/schemas/ImpactState"
             }
           }
         ],
@@ -23594,57 +23594,23 @@
         "oneOf": [
           {
             "description": "The resource is currently impacted by the active problem.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "active"
-                ]
-              }
-            },
-            "required": [
-              "state"
+            "type": "string",
+            "enum": [
+              "active"
             ]
           },
           {
             "description": "The resource has returned to a healthy state due to automated response or operator actions. It is no longer impacted by this problem, even if the problem remains active.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "recovered"
-                ]
-              },
-              "time_recovered": {
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "state",
-              "time_recovered"
+            "type": "string",
+            "enum": [
+              "recovered"
             ]
           },
           {
             "description": "The resource is no longer impacted by the problem because the resource has been removed from service by an operator action.\n\nThis occurs when an operator (or Oxide support) expunges a hardware resource (such as a physical disk or compute sled), or when a virtual resource (such as an instance or virtual disk) is deleted.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "out_of_service"
-                ]
-              },
-              "time_removed_from_service": {
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "state",
-              "time_removed_from_service"
+            "type": "string",
+            "enum": [
+              "out_of_service"
             ]
           }
         ]
@@ -27573,6 +27539,11 @@
             "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "time_state_changed": {
+            "description": "The time at which this problem entered its current `state`.\n\nFor an active problem, this is the time at which the problem was first detected. For a resolved problem, this is the time at which the problem was determined to be resolved.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -27585,7 +27556,8 @@
           "state",
           "summary",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "time_state_changed"
         ]
       },
       "ProblemImpact": {
@@ -27627,6 +27599,11 @@
             "description": "The time at which the system first determined this resource to be impacted by the problem.\n\nNote: impact to this resource may predate this timestamp. This represents the first time at which the system detected the impact to this resource and determine that it was due to this problem.",
             "type": "string",
             "format": "date-time"
+          },
+          "time_state_changed": {
+            "description": "The time at which this impact entered its current `state`.\n\nFor an impact that is still active, this is the same as `time_detected`. Otherwise, this is the time at which the resource recovered or was removed from service.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -27635,7 +27612,8 @@
           "resource",
           "revision_added",
           "state",
-          "time_detected"
+          "time_detected",
+          "time_state_changed"
         ]
       },
       "ProblemImpactResultsPage": {
@@ -27685,38 +27663,16 @@
         "oneOf": [
           {
             "description": "The condition represented by the problem is still ongoing.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "active"
-                ]
-              }
-            },
-            "required": [
-              "state"
+            "type": "string",
+            "enum": [
+              "active"
             ]
           },
           {
             "description": "The system has determined that the problem no longer exists.\n\nA resolved problem never becomes active again. If a similar condition is detected again, a new problem with a new ID is created.\n\nResolved problems are retained for historical purposes.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "resolved"
-                ]
-              },
-              "time_resolved": {
-                "description": "The time at which the problem was determined to be resolved.",
-                "type": "string",
-                "format": "date-time"
-              }
-            },
-            "required": [
-              "state",
-              "time_resolved"
+            "type": "string",
+            "enum": [
+              "resolved"
             ]
           }
         ]
@@ -33656,49 +33612,6 @@
         "enum": [
           "ascending",
           "descending"
-        ]
-      },
-      "ProblemStateFilter": {
-        "oneOf": [
-          {
-            "description": "The condition represented by the problem is still ongoing.",
-            "type": "string",
-            "enum": [
-              "active"
-            ]
-          },
-          {
-            "description": "The system has determined that the problem no longer exists.\n\nA resolved problem never becomes active again. If a similar condition is detected again, a new problem with a new ID is created.\n\nResolved problems are retained for historical purposes.",
-            "type": "string",
-            "enum": [
-              "resolved"
-            ]
-          }
-        ]
-      },
-      "ImpactStateFilter": {
-        "oneOf": [
-          {
-            "description": "The resource is currently impacted by the active problem.",
-            "type": "string",
-            "enum": [
-              "active"
-            ]
-          },
-          {
-            "description": "The resource has returned to a healthy state due to automated response or operator actions. It is no longer impacted by this problem, even if the problem remains active.",
-            "type": "string",
-            "enum": [
-              "recovered"
-            ]
-          },
-          {
-            "description": "The resource is no longer impacted by the problem because the resource has been removed from service by an operator action.\n\nThis occurs when an operator (or Oxide support) expunges a hardware resource (such as a physical disk or compute sled), or when a virtual resource (such as an instance or virtual disk) is deleted.",
-            "type": "string",
-            "enum": [
-              "out_of_service"
-            ]
-          }
         ]
       },
       "VersionSortMode": {
