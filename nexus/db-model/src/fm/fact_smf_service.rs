@@ -15,6 +15,7 @@ use nexus_db_schema::schema::fm_fact_smf_service;
 use nexus_types::fm;
 use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{FactPayload, SmfServiceFact, SmfServiceFactPayload};
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
     CaseKind, CollectionKind, FactKind, SitrepKind, SledKind,
 };
@@ -92,7 +93,7 @@ impl FmFactSmfService {
     }
 
     /// Reconstruct an in-memory fact from a row.
-    pub fn into_fact(self) -> fm::case::Fact {
+    pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let payload = SmfServiceFactPayload {
             sled_id: self.sled_id.into(),
             zone_name: self.zone_name,
@@ -105,13 +106,13 @@ impl FmFactSmfService {
                 FactPayload::SmfService(SmfServiceFact::InMaintenance(payload))
             }
         };
-        fm::case::Fact {
+        Ok(fm::case::Fact {
             metadata: fm::case::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,
             },
             payload,
-        }
+        })
     }
 }

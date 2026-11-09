@@ -18,6 +18,7 @@ use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
     CertificateExpiryFactPayload, CertificateFact, FactPayload,
 };
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::SiloKind;
 use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{CaseKind, FactKind, SitrepKind};
@@ -95,7 +96,7 @@ impl FmFactCertificate {
     }
 
     /// Reconstruct an in-memory fact from a row.
-    pub fn into_fact(self) -> fm::case::Fact {
+    pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let payload = CertificateExpiryFactPayload {
             silo_id: self.silo_id.into(),
             certificate_id: self.certificate_id,
@@ -113,13 +114,13 @@ impl FmFactCertificate {
                 )
             }
         };
-        fm::case::Fact {
+        Ok(fm::case::Fact {
             metadata: fm::case::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,
             },
             payload,
-        }
+        })
     }
 }
