@@ -629,9 +629,13 @@ impl InstanceAutoRestart {
             .eq(IntendedState::Running)
             // Either the failed-instance predicate from above matches, *or*
             // the instance is rebooting due to its sled evacuating. When an
-            // instance had to stop for sled evacuation, can always be
+            // instance had to stop for sled evacuation, it can always be
             // reincarnated, regardless of its auto-restart policy and when it
             // last reincarnated.
+            //
+            // Eventually, we'll give users the option to not allow
+            // auto-restarts during an update. This will be addressed in
+            // https://github.com/oxidecomputer/omicron/issues/11708
             .and(
                 can_restart_from_failure
                     .or(dsl::state.eq(InstanceState::SledEvacuating)),
@@ -644,8 +648,8 @@ impl InstanceAutoRestart {
             .and(dsl::updater_id.is_null())
     }
 
-    /// The wall-clock time at which the cooldown period will expire and the
-    /// instance will once again be eligible to reincarnate, if the instance
+    /// Returns the wall-clock time at which the cooldown period will expire and
+    /// the instance will once again be eligible to reincarnate, if the instance
     /// is still cooling down.
     fn cooldown_expiry_time(
         &self,
@@ -696,7 +700,7 @@ pub struct InstanceUpdate {
 mod test {
     use super::*;
 
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Clone, Copy, Debug, strum::VariantArray)]
     enum LastAutoRestart {
         NeverRestarted,
         WithinCooldown,
@@ -704,8 +708,7 @@ mod test {
     }
 
     impl LastAutoRestart {
-        const ALL: [Self; 3] =
-            [Self::NeverRestarted, Self::WithinCooldown, Self::CooldownElapsed];
+        const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
 
         fn time(self) -> Option<DateTime<Utc>> {
             let now = Utc::now();
@@ -799,10 +802,12 @@ mod test {
                             found_reincarnability,
                             state,
                             policy,
-                            last_auto_restart,
+                            *last_auto_restart,
                         ),
-                        "unexpected reincarnability: {found_reincarnability:?} for instance state: {state:?}, restart policy: \
-                         {policy:?}, last auto-restart time: {last_auto_restart:?}",
+                        "unexpected reincarnability: {found_reincarnability:?} \
+                         for instance state: {state:?}, restart policy: \
+                         {policy:?}, last auto-restart time: \
+                         {last_auto_restart:?}",
                     );
                 }
             }
