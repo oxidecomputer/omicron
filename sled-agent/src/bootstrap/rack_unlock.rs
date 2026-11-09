@@ -81,6 +81,16 @@ pub(crate) async fn wait_for_rack_unlock(
                     "error" => InlineErrorChain::new(&err),
                 );
                 sleep(POLL_INTERVAL).await;
+
+                // We only know that we are expunged by calling `status`. If
+                // the status call fails, the call to `load_latest_rack_secret`
+                // is almost certainly also going to fail because they are both
+                // messages to the same task that return immediately with a
+                // response. We just want to try again rather than fall through
+                // in this case.
+                //
+                // See https://github.com/oxidecomputer/omicron/issues/11726 for
+                // more details.
                 continue;
             }
         }
