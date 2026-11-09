@@ -2088,6 +2088,7 @@ mod test {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: instance_types::InstanceShutdownPolicy::default(),
         };
 
         // Check the instance state changes to `SledEvacuating` only if it's
