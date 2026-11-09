@@ -22,7 +22,10 @@ use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::{Error, IpVersion, NameOrId, ResourceType};
+use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::backon_retry_policy_internal_service;
+use omicron_common::backoff::retry_notify_ext;
+use omicron_common::backoff::retry_policy_internal_service;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use progenitor_extras::retry::retry_operation_while_indefinitely;
 use serde::{Deserialize, Serialize};
@@ -713,125 +716,205 @@ pub(super) async fn instance_ip_remove_opte(
 ///
 /// # Errors
 ///
-/// This function returns an error if the sled could not be looked up in the
-/// database, or if the sled-agent returns a non-retryable error..
+/// This keeps trying forever until the thing is for sure gone, and retries any
+/// errors that do not conclusively indicate that it has been erased from
+/// reality permanently. This function comes home with its shield, or on it.
+///
+/// `propolis_id` delendo est.
 pub(super) async fn ensure_vmm_unregistered(
     sagactx: &NexusActionContext,
-    opctx: &OpContext,
+    serialized_authn: &authn::saga::Serialized,
     instance_id: InstanceUuid,
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
-) -> Result<(), Error> {
+) {
     let osagactx = sagactx.user_data();
-    let log = osagactx.log();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let whoami = sagactx.node_label();
+    let log = osagactx.log().new(o!(
+        "instance_id" => instance_id.to_string(),
+        "propolis_id" => propolis_id.to_string(),
+        "sled_id" => sled_id.to_string(),
+    ));
 
-    let client = match osagactx.nexus().sled_client(&sled_id).await {
-        Ok(client) => client,
-        // If the sled no longer exists in the database at all, that's...quite
-        // surprising! But, we can hopefully assume that the sled, and any VMMs
-        // running on it, no longer exist.
-        Err(Error::ObjectNotFound {
-            type_name: ResourceType::Sled, ..
-        }) => {
-            slog::warn!(
-                log,
-                "sled no longer exists in the database; assuming VMM is gone";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "sled_id" => %sled_id,
-            );
-            return Ok(());
-        }
-        Err(e) => {
-            return Err(e.internal_context(format!(
-                "failed to look up sled {sled_id} to unregister VMM \
-                 {propolis_id}"
-            )));
-        }
-    };
+    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
+    // out of service (which may include potentially transient errors querying
+    // the database), nor will it retry errors from the sled-agent that
+    // progenitor-extras considers "permanent". Therefore, we wrap the entire
+    // thing in a second retry loop, so that the saga doesn't get stuck.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            // First, we must mark the VMM as `Cancelling` so that no one else
+            // (say, a stop request or the instance-watcher background task)
+            // will attempt to send requests to the sled-agent which we are
+            // about to instruct to disown the instance.
+            //
+            // This is safe to do HERE (and here ONLY) for the following
+            // reasons:
+            //
+            // 1. This undo action will continually retry the sled-agent
+            //    request to unregister the VMM indefinitely until we are
+            //    certain it is FOR SURE GONE (either because the sled-agent
+            //    said so or because the sled itself was erased from our
+            //    understanding of the universe).
+            //
+            //    If we did not do that, a failed call to the sled-agent would
+            //    leak the actual Propolis process, leaving it running while the
+            //    database would indicate that it does not exist.
+            //
+            // 2. We are in a saga node that will be re-run if we die between
+            //    when we mark the database record as cancelling and when we
+            //    try to unregister the VMM. If we did this outside of a saga
+            //    context, Nexus could crash between when we put the VMM record
+            //    in the "no longer exists" state and when we actually made it
+            //    no longer exist, but here, the saga node will be executed
+            //    elsewhere if we die between those two steps.
+            //
+            // 3. Finally, and due to the consequences of (2) above, because
+            //    `vmm_mark_saga_unwinding` succeeds idempotently if the VMM
+            //    record is already on a state in which it is not considered to
+            //    exist on a sled. This could occur either because a previous
+            //    execution of this node had already done so, or if the VMM
+            //    record was marked as `Cancelling` by an instance stop request
+            //    which is what caused this saga to unwind in the first place.
+            //
+            match osagactx
+                .datastore()
+                .vmm_mark_saga_unwinding(&opctx, &propolis_id)
+                .await
+            {
+                Ok(true) => {
+                    debug!(log, "{whoami}: marked VMM as `Cancelling`");
+                }
+                // Either we already marked it as nonexistent in a past life, or
+                // we never had to in the first place. Carry on!
+                Ok(false) => {}
+                // If the VMM record has been hard-deleted, then the query that
+                // marks it as `Cancelling` is totally fine: we no longer need
+                // to ensure it is in a non-existent state, since no other actor
+                // that might otherwise try to send requests to the sled-agent
+                // about it will ever see any evidence of its existence anyway!
+                // We can now safely proceed to telling the sled-agent to disown
+                // it.
+                Err(Error::ObjectNotFound { .. }) => {}
+                // Any other error must result in us retrying the query until
+                // the database record no longer indicates that the VMM exists
+                // on the sled. We must bail out here and retry before
+                // attempting to unregister the VMM from the sled, since the VMM
+                // record's state must be changed before we can do that.
+                Err(e) => return Err(BackoffError::transient(e)),
+            };
 
-    let result = retry_operation_while_indefinitely(
-        backon_retry_policy_internal_service(),
-        || client.vmm_unregister(&propolis_id),
-        || {
-            sled_out_of_service_gone_check(
-                osagactx.datastore(),
-                &opctx,
-                sled_id,
+            let client = match osagactx.nexus().sled_client(&sled_id).await {
+                Ok(client) => client,
+                // If the sled no longer exists in the database at all, that's...quite
+                // surprising! But, we can hopefully assume that the sled, and any VMMs
+                // running on it, no longer exist.
+                Err(Error::ObjectNotFound {
+                    type_name: ResourceType::Sled,
+                    ..
+                }) => {
+                    slog::warn!(
+                        log,
+                        "{whoami}: sled no longer exists in the database; \
+                         assuming VMM is gone";
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    return Err(BackoffError::transient(e.internal_context(
+                        "failed to look up sled in order to unregister VMM",
+                    )));
+                }
+            };
+
+            // Now, we can safely instruct the sled-agent to unregister the VMM.
+            // This will be retried indefinitely until the sled-agent
+            // acknowledges the unregistration or is expunged.
+            let unregister_result = retry_operation_while_indefinitely(
+                backon_retry_policy_internal_service(),
+                || client.vmm_unregister(&propolis_id),
+                || {
+                    sled_out_of_service_gone_check(
+                        osagactx.datastore(),
+                        &opctx,
+                        sled_id,
+                    )
+                },
+                |notification| {
+                    slog::warn!(
+                        log,
+                        "{whoami}: failed to unregister VMM, retrying in {:?}",
+                        notification.delay;
+                        "attempt" => notification.attempt,
+                        InlineErrorChain::new(&notification.error),
+                    );
+                },
             )
+            .await;
+
+            match unregister_result {
+                Ok(rsp) => {
+                    // The sled-agent only returns an updated runtime state if
+                    // there was previously a running Propolis zone to destroy.
+                    // Otherwise, the VMM was either already unregistered or was
+                    // never there to begin with.
+                    if rsp.into_inner().updated_runtime.is_some() {
+                        slog::info!(
+                            log,
+                            "{whoami}: unregistered VMM from sled; continuing \
+                             to unwind...";
+                        );
+                    } else {
+                        slog::debug!(
+                            log,
+                            "{whoami}: VMM was not registered with sled; \
+                             continuing to unwind...";
+                        );
+                    }
+                    Ok(())
+                }
+                // The sled has either been expunged or completely removed from the
+                // database. The Propolis zone we were trying to destroy is definitely
+                // gone.
+                Err(e) if e.is_gone() => {
+                    slog::info!(
+                        log,
+                        "{whoami}: the sled hosting the VMM to unregister is \
+                         no longer in service; assuming the VMM is gone";
+                    );
+                    Ok(())
+                }
+                // Welp. That's not good...
+                Err(e) => {
+                    let error = InlineErrorChain::new(&e);
+                    slog::error!(
+                        log,
+                        "{whoami}: failed to unregister VMM from sled";
+                        &error
+                    );
+                    Err(BackoffError::transient(Error::InternalError {
+                        internal_message: format!(
+                            "failed to unregister VMM from sled: {error}"
+                        ),
+                    }))
+                }
+            }
         },
-        |notification| {
-            slog::warn!(
+        |error, call_count, total_duration| {
+            warn!(
                 log,
-                "failed to unregister VMM, retrying in {:?}",
-                notification.delay;
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "sled_id" => %sled_id,
-                "attempt" => notification.attempt,
-                InlineErrorChain::new(&notification.error),
+                "{whoami}: failed to unregister VMM; retrying";
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
             );
         },
     )
-    .await;
-
-    match result {
-        Ok(rsp) => {
-            // The sled-agent only returns an updated runtime state if there was
-            // previously a running Propolis zone to destroy. Otherwise, the VMM
-            // was either already unregistered or was never there to begin with.
-            if rsp.into_inner().updated_runtime.is_some() {
-                slog::info!(
-                    log,
-                    "unregistered VMM from sled; continuing to unwind...";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id,
-                    "sled_id" => %sled_id,
-                );
-            } else {
-                slog::debug!(
-                    log,
-                    "VMM was not registered with sled; continuing to unwind...";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id,
-                    "sled_id" => %sled_id,
-                );
-            }
-            Ok(())
-        }
-        // The sled has either been expunged or completely removed from the
-        // database. The Propolis zone we were trying to destroy is definitely
-        // gone.
-        Err(e) if e.is_gone() => {
-            slog::info!(
-                log,
-                "the sled hosting the VMM to unregister is no longer in \
-                 service; assuming the VMM is gone";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "sled_id" => %sled_id,
-            );
-            Ok(())
-        }
-        // Welp. That's not good...
-        Err(e) => {
-            let error = InlineErrorChain::new(&e);
-            slog::error!(
-                log,
-                "failed to unregister VMM from sled";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "sled_id" => %sled_id,
-                &error
-            );
-            Err(Error::InternalError {
-                internal_message: format!(
-                    "failed to unregister VMM {propolis_id} from sled \
-                    {sled_id}: {error}"
-                ),
-            })
-        }
-    }
+    .await
+    .expect("this never returns an error");
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
