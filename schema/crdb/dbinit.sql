@@ -150,7 +150,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
     initialized BOOL NOT NULL,
 
     /* The IPv6 underlay /56 prefix for the rack */
-    rack_subnet INET
+    rack_subnet INET,
+
+    /* Reserved for future rack lifecycle support. */
+    time_deleted TIMESTAMPTZ
 );
 
 /*
@@ -9882,7 +9885,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '312.0.0', NULL)
+    (TRUE, NOW(), NOW(), '313.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

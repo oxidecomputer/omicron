@@ -1057,6 +1057,7 @@ table! {
         time_modified -> Timestamptz,
         initialized -> Bool,
         rack_subnet -> Nullable<Inet>,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
