@@ -9988,13 +9988,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
 -- when the sitrep corresponding to the record's `sitrep_id` is deleted.
 -- Problems are carried forwards into subsequent sitreps until they are
 -- resolved.
-CREATE TABLE IF NOT EXISTS omicron.public.fm_problem (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_request (
     -- UUID of the problem.
     id UUID NOT NULL,
     -- UUID of the current sitrep that this record is part of.
     sitrep_id UUID NOT NULL,
-    -- UUID of the original sitrep in which the problem was first created.
-    created_sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the problem was first requested.
+    requested_sitrep_id UUID NOT NULL,
 
     -- A human-readable comment explaining why the diagnosis engine created
     -- this problem. This is *not* part of the externally visible problem, and
@@ -10008,11 +10008,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem (
 -- problem row when FM rendezvous successfully creates a problem requested by
 -- the sitrep. This serves as a guard against resurrection: if the problem is
 -- deleted after its initial creation, but an executing sitrep still contains an
--- fm_problem record for the same problem, this marker prevents
+-- fm_problem_request record for the same problem, this marker prevents
 -- `SitrepGuardedInsert` from re-creating the problem.
 --
 -- A marker can be GC'ed in FM rendezvous when:
---   * its problem_id is not present in any fm_problem record in
+--   * its problem_id is not present in any fm_problem_request record in
 --     the executing sitrep,
 --   * its created_at_generation is less than that of the
 --     problem_generation on the sitrep being executed.
@@ -10023,7 +10023,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_problem_created (
     created_at_generation INT8 NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision_request (
     -- UUID of the problem.
     problem_id UUID NOT NULL,
     -- The revision number of this revision.
@@ -10035,8 +10035,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision (
     -- UUID of the current sitrep that this record is part of.
     sitrep_id UUID NOT NULL,
     -- UUID of the original sitrep in which this revision of the problem was
-    -- first created.
-    created_sitrep_id UUID NOT NULL,
+    -- first requested.
+    requested_sitrep_id UUID NOT NULL,
 
     -- If this is NULL, the problem is in the "active" state, and if it is
     -- non-NULL, the problem is in the "resolved" state.

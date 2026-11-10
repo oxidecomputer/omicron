@@ -3573,20 +3573,20 @@ table! {
 }
 
 table! {
-    fm_problem (sitrep_id, id) {
+    fm_problem_request (sitrep_id, id) {
         id -> Uuid,
         sitrep_id -> Uuid,
-        created_sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
         comment -> Text,
     }
 }
 
 table! {
-    fm_problem_revision (sitrep_id, problem_id, revision) {
+    fm_problem_revision_request (sitrep_id, problem_id, revision) {
         problem_id -> Uuid,
         revision -> Int8,
         sitrep_id -> Uuid,
-        created_sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
         time_resolved -> Nullable<Timestamptz>,
         code -> Int8,
         summary -> Text,

@@ -140,7 +140,7 @@ impl FmRendezvousResource for nexus_db_model::SupportBundle {
 impl FmRendezvousResource for nexus_db_model::Problem {
     type GenerationColumn = schema::fm_sitrep::problem_generation;
     type IdColumn = schema::rendezvous_problem_created::dsl::problem_id;
-    type RequestTable = schema::fm_problem::table;
+    type RequestTable = schema::fm_problem_request::table;
 }
 
 /// Test fixtures shared by the insert (`sitrep_guard`) and GC
