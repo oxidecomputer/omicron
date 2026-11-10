@@ -46,6 +46,8 @@ pub struct CapacityMetricsStatus {
     pub silo_samples: usize,
     /// Number of project quota samples retrieved.
     pub project_samples: usize,
+    /// Number of sled capacity samples retrieved.
+    pub sled_samples: usize,
 }
 
 /// The status of a `region_replacement` background task activation
