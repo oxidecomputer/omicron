@@ -7965,6 +7965,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "pq-sys",
  "qorb",
  "rand 0.9.2",

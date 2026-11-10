@@ -54,6 +54,7 @@ http.workspace = true
 hubtools.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
+oxnet.workspace = true
 rand.workspace = true
 repo-depot-api.workspace = true
 sled-agent-api.workspace = true
