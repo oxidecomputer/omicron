@@ -376,12 +376,8 @@ async fn prepare(
     //
     // Otherwise, we haven't finished preparing, so just return.
     match outcome {
-        // TODO: This still commits using the possibly-stale config loaded
-        // before the prepare update. In particular, it is possible for digests
-        // to be present but secrets to be missing. It should use the returned
-        // one.
-        TqPrepareStatusOutcome::Committing { config: _ } => {
-            commit(log, opctx, datastore, config).await
+        TqPrepareStatusOutcome::Committing { config: committing_config } => {
+            commit(log, opctx, datastore, *committing_config).await
         }
         TqPrepareStatusOutcome::StillPreparing => Ok(Status::Preparing),
     }
