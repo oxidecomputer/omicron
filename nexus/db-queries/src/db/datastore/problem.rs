@@ -538,6 +538,7 @@ mod test {
         id: ProblemUuid,
         revision: u32,
         time_base: DateTime<Utc>,
+        code: ProblemCode,
     ) -> ProblemRevision {
         ProblemRevision {
             problem_id: id.into(),
@@ -545,7 +546,7 @@ mod test {
             time_created: time_base
                 + chrono::TimeDelta::seconds(i64::from(revision)),
             time_resolved: None,
-            code: SqlU32::new(ProblemCode::NotARealProblem.into()),
+            code: SqlU32::new(code.into()),
             summary: format!("My Cool Problem (rev {revision})"),
             description: format!(
                 "This is a bunch of interesting information about revision \
@@ -629,7 +630,12 @@ mod test {
             .unwrap();
         let mut inserted = Vec::new();
         for revision in 1..=revisions {
-            let revision = make_revision(id, revision, time_base);
+            let revision = make_revision(
+                id,
+                revision,
+                time_base,
+                ProblemCode::UnhealthyZpool,
+            );
             let was_inserted = datastore
                 .problem_revision_insert(
                     opctx,
@@ -1028,6 +1034,7 @@ mod test {
             ProblemUuid::new_v4(),
             2,
             omicron_common::now_db_precision(),
+                ProblemCode::UnhealthyZpool,
         );
         let err = datastore
             .problem_revision_insert(opctx, &authz_problem, other)
@@ -1108,7 +1115,12 @@ mod test {
             .await
             .unwrap();
 
-        let mut revision = make_revision(id, 1, time_created);
+        let mut revision = make_revision(
+            id,
+            1,
+            time_created,
+            ProblemCode::UnhealthyZpool,
+        );
         if resolved {
             revision.time_resolved = Some(revision.time_created);
         }
@@ -1179,8 +1191,12 @@ mod test {
         // later revision that is resolved and not yet current.
         let pending_resolution =
             create_current_problem(opctx, datastore, now, false).await;
-        let mut resolving_revision =
-            make_revision(pending_resolution.id(), 2, now);
+        let mut resolving_revision = make_revision(
+            pending_resolution.id(),
+            2,
+            now,
+            ProblemCode::UnhealthyZpool,
+        );
         resolving_revision.time_resolved =
             Some(resolving_revision.time_created);
         datastore

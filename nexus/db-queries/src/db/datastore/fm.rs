@@ -3385,7 +3385,7 @@ mod tests {
                 number: ProblemRevNum::from_u32(number),
                 created_sitrep_id: sitrep_id,
                 time_resolved,
-                code: fm::problem::ProblemCode::NotARealProblem,
+                code: fm::problem::ProblemCode::UnhealthyZpool,
                 summary: summary.to_string(),
                 description: format!("a longer description: {summary}"),
                 action_required: "none, it's not a real problem".to_string(),
