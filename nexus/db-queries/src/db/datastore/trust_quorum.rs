@@ -1141,20 +1141,21 @@ impl DataStore {
     /// Abort the configuration for a trust quorum if `epoch` is the latest per `rack_id`
     /// and the configuration has not been committed.
     ///
-    /// This operation returns `Ok(())` if the configuration has already been
-    /// aborted and it is still the latest configuration.
+    /// Returns the configuration as read at the end of the transaction. If the
+    /// configuration has already been aborted and it is still the latest
+    /// configuration, it is returned unchanged.
     pub async fn tq_abort_config(
         &self,
         opctx: &OpContext,
         authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
         abort_reason: String,
-    ) -> Result<(), Error> {
+    ) -> Result<TrustQuorumConfig, Error> {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         let rack_id = authz_tq.rack().id();
-        let epoch = epoch_to_i64(epoch)?;
+        let db_epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
 
@@ -1173,53 +1174,66 @@ impl DataStore {
                             err,
                             "No trust quorum config for rack_id {} at epoch {}",
                             rack_id,
-                            epoch
+                            db_epoch
                         );
                     };
 
-                    if db_config.epoch != epoch {
+                    if db_config.epoch != db_epoch {
                         let actual = db_config.epoch;
                         bail_txn!(
                             err,
                             "Cannot abort trust quorum config. \
                              Latest epoch does not match. Expected {}, Got {}",
-                            epoch,
+                            db_epoch,
                             actual
                         );
                     }
 
+                    // Abort is idempotent
                     if db_config.state
-                        == DbTrustQuorumConfigurationState::Aborted
+                        != DbTrustQuorumConfigurationState::Aborted
                     {
-                        // Abort is idempotent
-                        return Ok(());
+                        // If we've already started committing , we can't abort
+                        if db_config.state
+                            == DbTrustQuorumConfigurationState::Committing
+                            || db_config.state
+                                == DbTrustQuorumConfigurationState::Committed
+                        {
+                            let state = db_config.state;
+                            bail_txn!(
+                                err,
+                                "Invalid update of trust quorum abort status. \
+                                Expected `Preparing`, got `{:?}`",
+                                state
+                            );
+                        }
+
+                        Self::update_tq_abort_state_conn(
+                            &c,
+                            db_config.rack_id,
+                            db_config.epoch,
+                            abort_reason,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
                     }
 
-                    // If we've already started committing , we can't abort
-                    if db_config.state
-                        == DbTrustQuorumConfigurationState::Committing
-                        || db_config.state
-                            == DbTrustQuorumConfigurationState::Committed
-                    {
-                        let state = db_config.state;
+                    let aborted_config =
+                        Self::tq_get_config_with_members_from_epoch_conn(
+                            &c, rack_id, epoch,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let Some(aborted_config) = aborted_config else {
                         bail_txn!(
                             err,
-                            "Invalid update of trust quorum abort status. \
-                            Expected `Preparing`, got `{:?}`",
-                            state
+                            "Trust quorum config for rack_id {} at epoch {} \
+                             disappeared after it was aborted",
+                            rack_id,
+                            epoch
                         );
-                    }
-
-                    Self::update_tq_abort_state_conn(
-                        &c,
-                        db_config.rack_id,
-                        db_config.epoch,
-                        abort_reason,
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
-
-                    Ok(())
+                    };
+                    Ok(aborted_config)
                 }
             })
             .await
@@ -2883,6 +2897,14 @@ mod tests {
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let coordinator = members.first().unwrap().clone();
+        let abort = |epoch: u64| {
+            datastore.tq_abort_config(
+                opctx,
+                make_authz_tq(rack_id),
+                Epoch(epoch),
+                "test".into(),
+            )
+        };
 
         // Insert an initial config
         DataStore::tq_insert_rss_config_after_handoff(
@@ -2907,26 +2929,15 @@ mod tests {
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
         // Aborting should succeed, since we haven't committed
-        datastore
-            .tq_abort_config(
-                opctx,
-                make_authz_tq(config.rack_id),
-                config.epoch,
-                "test".into(),
-            )
-            .await
-            .unwrap();
+        let aborted = abort(2).await.expect("aborted the latest configuration");
+        assert_eq!(aborted.state, TrustQuorumConfigState::Aborted);
+        assert_eq!(aborted.abort_reason.as_deref(), Some("test"));
 
         // Aborting is idempotent
-        datastore
-            .tq_abort_config(
-                opctx,
-                make_authz_tq(config.rack_id),
-                config.epoch,
-                "test".into(),
-            )
-            .await
-            .unwrap();
+        assert_eq!(
+            abort(2).await.expect("aborting again is idempotent"),
+            aborted
+        );
 
         // Committing will fail to update any rows
         // (This is not directly callable from a public API).
@@ -2981,7 +2992,7 @@ mod tests {
             .await
             .expect("no error")
             .expect("returned config");
-        assert_eq!(read_config.state, TrustQuorumConfigState::Aborted);
+        assert_eq!(read_config, aborted);
 
         // Create and insert another config
         let config2 = ProposedTrustQuorumConfig {

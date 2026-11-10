@@ -522,7 +522,8 @@ impl TrustQuorumConfigDriver<'_> {
     }
 
     async fn abort(&self, epoch: u64) {
-        self.datastore
+        let aborted = self
+            .datastore
             .tq_abort_config(
                 self.opctx,
                 self.authz_tq(),
@@ -533,10 +534,7 @@ impl TrustQuorumConfigDriver<'_> {
             .unwrap_or_else(|error| {
                 panic!("aborted trust quorum config at epoch {epoch}: {error}")
             });
-        assert_eq!(
-            self.config(epoch).await.state,
-            TrustQuorumConfigState::Aborted
-        );
+        assert_eq!(aborted.state, TrustQuorumConfigState::Aborted);
     }
 }
 
