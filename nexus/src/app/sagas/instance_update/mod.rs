@@ -2376,6 +2376,129 @@ mod test {
         );
     }
 
+    // Regression test for
+    // <https://github.com/oxidecomputer/omicron/issues/11706>.
+    //
+    // When a VMM stopped for a sled evacuation is destroyed, that starts an
+    // update saga to transition the instance record to the `SledEvacuating`
+    // state if (and only if) its intended state is `Running`. If the instance
+    // is `SledEvacuating`, the instance-reincarnation task will attempt to
+    // restart it. The decision to advance the state to `SledEvacuating` is made
+    // from the snapshot taken by the `start_instance_update` saga, but the
+    // state is not actually written until the `siu_commit_instance_update` node
+    // in the "real" update saga.
+    //
+    // If the instance is stopped by an external API request after the state
+    // snapshot is read snapshot but before `siu_commit_instance_update`, the
+    // instance should come to rest in `NoVmm` (externally `Stopped`) rather
+    // than `SledEvacuating` (externally `Rebooting`). The user request to stop
+    // the instance should be honored.
+    #[nexus_test(server = crate::Server)]
+    async fn test_sled_evacuating_update_races_with_instance_stop(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+        use omicron_generation_kinds::UpdateDispositionGeneration;
+
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+        let instance_id =
+            InstanceUuid::from_untyped_uuid(state.instance().id());
+        let authz_instance = params.authz_instance.clone();
+        assert_eq!(
+            state.instance().intended_state,
+            InstanceIntendedState::Running
+        );
+
+        // Mark the (destroyed) active VMM as having been stopped for a sled
+        // update. This is written directly to the database rather than running
+        // the `vmm_mark_stop_for_update` task, because that would require us to
+        // go and create an entire blueprint to evacuate the sled, and that's
+        // annoying.
+        let vmm_id = state
+            .vmm()
+            .as_ref()
+            .expect("test setup function should have generated an active VMM")
+            .id;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let marked = diesel::update(vmm_dsl::vmm)
+            .filter(vmm_dsl::id.eq(vmm_id))
+            // Gosh, those sure are some long identifiers...
+            .set(vmm_dsl::stop_for_update_disposition_generation.eq(Some(
+                db::model::to_db_typed_generation(
+                    UpdateDispositionGeneration::from(1),
+                ),
+            )))
+            .execute_async(&*conn)
+            .await
+            .expect("should be able to mark the VMM as stopped for update");
+        assert_eq!(
+            marked, 1,
+            "the VMM should be marked, and no other VMMs should exist in this \
+             test"
+        );
+
+        // Because the state snapshot is read in the `start_instance_update`
+        // saga, which is separate from the `instance_update` saga, we can
+        // simulate the race deterministically. The `make_real_params` function
+        // in `setup_active_vmm_destroyed` test simulates the construction of
+        // the params to the actual update saga.
+        let real_params = make_real_params(cptestctx, &opctx, params).await;
+        // Make sure we are still actually testing the expected update saga...
+        assert_eq!(
+            real_params.update.new_runtime.nexus_state,
+            InstanceState::SledEvacuating,
+            "the update computed from a snapshot with intended state \
+             `Running` should move the instance to `SledEvacuating`. if this \
+             is no longer the case, this test is no longer testing the right \
+             thing!",
+        );
+
+        // Now, simulate a user stopping the instance through the external API.
+        // The call to `instance_set_intended_state` is the only effect of
+        // `Nexus::instance_stop` that matters in this test, and the request to
+        // the sled-agent that nexus would make after setting the intended state
+        // would fail, because the VMM has been destroyed. Note that changes to
+        // an intended state succeed even while the instance record is locked by
+        // the saga, and do not increment the generation number.
+        //
+        // TODO(eliza): stop requests really should not be sent to the sled in
+        // this state, since the active VMM has been `Destroyed`. We should fix
+        // that.
+        datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                InstanceIntendedState::Stopped,
+            )
+            .await
+            .expect("setting the intended state should succeed");
+
+        nexus
+            .sagas
+            .saga_execute::<SagaDoActualInstanceUpdate>(real_params)
+            .await
+            .expect("update saga should succeed");
+
+        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
+        let instance = state.instance();
+        assert_instance_unlocked(instance);
+        assert_instance_record_is_consistent(instance);
+        assert_eq!(instance.intended_state, InstanceIntendedState::Stopped);
+        assert_eq!(
+            instance.runtime().nexus_state,
+            InstanceState::NoVmm,
+            "an instance stopped by the user during an update saga for an \
+             active VMM stopped due to sled evacuation should come to rest in \
+             the `NoVmm` state, not `SledEvacuating`\ninstance: {instance:#?}",
+        );
+    }
+
     // --- test helpers ---
 
     async fn setup_active_vmm_destroyed_test(
