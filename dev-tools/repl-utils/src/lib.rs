@@ -149,7 +149,9 @@ pub fn run_repl_on_stdin_customized(
     // Ensure new Signal variants would trigger a compile error.
     #[allow(clippy::while_let_loop)]
     loop {
-        match ed.read_line(prompt).context("unexpected error")? {
+        match ed.read_line(prompt).context(
+            "unexpected error from reedline while reading line from stdin",
+        )? {
             Signal::Success(buffer) => process_entry(&buffer, &mut run_line),
             Signal::CtrlD | Signal::CtrlC => break,
         }
