@@ -75,8 +75,8 @@ pub enum TqPrepareStatusOutcome {
     Committing {
         /// The trust quorum config.
         ///
-        /// The config is read at the end of the update's transaction, so it has
-        /// the share digests, rack secrets, and prepared members just written.
+        /// The config is read at the end of the update's transaction, so it
+        /// includes everything written by the `tq_update_prepare_status` call.
         config: Box<TrustQuorumConfig>,
     },
 }
