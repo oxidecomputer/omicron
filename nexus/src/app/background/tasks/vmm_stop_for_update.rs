@@ -293,12 +293,7 @@ impl VmmStopForUpdate {
                     &vmm_id,
                     &VmmPutStateBody {
                         state: VmmStateRequested::Stopped {
-                            acpi_timeout_secs: match shutdown_policy {
-                                InstanceShutdownPolicy::HardOff => None,
-                                InstanceShutdownPolicy::PowerButton {
-                                    timeout_secs,
-                                } => Some(u64::from(timeout_secs)),
-                            },
+                            method: shutdown_policy.into(),
                         },
                     },
                 )

@@ -40,15 +40,16 @@ impl std::fmt::Display for VmmStateRequested {
 
 impl VmmStateRequested {
     fn label(&self) -> &str {
+        use omicron_common::api::internal::shared::InstanceShutdownPolicy::*;
         match self {
             VmmStateRequested::MigrationTarget(_) => "migrating in",
             VmmStateRequested::Running => "running",
-            VmmStateRequested::Stopped { acpi_timeout_secs: None } => "stopped",
-            VmmStateRequested::Reboot { acpi_timeout_secs: None } => "reboot",
-            VmmStateRequested::Stopped { acpi_timeout_secs: Some(_) } => {
+            VmmStateRequested::Stopped { method: HardOff } => "stopped",
+            VmmStateRequested::Reboot { method: HardOff } => "reboot",
+            VmmStateRequested::Stopped { method: PowerButton { .. } } => {
                 "acpi-stopped"
             }
-            VmmStateRequested::Reboot { acpi_timeout_secs: Some(_) } => {
+            VmmStateRequested::Reboot { method: PowerButton { .. } } => {
                 "acpi-reboot"
             }
         }
@@ -96,8 +97,8 @@ impl VmmStateRequested {
         match self {
             VmmStateRequested::MigrationTarget(_) => false,
             VmmStateRequested::Running => false,
-            VmmStateRequested::Stopped { acpi_timeout_secs: _ } => true,
-            VmmStateRequested::Reboot { acpi_timeout_secs: _ } => false,
+            VmmStateRequested::Stopped { method: _ } => true,
+            VmmStateRequested::Reboot { method: _ } => false,
         }
     }
 }

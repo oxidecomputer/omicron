@@ -890,6 +890,7 @@ impl InstanceRunner {
 
     async fn run(mut self, mut ticket: InstanceTicket) {
         use InstanceRequest::*;
+        use omicron_common::api::external::InstanceShutdownPolicy;
 
         // Clone the arc around the terminator so that we can await the
         // termination signal even while running an async function that mutably
@@ -1021,7 +1022,7 @@ impl InstanceRunner {
                                 // If we're going to stop the instance, start
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
-                                if let VmmStateRequested::Stopped { acpi_timeout_secs } = state {
+                                if let VmmStateRequested::Stopped { method } = state {
                                     // Only start the stop timeout if there
                                     // isn't one already, so that additional
                                     // requests to stop coming in don't reset
@@ -1029,7 +1030,12 @@ impl InstanceRunner {
                                     // was for an ACPI shutdown and this is
                                     // a hard-stop request that would terminate
                                     // sooner.
-                                    let acpi_timeout = acpi_timeout_secs.unwrap_or(0);
+                                    let acpi_timeout = match method {
+                                        InstanceShutdownPolicy::HardOff => 0u64,
+                                        InstanceShutdownPolicy::PowerButton {
+                                            timeout_secs
+                                        } => timeout_secs.into(),
+                                    };
                                     let duration = Duration::from_secs(acpi_timeout)
                                         + Self::STOP_GRACE_PERIOD;
                                     let new_deadline = std::time::Instant::now() + duration;
@@ -1037,7 +1043,8 @@ impl InstanceRunner {
                                         // true iff current request is hard-stop and would
                                         // shorten the existing timeout, and the existing
                                         // timeout was for an ACPI shutdown
-                                        acpi_timeout_secs.is_none() && new_deadline < *dl
+                                        method == InstanceShutdownPolicy::HardOff &&
+                                        new_deadline < *dl
                                     } else {
                                         // there's no existing timeout
                                         true
@@ -1051,9 +1058,11 @@ impl InstanceRunner {
                                             // if this is an ACPI shutdown, store the timeout
                                             // deadline, such that we may shorten it later if
                                             // a force-off comes through.
-                                            acpi_timeout_secs
-                                                .is_some()
-                                                .then_some(new_deadline),
+                                            if let InstanceShutdownPolicy::PowerButton { .. } = method {
+                                                Some(new_deadline)
+                                            } else {
+                                                None
+                                            }
                                         ));
                                     }
                                 }
@@ -1064,8 +1073,11 @@ impl InstanceRunner {
                                 // If we receive a reboot request while a stop timeout is running
                                 // that was initiated by an ACPI shutdown, disarm the timeout,
                                 // but only if Propolis was still there and honored the request.
-                                if let (VmmStateRequested::Reboot {acpi_timeout_secs: _}, Some((_, Some(_))), Ok(_)) =
-                                    (state, &stop_timeout, &propolis_result)
+                                if let (
+                                    VmmStateRequested::Reboot { method: _ },
+                                    Some((_, Some(_))),
+                                    Ok(_),
+                                ) = (state, &stop_timeout, &propolis_result)
                                 {
                                     stop_timeout = None;
                                 }
@@ -2453,6 +2465,7 @@ impl InstanceRunner {
         &mut self,
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
+        use omicron_common::api::internal::shared::InstanceShutdownPolicy::PowerButton;
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
@@ -2486,7 +2499,7 @@ impl InstanceRunner {
 
                 (Some(PropolisRequest::Run), None)
             }
-            VmmStateRequested::Stopped { acpi_timeout_secs } => {
+            VmmStateRequested::Stopped { method } => {
                 // If there's no running Propolis yet, unregister this instance
                 // straightaway. Since nothing will ever send a state update in
                 // this case, force the VMM into a terminal Destroyed state,
@@ -2497,20 +2510,20 @@ impl InstanceRunner {
                     self.terminate().await;
                     (None, None)
                 } else {
-                    let p = if let Some(timeout_secs) = acpi_timeout_secs {
-                        PropolisRequest::AcpiStop { timeout_secs }
+                    let p = if let PowerButton { timeout_secs: s } = method {
+                        PropolisRequest::AcpiStop { timeout_secs: s.into() }
                     } else {
                         PropolisRequest::Stop
                     };
                     (Some(p), Some(PublishedVmmState::Stopping))
                 }
             }
-            VmmStateRequested::Reboot { acpi_timeout_secs } => {
+            VmmStateRequested::Reboot { method } => {
                 if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
-                let p = if let Some(timeout_secs) = acpi_timeout_secs {
-                    PropolisRequest::AcpiReboot { timeout_secs }
+                let p = if let PowerButton { timeout_secs: s } = method {
+                    PropolisRequest::AcpiReboot { timeout_secs: s.into() }
                 } else {
                     PropolisRequest::Reboot
                 };
@@ -3074,7 +3087,7 @@ mod tests {
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
-    use omicron_common::api::external::Hostname;
+    use omicron_common::api::external::{Hostname, InstanceShutdownPolicy};
     use omicron_common::api::internal::shared::{
         DhcpConfig, PrivateIpConfig, SledIdentifiers,
     };
@@ -3832,7 +3845,9 @@ mod tests {
             .instance_manager
             .ensure_state(
                 propolis_id,
-                VmmStateRequested::Stopped { acpi_timeout_secs: None },
+                VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
             )
             .await
             .unwrap();
@@ -3949,7 +3964,11 @@ mod tests {
             .instance_manager
             .ensure_state(
                 propolis_id,
-                VmmStateRequested::Stopped { acpi_timeout_secs: Some(1) },
+                VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::PowerButton {
+                        timeout_secs: 1.try_into().unwrap(),
+                    },
+                },
             )
             .await
             .unwrap();
@@ -3980,7 +3999,9 @@ mod tests {
             .instance_manager
             .ensure_state(
                 propolis_id,
-                VmmStateRequested::Reboot { acpi_timeout_secs: None },
+                VmmStateRequested::Reboot {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
             )
             .await
             .expect("failed to send reboot request");

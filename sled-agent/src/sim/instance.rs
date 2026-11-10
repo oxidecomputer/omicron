@@ -235,7 +235,7 @@ impl SimInstanceInner {
                     }
                 }
             }
-            VmmStateRequested::Stopped { acpi_timeout_secs: _ } => {
+            VmmStateRequested::Stopped { method: _ } => {
                 match self.next_resting_state() {
                     VmmState::Starting => {
                         self.state.force_state_to_destroyed();
@@ -256,7 +256,7 @@ impl SimInstanceInner {
                     }
                 }
             }
-            VmmStateRequested::Reboot { acpi_timeout_secs: _ } => {
+            VmmStateRequested::Reboot { method: _ } => {
                 match self.next_resting_state() {
                     VmmState::Running => {
                         // Further requests to reboot are ignored if the instance
@@ -339,10 +339,10 @@ impl SimInstanceInner {
             PropolisInstanceState::Stopping
             | PropolisInstanceState::Stopped
             | PropolisInstanceState::Destroyed => {
-                VmmStateRequested::Stopped { acpi_timeout_secs: None }
+                VmmStateRequested::Stopped { method: Default::default() }
             }
             PropolisInstanceState::Rebooting => {
-                VmmStateRequested::Reboot { acpi_timeout_secs: None }
+                VmmStateRequested::Reboot { method: Default::default() }
             }
         })
     }

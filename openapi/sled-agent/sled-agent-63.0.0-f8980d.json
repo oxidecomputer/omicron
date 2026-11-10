@@ -2907,6 +2907,13 @@
   },
   "components": {
     "schemas": {
+      "AcpiTimeoutSecs": {
+        "description": "ACPI power button timeout in seconds.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 1,
+        "maximum": 3600
+      },
       "AddSledRequest": {
         "description": "A request to Add a given sled after rack initialization has occurred",
         "type": "object",
@@ -6180,6 +6187,45 @@
         "required": [
           "group_ip",
           "sources"
+        ]
+      },
+      "InstanceShutdownPolicy": {
+        "description": "Instance-stopping method choices",
+        "oneOf": [
+          {
+            "description": "Instance's VM is forcefully terminated immediately.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "$ref": "#/components/schemas/AcpiTimeoutSecs"
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
         ]
       },
       "InstanceSledLocalConfig": {
@@ -10995,14 +11041,18 @@
               "value": {
                 "type": "object",
                 "properties": {
-                  "acpi_timeout_secs": {
-                    "nullable": true,
-                    "description": "The number of seconds to wait between sending the VM guest a power button signal and forcefully terminating it, if it does not power itself down by then after receiving the signal. If none, it is stopped with no prior power button signal.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
+                  "method": {
+                    "description": "The method by which the instance should be stopped *this* time. May be `HardOff` for an instance whose policy is `PowerButton` if the operator wants to use force.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "method"
+                ]
               }
             },
             "required": [
@@ -11023,14 +11073,18 @@
               "value": {
                 "type": "object",
                 "properties": {
-                  "acpi_timeout_secs": {
-                    "nullable": true,
-                    "description": "The number of seconds to wait between sending the VM guest a power button signal and forcefully rebooting it, if it does not power itself down by then after receiving the signal. If none, it is rebooted with no prior power button signal.",
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
+                  "method": {
+                    "description": "The method by which the instance should be rebooted *this* time. May be `HardOff` for an instance whose policy is `PowerButton` if the operator wants to use force.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "method"
+                ]
               }
             },
             "required": [

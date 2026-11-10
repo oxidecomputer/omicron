@@ -8,6 +8,7 @@ pub mod instance {
 
     use crate::v1::instance::InstanceMigrationTargetParams;
     use crate::v1::instance::VmmStateRequested as VmmStateRequestedV1;
+    use omicron_common::api::external::InstanceShutdownPolicy;
 
     /// Requestable running state of an Instance.
     #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -20,20 +21,18 @@ pub mod instance {
         Running,
         /// Stop the instance.
         Stopped {
-            /// The number of seconds to wait between sending the VM guest a power
-            /// button signal and forcefully terminating it, if it does not power
-            /// itself down by then after receiving the signal.
-            /// If none, it is stopped with no prior power button signal.
-            acpi_timeout_secs: Option<u64>,
+            /// The method by which the instance should be stopped *this* time.
+            /// May be `HardOff` for an instance whose policy is `PowerButton`
+            /// if the operator wants to use force.
+            method: InstanceShutdownPolicy,
         },
         /// Immediately reset the instance, as though it had stopped and immediately
         /// began to run again.
         Reboot {
-            /// The number of seconds to wait between sending the VM guest a power
-            /// button signal and forcefully rebooting it, if it does not power
-            /// itself down by then after receiving the signal.
-            /// If none, it is rebooted with no prior power button signal.
-            acpi_timeout_secs: Option<u64>,
+            /// The method by which the instance should be rebooted *this* time.
+            /// May be `HardOff` for an instance whose policy is `PowerButton`
+            /// if the operator wants to use force.
+            method: InstanceShutdownPolicy,
         },
     }
 
@@ -46,12 +45,12 @@ pub mod instance {
                     instance_migration_target_params,
                 ),
                 VmmStateRequestedV1::Running => VmmStateRequested::Running,
-                VmmStateRequestedV1::Stopped => {
-                    VmmStateRequested::Stopped { acpi_timeout_secs: None }
-                }
-                VmmStateRequestedV1::Reboot => {
-                    VmmStateRequested::Reboot { acpi_timeout_secs: None }
-                }
+                VmmStateRequestedV1::Stopped => VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
+                VmmStateRequestedV1::Reboot => VmmStateRequested::Reboot {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
             }
         }
     }

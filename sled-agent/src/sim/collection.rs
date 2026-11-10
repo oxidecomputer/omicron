@@ -372,6 +372,7 @@ mod test {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
+    use omicron_common::api::external::InstanceShutdownPolicy::HardOff;
     use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::instance::SledVmmState;
@@ -419,7 +420,7 @@ mod test {
         // its VMM.
         let rprev = r1;
         let dropped = instance
-            .transition(VmmStateRequested::Stopped { acpi_timeout_secs: None })
+            .transition(VmmStateRequested::Stopped { method: HardOff })
             .unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
@@ -506,7 +507,7 @@ mod test {
         // again.
         assert!(rx.try_recv().is_err());
         let dropped = instance
-            .transition(VmmStateRequested::Stopped { acpi_timeout_secs: None })
+            .transition(VmmStateRequested::Stopped { method: HardOff })
             .unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
@@ -580,9 +581,7 @@ mod test {
         // move to the Rebooting state and then back to Running.
         assert!(
             instance
-                .transition(VmmStateRequested::Reboot {
-                    acpi_timeout_secs: None
-                })
+                .transition(VmmStateRequested::Reboot { method: HardOff })
                 .unwrap()
                 .is_none()
         );

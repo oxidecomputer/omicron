@@ -217,6 +217,23 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
     }
 }
 
+impl From<omicron_common::api::external::InstanceShutdownPolicy>
+    for types::InstanceShutdownPolicy
+{
+    fn from(s: omicron_common::api::external::InstanceShutdownPolicy) -> Self {
+        use omicron_common::api::external::InstanceShutdownPolicy::*;
+        match s {
+            HardOff => Self::HardOff,
+            PowerButton { timeout_secs } => {
+                Self::PowerButton(types::AcpiTimeoutSecs::from(
+                    std::num::NonZeroU64::try_from(u64::from(timeout_secs))
+                        .unwrap(), // unwrap: schemars(min=1)
+                ))
+            }
+        }
+    }
+}
+
 // TODO-cleanup This is icky; can we move these methods to a separate client so
 // we don't need to add this header by hand?
 // https://github.com/oxidecomputer/omicron/issues/8900

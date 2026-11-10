@@ -259,22 +259,23 @@ pub(crate) enum InstanceStateChangeRequest {
 impl InstanceStateChangeRequest {
     fn to_vmm(
         self,
-        acpi_timeout_secs: Option<u64>,
+        shutdown_method: instance::InstanceShutdownPolicy,
     ) -> sled_agent_client::types::VmmStateRequested {
+        use sled_agent_client::types::InstanceShutdownPolicy::HardOff;
         use sled_agent_client::types::VmmStateRequested as VmmState;
         match self {
             Self::Run => VmmState::Running,
             Self::Reboot { skip_os_shutdown: true } => {
-                VmmState::Reboot { acpi_timeout_secs: None }
+                VmmState::Reboot { method: HardOff }
             }
             Self::Reboot { skip_os_shutdown: false } => {
-                VmmState::Reboot { acpi_timeout_secs }
+                VmmState::Reboot { method: shutdown_method.into() }
             }
             Self::Stop { skip_os_shutdown: true } => {
-                VmmState::Stopped { acpi_timeout_secs: None }
+                VmmState::Stopped { method: HardOff }
             }
             Self::Stop { skip_os_shutdown: false } => {
-                VmmState::Stopped { acpi_timeout_secs }
+                VmmState::Stopped { method: shutdown_method.into() }
             }
             Self::Migrate(params) => VmmState::MigrationTarget(params),
         }
@@ -1508,32 +1509,23 @@ impl super::Nexus {
                 propolis_id,
             } => {
                 let sa = self.sled_client(&sled_id).await?;
-                let acpi_timeout_secs = match requested {
+                let shutdown_method = match requested {
                     InstanceStateChangeRequest::Reboot {
                         skip_os_shutdown: false,
                     }
                     | InstanceStateChangeRequest::Stop {
                         skip_os_shutdown: false,
-                    } => {
-                        // TODO can(/should) sled-agent take the shutdown policy
-                        // directly instead of an option?
-                        match prev_instance_state
-                            .shutdown_policy()
-                            .map_err(InstanceStateChangeError::Other)?
-                        {
-                            instance::InstanceShutdownPolicy::HardOff => None,
-                            instance::InstanceShutdownPolicy::PowerButton {
-                                timeout_secs,
-                            } => Some(u64::from(timeout_secs)),
-                        }
-                    }
-                    _ => None,
+                    } => prev_instance_state
+                        .shutdown_policy()
+                        .map_err(InstanceStateChangeError::Other)?,
+                    // skip_os_shutdown true, disregard policy and hard-halt
+                    _ => instance::InstanceShutdownPolicy::HardOff,
                 };
                 let instance_put_result = sa
                     .vmm_put_state(
                         &propolis_id,
                         &VmmPutStateBody {
-                            state: requested.to_vmm(acpi_timeout_secs),
+                            state: requested.to_vmm(shutdown_method),
                         },
                     )
                     .await

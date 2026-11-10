@@ -792,6 +792,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
     ) -> Result<VmmPutStateResponse, HttpError> {
+        use omicron_common::api::internal::shared::InstanceShutdownPolicy::*;
         use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
 
         self.vmm_put_state_pauses.hold_request(&self.log, propolis_id).await?;
@@ -809,19 +810,21 @@ impl SledAgent {
                     .into());
                 }
                 VmmStateRequested::Running => PropolisStateRequested::Run,
-                VmmStateRequested::Stopped { acpi_timeout_secs } => {
-                    if let Some(timeout_secs) = acpi_timeout_secs {
-                        PropolisStateRequested::AcpiStop { timeout_secs }
-                    } else {
-                        PropolisStateRequested::Stop
-                    }
+                VmmStateRequested::Stopped {
+                    method: PowerButton { timeout_secs },
+                } => PropolisStateRequested::AcpiStop {
+                    timeout_secs: timeout_secs.into(),
+                },
+                VmmStateRequested::Stopped { method: HardOff } => {
+                    PropolisStateRequested::Stop
                 }
-                VmmStateRequested::Reboot { acpi_timeout_secs } => {
-                    if let Some(timeout_secs) = acpi_timeout_secs {
-                        PropolisStateRequested::AcpiReboot { timeout_secs }
-                    } else {
-                        PropolisStateRequested::Reboot
-                    }
+                VmmStateRequested::Reboot {
+                    method: PowerButton { timeout_secs },
+                } => PropolisStateRequested::AcpiReboot {
+                    timeout_secs: timeout_secs.into(),
+                },
+                VmmStateRequested::Reboot { method: HardOff } => {
+                    PropolisStateRequested::Reboot
                 }
             };
             client.instance_state_put().body(p_state).send().await.map_err(
@@ -842,10 +845,12 @@ impl SledAgent {
         };
         let delay = match state {
             // don't immediately stop/reboot for soft-shutdown requests.
-            VmmStateRequested::Stopped { acpi_timeout_secs }
-            | VmmStateRequested::Reboot { acpi_timeout_secs } => {
-                acpi_timeout_secs.map(Duration::from_secs)
+            VmmStateRequested::Stopped {
+                method: PowerButton { timeout_secs },
             }
+            | VmmStateRequested::Reboot {
+                method: PowerButton { timeout_secs },
+            } => Some(Duration::from_secs(timeout_secs.into())),
             _ => None,
         };
         if let Some(timeout) = delay {
