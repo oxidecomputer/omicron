@@ -60,17 +60,17 @@ impl VmmCpuPlatform {
     }
 }
 
-// An InstanceCpuPlatform is an instance's request for how it wants vCPUs to
-// look, whereas a VmmCpuPlatform is the actual chosen platform at the point
-// that instance was incarnated. A critical difference is that VmmCpuPlatform
-// has an escape hatch in the form of `SledDefault` if an instance is to be run
-// on a kind of hardware the control plane does not yet know about - this is
-// only a possible value if both the instance did not have an explicit CPU
-// platform *and* it was placed on a sled whose family we don't know.
-//
-// While this means we can convert between Instance and VMM CPU platforms, in
-// practice Instance->VMM is the only useful direction. Since that is expected
-// to be injective, `From` suffices.
+/// An InstanceCpuPlatform is an instance's request for how it wants vCPUs to
+/// look, whereas a VmmCpuPlatform is the actual chosen platform at the point
+/// that instance was incarnated. A critical difference is that VmmCpuPlatform
+/// has an escape hatch in the form of `SledDefault` if an instance is to be run
+/// on a kind of hardware the control plane does not yet know about - this is
+/// only a possible value if both the instance did not have an explicit CPU
+/// platform *and* it was placed on a sled whose family we don't know.
+///
+/// While this means we can convert between Instance and VMM CPU platforms, in
+/// practice Instance->VMM is the only useful direction. Since that is expected
+/// to be injective, `From` suffices.
 impl From<InstanceCpuPlatform> for VmmCpuPlatform {
     fn from(value: InstanceCpuPlatform) -> Self {
         match value {
