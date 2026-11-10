@@ -594,6 +594,9 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     created by::::::::::::::   reconfigurator-sim
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   update Sled 0 (serial0) RoT bootloader to 1.0.0
+    reflects collection:::::   b1bda47d-2c19-4fba-96e3-d9df28db7436
+    collection started::::::   <REDACTED_TIMESTAMP>
+    collection done:::::::::   <REDACTED_TIMESTAMP>
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1

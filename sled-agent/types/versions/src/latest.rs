@@ -130,8 +130,8 @@ pub mod instance {
     pub use crate::v59::instance::InstanceEnsureBody;
     pub use crate::v59::instance::InstanceSledLocalConfig;
 
-    pub use crate::v63::instance::VmmPutStateBody;
-    pub use crate::v63::instance::VmmStateRequested;
+    pub use crate::v64::instance::VmmPutStateBody;
+    pub use crate::v64::instance::VmmStateRequested;
 }
 
 pub mod inventory {
@@ -239,6 +239,8 @@ pub mod multirack {
     pub use crate::v60::multirack::MultirackJoinServiceStatus;
     pub use crate::v60::multirack::SledAgentInfo;
     pub use crate::v60::multirack::SledAgentStartState;
+
+    pub use crate::v63::multirack::MultirackJoinCompleteResponse;
 }
 
 pub mod probes {

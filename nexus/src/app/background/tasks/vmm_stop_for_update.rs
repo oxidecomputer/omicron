@@ -23,6 +23,7 @@ use nexus_types::instance::SledVmmState;
 use nexus_types::instance::VmmFailureReason;
 use nexus_types::instance::VmmRuntimeState;
 use nexus_types::instance::VmmState;
+use nexus_types::internal_api::background::VmmStopForUpdateDetails;
 use nexus_types::internal_api::background::VmmStopForUpdateStatus;
 use nexus_types::internal_api::background::VmmsBySled;
 use omicron_common::api::external::Error;
@@ -97,6 +98,7 @@ impl VmmStopForUpdateResult {
 pub struct VmmStopForUpdate {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    disabled: bool,
     reqwest_client: Option<ReqwestClient>,
 }
 
@@ -104,8 +106,9 @@ impl VmmStopForUpdate {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
+        disabled: bool,
     ) -> Self {
-        Self { datastore, sagas, reqwest_client: None }
+        Self { datastore, sagas, disabled, reqwest_client: None }
     }
 
     /// Retrieves a list of VMMs marked to be stopped for update by sled, and
@@ -518,6 +521,14 @@ impl VmmStopForUpdate {
         &mut self,
         opctx: &OpContext,
     ) -> VmmStopForUpdateStatus {
+        if self.disabled {
+            slog::debug!(
+                &opctx.log,
+                "vmm_stop_for_update disabled by config, doing nothing";
+            );
+            return VmmStopForUpdateStatus::Disabled;
+        }
+
         let VmmStopForUpdateResult {
             vmms_stopped_by_sled,
             vmms_failed_to_stop_by_sled,
@@ -569,11 +580,11 @@ impl VmmStopForUpdate {
             );
         }
 
-        VmmStopForUpdateStatus {
+        VmmStopForUpdateStatus::Enabled(VmmStopForUpdateDetails {
             vmms_stopped_by_sled,
             vmms_failed_to_stop_by_sled,
             error_messages,
-        }
+        })
     }
 }
 
@@ -904,10 +915,20 @@ mod tests {
                 .customize_nexus_config(&|config| {
                     let one_day = Duration::from_secs(86_400);
                     let tasks = &mut config.pkg.background_tasks;
+                    // The `instance-update` saga activates the real
+                    // `instance_reincarnation` background task when an
+                    // instance's state changes to `SledEvacuating`. Disable
+                    // that task so we can accurately verify the instance
+                    // ends up in that state after the `vmm_stop_for_update`
+                    // task runs.
+                    tasks.instance_reincarnation.disable = true;
                     tasks.instance_watcher.period_secs = one_day;
                     tasks.abandoned_vmm_reaper.period_secs = one_day;
-                    tasks.vmm_mark_stop_for_update.period_secs = one_day;
-                    tasks.vmm_stop_for_update.period_secs = one_day;
+                    // Disable the `vmm_mark_stop_for_update` and `vmm_stop_for_update`
+                    // tasks rather than merely increasing their intervals, since the
+                    // task could be activated by the data it depends on.
+                    tasks.vmm_mark_stop_for_update.disable = true;
+                    tasks.vmm_stop_for_update.disable = true;
                 })
                 .start::<crate::Server>()
                 .await;
@@ -1038,9 +1059,16 @@ mod tests {
         }
 
         // Run the task.
-        let mut task =
-            VmmStopForUpdate::new(datastore.clone(), nexus.sagas.clone());
-        let status = task.actually_activate(&opctx).await;
+        let mut task = VmmStopForUpdate::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
+        let VmmStopForUpdateStatus::Enabled(status) =
+            task.actually_activate(&opctx).await
+        else {
+            panic!("vmm_stop_for_update task should be enabled");
+        };
 
         // No errors are expected
         assert_eq!(
@@ -1132,7 +1160,11 @@ mod tests {
         }
 
         // Run the task again.
-        let status_second_run = task.actually_activate(&opctx).await;
+        let VmmStopForUpdateStatus::Enabled(status_second_run) =
+            task.actually_activate(&opctx).await
+        else {
+            panic!("vmm_stop_for_update task should be enabled");
+        };
 
         // No new VMMs were marked to be stopped so nothing is stopped
         assert!(status_second_run.vmms_stopped_by_sled.is_empty());

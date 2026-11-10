@@ -1482,6 +1482,7 @@ parent:    58d5e830-0884-47d8-a7cd-b2b3751adeb4
     created by::::::::::::::   reconfigurator-cli
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1

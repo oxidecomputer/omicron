@@ -2363,6 +2363,10 @@ table! {
         source -> crate::enums::BpSourceEnum,
 
         external_networking_generation -> Int8,
+
+        reflects_collection_id -> Nullable<Uuid>,
+        reflects_collection_time_started -> Nullable<Timestamptz>,
+        reflects_collection_time_done -> Nullable<Timestamptz>,
     }
 }
 
