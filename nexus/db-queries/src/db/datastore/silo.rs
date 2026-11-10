@@ -681,21 +681,10 @@ impl DataStore {
         // delete role assignments on the silo itself. The subqueries above
         // only cover identities that belong to this silo; users from other
         // silos (typically fleet admins) can hold roles on it too.
-        let updated_rows =
-            diesel::delete(role_assignment::dsl::role_assignment)
-                .filter(
-                    role_assignment::dsl::resource_type
-                        .eq(ResourceType::Silo.to_string()),
-                )
-                .filter(
-                    role_assignment::dsl::resource_id
-                        .eq(id.into_untyped_uuid()),
-                )
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+        let updated_rows = self
+            .role_assignment_delete_by_resource_on_connection(&conn, authz_silo)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,

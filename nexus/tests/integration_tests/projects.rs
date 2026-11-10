@@ -6,6 +6,11 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -31,6 +36,7 @@ use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::policy::ProjectRole;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
@@ -282,6 +288,57 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
     );
     delete_project_default_vpc(&name, &client).await;
     delete_project(&url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_clean_up_role_assignments(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    let name = "role-project";
+    let url = format!("/v1/projects/{}", name);
+    create_project(&client, &name).await;
+    grant_iam(
+        client,
+        &url,
+        ProjectRole::Viewer,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Look up the project before deleting it, because the lookup fails once
+    // the project is gone.
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
+        .project_name(&Name::from_str(name).unwrap().into())
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("project lookup");
+    let assignments = datastore
+        .role_assignment_fetch_visible(&opctx, &authz_project)
+        .await
+        .expect("role_assignment_fetch_visible");
+    assert!(!assignments.is_empty());
+
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+    delete_project(&url, &client).await;
+
+    // The project's policy can no longer be fetched through the API, so
+    // check the database directly.
+    let assignments = datastore
+        .role_assignment_fetch_visible(&opctx, &authz_project)
+        .await
+        .expect("role_assignment_fetch_visible");
+    assert!(
+        assignments.is_empty(),
+        "unexpected role assignments: {assignments:?}"
+    );
 }
 
 #[nexus_test]

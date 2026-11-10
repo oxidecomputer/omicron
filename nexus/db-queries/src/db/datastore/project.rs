@@ -296,6 +296,12 @@ impl DataStore {
                         db_project.id().into_untyped_uuid(),
                     )
                     .await?;
+
+                    self.role_assignment_delete_by_resource_on_connection(
+                        &conn,
+                        authz_project,
+                    )
+                    .await?;
                     Ok(())
                 }
             })
