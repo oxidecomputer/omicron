@@ -5,16 +5,16 @@
 //! The fault management sitrep's representation of problems.
 //!
 //! This is distinct from [`crate::Problem`], the externally-visible problem
-//! record that FM rendezvous creates for each [`FmProblem`] in the sitrep
+//! record that FM rendezvous creates for each [`FmProblemRequest`] in the sitrep
 //! being executed.
 
 use crate::DbTypedGeneration;
 use crate::DbTypedUuid;
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
-use nexus_db_schema::schema::fm_problem;
 use nexus_db_schema::schema::fm_problem_alert;
-use nexus_db_schema::schema::fm_problem_revision;
+use nexus_db_schema::schema::fm_problem_request;
+use nexus_db_schema::schema::fm_problem_revision_request;
 use nexus_db_schema::schema::fm_problem_support_bundle;
 use nexus_types::fm::problem::{
     AlertLink, ProblemCode, SitrepProblem, SitrepRevision, SupportBundleLink,
@@ -27,18 +27,18 @@ use omicron_uuid_kinds::{
 
 /// A problem in a fault management sitrep.
 ///
-/// This corresponds to a record in the `fm_problem` table.
+/// This corresponds to a record in the `fm_problem_request` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = fm_problem)]
-pub struct FmProblem {
+#[diesel(table_name = fm_problem_request)]
+pub struct FmProblemRequest {
     pub id: DbTypedUuid<ProblemKind>,
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which the problem was first
-    /// created; see [`Self::created_sitrep_id`].
+    /// requested; see [`Self::requested_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
-    /// The sitrep in which the problem was first created.
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which the problem was first requested.
+    pub requested_sitrep_id: DbTypedUuid<SitrepKind>,
 
     /// An internal human-readable comment explaining why the diagnosis engine
     /// created this problem.
@@ -50,20 +50,20 @@ pub struct FmProblem {
 
 /// A revision of a problem in a fault management sitrep.
 ///
-/// This corresponds to a record in the `fm_problem_revision` table.
+/// This corresponds to a record in the `fm_problem_revision_request` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = fm_problem_revision)]
-pub struct FmProblemRevision {
+#[diesel(table_name = fm_problem_revision_request)]
+pub struct FmProblemRevisionRequest {
     pub problem_id: DbTypedUuid<ProblemKind>,
     pub revision: DbTypedGeneration<ProblemRevKind>,
 
     /// The sitrep that this record is part of.
     ///
     /// Note that this is *not* the sitrep in which this revision was first
-    /// created; see [`Self::created_sitrep_id`].
+    /// requested; see [`Self::requested_sitrep_id`].
     pub sitrep_id: DbTypedUuid<SitrepKind>,
-    /// The sitrep in which this revision of the problem was first created.
-    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which this revision of the problem was first requested.
+    pub requested_sitrep_id: DbTypedUuid<SitrepKind>,
 
     /// The time at which the problem was resolved, if it is resolved as of
     /// this revision.
@@ -135,13 +135,13 @@ pub struct FmProblemSupportBundle {
     pub comment: String,
 }
 
-impl FmProblem {
-    /// Returns the `fm_problem` record for `problem` in the sitrep
+impl FmProblemRequest {
+    /// Returns the `fm_problem_request` record for `problem` in the sitrep
     /// `sitrep_id`.
     ///
     /// The problem's revisions, and records representing links to alerts and
     /// support bundles, are stored in separate tables. See
-    /// [`FmProblemRevision::from_sitrep`], [`FmProblemAlert::from_sitrep`], and
+    /// [`FmProblemRevisionRequest::from_sitrep`], [`FmProblemAlert::from_sitrep`], and
     /// [`FmProblemSupportBundle::from_sitrep`].
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
@@ -158,14 +158,14 @@ impl FmProblem {
         Self {
             id: (*id).into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: (*created_sitrep_id).into(),
+            requested_sitrep_id: (*created_sitrep_id).into(),
             comment: comment.clone(),
         }
     }
 }
 
-impl FmProblemRevision {
-    /// Constructs an `fm_problem_revision` record for `revision` of the
+impl FmProblemRevisionRequest {
+    /// Constructs an `fm_problem_revision_request` record for `revision` of the
     /// problem `problem_id` in the sitrep `sitrep_id`.
     pub fn from_sitrep(
         sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
@@ -186,7 +186,7 @@ impl FmProblemRevision {
             problem_id: problem_id.into(),
             revision: number.into(),
             sitrep_id: sitrep_id.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            requested_sitrep_id: created_sitrep_id.into(),
             time_resolved,
             code: SqlU32::new(code.into()),
             summary,
@@ -197,19 +197,19 @@ impl FmProblemRevision {
     }
 }
 
-impl TryFrom<FmProblemRevision> for SitrepRevision {
+impl TryFrom<FmProblemRevisionRequest> for SitrepRevision {
     type Error = Error;
 
     /// # Errors
     ///
     /// Returns an internal error if the revision's problem code is not known
     /// to this version of the system software.
-    fn try_from(revision: FmProblemRevision) -> Result<Self, Error> {
-        let FmProblemRevision {
+    fn try_from(revision: FmProblemRevisionRequest) -> Result<Self, Error> {
+        let FmProblemRevisionRequest {
             problem_id: _,
             revision: number,
             sitrep_id: _,
-            created_sitrep_id,
+            requested_sitrep_id: created_sitrep_id,
             time_resolved,
             code,
             summary,

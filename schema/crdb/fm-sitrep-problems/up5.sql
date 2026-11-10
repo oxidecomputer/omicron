@@ -1,9 +1,9 @@
-CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision_request (
     problem_id UUID NOT NULL,
     revision INT8 NOT NULL,
 
     sitrep_id UUID NOT NULL,
-    created_sitrep_id UUID NOT NULL,
+    requested_sitrep_id UUID NOT NULL,
 
     time_resolved TIMESTAMPTZ,
 

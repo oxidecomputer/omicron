@@ -47,7 +47,8 @@ use nexus_db_schema::schema::fm_case_problem::dsl as case_problem_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_problem::dsl as problem_dsl;
 use nexus_db_schema::schema::fm_problem_alert::dsl as problem_alert_dsl;
-use nexus_db_schema::schema::fm_problem_revision::dsl as problem_rev_dsl;
+use nexus_db_schema::schema::fm_problem_request::dsl as problem_dsl;
+use nexus_db_schema::schema::fm_problem_revision_request::dsl as problem_rev_dsl;
 use nexus_db_schema::schema::fm_problem_support_bundle::dsl as problem_bundle_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
@@ -145,8 +146,8 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
-    Problem => { table: "fm_problem" },
-    ProblemRevision => { table: "fm_problem_revision" },
+    ProblemRequest => { table: "fm_problem_request" },
+    ProblemRevisionRequest => { table: "fm_problem_revision_request" },
     ProblemAlert => { table: "fm_problem_alert" },
     ProblemSupportBundle => { table: "fm_problem_support_bundle" },
     CaseProblem => { table: "fm_case_problem" },
@@ -682,8 +683,8 @@ impl DataStore {
         sitrep_id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<IdOrdMap<fm::problem::SitrepProblem>, Error> {
-        use nexus_db_schema::schema::fm_problem::dsl;
-        use nexus_db_schema::schema::fm_problem_revision::dsl as rev_dsl;
+        use nexus_db_schema::schema::fm_problem_request::dsl;
+        use nexus_db_schema::schema::fm_problem_revision_request::dsl as rev_dsl;
 
         // First, load every revision of every problem in this sitrep,
         // grouped by problem.
@@ -692,12 +693,12 @@ impl DataStore {
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
         while let Some(p) = paginator.next() {
             let batch = paginated_multicolumn(
-                rev_dsl::fm_problem_revision,
+                rev_dsl::fm_problem_revision_request,
                 (rev_dsl::problem_id, rev_dsl::revision),
                 &p.current_pagparams(),
             )
             .filter(rev_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
-            .select(model::fm::FmProblemRevision::as_select())
+            .select(model::fm::FmProblemRevisionRequest::as_select())
             .load_async(conn)
             .await
             .map_err(|e| {
@@ -741,23 +742,26 @@ impl DataStore {
         let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
         while let Some(p) = paginator.next() {
-            let batch =
-                paginated(dsl::fm_problem, dsl::id, &p.current_pagparams())
-                    .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
-                    .select(model::fm::FmProblem::as_select())
-                    .load_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                            .internal_context("failed to load problems")
-                    })?;
+            let batch = paginated(
+                dsl::fm_problem_request,
+                dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmProblemRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load problems")
+            })?;
 
             paginator = p.found_batch(&batch, &|problem| problem.id);
             for problem in batch {
-                let model::fm::FmProblem {
+                let model::fm::FmProblemRequest {
                     id,
                     sitrep_id: _,
-                    created_sitrep_id,
+                    requested_sitrep_id: created_sitrep_id,
                     comment,
                 } = problem;
                 let id = ProblemUuid::from(id);
@@ -1425,11 +1429,12 @@ impl DataStore {
         let mut problem_alerts = Vec::new();
         let mut problem_support_bundles = Vec::new();
         for problem in sitrep.problems {
-            problems
-                .push(model::fm::FmProblem::from_sitrep(sitrep_id, &problem));
+            problems.push(model::fm::FmProblemRequest::from_sitrep(
+                sitrep_id, &problem,
+            ));
             problem_revisions.extend(problem.revisions.into_iter().map(
                 |revision| {
-                    model::fm::FmProblemRevision::from_sitrep(
+                    model::fm::FmProblemRevisionRequest::from_sitrep(
                         sitrep_id, problem.id, revision,
                     )
                 },
@@ -1449,7 +1454,7 @@ impl DataStore {
         }
 
         if !problems.is_empty() {
-            diesel::insert_into(problem_dsl::fm_problem)
+            diesel::insert_into(problem_dsl::fm_problem_request)
                 .values(problems)
                 .execute_async(&*conn)
                 .await
@@ -1460,7 +1465,7 @@ impl DataStore {
         }
 
         if !problem_revisions.is_empty() {
-            diesel::insert_into(problem_rev_dsl::fm_problem_revision)
+            diesel::insert_into(problem_rev_dsl::fm_problem_revision_request)
                 .values(problem_revisions)
                 .execute_async(&*conn)
                 .await
@@ -3264,7 +3269,7 @@ mod tests {
         let creator_id = OmicronZoneUuid::new_v4();
 
         // Two problems, which should be sufficient to exercise the
-        // fm_problem, fm_problem_revision, fm_problem_alert,
+        // fm_problem_request, fm_problem_revision_request, fm_problem_alert,
         // fm_problem_support_bundle, and fm_case_problem read, write, and GC
         // paths. One problem has
         // multiple revisions, the latest of which is resolved. The other is
