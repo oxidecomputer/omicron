@@ -157,7 +157,7 @@ fn get_instance_stop_url(
         "/v1/instances/{}/stop?{}{}",
         instance_name,
         get_project_selector(),
-        if skip_os_shutdown { "&skip_os_shutdown=true" } else { "" }
+        if skip_os_shutdown { "&force=true" } else { "" }
     )
 }
 
@@ -10623,7 +10623,7 @@ async fn test_instances_shutdown_policy_force_hardstop_during_soft(
         PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
     );
 
-    // stop with skip_os_shutdown=true param.
+    // stop with force=true param.
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
@@ -10652,7 +10652,7 @@ async fn test_instances_shutdown_policy_force_hardstop(
 
     assert_eq!(instance.shutdown_policy, policy);
 
-    // stop with skip_os_shutdown=true param should request normal Stop
+    // stop with force=true param should request normal Stop
     // to propolis, ignoring configured soft-off policy.
     expect_instance_stop_ok(client, instance_name, true).await;
     assert_matches::assert_matches!(

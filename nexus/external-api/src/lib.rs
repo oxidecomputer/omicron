@@ -4417,7 +4417,7 @@ pub trait NexusExternalApi {
             rqctx,
             latest::instance::InstanceStopOrRebootParams {
                 project: query_params.into_inner().project,
-                skip_os_shutdown: None,
+                force: None,
             }
             .into(),
             path_params,
@@ -4587,7 +4587,7 @@ pub trait NexusExternalApi {
             rqctx,
             latest::instance::InstanceStopOrRebootParams {
                 project: query_params.into_inner().project,
-                skip_os_shutdown: None,
+                force: None,
             }
             .into(),
             path_params,

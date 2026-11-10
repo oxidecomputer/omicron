@@ -4591,19 +4591,19 @@
         "parameters": [
           {
             "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "skip_os_shutdown",
+            "name": "force",
             "description": "Whether to override the instance's configured Shutdown Policy, if any, and hard-cut the power of the VM guest for this stop or reboot request.",
             "schema": {
               "nullable": true,
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -4899,19 +4899,19 @@
         "parameters": [
           {
             "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "skip_os_shutdown",
+            "name": "force",
             "description": "Whether to override the instance's configured Shutdown Policy, if any, and hard-cut the power of the VM guest for this stop or reboot request.",
             "schema": {
               "nullable": true,
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {

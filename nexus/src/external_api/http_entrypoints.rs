@@ -2946,7 +2946,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_reboot(
                     &opctx,
                     &instance_lookup,
-                    query.skip_os_shutdown.unwrap_or(false),
+                    query.force.unwrap_or(false),
                 )
                 .await?;
             Ok(HttpResponseAccepted(instance.try_into()?))
@@ -2998,7 +2998,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_stop(
                     &opctx,
                     &instance_lookup,
-                    query.skip_os_shutdown.unwrap_or(false),
+                    query.force.unwrap_or(false),
                 )
                 .await?;
             Ok(HttpResponseAccepted(instance.try_into()?))

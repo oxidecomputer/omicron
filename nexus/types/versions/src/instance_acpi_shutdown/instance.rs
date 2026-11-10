@@ -358,7 +358,5 @@ pub struct InstanceStopOrRebootParams {
     pub project: Option<NameOrId>,
     /// Whether to override the instance's configured Shutdown Policy, if any,
     /// and hard-cut the power of the VM guest for this stop or reboot request.
-    // TODO(lif): rename to 'force' before undrafting PR?
-    // (easier to grep for 'skip_os_shutdown' than 'force' in codebase)
-    pub skip_os_shutdown: Option<bool>,
+    pub force: Option<bool>,
 }

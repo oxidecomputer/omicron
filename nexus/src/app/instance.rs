@@ -1518,7 +1518,7 @@ impl super::Nexus {
                     } => prev_instance_state
                         .shutdown_policy()
                         .map_err(InstanceStateChangeError::Other)?,
-                    // skip_os_shutdown true, disregard policy and hard-halt
+                    // force=true, disregard policy and hard-halt
                     _ => instance::InstanceShutdownPolicy::HardOff,
                 };
                 let instance_put_result = sa
