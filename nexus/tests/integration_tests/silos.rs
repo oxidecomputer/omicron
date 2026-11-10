@@ -1718,6 +1718,26 @@ async fn test_silo_delete_clean_up_role_assignments(
         AuthnMode::PrivilegedUser,
     )
     .await;
+    // Also give a user from a different silo a role on this silo. Deleting
+    // the silo should remove this too, even though the user survives.
+    grant_iam(
+        client,
+        silo_url,
+        SiloRole::Admin,
+        USER_TEST_PRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let silo_ids = policy_identity_ids::<SiloRole>(
+        client,
+        &format!("{silo_url}/policy"),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    assert!(silo_ids.contains(&user_id));
+    assert!(silo_ids.contains(&group_id));
+    assert!(silo_ids.contains(&USER_TEST_PRIVILEGED.id().into_untyped_uuid()));
 
     let fleet_ids = policy_identity_ids::<FleetRole>(
         client,
@@ -1740,9 +1760,8 @@ async fn test_silo_delete_clean_up_role_assignments(
     assert!(!fleet_ids.contains(&group_id));
 
     // The silo's policy can no longer be fetched through the API, so check
-    // the database directly. This is empty only because every assignment on
-    // the silo was held by one of its own users or groups: silo deletion does
-    // not remove assignments on the silo held by identities from other silos.
+    // the database directly. Every assignment on the silo should be gone,
+    // including the one held by the user from the other silo.
     let silo_assignments = datastore
         .role_assignment_fetch_visible(&opctx, &authz_silo)
         .await

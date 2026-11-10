@@ -508,7 +508,7 @@ impl<'a> CrdbScimProviderStore<'a> {
 
         // Cleanup role assignment records for the deleted user
         self.datastore
-            .role_assignment_delete_by_identity(
+            .role_assignment_delete_by_identity_on_connection(
                 conn,
                 IdentityType::SiloUser,
                 user_id.into_untyped_uuid(),
@@ -1216,7 +1216,7 @@ impl<'a> CrdbScimProviderStore<'a> {
 
         // Cleanup role assignment records for the deleted group
         self.datastore
-            .role_assignment_delete_by_identity(
+            .role_assignment_delete_by_identity_on_connection(
                 conn,
                 IdentityType::SiloGroup,
                 group_id.into_untyped_uuid(),

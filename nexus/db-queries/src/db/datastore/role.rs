@@ -111,7 +111,7 @@ impl DataStore {
     ///
     /// Returns the raw diesel error so this can run inside a transaction;
     /// callers outside one should map it with `public_error_from_diesel`.
-    pub(super) async fn role_assignment_delete_by_identity(
+    pub(super) async fn role_assignment_delete_by_identity_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         identity_type: IdentityType,
