@@ -1204,9 +1204,9 @@ impl DataStore {
         Ok(rack_id.map(RackUuid::from))
     }
 
-    // Return the commissioned sled if it exists in the given rack, given its
+    // Return the in-service sled if it exists in the given rack, given its
     // `BaseboardId`.
-    pub async fn sled_get_commissioned_by_baseboard_and_rack_id(
+    pub async fn sled_get_in_service_by_baseboard_and_rack_id(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
@@ -1220,7 +1220,7 @@ impl DataStore {
             .filter(dsl::part_number.eq(baseboard_id.part_number))
             .filter(dsl::serial_number.eq(baseboard_id.serial_number))
             .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
-            .sled_filter(SledFilter::Commissioned)
+            .sled_filter(SledFilter::InService)
             .select(Sled::as_select())
             .get_result_async::<Sled>(conn)
             .await
@@ -2536,6 +2536,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_filtered;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
+    use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
@@ -2590,6 +2591,79 @@ pub(in crate::db::datastore) mod test {
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
+
+    #[tokio::test]
+    async fn test_sled_get_in_service_by_baseboard_and_rack_id() {
+        let logctx = dev::test_setup_log(
+            "test_sled_get_in_service_by_baseboard_and_rack_id",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rack_id = RackUuid::new_v4();
+        let baseboard_id = BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: "test-serial".to_string(),
+        };
+        let lookup = async |rack_id| {
+            datastore
+                .sled_get_in_service_by_baseboard_and_rack_id(
+                    opctx,
+                    rack_id,
+                    baseboard_id.clone(),
+                )
+                .await
+                .expect("looked up sled by baseboard")
+                .map(|sled| sled.id())
+        };
+
+        let sled_id =
+            sled_upsert_for_baseboard(datastore, rack_id, &baseboard_id)
+                .await
+                .id();
+        let (authz_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("looked up sled");
+
+        assert_eq!(lookup(rack_id).await, Some(sled_id));
+        assert_eq!(lookup(RackUuid::new_v4()).await, None);
+
+        // Non-provisionable is still in service.
+        datastore
+            .sled_set_provision_policy(
+                opctx,
+                &authz_sled,
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .expect("set sled non-provisionable");
+        assert_eq!(lookup(rack_id).await, Some(sled_id));
+
+        // Expunged but not yet decommissioned is still commissioned, but not in
+        // service.
+        datastore
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .await
+            .expect("expunged sled");
+        let (_, sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch()
+            .await
+            .expect("looked up sled");
+        assert_eq!(sled.state(), SledState::Active);
+        assert_eq!(lookup(rack_id).await, None);
+
+        datastore
+            .sled_set_state_to_decommissioned(opctx, &authz_sled)
+            .await
+            .expect("decommissioned sled");
+        assert_eq!(lookup(rack_id).await, None);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn upsert_sled_updates_hardware() {
