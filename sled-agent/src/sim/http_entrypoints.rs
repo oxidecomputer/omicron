@@ -32,6 +32,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::artifact::{
@@ -94,7 +95,7 @@ use sled_agent_types_versions::v47;
 use sled_agent_types_versions::v48;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use sled_hardware_types::BaseboardId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
@@ -1182,6 +1183,12 @@ impl SledAgentApi for SledAgentSimImpl {
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
         Ok(HttpResponseOk(request_context.context().sled_registration_info()))
+    }
+
+    async fn peer_rack_prefixes(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeSet<Ipv6Net>>, HttpError> {
+        method_unimplemented()
     }
 }
 

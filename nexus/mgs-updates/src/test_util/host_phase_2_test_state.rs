@@ -1162,5 +1162,12 @@ mod api_impl {
         ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
             unimplemented!()
         }
+
+        async fn peer_rack_prefixes(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<BTreeSet<oxnet::Ipv6Net>>, HttpError>
+        {
+            unimplemented!()
+        }
     }
 }
