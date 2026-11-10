@@ -376,6 +376,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance;
     use nexus_types::external_api::instance::InstanceAutoRestartPolicy;
+    use nexus_types::internal_api::background::VmmStopForUpdateStatus;
     use nexus_types_versions::latest;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1197,9 +1198,11 @@ mod test {
             // VMM records while this test is running.
             tasks.instance_watcher.period_secs = Duration::from_hours(24);
             tasks.abandoned_vmm_reaper.period_secs = Duration::from_hours(24);
-            tasks.vmm_mark_stop_for_update.period_secs =
-                Duration::from_hours(24);
-            tasks.vmm_stop_for_update.period_secs = Duration::from_hours(24);
+            // Disable the `vmm_mark_stop_for_update` and `vmm_stop_for_update`
+            // tasks rather than merely increasing their intervals, since the
+            // task could be activated by the data it depends on.
+            tasks.vmm_mark_stop_for_update.disable = true;
+            tasks.vmm_stop_for_update.disable = true;
         })
         .start::<crate::Server>()
         .await;
@@ -1282,9 +1285,16 @@ mod test {
         );
 
         // Run the `vmm_stop_for_update` task to actually stop the marked VMMs.
-        let mut stop_task =
-            VmmStopForUpdate::new(datastore.clone(), nexus.sagas.clone());
-        let stop_status = stop_task.actually_activate(&opctx).await;
+        let mut stop_task = VmmStopForUpdate::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
+        let VmmStopForUpdateStatus::Enabled(stop_status) =
+            stop_task.actually_activate(&opctx).await
+        else {
+            panic!("vmm_stop_for_update task should be enabled");
+        };
         assert_eq!(
             stop_status.error_messages.len(),
             0,
