@@ -132,16 +132,15 @@ impl DataStore {
     /// identity. Used when deleting resources that have policies (silos,
     /// projects) so their assignments don't outlive them.
     ///
-    /// Returns the number of deleted rows. Returns the raw diesel error so
-    /// this can run inside a transaction; callers outside one should map it
-    /// with `public_error_from_diesel`.
+    /// Returns the raw diesel error so this can run inside a transaction;
+    /// callers outside one should map it with `public_error_from_diesel`.
     pub(super) async fn role_assignment_delete_by_resource_on_connection<
         T: authz::ApiResourceWithRoles,
     >(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_resource: &T,
-    ) -> Result<usize, DieselError> {
+    ) -> Result<(), DieselError> {
         use nexus_db_schema::schema::role_assignment::dsl;
 
         diesel::delete(dsl::role_assignment)
@@ -151,10 +150,12 @@ impl DataStore {
             )
             .filter(dsl::resource_id.eq(authz_resource.resource_id()))
             .execute_async(conn)
-            .await
+            .await?;
+
+        Ok(())
     }
 
-    /// Removes all existing externally-visble role assignments on
+    /// Removes all existing externally-visible role assignments on
     /// `authz_resource` and adds those specified by `new_assignments`
     ///
     /// Role assignments for internal identities (e.g., built-in users) are not

@@ -48,6 +48,7 @@ use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::GenericUuid;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -323,7 +324,11 @@ async fn test_project_deletion_clean_up_role_assignments(
         .role_assignment_fetch_visible(&opctx, &authz_project)
         .await
         .expect("role_assignment_fetch_visible");
-    assert!(!assignments.is_empty());
+    let user_id = USER_TEST_UNPRIVILEGED.id().into_untyped_uuid();
+    assert!(
+        assignments.iter().any(|a| a.identity_id == user_id),
+        "missing role assignment for {user_id}: {assignments:?}"
+    );
 
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;

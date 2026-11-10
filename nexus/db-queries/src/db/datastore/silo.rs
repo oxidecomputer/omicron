@@ -512,6 +512,16 @@ impl DataStore {
                 self.silo_auth_settings_delete(opctx, &conn, &authz_silo)
                     .await?;
 
+                // Delete all role assignments on the silo, including those
+                // held by users from other silos (typically fleet admins).
+                // The count is bounded by MAX_ROLE_ASSIGNMENTS_PER_RESOURCE,
+                // so unlike the per-identity cleanup below, this can run in
+                // the transaction.
+                self.role_assignment_delete_by_resource_on_connection(
+                    &conn, authz_silo,
+                )
+                .await?;
+
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log,
                     &conn,
@@ -676,19 +686,6 @@ impl DataStore {
             "deleted {} silo group role assignments for silo {}",
             updated_rows,
             id
-        );
-
-        // delete role assignments on the silo itself. The subqueries above
-        // only cover identities that belong to this silo; users from other
-        // silos (typically fleet admins) can hold roles on it too.
-        let updated_rows = self
-            .role_assignment_delete_by_resource_on_connection(&conn, authz_silo)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        debug!(
-            opctx.log,
-            "deleted {} role assignments on silo {}", updated_rows, id
         );
 
         // delete all silo groups
