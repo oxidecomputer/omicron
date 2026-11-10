@@ -137,8 +137,8 @@ impl IdOrdItem for VmmsBySled {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum VmmStopForUpdateStatus {
-    /// The task was disabled by configuration (`vmm_stop_for_update.disable`),
-    /// so the activation did nothing.
+    /// Disabled by configuration (`vmm_stop_for_update.disable`). The task did
+    /// nothing.
     Disabled,
     /// The task was enabled and ran, with the details of what it did provided.
     Enabled(VmmStopForUpdateDetails),
@@ -1746,9 +1746,8 @@ pub struct AuditLogCleanupStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum VmmMarkStopForUpdateStatus {
-    /// The task was disabled by configuration
-    /// (`vmm_mark_stop_for_update.disable`), so the activation did nothing and
-    /// did not activate `vmm_stop_for_update`.
+    /// Disabled by configuration (`vmm_mark_stop_for_update.disable`). The task
+    /// did nothing, and in particular did not trigger `vmm_stop_for_update`.
     Disabled,
     /// The task was enabled and ran, with the details of what it did provided.
     Enabled(VmmMarkStopForUpdateDetails),

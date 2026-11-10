@@ -564,6 +564,12 @@ pub struct VmmMarkStopForUpdateConfig {
 
     /// disable this task
     ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
     /// Default: Off
     #[serde(default)]
     pub disable: bool,
@@ -852,6 +858,12 @@ pub struct VmmStopForUpdateConfig {
     pub period_secs: Duration,
 
     /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
     ///
     /// Default: Off
     #[serde(default)]
