@@ -15,9 +15,10 @@ use crate::deployment::MgsUpdateComponent;
 use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
-use crate::deployment::operator_status::OperatorStatus;
-use crate::deployment::operator_status::SledEvacuationProgress;
-use crate::deployment::operator_status::UpdateWait;
+use crate::deployment::OperatorStatus;
+use crate::deployment::QuiesceInfo;
+use crate::deployment::SledEvacuationProgress;
+use crate::deployment::UpdateWait;
 use crate::internal_api::views::QuiesceState;
 use daft::Diffable;
 use iddqd::IdOrdItem;
@@ -832,6 +833,11 @@ pub enum HostOsTargetArtifactError {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
+#[cfg_attr(
+    test,
+    derive(strum::EnumDiscriminants),
+    strum_discriminants(derive(strum::EnumIter))
+)]
 pub enum WaitingOnSledEvacuationDetails {
     #[error("sled is missing from inventory")]
     MissingFromInventory,
@@ -2229,19 +2235,6 @@ fn plural_map<K, V>(map: &BTreeMap<K, V>) -> (usize, &'static str) {
 fn plural_map_of_vec<K, V>(map: &BTreeMap<K, Vec<V>>) -> (usize, &'static str) {
     let n = map.values().map(|v| v.len()).sum();
     (n, plural(n))
-}
-
-/// What the caller knows about whether Nexus is quiescing for handoff
-///
-/// Operator notes can only report that the system is waiting for handoff when
-/// the caller knows Nexus's quiesce state.  Code that prints a planning report
-/// by itself (e.g., from a saved blueprint) does not know it.
-#[derive(Clone, Copy, Debug)]
-pub enum QuiesceInfo<'a> {
-    /// the caller knows Nexus's current quiesce state
-    Known(&'a QuiesceState),
-    /// the caller does not know whether Nexus is quiescing
-    Unknown,
 }
 
 impl PlanningReport {

@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::OperatorStatus;
 use crate::deployment::PlanningReport;
-use crate::deployment::operator_status::OperatorStatus;
-use crate::deployment::operator_status::UnknownReason;
-use crate::deployment::planning_report::QuiesceInfo;
+use crate::deployment::QuiesceInfo;
+use crate::deployment::UnknownReason;
 use crate::external_api::alert;
 use chrono::DateTime;
 use chrono::Utc;
@@ -1967,10 +1967,10 @@ mod test {
     use super::TufRepoInfo;
     use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
+    use crate::deployment::OperatorStatus;
     use crate::deployment::PlanningReport;
-    use crate::deployment::operator_status::OperatorStatus;
-    use crate::deployment::operator_status::UnknownReason;
-    use crate::deployment::planning_report::QuiesceInfo;
+    use crate::deployment::QuiesceInfo;
+    use crate::deployment::UnknownReason;
     use crate::internal_api::background::BlueprintPrunerDetails;
     use crate::internal_api::background::BlueprintPrunerStatus;
     use crate::internal_api::background::DeletedBlueprint;

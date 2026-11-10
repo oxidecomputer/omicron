@@ -91,10 +91,7 @@ mod blueprint_display;
 mod clickhouse;
 pub mod execution;
 mod network_resources;
-pub mod operator_status;
-// <review>
-// I'm inclined to `pub use` the specific things we need from this module.  What do you think?
-// </review>
+mod operator_status;
 mod planning_input;
 pub mod planning_report;
 mod reconfigurator_config;
@@ -125,6 +122,11 @@ pub use network_resources::OmicronZoneNicEntry;
 pub use network_resources::OmicronZoneNicIp;
 pub use network_resources::ZoneExternalSnatError;
 use omicron_common::api::external::Error;
+pub use operator_status::OperatorStatus;
+pub use operator_status::QuiesceInfo;
+pub use operator_status::SledEvacuationProgress;
+pub use operator_status::UnknownReason;
+pub use operator_status::UpdateWait;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
