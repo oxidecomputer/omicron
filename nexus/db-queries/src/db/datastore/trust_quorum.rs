@@ -2153,13 +2153,13 @@ mod tests {
             datastore.tq_insert_latest_config(opctx, proposal.clone()).await,
             &format!(
                 "Cannot propose trust quorum configuration at epoch 2 for \
-                 rack {rack_id}: no sled can coordinate it. A coordinator \
-                 must be a member of the proposed configuration that \
-                 acknowledged the commit of epoch 1, with an in-service sled \
-                 in this rack, and none of the candidates ({}) has one. If \
-                 the rack was just initialized or these sleds were just \
+                 rack {rack_id}, since no sled can coordinate it. A \
+                 coordinator must be a member of the proposed configuration \
+                 that acknowledged the commit of epoch 1, with an in-service \
+                 sled in this rack, and none of the candidates ({}) has one. \
+                 If the rack was just initialized or these sleds were just \
                  added, wait for them to register with the control plane and \
-                 retry; otherwise, contact Oxide support.",
+                 retry. Otherwise, contact Oxide support.",
                 // insert_hw_baseboard_ids returns the baseboards in sorted
                 // order, so we don't need to sort them.
                 hw_ids[..5]
