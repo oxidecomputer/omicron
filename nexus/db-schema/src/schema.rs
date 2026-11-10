@@ -574,6 +574,16 @@ table! {
 }
 
 table! {
+    project_utilization(project_id) {
+        project_id -> Uuid,
+        silo_id -> Uuid,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+    }
+}
+
+table! {
     silo_auth_settings(silo_id) {
         silo_id -> Uuid,
         time_created -> Timestamptz,
