@@ -365,9 +365,13 @@ async fn prepare(
     };
 
     // Write state back to DB
-    let outcome = datastore
-        .tq_update_prepare_status(&opctx, status.config, status.acked_prepares)
-        .await?;
+    let outcome = record_prepare_status(
+        opctx,
+        datastore,
+        status.config,
+        status.acked_prepares,
+    )
+    .await?;
 
     // If we have started committing then we need to commit at each member.
     // We assume that other Nexuses have not yet committed, but there is
@@ -376,11 +380,23 @@ async fn prepare(
     //
     // Otherwise, we haven't finished preparing, so just return.
     match outcome {
-        TqPrepareStatusOutcome::Committing { config: committing_config } => {
-            commit(log, opctx, datastore, *committing_config).await
+        TqPrepareStatusOutcome::Committing { config } => {
+            commit(log, opctx, datastore, *config).await
         }
         TqPrepareStatusOutcome::StillPreparing => Ok(Status::Preparing),
     }
+}
+
+async fn record_prepare_status(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    coordinator_config: trust_quorum_types::configuration::Configuration,
+    acked_prepares: BTreeSet<BaseboardId>,
+) -> Result<TqPrepareStatusOutcome, Error> {
+    let outcome = datastore
+        .tq_update_prepare_status(opctx, coordinator_config, acked_prepares)
+        .await?;
+    Ok(outcome)
 }
 
 #[derive(Debug)]
@@ -901,4 +917,183 @@ async fn run_commit_ops(
         }
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use nexus_db_model::HwBaseboardId;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_types::trust_quorum::{
+        IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfigState,
+    };
+    use omicron_test_utils::dev::test_setup_log;
+    use trust_quorum_types::configuration::Configuration;
+    use trust_quorum_types::crypto::{
+        EncryptedRackSecrets, Salt, Sha3_256Digest,
+    };
+    use uuid::Uuid;
+
+    async fn load_config(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> NexusTrustQuorumConfig {
+        datastore
+            .tq_get_config(
+                opctx,
+                authz::TrustQuorumConfig::for_rack_id(rack_id),
+                epoch,
+            )
+            .await
+            .expect("loaded trust quorum config")
+            .unwrap_or_else(|| {
+                panic!("trust quorum config at epoch {epoch} exists")
+            })
+    }
+
+    #[tokio::test]
+    async fn test_record_prepare_status_secrets_after_digests() {
+        let logctx =
+            test_setup_log("test_record_prepare_status_secrets_after_digests");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids: Vec<_> = (0..5)
+            .map(|_| HwBaseboardId {
+                id: Uuid::new_v4(),
+                part_number: "test-part".to_string(),
+                serial_number: Uuid::new_v4().to_string(),
+            })
+            .collect();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        {
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
+            diesel::insert_into(dsl::hw_baseboard_id)
+                .values(hw_ids.clone())
+                .execute_async(&*conn)
+                .await
+                .expect("inserted hw baseboard ids");
+        }
+        let members: BTreeSet<BaseboardId> =
+            hw_ids.into_iter().map(BaseboardId::from).collect();
+
+        let rack_id = RackUuid::new_v4();
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            authz::TrustQuorumConfig::for_rack_id(rack_id),
+            members.clone(),
+            members.first().expect("at least one member").clone(),
+        )
+        .await
+        .expect("inserted epoch 1");
+        datastore
+            .tq_insert_latest_config(
+                opctx,
+                ProposedTrustQuorumConfig {
+                    rack_id,
+                    epoch: Epoch(2),
+                    is_lrtq_upgrade: IsLrtqUpgrade::No {
+                        last_committed_epoch: Epoch(1),
+                    },
+                    members: members.clone(),
+                },
+            )
+            .await
+            .expect("inserted epoch 2");
+
+        // In this first activation, while the coordinator is still collecting
+        // old shares:
+        //
+        // * digests are known
+        // * secrets are not
+        // * nobody has acked
+        let loaded_config =
+            load_config(opctx, datastore, rack_id, Epoch(2)).await;
+        let collecting_shares = Configuration {
+            rack_id,
+            epoch: Epoch(2),
+            coordinator: loaded_config.coordinator.clone(),
+            members: members
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let byte = u8::try_from(i + 1).expect("few members");
+                    (id.clone(), Sha3_256Digest([byte; 32]))
+                })
+                .collect(),
+            threshold: loaded_config.threshold,
+            encrypted_rack_secrets: None,
+        };
+        let outcome = record_prepare_status(
+            opctx,
+            datastore,
+            collecting_shares.clone(),
+            BTreeSet::new(),
+        )
+        .await
+        .expect("recorded prepare status");
+        match outcome {
+            TqPrepareStatusOutcome::StillPreparing => {}
+            TqPrepareStatusOutcome::Committing { config: _ } => {
+                panic!("expected StillPreparing, got {outcome:?}")
+            }
+        }
+
+        // In this next activation, after the coordinator collected old shares
+        // and sent prepares:
+        //
+        // * secrets are known
+        // * enough members have acked
+        let secrets =
+            EncryptedRackSecrets::new(Salt([7; 32]), vec![1, 2, 3, 4].into());
+        let preparing = Configuration {
+            encrypted_rack_secrets: Some(secrets.clone()),
+            ..collecting_shares.clone()
+        };
+        let min_acks = loaded_config.threshold.0 as usize
+            + loaded_config.commit_crash_tolerance as usize;
+        let acked: BTreeSet<_> =
+            members.iter().take(min_acks).cloned().collect();
+        let outcome = record_prepare_status(
+            opctx,
+            datastore,
+            preparing.clone(),
+            acked.clone(),
+        )
+        .await
+        .expect("recorded prepare status");
+        let commit_config = match outcome {
+            TqPrepareStatusOutcome::Committing { config } => config,
+            TqPrepareStatusOutcome::StillPreparing => {
+                panic!("expected Committing, got {outcome:?}")
+            }
+        };
+
+        // The commit config is the one written by the update, so it has the
+        // expected secrets, and the acked members are prepared.
+        assert_eq!(
+            *commit_config,
+            load_config(opctx, datastore, rack_id, Epoch(2)).await
+        );
+        assert_eq!(commit_config.state, TrustQuorumConfigState::Committing);
+        let commit_wire_config = Configuration::try_from(&*commit_config)
+            .expect("commit config has share digests");
+        assert_eq!(commit_wire_config.encrypted_rack_secrets, Some(secrets));
+        assert_eq!(commit_wire_config, preparing);
+        for (id, member) in &commit_config.members {
+            let expected = if acked.contains(id) {
+                TrustQuorumMemberState::Prepared
+            } else {
+                TrustQuorumMemberState::Unacked
+            };
+            assert_eq!(member.state, expected, "member {id}");
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }

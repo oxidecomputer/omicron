@@ -289,6 +289,16 @@ networking_switch_port_settings_view     GET      /v1/system/networking/switch-p
 system_networking_settings_update        PUT      /v1/system/networking/settings
 system_networking_settings_view          GET      /v1/system/networking/settings
 
+API operations found with tag "system/problems"
+OPERATION ID                             METHOD   URL PATH
+problem_alert_list                       GET      /v1/system/problems/{problem_id}/alerts
+problem_causes_list                      GET      /v1/system/problems/{problem_id}/causes
+problem_consequences_list                GET      /v1/system/problems/{problem_id}/consequences
+problem_impact_list                      GET      /v1/system/problems/{problem_id}/impacts
+problem_list                             GET      /v1/system/problems
+problem_support_bundles_list             GET      /v1/system/problems/{problem_id}/support-bundles
+problem_view                             GET      /v1/system/problems/{problem_id}
+
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users
