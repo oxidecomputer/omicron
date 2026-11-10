@@ -561,6 +561,12 @@ pub struct VmmMarkStopForUpdateConfig {
     /// period (in seconds) for periodic activations of this task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -844,6 +850,12 @@ pub struct VmmStopForUpdateConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1655,6 +1667,7 @@ mod test {
                         },
                         vmm_stop_for_update: VmmStopForUpdateConfig {
                             period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                         saga_recovery: SagaRecoveryConfig {
                             period_secs: Duration::from_secs(60),
@@ -1748,6 +1761,7 @@ mod test {
                         },
                         vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
                             period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
