@@ -1073,7 +1073,7 @@ mod tests {
             }
         };
 
-        // The commit config is the one written by the update, so it has the
+        // commit_config is the one written by the update, so it has the
         // expected secrets, and the acked members are prepared.
         assert_eq!(
             *commit_config,
