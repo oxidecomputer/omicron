@@ -76,6 +76,7 @@ use rand::seq::IndexedRandom;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -1228,6 +1229,29 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(sled)
+    }
+
+    /// Return the baseboards of every in-service sled in `rack_id`.
+    pub async fn sled_list_in_service_baseboards_in_rack_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<BTreeSet<BaseboardId>, TransactionError<Error>> {
+        use nexus_db_schema::schema::sled::dsl;
+        let baseboards = dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .sled_filter(SledFilter::InService)
+            .select((dsl::part_number, dsl::serial_number))
+            .load_async::<(String, String)>(conn)
+            .await?;
+
+        Ok(baseboards
+            .into_iter()
+            .map(|(part_number, serial_number)| BaseboardId {
+                part_number,
+                serial_number,
+            })
+            .collect())
     }
 
     pub async fn sled_list(

@@ -8592,12 +8592,14 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-scrimlet-reconcilers",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "tokio",
  "tokio-postgres",
  "tokio-util",
  "transient-dns-server",
+ "trust-quorum-types",
  "uuid",
 ]
 

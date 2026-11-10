@@ -23,6 +23,7 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::trust_quorum::commission_fake_trust_quorum_member;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::sled::Sled;
@@ -633,6 +634,7 @@ async fn test_sled_expunge_trust_quorum_gate(
     assert!(!others.contains(&sled_baseboard));
     let with_sled: BTreeSet<_> =
         others.iter().cloned().chain([sled_baseboard.clone()]).collect();
+    commission_fake_trust_quorum_member(cptestctx).await;
 
     tq.propose(2, 1, &with_sled).await;
     tq.ack_all_prepares(2).await;
