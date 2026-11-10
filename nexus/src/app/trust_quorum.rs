@@ -6,6 +6,8 @@
 
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_networking::InServiceSledClientError;
+use nexus_networking::sled_client_by_baseboard_id_and_rack_id_if_in_service_ext;
 use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
@@ -318,55 +320,52 @@ impl super::Nexus {
         coordinator: &BaseboardId,
     ) -> Result<sled_agent_client::Client, Error> {
         let rack_id = authz_tq.rack().id();
-        // Retrieve the sled for the coordinator
-        let Some(sled) = self
-            .db_datastore
-            .sled_get_in_service_by_baseboard_and_rack_id(
-                opctx,
-                rack_id,
-                coordinator.clone(),
-            )
-            .await?
-        else {
-            let msg = format!(
-                "Coordinator sled for trust quorum reconfiguration is no \
-                longer in service or is present in another rack. \
-                Configuration stored in database for this configuration will \
-                be aborted. Expected rack_id: {rack_id}, baseboard_id: {}.",
-                coordinator
-            );
-
-            self.db_datastore
-                .tq_abort_config(opctx, authz_tq, epoch, msg.clone())
-                .await
-                .map_err(|e| {
-                    Error::conflict(format!(
-                        "{}. Unfortunately, writing \
-                        the abort to the database also failed with error: {e}. \
-                        Abort will have to be performed explicitly by the \
-                        operator.",
-                        msg
-                    ))
-                })?;
-
-            return Err(Error::conflict(msg));
-        };
-
-        // Construct a sled agent client to talk to the coordinator
         let timeout = Duration::from_secs(60);
-        let url = format!("http://{}", sled.address());
-        let log = self.log.new(o!("SledAgent" => url.clone()));
         let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
             .unwrap();
-
-        Ok(sled_agent_client::Client::new_with_client(
-            &url,
+        match sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
+            &self.db_datastore,
+            opctx,
+            coordinator,
+            rack_id,
+            &self.log,
             reqwest_client,
-            log,
-        ))
+        )
+        .await
+        {
+            Ok(client) => Ok(client),
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                let msg = format!(
+                    "Coordinator sled for trust quorum reconfiguration is no \
+                    longer in service or is present in another rack. \
+                    Configuration stored in database for this configuration \
+                    will be aborted. Expected rack_id: {rack_id}, \
+                    baseboard_id: {}.",
+                    coordinator
+                );
+
+                self.db_datastore
+                    .tq_abort_config(opctx, authz_tq, epoch, msg.clone())
+                    .await
+                    .map_err(|e| {
+                        Error::conflict(format!(
+                            "{}. Unfortunately, writing \
+                            the abort to the database also failed with error: \
+                            {e}. Abort will have to be performed explicitly by \
+                            the operator.",
+                            msg
+                        ))
+                    })?;
+
+                Err(Error::conflict(msg))
+            }
+            Err(InServiceSledClientError::LookupFailed { error, .. }) => {
+                Err(error)
+            }
+        }
     }
 
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in

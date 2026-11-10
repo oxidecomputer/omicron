@@ -15,6 +15,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
 use nexus_networking::{
+    InServiceSledClientError,
     sled_client_by_baseboard_id_and_rack_id_if_in_service,
     sled_client_by_baseboard_id_and_rack_id_if_in_service_ext,
 };
@@ -314,8 +315,8 @@ async fn prepare(
     config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // Get a sled agent for the coordinator
-    let Some(coordinator_sa) =
-        sled_client_by_baseboard_id_and_rack_id_if_in_service(
+    let coordinator_sa =
+        match sled_client_by_baseboard_id_and_rack_id_if_in_service(
             &datastore,
             &opctx,
             &config.coordinator,
@@ -323,16 +324,17 @@ async fn prepare(
             &log,
         )
         .await
-        .with_context(|| {
-            format!(
-                "failed to retrieve in-service sled \
-                    by baseboard_id {} and rack_id {}.",
-                config.coordinator, config.rack_id
-            )
-        })?
-    else {
-        return Ok(Status::CoordinatorNotInService(config.coordinator.clone()));
-    };
+        {
+            Ok(client) => client,
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                return Ok(Status::CoordinatorNotInService(
+                    config.coordinator.clone(),
+                ));
+            }
+            Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
+                return Err(error.into());
+            }
+        };
 
     let response = coordinator_sa
         .trust_quorum_coordinator_status()
@@ -726,8 +728,8 @@ async fn get_sled_agent_clients(
 
     // Now try to get a client for `num_clients`
     for id in randomized {
-        let Some(client) =
-            sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
+        let client =
+            match sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
                 &datastore,
                 opctx,
                 &id,
@@ -735,10 +737,14 @@ async fn get_sled_agent_clients(
                 log,
                 reqwest_client.clone(),
             )
-            .await?
-        else {
-            continue;
-        };
+            .await
+            {
+                Ok(client) => client,
+                Err(InServiceSledClientError::NotInService { .. }) => continue,
+                Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
+                    return Err(error.into());
+                }
+            };
         clients.push((id.clone(), client));
         if clients.len() == num_clients {
             break;

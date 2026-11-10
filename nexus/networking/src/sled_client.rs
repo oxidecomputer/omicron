@@ -70,7 +70,7 @@ pub async fn sled_client_by_baseboard_id_and_rack_id_if_in_service(
     baseboard_id: &BaseboardId,
     rack_id: RackUuid,
     log: &Logger,
-) -> Result<Option<SledAgentClient>, Error> {
+) -> Result<SledAgentClient, InServiceSledClientError> {
     let client = default_reqwest_client_builder().build().unwrap();
     sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
         datastore,
@@ -90,24 +90,52 @@ pub async fn sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
     rack_id: RackUuid,
     log: &Logger,
     client: reqwest::Client,
-) -> Result<Option<SledAgentClient>, Error> {
+) -> Result<SledAgentClient, InServiceSledClientError> {
     let Some(sled) = datastore
         .sled_get_in_service_by_baseboard_and_rack_id(
             opctx,
             rack_id,
             baseboard_id.clone(),
         )
-        .await?
+        .await
+        .map_err(|error| InServiceSledClientError::LookupFailed {
+            rack_id,
+            baseboard_id: baseboard_id.clone(),
+            error,
+        })?
     else {
-        return Ok(None);
+        return Err(InServiceSledClientError::NotInService {
+            rack_id,
+            baseboard_id: baseboard_id.clone(),
+        });
     };
 
-    Ok(Some(sled_client_from_address_ext(
+    Ok(sled_client_from_address_ext(
         sled.identity.id.into(),
         sled.address(),
         log,
         client,
-    )))
+    ))
+}
+
+/// An error returned by
+/// [`sled_client_by_baseboard_id_and_rack_id_if_in_service`] and the `_ext`
+/// variant.
+#[derive(Debug, thiserror::Error)]
+pub enum InServiceSledClientError {
+    /// The sled is not in service.
+    #[error("sled {baseboard_id} is not an in-service sled in rack {rack_id}")]
+    NotInService { rack_id: RackUuid, baseboard_id: BaseboardId },
+    /// The sled could not be looked up.
+    #[error(
+        "failed to look up in-service sled {baseboard_id} in rack {rack_id}"
+    )]
+    LookupFailed {
+        rack_id: RackUuid,
+        baseboard_id: BaseboardId,
+        #[source]
+        error: Error,
+    },
 }
 
 pub fn sled_client_from_address(
