@@ -45,7 +45,6 @@ use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_case_problem::dsl as case_problem_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
-use nexus_db_schema::schema::fm_problem::dsl as problem_dsl;
 use nexus_db_schema::schema::fm_problem_alert::dsl as problem_alert_dsl;
 use nexus_db_schema::schema::fm_problem_request::dsl as problem_dsl;
 use nexus_db_schema::schema::fm_problem_revision_request::dsl as problem_rev_dsl;
