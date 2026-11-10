@@ -92,6 +92,9 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 pub mod operator_status;
+// <review>
+// I'm inclined to `pub use` the specific things we need from this module.  What do you think?
+// </review>
 mod planning_input;
 pub mod planning_report;
 mod reconfigurator_config;

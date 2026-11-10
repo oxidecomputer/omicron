@@ -1074,7 +1074,6 @@ impl BlueprintPlannerLatest {
 /// Planning report along with when the planner produced it
 #[derive(Clone, Debug)]
 pub struct TimestampedPlanningReport {
-    /// when the planning activation that produced this report started
     pub time_planned: DateTime<Utc>,
     pub report: Arc<PlanningReport>,
 }

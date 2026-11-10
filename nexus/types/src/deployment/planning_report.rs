@@ -120,8 +120,8 @@ impl PlanningReport {
 
 impl fmt::Display for PlanningReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Code that prints a planning report doesn't generally know whether
-        // Nexus is quiescing, so the notes can't describe a handoff.
+        // This generic printer cannot know the specific quiesce status, so the
+        // output here will not reflect the details of any pending handoff.
         let status = self.operator_status(QuiesceInfo::Unknown);
         if self.is_empty() {
             writeln!(f, "empty planning report")?;
@@ -1036,9 +1036,9 @@ impl PlanningMgsUpdatesStepReport {
         }
 
         // If this blueprint marks a sled for evacuation, then we're waiting
-        // for that sled to be evacuated.  This is the case only for the first
-        // blueprint in which we wait for a particular sled.  See the next
-        // block.
+        // for that sled to be evacuated.  In the current implementation, we'll
+        // only see this in the first blueprint in which we start waiting for a
+        // sled to be evacuated.  See the next block for more.
         if let Some(change) = evacuating {
             return Some(UpdateWait::SledEvacuation {
                 sled_id: change.sled_id,
@@ -1086,11 +1086,19 @@ impl PlanningMgsUpdatesStepReport {
 
         // If we're looking at a blueprint in which the planner is bringing a
         // sled back into service and isn't starting any other MGS update, then
-        // it's fair to say that the planner is waiting for that to happen.
-        // There is no analogous case to the blocked update above for later
-        // blueprints.  The planner doesn't wait for the change to be propagated
-        // anywhere else.  If we ran it again, it would immediately plan the
-        // next step.
+        // it's fair to report that the planner is waiting for the sled to go
+        // back in service.  In practice, today, if you ran the planner again
+        // immediately, it would plan the next update step.  So it's not really
+        // waiting for this step to finish.  But it's the most accurate thing we
+        // can report.
+        //
+        // (Note: when evacuating a sled, we had two cases to consider: the
+        // blueprint in which the disposition changed and subsequent ones before
+        // the sled was observed to be evacuated.  The condition below is
+        // analogous to the first case (the blueprint where the disposition
+        // changed).  There's no analog to the second case here for the reason
+        // mentioned above: subsequent planner runs won't actually wait for this
+        // to finish.)
         if let Some(change) = available {
             return Some(UpdateWait::SledAvailable {
                 sled_id: change.sled_id,
@@ -1503,7 +1511,8 @@ impl fmt::Display for PlanningAddStepReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum AddUpdateBlockedReason {
     /// The current target release generation is lower than the minimum
-    /// required by the blueprint.
+    /// required by the blueprint.  This means that the system has detected that
+    /// a MUPdate has occurred since the last time the target release was set.
     TargetReleaseGenerationTooLow {
         /// current target release generation
         current: TargetReleaseGeneration,
@@ -1517,13 +1526,13 @@ pub enum AddUpdateBlockedReason {
         sled_ids: BTreeSet<SledUuid>,
     },
 
-    /// Some sleds had errors fetching their MUPdate override information.
+    /// Some sleds reported errors fetching their MUPdate override information.
     SledsWithMupdateOverrideErrors {
         #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
         sled_ids: BTreeSet<SledUuid>,
     },
 
-    /// Some sleds have zones whose image source is not an artifact.
+    /// Some sleds reported zones whose image source is not an artifact.
     ZonesNotFromArtifacts {
         /// number of such zones on each affected sled
         #[cfg_attr(
@@ -1533,8 +1542,8 @@ pub enum AddUpdateBlockedReason {
         zone_counts_by_sled: BTreeMap<SledUuid, usize>,
     },
 
-    /// Some sleds have measurements set to the install dataset rather than
-    /// artifacts.
+    /// Some sleds reported measurements set to the install dataset rather than
+    /// specific artifacts.
     MeasurementsNotFromArtifacts {
         #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
         sled_ids: BTreeSet<SledUuid>,
@@ -1545,9 +1554,7 @@ impl AddUpdateBlockedReason {
     /// Returns true if this reason results from a MUPdate.  For this purpose,
     /// initial installation counts as a MUPdate.
     // This is used in messaging to the user about what the system is waiting
-    // on.
-    //
-    // Currently, all `AddUpdateBlockedReason`s are MUPdate-related.  This
+    // on.  Currently, all `AddUpdateBlockedReason`s are MUPdate-related.  This
     // helper exists so that callers don't have to assume that.  Instead, if you
     // add a new reason, you need to determine if it's MUPdate-related.
     fn is_mupdate_related(&self) -> bool {

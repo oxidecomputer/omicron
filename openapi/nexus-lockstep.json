@@ -1628,7 +1628,7 @@
         "description": "Reason why the planner is not adding or updating zones",
         "oneOf": [
           {
-            "description": "The current target release generation is lower than the minimum required by the blueprint.",
+            "description": "The current target release generation is lower than the minimum required by the blueprint.  This means that the system has detected that a MUPdate has occurred since the last time the target release was set.",
             "type": "object",
             "properties": {
               "current": {
@@ -1684,7 +1684,7 @@
             ]
           },
           {
-            "description": "Some sleds had errors fetching their MUPdate override information.",
+            "description": "Some sleds reported errors fetching their MUPdate override information.",
             "type": "object",
             "properties": {
               "sled_ids": {
@@ -1707,7 +1707,7 @@
             ]
           },
           {
-            "description": "Some sleds have zones whose image source is not an artifact.",
+            "description": "Some sleds reported zones whose image source is not an artifact.",
             "type": "object",
             "properties": {
               "type": {
@@ -1732,7 +1732,7 @@
             ]
           },
           {
-            "description": "Some sleds have measurements set to the install dataset rather than artifacts.",
+            "description": "Some sleds reported measurements set to the install dataset rather than specific artifacts.",
             "type": "object",
             "properties": {
               "sled_ids": {

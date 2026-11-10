@@ -58,17 +58,11 @@ pub struct UpdateStatus {
     /// `false` does not mean the entire system is completely healthy.
     pub contact_support: bool,
 
-    /// Summary of what the system is doing
-    ///
-    /// This summarizes the most recent automated planning run on the Nexus
-    /// instance that handled this request. If that instance has not completed
-    /// a planning run since it started, the status is `unknown`.
+    /// Summary of what the update / reconfiguration system is doing
     pub operator_notes: OperatorNotes,
 
-    /// Error from the most recent automated planning run, if it failed
-    ///
-    /// When this is set, `operator_notes` may describe an earlier planning
-    /// run.
+    /// Error from the most recent run of the update / reconfiguration planner,
+    /// if it failed
     pub planner_error: Nullable<String>,
 }
 
@@ -77,7 +71,7 @@ impl From<UpdateStatus> for v2026_05_20_00::update::UpdateStatus {
     fn from(new: UpdateStatus) -> Self {
         // Destructure the whole struct so that adding a field causes a compile
         // error here.  The older version has no place for the operator notes
-        // or the planner error, so those are dropped.
+        // or the planner error, but those can be safely dropped.
         let UpdateStatus {
             target_release,
             components_by_release_version,

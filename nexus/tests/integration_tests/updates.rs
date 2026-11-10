@@ -823,11 +823,10 @@ async fn test_update_status() -> Result<()> {
         .await
         .expect("enable blueprint planner");
 
-    // The planner might not see the new config right away, so keep activating
-    // it until the status reflects a run with the planner enabled.
+    // The config change ought to activate the planner, but it may take some
+    // time for it to actually run.
     let (time_planned, notes) = wait_for_condition(
         || async {
-            let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
             let status: update::UpdateStatus =
                 object_get(client, "/v1/system/update/status").await;
             let notes = status.operator_notes;

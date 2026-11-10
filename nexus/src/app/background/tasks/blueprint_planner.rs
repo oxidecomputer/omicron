@@ -9,7 +9,6 @@ use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use crate::app::deployment::SetTargetDebugWriter;
-use chrono::DateTime;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
@@ -150,28 +149,7 @@ impl BlueprintPlanner {
     /// current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
         let time_planned = Utc::now();
-        let status = self.plan_and_log(opctx).await;
-        self.publish_latest(time_planned, &status);
-        status
-    }
-
-    /// Publishes the outcome of a planning activation for other parts of
-    /// Nexus
-    fn publish_latest(
-        &self,
-        time_planned: DateTime<Utc>,
-        status: &BlueprintPlannerStatus,
-    ) {
-        self.tx_latest.send_modify(|latest| {
-            latest.record_activation(time_planned, status)
-        });
-    }
-
-    async fn plan_and_log(
-        &mut self,
-        opctx: &OpContext,
-    ) -> BlueprintPlannerStatus {
-        match self.plan_impl(opctx).await {
+        let status = match self.plan_impl(opctx).await {
             Ok(status) => status,
             Err(plan_error) => {
                 let error = InlineErrorChain::new(&plan_error);
@@ -197,7 +175,13 @@ impl BlueprintPlanner {
                 }
                 BlueprintPlannerStatus::Error(error.to_string())
             }
-        }
+        };
+
+        self.tx_latest.send_modify(|latest| {
+            latest.record_activation(time_planned, &status)
+        });
+
+        status
     }
 
     async fn plan_impl(

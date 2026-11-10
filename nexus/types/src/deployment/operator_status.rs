@@ -210,3 +210,6 @@ impl fmt::Display for SledEvacuationProgress {
         }
     }
 }
+// <review>
+// I wonder if it's worth creating an expectorate test that constructs every possible variant here and prints out the status so that we can see what each looks like?  It could print the debug version and then the to_string() version.  What do you think?
+// </review>

@@ -30825,7 +30825,7 @@
             "type": "boolean"
           },
           "operator_notes": {
-            "description": "Summary of what the system is doing\n\nThis summarizes the most recent automated planning run on the Nexus instance that handled this request. If that instance has not completed a planning run since it started, the status is `unknown`.",
+            "description": "Summary of what the update / reconfiguration system is doing",
             "allOf": [
               {
                 "$ref": "#/components/schemas/OperatorNotes"
@@ -30834,7 +30834,7 @@
           },
           "planner_error": {
             "nullable": true,
-            "description": "Error from the most recent automated planning run, if it failed\n\nWhen this is set, `operator_notes` may describe an earlier planning run.",
+            "description": "Error from the most recent run of the update / reconfiguration planner, if it failed",
             "type": "string"
           },
           "suspended": {
