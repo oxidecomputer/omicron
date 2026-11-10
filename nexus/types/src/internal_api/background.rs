@@ -39,11 +39,13 @@ use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
-/// The status of a successful `capacity_metrics` background task activation.
+/// The status of a `capacity_metrics` background task activation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CapacityMetricsStatus {
-    /// Number of new samples retained in the producer queue.
-    pub samples_queued: usize,
+    /// Number of silo quota samples retrieved.
+    pub silo_samples: usize,
+    /// Number of project quota samples retrieved.
+    pub project_samples: usize,
 }
 
 /// The status of a `region_replacement` background task activation
@@ -135,7 +137,18 @@ impl IdOrdItem for VmmsBySled {
 
 /// The status of a `vmm_stop_for_update` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct VmmStopForUpdateStatus {
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VmmStopForUpdateStatus {
+    /// Disabled by configuration (`vmm_stop_for_update.disable`). The task did
+    /// nothing.
+    Disabled,
+    /// The task was enabled and ran, with the details of what it did provided.
+    Enabled(VmmStopForUpdateDetails),
+}
+
+/// Details of an enabled `vmm_stop_for_update` activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmStopForUpdateDetails {
     /// Number of VMMs stopped in this activation, keyed by the sled they were
     /// running on.
     pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
@@ -1733,7 +1746,18 @@ pub struct AuditLogCleanupStatus {
 
 /// The status of a `vmm_mark_stop_for_update` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct VmmMarkStopForUpdateStatus {
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VmmMarkStopForUpdateStatus {
+    /// Disabled by configuration (`vmm_mark_stop_for_update.disable`). The task
+    /// did nothing, and in particular did not trigger `vmm_stop_for_update`.
+    Disabled,
+    /// The task was enabled and ran, with the details of what it did provided.
+    Enabled(VmmMarkStopForUpdateDetails),
+}
+
+/// Details of an enabled `vmm_mark_stop_for_update` activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmMarkStopForUpdateDetails {
     /// Number of VMMs that were marked as needing to be stopped for update in
     /// this activation.
     pub vmms_marked: usize,
