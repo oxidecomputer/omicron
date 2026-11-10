@@ -15,8 +15,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
 use nexus_networking::{
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned,
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext,
+    sled_client_by_baseboard_id_and_rack_id_if_in_service,
+    sled_client_by_baseboard_id_and_rack_id_if_in_service_ext,
 };
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::{
@@ -164,7 +164,7 @@ impl BackgroundTask for TrustQuorumManager {
 // Status of an activation for a single rack's active configuration
 enum Status {
     ConfigInactive,
-    CoordinatorNoLongerCommissioned(BaseboardId),
+    CoordinatorNotInService(BaseboardId),
     Preparing,
     Commit(Vec<CommitOpsResults>),
     CommitAndStartSledAgents(Vec<CommitOpsResults>, Vec<StartSledAgentResults>),
@@ -185,10 +185,10 @@ impl Status {
                     aborted."
                 );
             }
-            Status::CoordinatorNoLongerCommissioned(coordinator_id) => {
+            Status::CoordinatorNotInService(coordinator_id) => {
                 swriteln!(
                     &mut s,
-                    "    Coordinator ({coordinator_id}) was decommissioned."
+                    "    Coordinator ({coordinator_id}) is not in service."
                 );
             }
             Status::Preparing => {
@@ -315,7 +315,7 @@ async fn prepare(
 ) -> Result<Status, Error> {
     // Get a sled agent for the coordinator
     let Some(coordinator_sa) =
-        sled_client_by_baseboard_id_and_rack_id_if_commissioned(
+        sled_client_by_baseboard_id_and_rack_id_if_in_service(
             &datastore,
             &opctx,
             &config.coordinator,
@@ -325,15 +325,13 @@ async fn prepare(
         .await
         .with_context(|| {
             format!(
-                "failed to retrieve commissioned sled \
+                "failed to retrieve in-service sled \
                     by baseboard_id {} and rack_id {}.",
                 config.coordinator, config.rack_id
             )
         })?
     else {
-        return Ok(Status::CoordinatorNoLongerCommissioned(
-            config.coordinator.clone(),
-        ));
+        return Ok(Status::CoordinatorNotInService(config.coordinator.clone()));
     };
 
     let response = coordinator_sa
@@ -696,7 +694,7 @@ async fn send_start_sled_agent_requests(
     results
 }
 
-/// Retrieve up to `num_clients` clients for commissioned sled agents.
+/// Retrieve up to `num_clients` clients for in-service sled agents.
 ///
 /// Returns an error if no clients are available.
 #[allow(clippy::too_many_arguments)]
@@ -729,7 +727,7 @@ async fn get_sled_agent_clients(
     // Now try to get a client for `num_clients`
     for id in randomized {
         let Some(client) =
-            sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
+            sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
                 &datastore,
                 opctx,
                 &id,
