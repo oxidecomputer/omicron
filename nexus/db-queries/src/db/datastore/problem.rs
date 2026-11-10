@@ -1034,7 +1034,7 @@ mod test {
             ProblemUuid::new_v4(),
             2,
             omicron_common::now_db_precision(),
-                ProblemCode::UnhealthyZpool,
+            ProblemCode::UnhealthyZpool,
         );
         let err = datastore
             .problem_revision_insert(opctx, &authz_problem, other)
@@ -1115,12 +1115,8 @@ mod test {
             .await
             .unwrap();
 
-        let mut revision = make_revision(
-            id,
-            1,
-            time_created,
-            ProblemCode::UnhealthyZpool,
-        );
+        let mut revision =
+            make_revision(id, 1, time_created, ProblemCode::UnhealthyZpool);
         if resolved {
             revision.time_resolved = Some(revision.time_created);
         }
@@ -1357,76 +1353,4 @@ mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
-
-    //     use super::*;
-    //     use crate::db::explain::ExplainableAsync;
-    //     use crate::db::pub_test_utils::TestDatabase;
-    //     use dropshot::PaginationOrder;
-    //     use omicron_test_utils::dev;
-    //     use std::num::NonZeroU32;
-
-    //     #[tokio::test]
-    //     async fn explain_problem_list_all_states_query() {
-    //         explain_list_query(
-    //             "explain_problem_list_all_states_query",
-    //             api::ProblemListParams { state: None },
-    //         )
-    //         .await;
-    //     }
-
-    //     #[tokio::test]
-    //     async fn explain_problem_list_active_query() {
-    //         explain_list_query(
-    //             "explain_problem_list_active_query",
-    //             api::ProblemListParams {
-    //                 state: Some(api::ProblemState::Active),
-    //             },
-    //         )
-    //         .await;
-    //     }
-
-    //     #[tokio::test]
-    //     async fn explain_problem_list_resolved_query() {
-    //         explain_list_query(
-    //             "explain_problem_list_resolved_query",
-    //             api::ProblemListParams {
-    //                 state: Some(api::ProblemState::Resolved),
-    //             },
-    //         )
-    //         .await;
-    //     }
-
-    //     async fn explain_list_query(
-    //         test_name: &str,
-    //         filters: api::ProblemListParams,
-    //     ) {
-    //         let logctx = dev::test_setup_log(test_name);
-    //         let db = TestDatabase::new_with_pool(&logctx.log).await;
-    //         let pool = db.pool();
-    //         let conn = pool.claim().await.unwrap();
-
-    //         let pagparams = DataPageParams::<'_, (DateTime<Utc>, Uuid)> {
-    //             marker: None,
-    //             direction: PaginationOrder::Descending,
-    //             limit: NonZeroU32::new(100).unwrap(),
-    //         };
-    //         eprintln!("--- filters: {filters:#?}\n");
-
-    //         let query = DataStore::problem_list_query(&filters, &pagparams);
-
-    //         let explanation = query
-    //             .explain_async(&conn)
-    //             .await
-    //             .expect("Failed to explain query - is it valid SQL?");
-
-    //         eprintln!("--- explanation: {explanation}");
-
-    //         assert!(
-    //             !explanation.contains("FULL SCAN"),
-    //             "Found an unexpected FULL SCAN: {explanation}",
-    //         );
-
-    //         db.terminate().await;
-    //         logctx.cleanup_successful();
-    //     }
 }
