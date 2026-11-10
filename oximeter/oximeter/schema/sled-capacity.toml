@@ -1,0 +1,64 @@
+format_version = 1
+
+[target]
+name = "sled_capacity"
+description = "Sled resource capacity"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "nexus_id", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "sled_cpu_family" ] },
+]
+
+[fields.nexus_id]
+type = "uuid"
+description = "ID of the Nexus reporting the sample. We emit metrics from each Nexus, so aggregate over Nexus instances by mean or max, but not sum, to avoid double-counting."
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.sled_cpu_family]
+type = "string"
+description = "CPU family of the sled"
+
+[[metrics]]
+name = "hardware_threads"
+description = "Hardware threads which can execute on the sled"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "physical_ram"
+description = "RAM which may be used by the sled's OS"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "reservoir_ram"
+description = "RAM dedicated to the VMM reservoir"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]

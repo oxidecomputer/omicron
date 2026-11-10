@@ -795,6 +795,7 @@ task: "capacity_metrics"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     silo samples: 0
     project samples: 0
+    sled samples: <SLED_SAMPLES_REDACTED>
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1563,6 +1564,7 @@ task: "capacity_metrics"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     silo samples: 0
     project samples: 0
+    sled samples: <SLED_SAMPLES_REDACTED>
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m

@@ -44,6 +44,15 @@ impl SledCpuFamily {
             Self::AmdTurinDense => crate::VmmCpuPlatform::AmdMilan,
         }
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::AmdMilan => "amd_milan",
+            Self::AmdTurin => "amd_turin",
+            Self::AmdTurinDense => "amd_turin_dense",
+        }
+    }
 }
 
 impl From<sled_agent_types::inventory::SledCpuFamily> for SledCpuFamily {

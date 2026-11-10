@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task that collects and emits quota metrics, as described in
-//! silo-quota.toml and project-quota.toml.
+//! Background task that collects and emits capacity metrics, as described in
+//! silo-quota.toml, project-quota.toml, sled-capacity.toml, and
+//! sled-reservation.toml.
 //!
 //! Note: because background tasks run on each Nexus instance, these metrics are
 //! emitted once for each Nexus--as of this writing, in triplicate. Callers
@@ -23,25 +24,34 @@ use dropshot::PaginationOrder;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
+use nexus_db_model::Resources;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_types::deployment::SledFilter;
+use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::CapacityMetricsStatus;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use oximeter::MetricsError;
 use oximeter::Sample;
 use oximeter::queue::BoundedQueue;
 use oximeter::types::ProducerRegistry;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 oximeter::use_timeseries!("silo-quota.toml");
 oximeter::use_timeseries!("project-quota.toml");
+oximeter::use_timeseries!("sled-capacity.toml");
+oximeter::use_timeseries!("sled-reservation.toml");
 
 use project_quota::ProjectQuota;
 use silo_quota::SiloQuota;
+use sled_capacity::SledCapacity;
+use sled_reservation::SledReservation;
 
 const QUEUE_SIZE: usize = 8192;
 
@@ -70,8 +80,11 @@ impl CapacityMetrics {
         let now = chrono::Utc::now();
         let nexus_id = nexus_id.into_untyped_uuid();
 
-        let mut status =
-            CapacityMetricsStatus { silo_samples: 0, project_samples: 0 };
+        let mut status = CapacityMetricsStatus {
+            silo_samples: 0,
+            project_samples: 0,
+            sled_samples: 0,
+        };
 
         match self.fetch_silo_samples(opctx, nexus_id, now).await {
             Ok(samples) => {
@@ -91,8 +104,112 @@ impl CapacityMetrics {
                 slog::warn!(opctx.log, "failed to collect project metrics"; "error" => format!("{error:#}"));
             }
         };
+        match self.fetch_sled_samples(opctx, nexus_id, now).await {
+            Ok(samples) => {
+                status.sled_samples = samples.len();
+                self.enqueue_samples(opctx, samples);
+            }
+            Err(error) => {
+                slog::warn!(opctx.log, "failed to collect sled capacity/reservation metrics"; "error" => format!("{error:#}"));
+            }
+        }
 
         status
+    }
+
+    async fn fetch_sled_samples(
+        &self,
+        opctx: &OpContext,
+        nexus_id: Uuid,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Vec<Sample>> {
+        let mut samples = Vec::<Sample>::new();
+
+        let sleds = self
+            .datastore
+            .sled_list_all_batched(opctx, SledFilter::InService)
+            .await?;
+        let sled_ids: Vec<SledUuid> =
+            sleds.iter().map(|sled| sled.id()).collect();
+        let reservations: HashMap<SledUuid, Resources> = self
+            .datastore
+            .sled_vmm_reservation_list(opctx, &sled_ids)
+            .await?
+            .into_iter()
+            .map(|r| (r.sled_id.into(), r.resources))
+            .collect();
+
+        for sled in sleds {
+            // Produce sled capacity metrics.
+            let sled_target = SledCapacity {
+                nexus_id,
+                rack_id: sled.rack_id().into_untyped_uuid(),
+                sled_id: sled.id().into_untyped_uuid(),
+                sled_model: sled.part_number().to_string().into(),
+                sled_revision: sled.revision(),
+                sled_serial: sled.serial_number().to_string().into(),
+                sled_cpu_family: sled.cpu_family.as_str().into(),
+            };
+            samples.extend([
+                Sample::new_with_timestamp(
+                    now,
+                    &sled_target,
+                    &sled_capacity::HardwareThreads {
+                        datum: u64::from(*sled.usable_hardware_threads),
+                    },
+                )?,
+                Sample::new_with_timestamp(
+                    now,
+                    &sled_target,
+                    &sled_capacity::PhysicalRam {
+                        datum: sled.usable_physical_ram.to_bytes(),
+                    },
+                )?,
+                Sample::new_with_timestamp(
+                    now,
+                    &sled_target,
+                    &sled_capacity::ReservoirRam {
+                        datum: sled.reservoir_size.to_bytes(),
+                    },
+                )?,
+            ]);
+
+            // Produce sled vmm reservation metrics, emitting zeros if the sled
+            // doesn't appear in the aggregated reservation list.
+            let (hardware_threads, reservoir_ram) =
+                match reservations.get(&sled.id()) {
+                    Some(reservation) => (
+                        u64::from(*reservation.hardware_threads),
+                        reservation.reservoir_ram.to_bytes(),
+                    ),
+                    None => (0, 0),
+                };
+            let reservation_target = SledReservation {
+                nexus_id,
+                rack_id: sled.rack_id().into_untyped_uuid(),
+                sled_id: sled.id().into_untyped_uuid(),
+                sled_model: sled.part_number().to_string().into(),
+                sled_revision: sled.revision(),
+                sled_serial: sled.serial_number().to_string().into(),
+                sled_cpu_family: sled.cpu_family.as_str().into(),
+            };
+            samples.extend([
+                Sample::new_with_timestamp(
+                    now,
+                    &reservation_target,
+                    &sled_reservation::HardwareThreads {
+                        datum: hardware_threads,
+                    },
+                )?,
+                Sample::new_with_timestamp(
+                    now,
+                    &reservation_target,
+                    &sled_reservation::ReservoirRam { datum: reservoir_ram },
+                )?,
+            ]);
+        }
+
+        Ok(samples)
     }
 
     async fn fetch_silo_samples(
@@ -293,10 +410,16 @@ impl oximeter::Producer for Producer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_auth::{authn, authz};
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Project;
+    use nexus_db_model::SledCpuFamily;
+    use nexus_db_model::SledResourceVmm;
+    use nexus_db_model::SledResourceVmmState;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+    use nexus_db_queries::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use nexus_db_schema::schema::sled_resource_vmm;
     use nexus_test_utils::http_testing::AuthnMode;
     use nexus_test_utils::resource_helpers::{
         create_local_user, grant_iam, test_params,
@@ -312,8 +435,10 @@ mod tests {
         ByteCount, IdentityMetadataCreateParams,
     };
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::PropolisUuid;
     use oximeter::types::{Datum, FieldValue, ProducerResultsItem};
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -330,17 +455,18 @@ mod tests {
         }
     }
 
-    // Integration test for the CapacityMetrics task. Create silos, projects,
+    // Integration test for quota capacity metrics. Create silos, projects,
     // and utilization records; collect samples from the producer registry;
     // and assert the expected samples.
     #[nexus_test(server = crate::Server)]
-    async fn test_capacity_metrics(cptestctx: &ControlPlaneTestContext) {
+    async fn test_quota_metrics(cptestctx: &ControlPlaneTestContext) {
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
 
+        // Insert silo records.
         let mut silos = Vec::new();
         for (name, cpus, memory, storage) in
             [("populated", 32, 128, 1024), ("empty", 8, 32, 256)]
@@ -377,6 +503,10 @@ mod tests {
         }
         let populated_silo = silos[0].id();
         let empty_silo = silos[1].id();
+
+        // Insert project records, first provisioning a local user for the
+        // operation, since we don't have a public method for creating projects
+        // in a specified silo.
         let client = &cptestctx.external_client;
         let admin_user = create_local_user(
             client,
@@ -417,6 +547,7 @@ mod tests {
             datastore.project_create(&setup_opctx, project).await.unwrap();
         let project_id = project.id();
 
+        // Insert quota utilization records.
         datastore
             .virtual_provisioning_collection_insert_instance(
                 &opctx,
@@ -427,13 +558,6 @@ mod tests {
             )
             .await
             .unwrap();
-
-        let registry = ProducerRegistry::new();
-        let nexus_id = OmicronZoneUuid::new_v4();
-        let mut task =
-            CapacityMetrics::new(datastore.clone(), &registry, nexus_id);
-        assert!(collect_samples(&registry).is_empty());
-
         datastore
             .virtual_provisioning_collection_insert_disk(
                 &opctx,
@@ -444,14 +568,24 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            task.activate(&opctx).await,
-            serde_json::json!({
-                "silo_samples": 12,
-                "project_samples": 3,
-            }),
+        // Produce metrics.
+        let registry = ProducerRegistry::new();
+        let mut task = CapacityMetrics::new(
+            datastore.clone(),
+            &registry,
+            OmicronZoneUuid::new_v4(),
         );
-        let samples = collect_samples(&registry);
+        assert!(collect_samples(&registry).is_empty());
+
+        task.activate(&opctx).await;
+
+        // Assert expected samples.
+        let samples: Vec<_> = collect_samples(&registry)
+            .into_iter()
+            .filter(|sample| {
+                matches!(sample.target_name(), "silo_quota" | "project_quota")
+            })
+            .collect();
         assert_eq!(samples.len(), 15);
 
         let mut expected = BTreeMap::new();
@@ -488,32 +622,187 @@ mod tests {
                         project_id,
                         format!("{target}:{metric}_{kind}"),
                     ),
-                    value,
+                    Datum::U64(value),
                 );
             }
         }
 
-        for sample in samples {
-            let fields = sample.sorted_target_fields();
-            let FieldValue::Uuid(silo_id) = fields["silo_id"].value else {
-                panic!("expected silo_id be a uuid");
-            };
-            let project_id = if sample.target_name() == "project_quota" {
-                let FieldValue::Uuid(project_id) = fields["project_id"].value
-                else {
-                    panic!("expected project_id to be a uuid");
+        let actual: BTreeMap<_, _> = samples
+            .iter()
+            .map(|sample| {
+                let fields = sample.sorted_target_fields();
+                let FieldValue::Uuid(silo_id) = fields["silo_id"].value else {
+                    panic!("expected silo_id be a uuid");
                 };
-                Some(project_id)
-            } else {
-                None
-            };
-            let key = (silo_id, project_id, sample.timeseries_name.to_string());
-            let value = expected.remove(&key).unwrap_or_else(|| {
-                panic!("unexpected or duplicate sample: {key:?}")
-            });
-            assert_eq!(sample.measurement.datum(), &Datum::U64(value));
+                let project_id = if sample.target_name() == "project_quota" {
+                    let FieldValue::Uuid(project_id) =
+                        fields["project_id"].value
+                    else {
+                        panic!("expected project_id to be a uuid");
+                    };
+                    Some(project_id)
+                } else {
+                    None
+                };
+                (
+                    (silo_id, project_id, sample.timeseries_name.to_string()),
+                    sample.measurement.datum().clone(),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert!(
+            collect_samples(&registry).is_empty(),
+            "produce must drain the buffer"
+        );
+    }
+
+    // Integration test for sled capacity metrics. Create sleds and vmms;
+    // collect samples from the producer registry; and assert the expected
+    // samples.
+    #[nexus_test(server = crate::Server)]
+    async fn test_sled_metrics(cptestctx: &ControlPlaneTestContext) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Insert sled and vmm records, including sleds with different
+        // capacities, and a sled with no associated vmms.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let mut expected = BTreeMap::new();
+        for (cpu_family, threads, ram_gib, reservoir_gib, vmms) in [
+            (
+                SledCpuFamily::AmdMilan,
+                32,
+                256,
+                128,
+                vec![
+                    (SledResourceVmmState::Active, 4, 1, 16),
+                    (SledResourceVmmState::Tombstoned, 2, 1, 8),
+                ],
+            ),
+            (
+                SledCpuFamily::AmdTurin,
+                64,
+                512,
+                256,
+                vec![(SledResourceVmmState::Target, 2, 2, 8)],
+            ),
+            (SledCpuFamily::AmdTurinDense, 128, 1024, 512, vec![]),
+        ] {
+            let mut builder = SledUpdateBuilder::new();
+            builder
+                .hardware()
+                .usable_hardware_threads(threads)
+                .usable_physical_ram(i64::from(ram_gib) << 30)
+                .reservoir_size(i64::from(reservoir_gib) << 30)
+                .cpu_family(cpu_family);
+            let sled_id =
+                datastore.sled_upsert(builder.build()).await.unwrap().id();
+
+            let (mut reserved_threads, mut reserved_reservoir_gib) = (0, 0);
+            for (state, vmm_threads, rss_gib, vmm_reservoir_gib) in vmms {
+                diesel::insert_into(sled_resource_vmm::table)
+                    .values(SledResourceVmm::new(
+                        PropolisUuid::new_v4(),
+                        InstanceUuid::new_v4(),
+                        sled_id,
+                        Resources::new(
+                            vmm_threads,
+                            ByteCount::from_gibibytes_u32(rss_gib).into(),
+                            ByteCount::from_gibibytes_u32(vmm_reservoir_gib)
+                                .into(),
+                        ),
+                        state,
+                    ))
+                    .execute_async(&*conn)
+                    .await
+                    .unwrap();
+                reserved_threads += vmm_threads;
+                reserved_reservoir_gib += vmm_reservoir_gib;
+            }
+
+            for (metric, value) in [
+                ("sled_capacity:hardware_threads", u64::from(threads)),
+                (
+                    "sled_capacity:physical_ram",
+                    ByteCount::from_gibibytes_u32(ram_gib).to_bytes(),
+                ),
+                (
+                    "sled_capacity:reservoir_ram",
+                    ByteCount::from_gibibytes_u32(reservoir_gib).to_bytes(),
+                ),
+                (
+                    "sled_reservation:hardware_threads",
+                    u64::from(reserved_threads),
+                ),
+                (
+                    "sled_reservation:reservoir_ram",
+                    ByteCount::from_gibibytes_u32(reserved_reservoir_gib)
+                        .to_bytes(),
+                ),
+            ] {
+                expected.insert(
+                    (sled_id.into_untyped_uuid(), metric.to_string()),
+                    (
+                        FieldValue::String(cpu_family.as_str().into()),
+                        Datum::U64(value),
+                    ),
+                );
+            }
         }
-        assert!(expected.is_empty(), "missing samples: {expected:?}");
+
+        // Produce metrics.
+        let registry = ProducerRegistry::new();
+        let mut task = CapacityMetrics::new(
+            datastore.clone(),
+            &registry,
+            OmicronZoneUuid::new_v4(),
+        );
+        assert!(collect_samples(&registry).is_empty());
+
+        task.activate(&opctx).await;
+
+        // Assert expected samples.
+        //
+        // Note: the test harness includes a simulated sled that our test
+        // doesn't know about. Filter samples to the sleds managed by this test
+        // for explicitness.
+        let sled_ids: BTreeSet<Uuid> =
+            expected.keys().map(|(sled_id, _)| *sled_id).collect();
+        let samples: Vec<_> = collect_samples(&registry)
+            .into_iter()
+            .filter(|sample| {
+                matches!(
+                    sample.target_name(),
+                    "sled_capacity" | "sled_reservation"
+                ) && matches!(
+                    sample.sorted_target_fields()["sled_id"].value,
+                    FieldValue::Uuid(sled_id) if sled_ids.contains(&sled_id)
+                )
+            })
+            .collect();
+        assert_eq!(samples.len(), 15);
+
+        let actual: BTreeMap<_, _> = samples
+            .iter()
+            .map(|sample| {
+                let fields = sample.sorted_target_fields();
+                let FieldValue::Uuid(sled_id) = fields["sled_id"].value else {
+                    panic!("expected sled_id to be a uuid");
+                };
+                (
+                    (sled_id, sample.timeseries_name.to_string()),
+                    (
+                        fields["sled_cpu_family"].value.clone(),
+                        sample.measurement.datum().clone(),
+                    ),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
         assert!(
             collect_samples(&registry).is_empty(),
             "produce must drain the buffer"
