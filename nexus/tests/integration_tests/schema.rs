@@ -1356,6 +1356,85 @@ async fn compare_table_differing_not_null_order() {
     logctx.cleanup_successful();
 }
 
+// Reproduction case for https://github.com/oxidecomputer/omicron/issues/11769
+//
+// Each pair of differing types below has the same base type, but differs in
+// precision, length, interval fields, or array element type. Pairs of
+// identical types act as a control. Mirroring a migration, one schema creates
+// the column with "CREATE TABLE", the other with "ALTER TABLE ... ADD COLUMN".
+#[tokio::test]
+async fn compare_table_differing_column_type_modifiers() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_table_differing_column_type_modifiers",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let cases = [
+        ("INTERVAL", "INTERVAL(0)"),
+        ("INTERVAL", "INTERVAL HOUR"),
+        ("STRING", "STRING(63)"),
+        ("TIMESTAMPTZ", "TIMESTAMPTZ(0)"),
+        ("DECIMAL", "DECIMAL(10,2)"),
+        ("INET[]", "UUID[]"),
+        ("INTERVAL(0)", "INTERVAL(0)"),
+        ("UUID[]", "UUID[]"),
+    ];
+
+    let mut wrong = Vec::new();
+    for (dbinit_type, migration_type) in cases {
+        let dbinit = get_information_schema(
+            log,
+            &format!(
+                "
+                CREATE DATABASE omicron;
+                CREATE TABLE omicron.public.animal (
+                    id UUID PRIMARY KEY,
+                    value {dbinit_type}
+                );
+                "
+            ),
+        )
+        .await;
+
+        let migrated = get_information_schema(
+            log,
+            &format!(
+                "
+                CREATE DATABASE omicron;
+                CREATE TABLE omicron.public.animal (
+                    id UUID PRIMARY KEY
+                );
+                ALTER TABLE omicron.public.animal
+                    ADD COLUMN IF NOT EXISTS value {migration_type};
+                "
+            ),
+        )
+        .await;
+
+        // Use the same comparison as the migration tests.
+        let detected = std::panic::catch_unwind(|| {
+            migrated.pretty_assert_eq(&dbinit);
+        })
+        .is_err();
+        let expected = dbinit_type != migration_type;
+        if detected != expected {
+            wrong.push(format!(
+                "{dbinit_type} vs {migration_type}: \
+                 expected mismatch = {expected}, detected = {detected}"
+            ));
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "unexpected schema comparison results: {wrong:#?}"
+    );
+
+    logctx.cleanup_successful();
+}
+
 #[tokio::test]
 async fn validate_migration_from_base_version() {
     let config = load_test_config();
