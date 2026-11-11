@@ -13,6 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::BaseboardId;
 
+/// The status of a the multirack join service for a new rack that's going to be
+/// added to a regional cluster.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct MultirackJoinServiceStatus {
     pub sled_id: SledUuid,
