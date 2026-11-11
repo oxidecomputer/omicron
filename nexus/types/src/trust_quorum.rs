@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
 use trust_quorum_types::membership::TrustQuorumMembers;
+use trust_quorum_types::membership::TrustQuorumMembersError;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
@@ -273,26 +274,27 @@ impl ProposedTrustQuorumConfig {
         }
     }
 
-    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
-    // from the membership. Return an error if the sled is not a member of the
-    // `latest_committed_config`.
     pub fn remove_sled(
         latest_committed_config: &TrustQuorumConfig,
         new_epoch: Epoch,
         sled_to_remove: &BaseboardId,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, RemoveSledError> {
         let rack_id = latest_committed_config.rack_id;
         let mut members: BTreeSet<_> =
             latest_committed_config.members.keys().cloned().collect();
 
         if !members.remove(sled_to_remove) {
-            return Err(Error::invalid_request(format!(
-                "Sled {} is not a member of the trust quorum.",
-                sled_to_remove
-            )));
+            return Err(RemoveSledError::NotMember {
+                sled: sled_to_remove.clone(),
+            });
         }
-        let members = TrustQuorumMembers::new(members)
-            .map_err(|error| Error::internal_error(&error.to_string()))?;
+        let members = TrustQuorumMembers::new(members).map_err(|error| {
+            RemoveSledError::InvalidMembership {
+                rack_id,
+                sled: sled_to_remove.clone(),
+                error,
+            }
+        })?;
 
         Ok(ProposedTrustQuorumConfig {
             rack_id,
@@ -303,6 +305,22 @@ impl ProposedTrustQuorumConfig {
             members,
         })
     }
+}
+
+/// Why [`ProposedTrustQuorumConfig::remove_sled`] refused to remove a sled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoveSledError {
+    /// The sled is not a member of the trust quorum.
+    NotMember {
+        sled: BaseboardId,
+    },
+    /// The members left after removing `sled` are outside the trust quorum size
+    /// bounds.
+    InvalidMembership {
+        rack_id: RackUuid,
+        sled: BaseboardId,
+        error: TrustQuorumMembersError,
+    },
 }
 
 /// Given the current trust quorum config returned by
@@ -556,15 +574,29 @@ mod tests {
         );
 
         let non_member = test_baseboard("not-a-member");
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &non_member,
+        )
+        .expect_err("removing a non-member sled is refused");
+        assert_eq!(error, RemoveSledError::NotMember { sled: non_member });
+
+        let minimum =
+            test_config(3, Epoch(5), TrustQuorumConfigState::Committed);
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &minimum,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect_err("removing from a minimum-size trust quorum is refused");
         assert_eq!(
-            ProposedTrustQuorumConfig::remove_sled(
-                &config,
-                Epoch(6),
-                &non_member,
-            ),
-            Err(Error::invalid_request(format!(
-                "Sled {non_member} is not a member of the trust quorum."
-            ))),
+            error,
+            RemoveSledError::InvalidMembership {
+                rack_id: minimum.rack_id,
+                sled: sled_to_remove,
+                error: TrustQuorumMembersError::TooFew { num_members: 2 },
+            },
         );
     }
 }
