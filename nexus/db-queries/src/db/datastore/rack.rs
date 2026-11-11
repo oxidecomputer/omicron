@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Rack`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use super::dns::DnsVersionUpdateBuilder;
 use super::rendezvous_sled_bp_availability::SledBpAvailabilityWriteError;
 use crate::authz;
@@ -20,6 +21,7 @@ use crate::db::model::Rack;
 use crate::db::model::UserProvisionType;
 use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -220,6 +222,25 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn rack_list_all_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Rack> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let mut all_racks = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self.rack_list(opctx, &p.current_pagparams()).await?;
+            paginator =
+                p.found_batch(&batch, &|r: &Rack| r.id().into_untyped_uuid());
+            all_racks.extend(batch);
+        }
+        Ok(all_racks)
     }
 
     pub async fn rack_list_initialized(

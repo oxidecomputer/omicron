@@ -22,6 +22,7 @@ use bootstrap_agent_lockstep_types::{
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::MULTIRACK_JOIN_SERVICE_INDEX;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_ledger::{self as ledger};
@@ -39,6 +40,7 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use static_assertions::const_assert;
 use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
@@ -1097,6 +1099,9 @@ fn assign_ids_and_subnets(
 
     let this_nodes_sled_id = SledUuid::new_v4();
 
+    // We assume in the loop below that this index is always the first one.
+    const_assert!(MULTIRACK_JOIN_SERVICE_INDEX == 1);
+
     let sleds = once(SledAgentInfo {
         baseboard_id: this_nodes_baseboard_id.to_owned(),
         sled_id: this_nodes_sled_id,
@@ -1105,7 +1110,7 @@ fn assign_ids_and_subnets(
         // us to deterministically find the sled-agent running this code.
         // Specifically, we want to find the sled-agent hosting the multirack
         // join service.
-        sled_subnet: get_64_subnet(rack_subnet, 1),
+        sled_subnet: get_64_subnet(rack_subnet, MULTIRACK_JOIN_SERVICE_INDEX),
         start_state: SledAgentStartState::InProgress { last_error: None },
     })
     .chain(

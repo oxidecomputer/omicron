@@ -15,9 +15,12 @@ use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
+use iddqd::IdOrdMap;
 use itertools::Itertools;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::DiscoveredRack;
+use nexus_types::inventory::DiscoveredSled;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::Psu;
 use nexus_types::inventory::PsuState;
@@ -27,20 +30,28 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_ADMIN_PORT;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::multirack_join_service_address;
 use omicron_common::http_client::internal_http_client;
 use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxnet::Ipv6Net;
 use parallel_task_set::ParallelTaskSet;
+use rand::seq::SliceRandom;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::o;
-use slog::{debug, error};
+use slog::{debug, error, warn};
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,7 +71,12 @@ pub struct Collector<'a> {
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
+    known_rack_subnets: BTreeSet<Ipv6Net>,
     in_progress: CollectionBuilder,
+    #[cfg(test)]
+    join_service_url_override: Option<
+        Box<dyn Fn(Ipv6Subnet<RACK_PREFIX_LENGTH>) -> String + Send + Sync>,
+    >,
 }
 
 impl<'a> Collector<'a> {
@@ -70,6 +86,7 @@ impl<'a> Collector<'a> {
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
+        known_rack_subnets: BTreeSet<Ipv6Net>,
         log: slog::Logger,
     ) -> Self {
         Collector {
@@ -78,8 +95,22 @@ impl<'a> Collector<'a> {
             keeper_admin_clients,
             cockroach_admin_client,
             sled_agent_lister,
+            known_rack_subnets,
             in_progress: CollectionBuilder::new(creator),
+            #[cfg(test)]
+            join_service_url_override: None,
         }
+    }
+
+    fn join_service_url(
+        &self,
+        subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    ) -> String {
+        #[cfg(test)]
+        if let Some(override_fn) = &self.join_service_url_override {
+            return override_fn(subnet);
+        }
+        format!("http://{}", multirack_join_service_address(subnet))
     }
 
     /// Begin the process of collecting a complete hardware/software inventory
@@ -106,6 +137,7 @@ impl<'a> Collector<'a> {
 
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
+        self.collect_all_multirack().await;
         self.collect_all_keepers().await;
         self.collect_all_cockroach().await;
 
@@ -532,6 +564,126 @@ impl<'a> Collector<'a> {
         }
     }
 
+    /// Locate any unadopted racks on the underlay network and poll their
+    /// multirack join service.
+    ///
+    /// Unadopted racks are discoverd by querying *any* sled-agent for peer rack
+    /// prefixes and ensuring that those prefixes are not already present in the
+    /// `rack` table as of this collection. Prefixes are learned via DDM which
+    /// is eventually consistent on all sleds.
+    ///
+    /// Once an unknown rack prefix is discovered the sled-agent hosting its
+    /// multirack join service is polled for status to fill in the inventory.
+    ///
+    /// We retry on each collection until adoption. This allows state updates to
+    /// be gathered.
+    async fn collect_all_multirack(&mut self) {
+        // Pick a random sled-agent to query for status.
+        //
+        // While we could use this nexus's local sled-agent, it's more robust
+        // to pick a random one and then retry with a fallback in case of
+        // unavailability. Additionally, finding the local sled-agent requires
+        // the Nexus IP so that we can peel off the /64 sled-prefix and
+        // construct the sled-agent address. This requires us to pass the Nexus
+        // IP into the collection task. It also doesn't work in tests because
+        // localhost is used rather than real underlay addresses.
+        let mut urls = match self.sled_agent_lister.list_sled_agents().await {
+            Err(error) => {
+                self.in_progress.found_error(error);
+                return;
+            }
+            Ok(urls) => urls,
+        };
+        if urls.is_empty() {
+            warn!(&self.log, "no sled agents available for multirack");
+            return;
+        }
+        urls.shuffle(&mut rand::rng());
+
+        // Try sled-agents one at a time until one succeeds, recording any
+        // errors along the way.
+        let mut errors = Vec::new();
+        let mut success = None;
+        for url in &urls {
+            let log = self.log.new(o!("SledAgent" => url.clone()));
+            match collect_peer_rack_prefixes(url, log).await {
+                Err(error) => errors.push(error),
+                Ok(prefixes) => {
+                    success = Some((url, prefixes));
+                    break;
+                }
+            }
+        }
+        let Some((url, prefixes)) = success else {
+            for error in errors {
+                self.in_progress.found_error(error);
+            }
+            return;
+        };
+
+        // Filter out any known rack prefixes
+        let mut rack_subnets = Vec::new();
+        for prefix in prefixes {
+            if self.known_rack_subnets.contains(&prefix) {
+                continue;
+            }
+            if prefix.width() != RACK_PREFIX_LENGTH {
+                self.in_progress.found_error(InventoryError::from(anyhow!(
+                    "Sled Agent {url:?}: peer rack prefix {prefix} is not \
+                     a /{RACK_PREFIX_LENGTH}"
+                )));
+                continue;
+            }
+            rack_subnets
+                .push(Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(prefix.addr()));
+        }
+
+        // Contact the multirack join service to collect inventory for any
+        // discovered racks.
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::with_capacity(rack_subnets.len());
+        for (idx, subnet) in rack_subnets.into_iter().enumerate() {
+            let url = self.join_service_url(subnet);
+            let join_service_ip = *multirack_join_service_address(subnet).ip();
+            let log = self.log.new(o!("JoinService" => url.clone()));
+            let task = async move {
+                let result =
+                    collect_one_join_service(&url, join_service_ip, log).await;
+                (idx, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        // Record our discoveries
+        results.sort_by_key(|(idx, _)| *idx);
+        for (_, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(None) => (),
+                Ok(Some(rack)) => {
+                    let rack_id = rack.rack_id;
+                    let rack_subnet = rack.rack_subnet;
+                    if let Err(err) =
+                        self.in_progress.found_discovered_rack(rack)
+                    {
+                        error!(
+                            &self.log,
+                            "Failed to record discovered rack";
+                            "rack_id" => ?rack_id,
+                            "rack_subnet" => ?rack_subnet,
+                            "error" => ?err
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Collect timesync status from all sleds
     async fn collect_all_timesync(&mut self) {
         let ntp_admin_clients: Vec<_> = self
@@ -766,6 +918,93 @@ async fn collect_one_sled_agent(
         .await
         .with_context(|| format!("Sled Agent {:?}: inventory", url))?;
     Ok(inventory.into_inner())
+}
+
+fn discovered_rack_from_status(
+    join_service_ip: Ipv6Addr,
+    status: MultirackJoinServiceStatus,
+) -> DiscoveredRack {
+    let discovered_sleds = status
+        .sled_agents
+        .into_iter()
+        .map(|info| DiscoveredSled {
+            sled_id: info.sled_id,
+            baseboard_id: info.baseboard_id,
+            sled_subnet: Ipv6Subnet::new(info.address),
+            sled_agent_start_state: info.start_state,
+        })
+        .collect::<IdOrdMap<_>>();
+    DiscoveredRack {
+        rack_id: status.rack_id,
+        rack_subnet: status.rack_subnet,
+        join_service_ip,
+        discovered_sleds,
+    }
+}
+
+async fn collect_peer_rack_prefixes(
+    url: &str,
+    log: Logger,
+) -> Result<BTreeSet<Ipv6Net>, InventoryError> {
+    debug!(&log, "begin peer rack prefix collection from Sled Agent";
+        "sled_agent_url" => url
+    );
+
+    let reqwest_client = internal_http_client_builder()
+        .connect_timeout(SLED_AGENT_TIMEOUT)
+        .timeout(SLED_AGENT_TIMEOUT)
+        .build()
+        .unwrap();
+    let client =
+        sled_agent_client::Client::new_with_client(url, reqwest_client, log);
+
+    let prefixes = client
+        .peer_rack_prefixes()
+        .await
+        .with_context(|| format!("Sled Agent {:?}: peer rack prefixes", url))?;
+    Ok(prefixes.into_inner().into_iter().collect())
+}
+
+/// Retrieve the mulitrack join service status from the sled-agent hosting it.
+async fn collect_one_join_service(
+    url: &str,
+    join_service_ip: Ipv6Addr,
+    log: Logger,
+) -> Result<Option<DiscoveredRack>, InventoryError> {
+    debug!(&log, "begin collection from multirack join service";
+        "join_service_url" => url
+    );
+
+    let reqwest_client = internal_http_client_builder()
+        .connect_timeout(SLED_AGENT_TIMEOUT)
+        .timeout(SLED_AGENT_TIMEOUT)
+        .build()
+        .unwrap();
+    let client = sled_agent_client::Client::new_with_client(
+        url,
+        reqwest_client,
+        log.clone(),
+    );
+
+    match client.multirack_join_service_status().await {
+        Ok(status) => Ok(Some(discovered_rack_from_status(
+            join_service_ip,
+            status.into_inner(),
+        ))),
+        Err(sled_agent_client::Error::ErrorResponse(response))
+            if response.status() == reqwest::StatusCode::NOT_FOUND
+                || response.status() == reqwest::StatusCode::CONFLICT =>
+        {
+            debug!(&log, "join service status not available";
+                "join_service_url" => url,
+                "status" => %response.status(),
+            );
+            Ok(None)
+        }
+        Err(error) => Err(InventoryError::from(anyhow!(error).context(
+            format!("Join service {:?}: multirack-join-service-status", url),
+        ))),
+    }
 }
 
 /// Collect timesync status from a single NTP admin server
@@ -1054,6 +1293,7 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use crate::examples::RACK_UUID;
     use gateway_messages::SpPort;
+    use iddqd::BiHashMap;
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
@@ -1062,14 +1302,17 @@ mod test {
     use nexus_types::inventory::PsuIdentity;
     use nexus_types::inventory::PsuIdentityResult;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
     use omicron_test_utils::dev::test_cmds::Redactor;
+    use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use oxnet::Ipv6Net;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::OmicronSledConfig;
@@ -1077,6 +1320,10 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::multirack::MultirackJoinServiceStatus;
+    use sled_agent_types::multirack::SledAgentInfo;
+    use sled_agent_types::multirack::SledAgentStartState;
+    use sled_hardware_types::BaseboardId;
     use slog::o;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
@@ -1360,6 +1607,25 @@ mod test {
             }
         }
 
+        swrite!(s, "\ndiscovered racks:\n");
+        for rack in &collection.discovered_racks {
+            swriteln!(
+                s,
+                "    rack subnet {} join service ip {}",
+                rack.rack_subnet.net(),
+                rack.join_service_ip,
+            );
+            for sled in &rack.discovered_sleds {
+                swriteln!(
+                    s,
+                    "        sled serial {} subnet {} start state {:?}",
+                    sled.baseboard_id.serial_number,
+                    sled.sled_subnet.net(),
+                    sled.sled_agent_start_state,
+                );
+            }
+        }
+
         swrite!(s, "\nerrors:\n");
         let os_error_re = regex::Regex::new(r"os error \d+").unwrap();
         let comm_error_re =
@@ -1561,6 +1827,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
+            BTreeSet::new(),
             log.clone(),
         );
         let collection = collector
@@ -1643,6 +1910,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
+            BTreeSet::new(),
             log.clone(),
         );
         let collection = collector
@@ -1658,6 +1926,159 @@ mod test {
         sled1.http_server.close().await.unwrap();
         gwtestctx1.teardown().await;
         gwtestctx2.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_multirack_discovery() {
+        let logctx = test_setup_log("test_multirack_discovery");
+        let log = &logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let join_target = sim_sled_agent(
+            log.clone(),
+            "0cbcf672-4f36-4f03-be8c-0bc906e6ef13".parse().unwrap(),
+            RACK_UUID,
+            "45e47e2b-8dd3-4a94-bd15-7a2aa40f1cf1".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let known_prefix: Ipv6Net = "fd00:1122:3344:100::/56".parse().unwrap();
+        let new_prefix: Ipv6Net = "fd00:1122:3344:200::/56".parse().unwrap();
+        let peer_prefixes: BTreeSet<Ipv6Net> =
+            [known_prefix, new_prefix].into_iter().collect();
+        for sled in [&sled1, &sled2, &join_target] {
+            sled.sled_agent.set_peer_rack_prefixes(peer_prefixes.clone());
+        }
+
+        let discovered_rack_id: RackUuid =
+            "b4d53f0e-6ce2-43e1-a1a4-74a71b9800aa".parse().unwrap();
+        let discovered_sled_id: SledUuid =
+            "55a5c198-5f90-4a35-9192-a09be165f7d2".parse().unwrap();
+        let join_service_ip: Ipv6Addr =
+            "fd00:1122:3344:201::1".parse().unwrap();
+        let mut sled_agents = BiHashMap::new();
+        sled_agents
+            .insert_unique(SledAgentInfo {
+                baseboard_id: BaseboardId {
+                    part_number: "i86pc".to_string(),
+                    serial_number: "discovered-sled".to_string(),
+                },
+                sled_id: discovered_sled_id,
+                address: join_service_ip,
+                start_state: SledAgentStartState::Started,
+            })
+            .unwrap();
+        join_target.sled_agent.set_multirack_join_service_status(Some(
+            MultirackJoinServiceStatus {
+                sled_id: discovered_sled_id,
+                rack_id: discovered_rack_id,
+                rack_subnet: Ipv6Subnet::new(new_prefix.addr()),
+                sled_agents,
+            },
+        ));
+
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
+        let join_url =
+            format!("http://{}/", join_target.http_server.local_addr());
+        let sled_enum = StaticSledAgentEnumerator::new([
+            sled1_url,
+            sled2_url,
+            join_url.clone(),
+        ]);
+        let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
+        let known_rack_subnets: BTreeSet<Ipv6Net> =
+            [known_prefix].into_iter().collect();
+
+        let mut collector = Collector::new(
+            "test-suite",
+            Vec::new(),
+            keeper_clients,
+            &crdb_cluster,
+            &sled_enum,
+            known_rack_subnets.clone(),
+            log.clone(),
+        );
+        let override_url = join_url.clone();
+        collector.join_service_url_override =
+            Some(Box::new(move |_| override_url.clone()));
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(
+            collection.errors.is_empty(),
+            "Collection errors: {:#?}",
+            collection.errors
+        );
+        assert_eq!(collection.discovered_racks.len(), 1);
+        let rack = collection.discovered_racks.iter().next().unwrap();
+        assert_eq!(rack.rack_id, discovered_rack_id);
+        assert_eq!(rack.rack_subnet, Ipv6Subnet::new(new_prefix.addr()));
+        assert_eq!(rack.join_service_ip, join_service_ip);
+        assert_eq!(rack.discovered_sleds.len(), 1);
+        let sled = rack.discovered_sleds.iter().next().unwrap();
+        assert_eq!(sled.sled_id, discovered_sled_id);
+        assert_eq!(sled.baseboard_id.serial_number, "discovered-sled");
+        assert_eq!(
+            sled.sled_subnet.net().to_string(),
+            "fd00:1122:3344:201::/64"
+        );
+        assert_eq!(sled.sled_agent_start_state, SledAgentStartState::Started);
+
+        join_target.sled_agent.set_multirack_join_service_status(None);
+        let mut collector = Collector::new(
+            "test-suite",
+            Vec::new(),
+            Vec::new(),
+            &crdb_cluster,
+            &sled_enum,
+            known_rack_subnets,
+            log.clone(),
+        );
+        let override_url = join_url.clone();
+        collector.join_service_url_override =
+            Some(Box::new(move |_| override_url.clone()));
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(
+            collection.errors.is_empty(),
+            "Collection errors: {:#?}",
+            collection.errors
+        );
+        assert!(collection.discovered_racks.is_empty());
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1693,6 +2114,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
+            BTreeSet::new(),
             log.clone(),
         );
         let collection = collector
@@ -1751,6 +2173,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
+            BTreeSet::new(),
             log.clone(),
         );
         let collection = collector
