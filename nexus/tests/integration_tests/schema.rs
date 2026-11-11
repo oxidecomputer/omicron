@@ -567,8 +567,8 @@ const COLUMNS: [&'static str; 11] = [
     // None of the type columns above say whether a column is computed, or
     // what it is computed from. Whether a computed column is STORED or
     // VIRTUAL is not reported here; it is compared through
-    // "information_schema.statistics", where STORED columns appear in the
-    // primary index.
+    // "information_schema.statistics", where a STORED computed column appears
+    // as a "storing" column of the primary index and a VIRTUAL one does not.
     "is_generated",
     "generation_expression",
     // CockroachDB-specific: "YES" for NOT VISIBLE columns.
@@ -1374,8 +1374,7 @@ async fn compare_table_differing_not_null_order() {
 //
 // Each pair of differing types below has the same base type, but differs in
 // precision, length, interval fields, or array element type. Pairs of
-// identical types act as a control. Mirroring a migration, one schema creates
-// the column with "CREATE TABLE", the other with "ALTER TABLE ... ADD COLUMN".
+// identical types act as a control.
 #[tokio::test]
 async fn compare_table_differing_column_type_modifiers() {
     let config = load_test_config();
@@ -1422,6 +1421,7 @@ async fn compare_table_differing_generated_and_hidden_columns() {
             ("INT8 AS (num + 1) STORED", "INT8 AS (num + 2) STORED"),
             ("INT8 AS (num + 1) VIRTUAL", "INT8 AS (num + 1) STORED"),
             ("INT8", "INT8 NOT VISIBLE"),
+            ("INT8 AS (num + 1) STORED", "INT8 AS (num + 1) STORED"),
             ("INT8 AS (num + 1) VIRTUAL", "INT8 AS (num + 1) VIRTUAL"),
             ("INT8 NOT VISIBLE", "INT8 NOT VISIBLE"),
         ],
