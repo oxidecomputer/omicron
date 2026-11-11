@@ -67,15 +67,15 @@ impl From<TrustQuorumMembers> for BTreeSet<BaseboardId> {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TrustQuorumMembersError {
     #[error(
-        "Invalid Trust Quorum membership size ({num_members}): must be \
+        "Invalid trust quorum membership size ({num_members}): must be \
          between {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} \
-         nodes"
+         sleds."
     )]
     TooFew { num_members: usize },
     #[error(
-        "Invalid Trust Quorum membership size ({num_members}): must be \
+        "Invalid trust quorum membership size ({num_members}): must be \
          between {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} \
-         nodes"
+         sleds."
     )]
     TooMany { num_members: usize },
 }
@@ -124,7 +124,7 @@ mod tests {
                 .expect_err("out-of-bounds member set is rejected");
             assert!(
                 error.to_string().starts_with(&format!(
-                    "Invalid Trust Quorum membership size ({num_members})"
+                    "Invalid trust quorum membership size ({num_members})"
                 )),
                 "unexpected error: {error}",
             );
