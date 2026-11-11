@@ -14,10 +14,12 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
+use nexus_lockstep_client::types::LastResult;
 use nexus_lockstep_client::types::SledPolicy;
 use nexus_lockstep_client::types::SledProvisionPolicy;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::background::activate_background_task_with_timeout;
 use nexus_test_utils::background::run_inventory_collection;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
@@ -28,6 +30,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
+use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::TrustQuorumConfig;
@@ -46,6 +49,7 @@ use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::time::Duration;
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::crypto::Sha3_256Digest;
 use trust_quorum_types::types::Epoch;
@@ -661,5 +665,59 @@ async fn test_sled_expunge_trust_quorum_gate(
     assert_eq!(
         expunge_sled(&lockstep_client, sled_id).await,
         Ok(SledPolicy::InService(SledProvisionPolicy::Provisionable)),
+    );
+}
+
+#[nexus_test]
+async fn test_trust_quorum_manager_aborts_config_with_coordinator_not_in_service(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = test_opctx(cptestctx);
+    let coordinator = commission_fake_trust_quorum_member(cptestctx).await;
+    let tq = TrustQuorumConfigDriver {
+        opctx: &opctx,
+        datastore,
+        rack_id: nexus_test_utils::RACK_UUID,
+    };
+    let members: BTreeSet<_> = tq.config(1).await.members.into_keys().collect();
+
+    tq.propose(2, 1, &members).await;
+    expunge_and_decommission(cptestctx, &opctx, coordinator.sled_id).await;
+
+    let task = activate_background_task_with_timeout(
+        &cptestctx.lockstep_client,
+        "trust_quorum_manager",
+        // This timeout is well beyond the trust quorum manager's 15s sled-agent
+        // client timeout.
+        Duration::from_secs(60),
+    )
+    .await;
+    let LastResult::Completed(completed) = task.last else {
+        panic!("trust_quorum_manager completed an activation: {:?}", task.last);
+    };
+    let details = completed.details;
+    match serde_json::from_value::<TrustQuorumManagerStatus>(details.clone())
+        .expect("parsed trust_quorum_manager details")
+    {
+        TrustQuorumManagerStatus::PerRackStatus { errors, .. } => {
+            assert_eq!(errors, Vec::<String>::new(), "details: {details}");
+        }
+        TrustQuorumManagerStatus::Error(error) => {
+            panic!("trust_quorum_manager activation failed: {error}")
+        }
+    }
+    let config = tq.config(2).await;
+    assert_eq!(
+        (config.state, config.abort_reason),
+        (
+            TrustQuorumConfigState::Aborted,
+            Some(format!(
+                "Coordinator {} is no longer an in-service sled in rack {}; \
+                 aborted by the trust quorum background task.",
+                coordinator.baseboard_id, tq.rack_id
+            )),
+        ),
+        "activation details: {details}",
     );
 }
