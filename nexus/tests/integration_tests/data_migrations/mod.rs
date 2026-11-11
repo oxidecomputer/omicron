@@ -42,6 +42,7 @@ mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod sled_resource_vmm_state;
+mod support_bundle_sp_components;
 mod support_bundle_time_range;
 mod tufaceous_v2;
 mod vmm_failure_reason_if_failed;
@@ -90,6 +91,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(support_bundle_time_range);
     register!(inv_service_processor_rack_id);
     register!(add_rack_id_to_inv_sled_agent);
+    register!(support_bundle_sp_components);
 
     map
 }
