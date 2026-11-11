@@ -384,7 +384,7 @@ impl super::Nexus {
 }
 
 /// Returns the trust quorum members from a [`TrustQuorumConfig`].
-/// 
+///
 /// Returns an error if the number of members is out of bounds. (This can only
 /// happen if the database holds invalid state in some fashion.)
 fn tq_config_members(
