@@ -571,7 +571,10 @@ impl MulticastDataplaneClient {
             vni: Vni::from(u32::from(params.external_group.vni.0)),
         };
 
-        let new_name_str = params.new_name.to_string();
+        let external_tag =
+            params.external_group.tag.clone().ok_or_else(|| {
+                Error::internal_error("multicast group missing tag")
+            })?;
         let external_group_ip = params.external_group.multicast_ip.ip();
 
         // Source filtering per RFC 4607:
@@ -603,7 +606,7 @@ impl MulticastDataplaneClient {
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
-                let new_name = new_name_str.clone();
+                let external_tag = external_tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
@@ -702,7 +705,7 @@ impl MulticastDataplaneClient {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
-                        tag: Some(new_name.clone()),
+                        tag: Some(external_tag),
                         sources,
                     };
 

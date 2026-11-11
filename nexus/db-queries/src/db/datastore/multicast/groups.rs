@@ -920,11 +920,11 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
-    use omicron_common::address::{IpRange, Ipv4Range};
+    use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
@@ -2572,6 +2572,90 @@ mod tests {
             matches!(res3, EnsureUnderlayResult::Existing(_)),
             "Re-ensure same group should return Existing, got {res3:?}"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_tag_fits_uncompressed_ipv6() {
+        let logctx = dev::test_setup_log(
+            "test_multicast_group_tag_fits_uncompressed_ipv6",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "long-tag-pool".parse().unwrap(),
+            description: "Pool for the longest tag".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv6 multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        // This IP address's canonical form (RFC 5952) is the full 39
+        // characters, without leading zeros or a `::` to shorten it. The tag
+        // is 76 characters: UUID (36) + ':' (1) + IPv6 address (39).
+        let group_ip: Ipv6Addr =
+            "ff0e:1234:5678:9abc:def0:1234:5678:9abc".parse().unwrap();
+        let range = IpRange::V6(Ipv6Range::new(group_ip, group_ip).unwrap());
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id.into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "long-tag-group".parse().unwrap(),
+                description: "Group with the longest tag".to_string(),
+            },
+            multicast_ip: Some(IpAddr::V6(group_ip)),
+            has_sources: false,
+            ip_version: None,
+        };
+        let group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create group with an uncompressed IPv6 address");
+
+        let expected_tag = format!("{}:{group_ip}", group.id());
+        assert_eq!(expected_tag.len(), 76);
+        assert_eq!(group.tag.as_deref(), Some(expected_tag.as_str()));
+
+        let underlay_ip: IpNetwork = "ff04::dead:beef".parse().unwrap();
+        let res = datastore
+            .ensure_underlay_multicast_group(&opctx, group, underlay_ip)
+            .await
+            .expect("Should create underlay group");
+        let EnsureUnderlayResult::Created(underlay) = res else {
+            panic!("expected a new underlay group, got {res:?}");
+        };
+        assert_eq!(underlay.tag.as_deref(), Some(expected_tag.as_str()));
 
         db.terminate().await;
         logctx.cleanup_successful();
