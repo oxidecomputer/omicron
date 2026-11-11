@@ -25847,7 +25847,7 @@
         "type": "object",
         "properties": {
           "status": {
-            "description": "What the system is doing",
+            "description": "What the system is doing\n\nThis is a best-effort debugging aid that may be incomplete or even misleading.  (It should not be incorrect.  However, the system is often waiting for more than one different thing to happen and the one reported here may not always be the most salient.)",
             "allOf": [
               {
                 "$ref": "#/components/schemas/OperatorStatus"
@@ -25855,7 +25855,7 @@
             ]
           },
           "status_message": {
-            "description": "Human-readable description of `status`",
+            "description": "Human-readable description of `status`\n\nThis is a best-effort debugging aid that may be incomplete or even misleading.  (It should not be incorrect.  However, the system is often waiting for more than one different thing to happen and the one reported here may not always be the most salient.)",
             "type": "string"
           },
           "time_planned": {

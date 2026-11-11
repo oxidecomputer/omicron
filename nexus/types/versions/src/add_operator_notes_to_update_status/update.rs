@@ -99,9 +99,21 @@ pub struct OperatorNotes {
     /// This is null if no planning run has completed, in which case the status
     /// is `unknown`.
     pub time_planned: Nullable<DateTime<Utc>>,
+
     /// What the system is doing
+    ///
+    /// This is a best-effort debugging aid that may be incomplete or even
+    /// misleading.  (It should not be incorrect.  However, the system is often
+    /// waiting for more than one different thing to happen and the one reported
+    /// here may not always be the most salient.)
     pub status: OperatorStatus,
+
     /// Human-readable description of `status`
+    ///
+    /// This is a best-effort debugging aid that may be incomplete or even
+    /// misleading.  (It should not be incorrect.  However, the system is often
+    /// waiting for more than one different thing to happen and the one reported
+    /// here may not always be the most salient.)
     pub status_message: String,
 }
 

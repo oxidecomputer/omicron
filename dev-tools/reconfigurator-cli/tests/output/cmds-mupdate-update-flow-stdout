@@ -639,7 +639,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)
@@ -928,7 +928,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -1048,7 +1048,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting current measurements to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone adds waiting on blockers
@@ -1287,7 +1287,7 @@ INFO measurement install dataset artifact hash not found in TUF repo, ignoring f
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
@@ -1521,7 +1521,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
@@ -1667,7 +1667,7 @@ ffa6a263fe18e2882f2024aeec01b6b7b3e8f50c87b49fb44a217ccab18b32cb version 2.0.0
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * noop converting current measurements to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
@@ -1899,7 +1899,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * noop converting current measurements to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
@@ -2035,7 +2035,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
@@ -3271,7 +3271,7 @@ INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-e
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)

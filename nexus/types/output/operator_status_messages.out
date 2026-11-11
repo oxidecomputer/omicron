@@ -5,7 +5,7 @@ Busy
     System is busy
 
 WaitingForMupdateResolution
-    Waiting for operator to resolve MUPdate
+    Waiting for MUPdate resolution
 
 WaitingForUpdate(ServiceRecovery { service: InternalDns })
     Waiting for internal services to recover after recent changes (internal_dns)

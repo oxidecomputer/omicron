@@ -124,7 +124,7 @@ INFO skipped noop image source check on sled, sled_id: e96e226f-4ed9-4c01-91b9-6
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 5/6 install-dataset zones to artifact store on sled aff6c093-197d-42c5-ad80-9f10ba051a34
 * zone adds waiting on blockers
@@ -425,7 +425,7 @@ INFO current sled measurements are in an unknown state, sled_id: e96e226f-4ed9-4
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for operator to resolve MUPdate
+status for operators: Waiting for MUPdate resolution
 * noop converting 2/2 install-dataset zones to artifact store on sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 * zone adds waiting on blockers
 * zone adds and updates are blocked:

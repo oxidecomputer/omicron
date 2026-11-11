@@ -47,7 +47,7 @@ impl fmt::Display for OperatorStatus {
             OperatorStatus::AtRest => write!(f, "No changes in progress"),
             OperatorStatus::Busy => write!(f, "System is busy"),
             OperatorStatus::WaitingForMupdateResolution => {
-                write!(f, "Waiting for operator to resolve MUPdate")
+                write!(f, "Waiting for MUPdate resolution")
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::ServiceRecovery {
                 service,
