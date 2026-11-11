@@ -991,6 +991,7 @@ mod tests {
     use trust_quorum_types::crypto::{
         EncryptedRackSecrets, Salt, Sha3_256Digest,
     };
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use uuid::Uuid;
 
     async fn load_config(
@@ -1046,7 +1047,8 @@ mod tests {
             opctx,
             &conn,
             authz::TrustQuorumConfig::for_rack_id(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             members.first().expect("at least one member").clone(),
         )
         .await
@@ -1060,7 +1062,8 @@ mod tests {
                     is_lrtq_upgrade: IsLrtqUpgrade::No {
                         last_committed_epoch: Epoch(1),
                     },
-                    members: members.clone(),
+                    members: TrustQuorumMembers::new(members.clone())
+                        .expect("test members are within the size bounds"),
                 },
             )
             .await

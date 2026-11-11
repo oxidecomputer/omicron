@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "63.0.0"
+    "version": "64.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6960,11 +6960,7 @@
             "minimum": 0
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
@@ -9101,11 +9097,7 @@
             "minimum": 0
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
@@ -10545,6 +10537,16 @@
             ]
           }
         ]
+      },
+      "TrustQuorumMembers": {
+        "description": "The members of a trust quorum.\n\nA trust quorum has between [`TRUST_QUORUM_MIN_MEMBERS`] and [`TRUST_QUORUM_MAX_MEMBERS`] members, inclusive.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TrustQuorumNetworkConfig": {
         "description": "Network configuration used to bring up the control plane.\n\nThis type mirrors `bootstore::schemes::v0::NetworkConfig` but adds `JsonSchema` for API compatibility.",

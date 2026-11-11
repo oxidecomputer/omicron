@@ -11,4 +11,5 @@
 //! functions when necessary.
 
 mod epoch;
+mod membership;
 mod salt;

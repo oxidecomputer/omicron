@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (64, TRUST_QUORUM_MEMBERS),
     (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
     (62, ADD_SLED_REGISTRATION_INFO),
     (61, TRUST_QUORUM_NULLABLE_RESPONSES),
@@ -1578,21 +1579,77 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/trust-quorum/configuration",
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
+        body: TypedBody<
+            trust_quorum_types_versions::latest::messages::ReconfigureMsg,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_reconfigure",
+        method = POST,
+        path = "/trust-quorum/configuration",
+        versions = ..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_reconfigure_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::v1::messages::ReconfigureMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::trust_quorum_reconfigure(
+            request_context,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
 
     /// Initiate an upgrade from LRTQ
     #[endpoint {
         method = POST,
         path = "/trust-quorum/upgrade",
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
+        body: TypedBody<
+            trust_quorum_types_versions::latest::messages::LrtqUpgradeMsg,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        operation_id = "trust_quorum_upgrade_from_lrtq",
+        method = POST,
+        path = "/trust-quorum/upgrade",
+        versions = ..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::v1::messages::LrtqUpgradeMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::trust_quorum_upgrade_from_lrtq(
+            request_context,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
 
     /// Commit a trust quorum configuration
     #[endpoint {

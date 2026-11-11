@@ -6,7 +6,6 @@
 //!
 //! This crate re-exports types from `trust-quorum-types-versions::latest`,
 //! providing a stable interface for consumers who want the latest versions
-//! of all types. It also provides non-versioned types.
+//! of all types.
 
-pub mod membership;
 pub use trust_quorum_types_versions::latest::*;

@@ -1029,6 +1029,7 @@ mod tests {
     use std::time::Duration;
     use tokio::task::JoinHandle;
     use trust_quorum_protocol::NodeHandlerCtx;
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use trust_quorum_types::types::Threshold;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
@@ -1499,7 +1500,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -1619,7 +1623,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -1754,7 +1761,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -1967,7 +1977,10 @@ mod tests {
         let msg = LrtqUpgradeMsg {
             rack_id,
             epoch: Epoch(2),
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -2056,7 +2069,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -2341,7 +2357,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 

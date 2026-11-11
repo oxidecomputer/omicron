@@ -937,6 +937,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -8073,6 +8074,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "steno",
+ "trust-quorum-types",
  "uuid",
 ]
 
@@ -12814,6 +12816,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "toml 0.8.23",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -17368,6 +17371,7 @@ dependencies = [
  "rand 0.9.2",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "serde_with 3.21.0",
  "sled-hardware-types",
  "slog",
@@ -18640,6 +18644,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "slog",
+ "trust-quorum-types-versions",
  "wicketd-commission-types-versions",
 ]
 
@@ -18673,6 +18678,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "toml 0.8.23",
+ "trust-quorum-types-versions",
  "uuid",
  "zeroize",
 ]
