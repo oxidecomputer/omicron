@@ -2148,7 +2148,6 @@ mod tests {
             },
             members: proposed_members,
         };
-        // TODO:
         assert_conflict(
             datastore.tq_insert_latest_config(opctx, proposal.clone()).await,
             &format!(
