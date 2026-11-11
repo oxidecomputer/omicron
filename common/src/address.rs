@@ -29,6 +29,10 @@ pub const AZ_PREFIX_LENGTH: u8 = 48;
 pub const RACK_PREFIX_LENGTH: u8 = 56;
 pub const SLED_PREFIX_LENGTH: u8 = 64;
 
+/// The sled hosting the multirack join service is always the first /64 sled
+/// prefix for a given /56 rack subnet, by definition.
+pub const MULTIRACK_JOIN_SERVICE_INDEX: u8 = 1;
+
 /// Effective MTU for external-facing OPTE ports when jumbo frames have been
 /// opted into. 500 bytes of headroom under the 9000 byte underlay MTU leaves
 /// room for encapsulation overhead.
@@ -691,6 +695,16 @@ pub fn get_switch_zone_address(
     sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 ) -> Ipv6Addr {
     sled_subnet.net().nth(SWITCH_ZONE_ADDRESS_INDEX as u128).unwrap()
+}
+
+/// Return the address of the sled-agent hosting the multirack join service.
+///
+/// By construction, the sled hosting multirack join service is always the first
+/// /64 sled-prefix on a new, unadopted, rack.
+pub fn multirack_join_service_address(
+    rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+) -> SocketAddrV6 {
+    get_sled_address(get_64_subnet(rack_subnet, MULTIRACK_JOIN_SERVICE_INDEX))
 }
 
 /// Returns a sled subnet within a rack subnet.

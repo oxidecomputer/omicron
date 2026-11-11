@@ -1174,9 +1174,16 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn multirack_join_service_status(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        match sa.multirack_join_service_status.lock().unwrap().clone() {
+            Some(status) => Ok(HttpResponseOk(status)),
+            None => Err(HttpError::for_not_found(
+                None,
+                "no multirack join service running".to_string(),
+            )),
+        }
     }
 
     async fn sled_registration_info(
@@ -1186,9 +1193,10 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn peer_rack_prefixes(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeSet<Ipv6Net>>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        Ok(HttpResponseOk(sa.peer_rack_prefixes.lock().unwrap().clone()))
     }
 }
 
