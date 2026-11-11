@@ -52,6 +52,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::crypto::Sha3_256Digest;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
@@ -462,7 +463,8 @@ impl TrustQuorumConfigDriver<'_> {
                     is_lrtq_upgrade: IsLrtqUpgrade::No {
                         last_committed_epoch: Epoch(last_committed_epoch),
                     },
-                    members: members.clone(),
+                    members: TrustQuorumMembers::new(members.clone())
+                        .expect("test members are within the size bounds"),
                 },
             )
             .await

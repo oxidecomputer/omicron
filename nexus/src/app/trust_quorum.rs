@@ -16,8 +16,10 @@ use omicron_common::api::external::Error;
 use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::time::Duration;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::types::Epoch;
 
 impl super::Nexus {
@@ -218,6 +220,8 @@ impl super::Nexus {
             .collect();
 
         // Create a proposed configuration for the upgrade and save it to the DB
+        let members = TrustQuorumMembers::new(members)
+            .map_err(|error| Error::internal_error(&error.to_string()))?;
         let proposed = ProposedTrustQuorumConfig {
             rack_id,
             epoch: new_epoch,
@@ -276,7 +280,7 @@ impl super::Nexus {
             rack_id: config.rack_id,
             epoch: config.epoch,
             last_committed_epoch: config.last_committed_epoch,
-            members: config.members.keys().cloned().collect(),
+            members: tq_config_members(config)?,
             threshold: config.threshold,
         };
         client.trust_quorum_reconfigure(&req).await?;
@@ -307,7 +311,7 @@ impl super::Nexus {
         let req = trust_quorum_types::messages::LrtqUpgradeMsg {
             rack_id: config.rack_id,
             epoch: config.epoch,
-            members: config.members.keys().cloned().collect(),
+            members: tq_config_members(config)?,
             threshold: config.threshold,
         };
         client.trust_quorum_upgrade_from_lrtq(&req).await?;
@@ -363,15 +367,40 @@ impl super::Nexus {
             )));
         }
 
+        let members = TrustQuorumMembers::new(
+            new_sleds.union(&existing).cloned().collect(),
+        )
+        .map_err(|error| Error::internal_error(&error.to_string()))?;
+
         Ok(ProposedTrustQuorumConfig {
             rack_id,
             epoch: new_epoch,
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: latest_committed_config.epoch,
             },
-            members: new_sleds.union(&existing).cloned().collect(),
+            members,
         })
     }
+}
+
+/// Returns the trust quorum members from a [`TrustQuorumConfig`].
+/// 
+/// Returns an error if the number of members is out of bounds. (This can only
+/// happen if the database holds invalid state in some fashion.)
+fn tq_config_members(
+    config: &TrustQuorumConfig,
+) -> Result<TrustQuorumMembers, Error> {
+    TrustQuorumMembers::new(config.members.keys().cloned().collect()).map_err(
+        |error| {
+            Error::internal_error(&format!(
+                "trust quorum configuration for rack {} at epoch {} has \
+                 invalid membership: {}",
+                config.rack_id,
+                config.epoch,
+                InlineErrorChain::new(&error),
+            ))
+        },
+    )
 }
 
 fn coordinator_not_in_service_error(config: &TrustQuorumConfig) -> Error {

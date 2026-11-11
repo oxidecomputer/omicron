@@ -24,5 +24,8 @@ slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 testing = []
