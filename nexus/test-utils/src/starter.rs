@@ -21,6 +21,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_test_utils::setup::GatewayTestConfigFiles;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
@@ -165,6 +166,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     sled_index_allocator: SledIndexAllocator,
+    sim_trust_quorum: sim::SimTrustQuorumMode,
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -228,6 +230,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             clickhouse: None,
             sled_agents: vec![],
             sled_index_allocator: SledIndexAllocator::new(),
+            sim_trust_quorum: sim::SimTrustQuorumMode::default(),
             oximeter: None,
             producer: None,
             gateway: BTreeMap::new(),
@@ -252,6 +255,15 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             debug_dropbox_dir,
         }
+    }
+
+    // TODO-RAINCLAUDE: see ControlPlaneBuilder::with_sim_trust_quorum; applies to sim sleds started after this call and to the RSS handoff.
+    pub fn with_sim_trust_quorum(
+        mut self,
+        sim_trust_quorum: sim::SimTrustQuorumMode,
+    ) -> Self {
+        self.sim_trust_quorum = sim_trust_quorum;
+        self
     }
 
     pub async fn init_with_steps(
@@ -423,9 +435,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         port: Option<u16>,
         sp_sim_config_file: Utf8PathBuf,
     ) {
+        self.start_gateway_with_config_files(
+            switch_slot,
+            port,
+            GatewayTestConfigFiles::with_default_mgs_config(sp_sim_config_file),
+        )
+        .await
+    }
+
+    pub async fn start_gateway_with_config_files(
+        &mut self,
+        switch_slot: SwitchSlot,
+        port: Option<u16>,
+        gateway_config_files: GatewayTestConfigFiles,
+    ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config(sp_sim_config_file);
+        let (mut mgs_config, sp_sim_config) = gateway_config_files.load();
 
         // The sp_sim_config_file contains suitable configuration information for a MGS daemon running on
         // switch0. For switch1, the port information needs to be flipped in order for MGS to correctly identify
@@ -875,6 +900,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         self.initial_blueprint_id = Some(blueprint.id);
 
+        let initial_trust_quorum_configuration =
+            crate::trust_quorum::harness_initial_trust_quorum_config(
+                self.sim_trust_quorum,
+                &self.sled_agents,
+            );
+
         // Handoff all known service information to Nexus
         let server = N::start(
             self.nexus_internal
@@ -906,6 +937,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             &external_dns_zone_name,
             recovery_silo,
             tls_certificates,
+            initial_trust_quorum_configuration,
         )
         .await;
 
@@ -983,6 +1015,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sim_mode,
             SledCpuFamily::AmdMilan,
             sled_role,
+            self.sim_trust_quorum,
             &self.simulated_upstairs,
             sim::NexusRegistration::WaitForCompletion,
         )
@@ -1122,6 +1155,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sim_mode,
             SledCpuFamily::AmdMilan,
             SledRole::Gimlet,
+            self.sim_trust_quorum,
             &self.simulated_upstairs,
             sim::NexusRegistration::WaitForCompletion,
         )
@@ -1377,6 +1411,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             clickhouse: self.clickhouse.unwrap(),
             sled_agents: self.sled_agents,
             sled_index_allocator: self.sled_index_allocator,
+            sim_trust_quorum: self.sim_trust_quorum,
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
             logctx: self.logctx,
@@ -1672,7 +1707,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
     extra_sled_agents: u16,
-    gateway_config_file: Utf8PathBuf,
+    gateway_config_files: GatewayTestConfigFiles,
     second_nexus: bool,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
@@ -1743,7 +1778,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     // be configured. If extra sled agents are requested, then the second sled
     // agent will be for switch1.
 
-    let mgs_config = gateway_config_file.clone();
+    let mgs_config = gateway_config_files.clone();
     starter
         .init_with_steps(
             vec![
@@ -1751,7 +1786,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     "start_gateway_switch0",
                     Box::new(|builder| {
                         builder
-                            .start_gateway(
+                            .start_gateway_with_config_files(
                                 SwitchSlot::Switch0,
                                 None,
                                 mgs_config,
@@ -1801,10 +1836,10 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_gateway_switch1",
                         Box::new(|builder| {
                             builder
-                                .start_gateway(
+                                .start_gateway_with_config_files(
                                     SwitchSlot::Switch1,
                                     None,
-                                    gateway_config_file,
+                                    gateway_config_files,
                                 )
                                 .boxed()
                         }),
@@ -2085,6 +2120,7 @@ pub(crate) async fn start_sled_agent(
     sim_mode: sim::SimMode,
     cpu_family: SledCpuFamily,
     sled_role: SledRole,
+    trust_quorum: sim::SimTrustQuorumMode,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
     nexus_registration: sim::NexusRegistration,
 ) -> Result<sim::Server, String> {
@@ -2093,7 +2129,7 @@ pub(crate) async fn start_sled_agent(
     // to their corresponding SPs via baseboard_id.
     let baseboard_serial = format!("SimGimlet{:02}", sled_index);
 
-    let config = sim::Config::for_testing_with_baseboard(
+    let mut config = sim::Config::for_testing_with_baseboard(
         id,
         rack_id,
         sim_mode,
@@ -2103,6 +2139,7 @@ pub(crate) async fn start_sled_agent(
         Some(baseboard_serial),
         sled_role,
     );
+    config.trust_quorum = trust_quorum;
     start_sled_agent_with_config(
         log,
         &config,

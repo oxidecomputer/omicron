@@ -19,7 +19,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
+use gateway_test_utils::setup::GatewayTestConfigFiles;
 use gateway_test_utils::setup::GatewayTestContext;
 use nexus_config::NexusConfig;
 use nexus_lockstep_client::types::BlueprintTarget;
@@ -67,6 +67,8 @@ pub struct ControlPlaneBuilder<'a> {
     tls_cert: Option<Certificate>,
     nexus_config: NexusConfig,
     configure_second_nexus: bool,
+    sim_trust_quorum: sim::SimTrustQuorumMode,
+    gateway_config_files: GatewayTestConfigFiles,
 }
 
 impl<'a> ControlPlaneBuilder<'a> {
@@ -77,6 +79,8 @@ impl<'a> ControlPlaneBuilder<'a> {
             tls_cert: None,
             nexus_config: load_test_config(),
             configure_second_nexus: false,
+            sim_trust_quorum: sim::SimTrustQuorumMode::default(),
+            gateway_config_files: GatewayTestConfigFiles::default(),
         }
     }
 
@@ -95,6 +99,24 @@ impl<'a> ControlPlaneBuilder<'a> {
         self
     }
 
+    // TODO-RAINCLAUDE: Fake starts every sim sled (including later add_sled ones) with the fake sim trust quorum, and has the RSS handoff commit epoch 1 over the sim sleds' baseboards instead of fake members; needs 3 to 32 harness sim sleds (extra_sled_agents = 2 to 31), and 4 or more for one removal.
+    pub fn with_sim_trust_quorum(
+        mut self,
+        sim_trust_quorum: sim::SimTrustQuorumMode,
+    ) -> Self {
+        self.sim_trust_quorum = sim_trust_quorum;
+        self
+    }
+
+    // TODO-RAINCLAUDE: both switches' MGS use these files, each in front of its own sp-sim rack; with GatewayTestConfigFiles::five_gimlets, start() requires extra_sled_agents = 4, one sim sled per gimlet SP.
+    pub fn with_sp_sim_config(
+        mut self,
+        gateway_config_files: GatewayTestConfigFiles,
+    ) -> Self {
+        self.gateway_config_files = gateway_config_files;
+        self
+    }
+
     pub fn customize_nexus_config(
         mut self,
         f: &dyn Fn(&mut NexusConfig) -> (),
@@ -104,16 +126,31 @@ impl<'a> ControlPlaneBuilder<'a> {
     }
 
     pub async fn start<N: NexusServer>(self) -> ControlPlaneTestContext<N> {
+        let sim_sleds = 1 + usize::from(self.nextra_sled_agents);
+        if let Some(required_sim_sleds) =
+            self.gateway_config_files.required_sim_sleds()
+        {
+            assert_eq!(
+                sim_sleds,
+                required_sim_sleds,
+                "the sp-sim config {} needs {required_sim_sleds} harness sim \
+                 sleds, one per gimlet SP with that sled's baseboard, but the \
+                 harness has {sim_sleds}: use extra_sled_agents = {}",
+                self.gateway_config_files.sp_sim_config_file(),
+                required_sim_sleds.saturating_sub(1),
+            );
+        }
         let mut nexus_config = self.nexus_config;
         let starter =
-            ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config);
+            ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config)
+                .with_sim_trust_quorum(self.sim_trust_quorum);
         setup_with_config_impl(
             starter,
             PopulateCrdb::FromEnvironmentSeed,
             sim::SimMode::Explicit,
             self.tls_cert,
             self.nextra_sled_agents,
-            DEFAULT_SP_SIM_CONFIG.into(),
+            self.gateway_config_files,
             self.configure_second_nexus,
         )
         .await
@@ -136,6 +173,7 @@ pub struct ControlPlaneTestContext<N> {
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub(crate) sled_index_allocator: SledIndexAllocator,
+    pub(crate) sim_trust_quorum: sim::SimTrustQuorumMode,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
@@ -405,6 +443,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             sim_mode,
             cpu_family,
             SledRole::Gimlet,
+            self.sim_trust_quorum,
             &self.first_sled_agent().simulated_upstairs,
             nexus_registration,
         )
@@ -753,7 +792,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
         sim::SimMode::Auto,
         None,
         extra_sled_agents,
-        gateway_config_file,
+        GatewayTestConfigFiles::with_default_mgs_config(gateway_config_file),
         true,
     )
     .await)

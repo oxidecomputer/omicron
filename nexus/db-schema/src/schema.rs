@@ -3681,3 +3681,22 @@ joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
 // would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
 allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
 allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);
+
+table! {
+    sled_expunge_request (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+        tq_epoch -> Int8,
+        state -> crate::enums::SledExpungeRequestStateEnum,
+        power_off_outcome -> Nullable<crate::enums::SledExpungePowerOffOutcomeEnum>,
+        send_uncertain -> Bool,
+        last_error -> Nullable<Text>,
+        failure_reason -> Nullable<Text>,
+        time_completed -> Nullable<Timestamptz>,
+    }
+}

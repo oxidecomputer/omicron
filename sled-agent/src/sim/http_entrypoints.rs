@@ -105,6 +105,8 @@ use trust_quorum_types::status::CommitStatus;
 use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
+use super::trust_quorum::{FakeTrustQuorum, FakeTrustQuorumError};
+use slog_error_chain::InlineErrorChain;
 
 type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
@@ -1018,10 +1020,14 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn trust_quorum_reconfigure(
-        _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<ReconfigureMsg>,
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ReconfigureMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
+        let msg = body.into_inner();
+        with_fake_trust_quorum(request_context.context(), |fake| {
+            fake.reconfigure(msg)
+        })?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_upgrade_from_lrtq(
@@ -1032,38 +1038,56 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn trust_quorum_commit(
-        _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<CommitRequest>,
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<CommitRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
+        let request = body.into_inner();
+        with_fake_trust_quorum(request_context.context(), |fake| {
+            fake.commit(request)
+        })?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_coordinator_status(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
     {
-        method_unimplemented()
+        let status =
+            with_fake_trust_quorum(request_context.context(), |fake| {
+                Ok(fake.coordinator_status())
+            })?;
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_prepare_and_commit(
-        _request_context: RequestContext<Self::Context>,
-        _body: TypedBody<PrepareAndCommitRequest>,
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<PrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
-        method_unimplemented()
+        let config = body.into_inner().config;
+        let status =
+            with_fake_trust_quorum(request_context.context(), |fake| {
+                fake.prepare_and_commit(config)
+            })?;
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_commit(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
         _body: TypedBody<ProxyCommitRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
+        with_fake_trust_quorum(request_context.context(), |_fake| Ok(()))?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_proxy_prepare_and_commit(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
         _body: TypedBody<ProxyPrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
-        method_unimplemented()
+        let status =
+            with_fake_trust_quorum(request_context.context(), |_fake| {
+                Ok(CommitStatus::Committed)
+            })?;
+        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_status(
@@ -1188,7 +1212,11 @@ impl SledAgentApi for SledAgentSimImpl {
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {
-    Err(HttpError {
+    Err(method_unimplemented_error())
+}
+
+fn method_unimplemented_error() -> HttpError {
+    HttpError {
         // Use a client error here (405 Method Not Allowed vs 501 Not
         // Implemented) even though it isn't strictly accurate here, so tests
         // get to see the error message.
@@ -1199,6 +1227,18 @@ fn method_unimplemented<T>() -> Result<T, HttpError> {
         internal_message: "Method not implemented in sled-agent-sim"
             .to_string(),
         headers: None,
+    }
+}
+
+fn with_fake_trust_quorum<T, F>(sa: &SledAgent, f: F) -> Result<T, HttpError>
+where
+    F: FnOnce(&mut FakeTrustQuorum) -> Result<T, FakeTrustQuorumError>,
+{
+    let Some(mut fake) = sa.fake_trust_quorum() else {
+        return Err(method_unimplemented_error());
+    };
+    f(&mut fake).map_err(|error| {
+        HttpError::for_internal_error(InlineErrorChain::new(&error).to_string())
     })
 }
 

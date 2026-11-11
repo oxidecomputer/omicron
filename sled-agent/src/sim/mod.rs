@@ -16,11 +16,13 @@ mod sim_support_logs;
 mod simulatable;
 mod sled_agent;
 mod storage;
+mod trust_quorum;
 mod upstairs;
 
 pub use config::{
     Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
-    SledCpuFamily, TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
+    SimTrustQuorumMode, SledCpuFamily, TEST_HARDWARE_THREADS,
+    TEST_RESERVOIR_RAM, ZpoolConfig,
 };
 pub use server::{NexusRegistration, RssArgs, Server, run_standalone_server};
 pub use sled_agent::{

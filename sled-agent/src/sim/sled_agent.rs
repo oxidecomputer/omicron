@@ -7,9 +7,11 @@
 use super::artifact_store::SimArtifactStorage;
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
+use super::config::SimTrustQuorumMode;
 use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
+use super::trust_quorum::FakeTrustQuorum;
 use crate::artifact_store::ArtifactStore;
 use crate::instance_manager::VmmRegistrationDisallowedReason;
 use crate::nexus::NexusClient;
@@ -71,6 +73,7 @@ use sled_agent_types::inventory::{
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
+use sled_hardware_types::BaseboardId;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -166,6 +169,7 @@ pub struct SledAgent {
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+    fake_trust_quorum: Option<Mutex<FakeTrustQuorum>>,
 }
 
 /// A queue of pending pauses for one of the simulated sled-agent's VMM
@@ -489,7 +493,26 @@ impl SledAgent {
             support_logs: Mutex::new(HashMap::new()),
             network_config_tx,
             scrimlet_reconcilers,
+            fake_trust_quorum: match config.trust_quorum {
+                SimTrustQuorumMode::Unimplemented => None,
+                SimTrustQuorumMode::Fake => {
+                    Some(Mutex::new(FakeTrustQuorum::new(
+                        config.hardware.baseboard.clone().into(),
+                        config.rack_id,
+                    )))
+                }
+            },
         })
+    }
+
+    pub fn baseboard_id(&self) -> BaseboardId {
+        self.config.hardware.baseboard.clone().into()
+    }
+
+    pub(super) fn fake_trust_quorum(
+        &self,
+    ) -> Option<std::sync::MutexGuard<'_, FakeTrustQuorum>> {
+        self.fake_trust_quorum.as_ref().map(|fake| fake.lock().unwrap())
     }
 
     /// Injects a synthetic zone log file to be served by the support-logs
@@ -1335,7 +1358,7 @@ impl SledAgent {
             sled_id: self.id,
             sled_agent_address,
             sled_role: self.config.sled_role,
-            baseboard_id: self.config.hardware.baseboard.clone().into(),
+            baseboard_id: self.baseboard_id(),
             rack_id: self.config.rack_id,
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(

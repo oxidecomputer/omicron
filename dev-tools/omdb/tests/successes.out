@@ -163,6 +163,16 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "sled-expunge-requests", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID RACK_ID SLED_ID SERIAL STATE TQ_EPOCH TQ_SEND LAST_ERROR FAILURE_REASON TIME_CREATED TIME_MODIFIED 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["mgs", "inventory"]
 termination: Exited(0)
 ---------------------------------------------
@@ -571,6 +581,11 @@ task: "service_firewall_rule_propagation"
 
 task: "session_cleanup"
     hard-deletes expired console sessions based on absolute timeout
+
+
+task: "sled_expunge"
+    drives operator-requested sled expunges (RFD 747) through the trust quorum,
+    power-off, and expunge steps
 
 
 task: "sp_ereport_ingester"
@@ -1146,6 +1161,12 @@ task: "session_cleanup"
     deleted: 0
     cutoff:  <REDACTED_TIMESTAMP>
     limit:   10000
+
+task: "sled_expunge"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    unfinished requests: 0
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
@@ -1911,6 +1932,12 @@ task: "session_cleanup"
     deleted: 0
     cutoff:  <REDACTED_TIMESTAMP>
     limit:   10000
+
+task: "sled_expunge"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    unfinished requests: 0
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s

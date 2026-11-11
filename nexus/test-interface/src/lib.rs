@@ -36,7 +36,7 @@ use nexus_config::NexusConfig;
 use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::params::{
-    PhysicalDiskPutRequest, ZpoolPutRequest,
+    InitialTrustQuorumConfig, PhysicalDiskPutRequest, ZpoolPutRequest,
 };
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
@@ -84,6 +84,7 @@ pub trait NexusServer: Send + Sync + 'static {
         tls_certificates: Vec<
             omicron_common::api::internal::nexus::Certificate,
         >,
+        initial_trust_quorum_configuration: InitialTrustQuorumConfig,
     ) -> Self;
 
     fn datastore(&self) -> &Arc<db::DataStore>;

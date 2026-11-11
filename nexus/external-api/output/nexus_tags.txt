@@ -218,6 +218,9 @@ physical_disk_view                       GET      /v1/system/hardware/disks/{dis
 rack_list                                GET      /v1/system/hardware/racks
 rack_list_unadopted                      GET      /v1/system/hardware/racks-unadopted
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
+sled_expunge                             POST     /v1/system/hardware/sleds/{sled_id}/expunge
+sled_expunge_request_list                GET      /v1/system/hardware/sled-expunge-requests
+sled_expunge_request_view                GET      /v1/system/hardware/sled-expunge-requests/{sled_expunge_request_id}
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized

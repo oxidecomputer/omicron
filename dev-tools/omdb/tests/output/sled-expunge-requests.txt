@@ -1,0 +1,60 @@
+=== list (empty) ===
+ID RACK_ID SLED_ID SERIAL STATE TQ_EPOCH TQ_SEND LAST_ERROR FAILURE_REASON TIME_CREATED TIME_MODIFIED 
+=== list ===
+ID                                   RACK_ID                              SLED_ID                              SERIAL      STATE                    TQ_EPOCH TQ_SEND   LAST_ERROR FAILURE_REASON TIME_CREATED             TIME_MODIFIED            
+00000000-0000-0000-0000-00005e1e0001 00000000-0000-0000-0000-000000c0ffee 00000000-0000-0000-0000-000051ed0001 SimGimlet01 waiting_for_trust_quorum 2        UNCERTAIN no         no             2027-01-15T08:01:40.000Z 2027-01-15T08:02:10.000Z 
+00000000-0000-0000-0000-00005e1e0002 00000000-0000-0000-0000-000000c0ffee 00000000-0000-0000-0000-000051ed0002 SimGimlet02 powering_off             3        settled   yes        no             2027-01-15T08:03:20.000Z 2027-01-15T08:03:50.000Z 
+00000000-0000-0000-0000-00005e1e0003 00000000-0000-0000-0000-000000c0ffee 00000000-0000-0000-0000-000051ed0003 SimGimlet03 expunging                4        settled   no         no             2027-01-15T08:05:00.000Z 2027-01-15T08:05:30.000Z 
+00000000-0000-0000-0000-00005e1e0004 00000000-0000-0000-0000-000000c0ffee 00000000-0000-0000-0000-000051ed0004 SimGimlet04 done                     5        settled   no         no             2027-01-15T08:06:40.000Z 2027-01-15T08:07:10.000Z 
+00000000-0000-0000-0000-00005e1e0005 00000000-0000-0000-0000-000000c0ffee 00000000-0000-0000-0000-000051ed0005 SimGimlet05 failed                   6        uncertain no         yes            2027-01-15T08:08:20.000Z 2027-01-15T08:08:50.000Z 
+=== show: waiting_for_trust_quorum ===
+                                              ID: 00000000-0000-0000-0000-00005e1e0001
+                                         rack ID: 00000000-0000-0000-0000-000000c0ffee
+                                         sled ID: 00000000-0000-0000-0000-000051ed0001
+                           baseboard part number: 913-0000019
+                         baseboard serial number: SimGimlet01
+                                           state: waiting_for_trust_quorum
+    trust quorum epoch (rack membership version): 2
+                               trust quorum send: UNCERTAIN
+                                                  Nexus has not recorded that the trust quorum change removing this sled reached its coordinator, or that it was not sent because its coordinator is no longer an in-service sled: the send may not have happened yet, may have failed or not been attempted, or may have succeeded without its result being saved.
+                                                  To see what happened to the send, search the Nexus logs for request_id 00000000-0000-0000-0000-00005e1e0001
+                               power-off outcome: -
+                                      created at: 2027-01-15T08:01:40.000Z
+                                last modified at: 2027-01-15T08:02:10.000Z
+                                    completed at: -
+                                      last error: -
+                                  failure reason: -
+=== show: done ===
+                                              ID: 00000000-0000-0000-0000-00005e1e0004
+                                         rack ID: 00000000-0000-0000-0000-000000c0ffee
+                                         sled ID: 00000000-0000-0000-0000-000051ed0004
+                           baseboard part number: 913-0000019
+                         baseboard serial number: SimGimlet04
+                                           state: done
+    trust quorum epoch (rack membership version): 5
+                               trust quorum send: settled
+                                                  Nexus recorded that the trust quorum change removing this sled reached its coordinator, or that it was not sent because its coordinator is no longer an in-service sled (the trust quorum background task then aborts it).
+                               power-off outcome: powered_off
+                                      created at: 2027-01-15T08:06:40.000Z
+                                last modified at: 2027-01-15T08:07:10.000Z
+                                    completed at: 2027-01-15T08:07:40.000Z
+                                      last error: -
+                                  failure reason: -
+=== show: failed ===
+                                              ID: 00000000-0000-0000-0000-00005e1e0005
+                                         rack ID: 00000000-0000-0000-0000-000000c0ffee
+                                         sled ID: 00000000-0000-0000-0000-000051ed0005
+                           baseboard part number: 913-0000019
+                         baseboard serial number: SimGimlet05
+                                           state: failed
+    trust quorum epoch (rack membership version): 6
+                               trust quorum send: uncertain
+                                                  Nexus has not recorded that the trust quorum change removing this sled reached its coordinator, or that it was not sent because its coordinator is no longer an in-service sled: the send may not have happened yet, may have failed or not been attempted, or may have succeeded without its result being saved.
+                                                  To see what happened to the send, search the Nexus logs for request_id 00000000-0000-0000-0000-00005e1e0005
+                                                  This only matters while the request is waiting_for_trust_quorum.
+                               power-off outcome: -
+                                      created at: 2027-01-15T08:08:20.000Z
+                                last modified at: 2027-01-15T08:08:50.000Z
+                                    completed at: 2027-01-15T08:09:20.000Z
+                                      last error: -
+                                  failure reason: test failure reason: the removal was aborted

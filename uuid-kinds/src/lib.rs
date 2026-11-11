@@ -99,6 +99,7 @@ impl_typed_uuid_kinds! {
         SiloUser = {},
         Sitrep = {},
         Sled = {},
+        SledExpungeRequest = {},
         SpUpdate = {},
         SubnetPool = {},
         SubnetPoolMember = {},

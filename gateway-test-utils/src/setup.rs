@@ -61,29 +61,82 @@ impl GatewayTestContext {
     }
 }
 
-pub fn load_test_config(
+// TODO-RAINCLAUDE: an MGS config and the sp-sim config it describes; the MGS config's sled ports and ignition targets must match the sp-sim config's SPs, so the non-default pairs are only built together.
+#[derive(Clone, Debug)]
+pub struct GatewayTestConfigFiles {
+    mgs_config_file: Utf8PathBuf,
     sp_sim_config_file: Utf8PathBuf,
-) -> (omicron_gateway::Config, sp_sim::Config) {
+    required_sim_sleds: Option<usize>,
+}
+
+impl GatewayTestConfigFiles {
+    pub fn with_default_mgs_config(sp_sim_config_file: Utf8PathBuf) -> Self {
+        Self {
+            mgs_config_file: test_config_path("config.test.toml"),
+            sp_sim_config_file,
+            required_sim_sleds: None,
+        }
+    }
+
+    // TODO-RAINCLAUDE: the default SPs plus non-scrimlet gimlets SimGimlet02 to SimGimlet04 in sled slots 2 to 4, matching the baseboards of the harness's third to fifth sim sleds, with ignition and port descriptions on both switches' MGS.
+    pub fn five_gimlets() -> Self {
+        Self {
+            mgs_config_file: test_config_path("config_five_gimlets.test.toml"),
+            sp_sim_config_file: test_config_path(
+                "sp_sim_config_five_gimlets.test.toml",
+            ),
+            required_sim_sleds: Some(5),
+        }
+    }
+
+    // TODO-RAINCLAUDE: pairs built together give every gimlet SP a sim sled's baseboard (SimGimletNN for sled index NN), so the harness must run exactly one sim sled per gimlet; None for a default-MGS pair, which makes no such promise.
+    pub fn required_sim_sleds(&self) -> Option<usize> {
+        self.required_sim_sleds
+    }
+
+    pub fn sp_sim_config_file(&self) -> &Utf8Path {
+        &self.sp_sim_config_file
+    }
+
+    pub fn load(&self) -> (omicron_gateway::Config, sp_sim::Config) {
+        let config_path = &self.mgs_config_file;
+        let server_config = omicron_gateway::Config::from_file(config_path)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to load MGS config from {config_path}: {}",
+                    InlineErrorChain::new(&e)
+                )
+            });
+
+        let sp_sim_config =
+            match sp_sim::Config::from_file(&self.sp_sim_config_file) {
+                Ok(config) => config,
+                Err(e) => panic!(
+                    "failed to load SP simulator config: {}",
+                    InlineErrorChain::new(&e)
+                ),
+            };
+        (server_config, sp_sim_config)
+    }
+}
+
+impl Default for GatewayTestConfigFiles {
+    fn default() -> Self {
+        Self::with_default_mgs_config(DEFAULT_SP_SIM_CONFIG.into())
+    }
+}
+
+fn test_config_path(file_name: &str) -> Utf8PathBuf {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
-    let config_path = manifest_dir.join("configs/config.test.toml");
-    let server_config = omicron_gateway::Config::from_file(&config_path)
-        .unwrap_or_else(|e| {
-            panic!(
-                "failed to load MGS config from {config_path}: {}",
-                InlineErrorChain::new(&e)
-            )
-        });
+    manifest_dir.join("configs").join(file_name)
+}
 
-    let sp_sim_config = match sp_sim::Config::from_file(sp_sim_config_file) {
-        Ok(config) => config,
-        Err(e) => panic!(
-            "failed to load SP simulator config: {}",
-            InlineErrorChain::new(&e)
-        ),
-    };
-    (server_config, sp_sim_config)
+pub fn load_test_config(
+    sp_sim_config_file: Utf8PathBuf,
+) -> (omicron_gateway::Config, sp_sim::Config) {
+    GatewayTestConfigFiles::with_default_mgs_config(sp_sim_config_file).load()
 }
 
 pub async fn test_setup(

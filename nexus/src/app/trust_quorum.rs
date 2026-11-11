@@ -6,9 +6,12 @@
 
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_networking::InServiceSledClientError;
+use nexus_networking::sled_client_by_baseboard_id_and_rack_id_if_in_service_ext;
 use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::trust_quorum::{
-    IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
+    IsLrtqUpgrade, ProposedTrustQuorumConfig, RemoveSledError,
+    TRUST_QUORUM_MIN_MEMBERS, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
 use omicron_common::http_client::internal_http_client_builder;
@@ -17,6 +20,8 @@ use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::time::Duration;
 use trust_quorum_types::types::Epoch;
+
+const API_ABORT_REASON: &str = "Aborted via API request";
 
 impl super::Nexus {
     /// Add a set of sleds to the trust quorum
@@ -53,10 +58,8 @@ impl super::Nexus {
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        let Some(new_config) = self
-            .db_datastore
-            .tq_get_config(opctx, authz_tq.clone(), new_epoch)
-            .await?
+        let Some(new_config) =
+            self.db_datastore.tq_get_config(opctx, authz_tq, new_epoch).await?
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
@@ -64,27 +67,12 @@ impl super::Nexus {
             )));
         };
 
-        // Retrieve the sled for the coordinator
-        let client = self
-            .get_coordinator_client(
-                opctx,
-                authz_tq,
-                new_epoch,
-                &new_config.coordinator,
-            )
-            .await?;
-
         // Now send the reconfiguration request to the coordinator. We do
         // this directly in the API handler because this is a non-idempotent
         // operation and we only want to issue it once.
-        let req = trust_quorum_types::messages::ReconfigureMsg {
-            rack_id: new_config.rack_id,
-            epoch: new_config.epoch,
-            last_committed_epoch: new_config.last_committed_epoch,
-            members: new_config.members.keys().cloned().collect(),
-            threshold: new_config.threshold,
-        };
-        client.trust_quorum_reconfigure(&req).await?;
+        self.tq_send_reconfigure(opctx, &new_config)
+            .await
+            .into_result(&new_config)?;
 
         Ok(new_config)
     }
@@ -113,15 +101,14 @@ impl super::Nexus {
             &latest_committed_config,
             new_epoch,
             &sled_to_remove,
-        )?;
+        )
+        .map_err(tq_remove_sled_refusal)?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        let Some(new_config) = self
-            .db_datastore
-            .tq_get_config(opctx, authz_tq.clone(), new_epoch)
-            .await?
+        let Some(new_config) =
+            self.db_datastore.tq_get_config(opctx, authz_tq, new_epoch).await?
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
@@ -129,67 +116,48 @@ impl super::Nexus {
             )));
         };
 
-        // Retrieve the sled for the coordinator
-        let client = self
-            .get_coordinator_client(
-                opctx,
-                authz_tq,
-                new_epoch,
-                &new_config.coordinator,
-            )
-            .await?;
-
         // Now send the reconfiguration request to the coordinator. We do
         // this directly in the API handler because this is a non-idempotent
         // operation and we only want to issue it once.
-        let req = trust_quorum_types::messages::ReconfigureMsg {
-            rack_id: new_config.rack_id,
-            epoch: new_config.epoch,
-            last_committed_epoch: new_config.last_committed_epoch,
-            members: new_config.members.keys().cloned().collect(),
-            threshold: new_config.threshold,
-        };
-        client.trust_quorum_reconfigure(&req).await?;
+        self.tq_send_reconfigure(opctx, &new_config)
+            .await
+            .into_result(&new_config)?;
 
         Ok(new_epoch)
     }
 
-    /// Abort the latest trust quorum configuration if it is still in the
-    /// preparing state.
-    pub(crate) async fn tq_abort_latest_config(
+    // TODO-RAINCLAUDE: replace the old "abort the latest config if still preparing" doc: aborts the config at `epoch`, or the latest if `None` (404 if the rack has no config); refusal semantics come from DataStore::tq_abort_config.
+    pub(crate) async fn tq_abort_config(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
+        epoch: Option<Epoch>,
     ) -> Result<TrustQuorumConfig, Error> {
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
-        let Some(latest_config) = self
-            .db_datastore
-            .tq_get_latest_config(opctx, authz_tq.clone())
-            .await?
-        else {
-            return Err(Error::non_resourcetype_not_found(
-                "No trust quorum configuration exists for this rack",
-            ));
+        let epoch = match epoch {
+            Some(epoch) => epoch,
+            None => {
+                let Some(latest_config) = self
+                    .db_datastore
+                    .tq_get_latest_config(opctx, authz_tq.clone())
+                    .await?
+                else {
+                    return Err(Error::non_resourcetype_not_found(
+                        "No trust quorum configuration exists for this rack",
+                    ));
+                };
+                latest_config.epoch
+            }
         };
 
         self.db_datastore
             .tq_abort_config(
                 opctx,
-                authz_tq.clone(),
-                latest_config.epoch,
-                "Aborted via API request".to_string(),
+                authz_tq,
+                epoch,
+                API_ABORT_REASON.to_string(),
             )
-            .await?;
-
-        // Return the updated configuration
-        self.db_datastore
-            .tq_get_config(opctx, authz_tq, latest_config.epoch)
-            .await?
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "Configuration was just aborted but cannot be retrieved",
-                )
-            })
+            .await
     }
 
     /// Read the set of all commissioned sleds from an existing deployment and
@@ -268,16 +236,14 @@ impl super::Nexus {
             rack_id,
             epoch: new_epoch,
             is_lrtq_upgrade: IsLrtqUpgrade::Yes,
-            members: members.clone(),
+            members,
         };
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        let Some(new_config) = self
-            .db_datastore
-            .tq_get_config(opctx, authz_tq.clone(), new_epoch)
-            .await?
+        let Some(new_config) =
+            self.db_datastore.tq_get_config(opctx, authz_tq, new_epoch).await?
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
@@ -286,87 +252,117 @@ impl super::Nexus {
             )));
         };
 
-        // Retrieve the sled for the coordinator
-        let client = self
-            .get_coordinator_client(
-                opctx,
-                authz_tq,
-                new_epoch,
-                &new_config.coordinator,
-            )
-            .await?;
-
         // Finally, initiate the upgrade at the coordinator
-        let req = trust_quorum_types::messages::LrtqUpgradeMsg {
-            rack_id,
-            epoch: new_epoch,
-            members,
-            threshold: new_config.threshold,
-        };
-        client.trust_quorum_upgrade_from_lrtq(&req).await?;
+        self.tq_send_lrtq_upgrade(opctx, &new_config).await?;
 
         Ok(new_epoch)
     }
 
+    /// Send a `ReconfigureMsg` corresponding to a config to its coordinator.
+    ///
+    /// The Nexus that successfully inserted `config` into the database should
+    /// call this, once, right after that insert. A re-send of the same config
+    /// is a no-op while the coordinator is still coordinating that epoch, but
+    /// may be rejected with an error once it has lost its in-memory state
+    /// (e.g., after a restart). Resending is harmless but can surface a
+    /// spurious error.
+    ///
+    /// XXX: The caller obligation is a bit strange. If the Nexus that inserted
+    /// the config crashes before this is called, the coordinator never receives
+    /// the config, and the reconfiguration gets stuck in the preparing phase.
+    /// We should fix this for real.
+    pub(crate) async fn tq_send_reconfigure(
+        &self,
+        opctx: &OpContext,
+        config: &TrustQuorumConfig,
+    ) -> ReconfigureSendOutcome {
+        let client = match self.get_coordinator_client(opctx, config).await {
+            Ok(client) => client,
+            Err(
+                unavailable @ InServiceSledClientError::NotInService { .. },
+            ) => {
+                self.background_tasks.task_trust_quorum_manager.activate();
+                return ReconfigureSendOutcome::CoordinatorUnavailable(
+                    unavailable,
+                );
+            }
+            Err(
+                unavailable @ InServiceSledClientError::LookupFailed { .. },
+            ) => {
+                return ReconfigureSendOutcome::CoordinatorUnavailable(
+                    unavailable,
+                );
+            }
+        };
+        let req = trust_quorum_types::messages::ReconfigureMsg {
+            rack_id: config.rack_id,
+            epoch: config.epoch,
+            last_committed_epoch: config.last_committed_epoch,
+            members: config.members.keys().cloned().collect(),
+            threshold: config.threshold,
+        };
+        match client.trust_quorum_reconfigure(&req).await {
+            Ok(_) => ReconfigureSendOutcome::Sent,
+            Err(error) => ReconfigureSendOutcome::SendFailed(error),
+        }
+    }
+
+    /// Send an `LrtqUpgradeMsg` corresponding to a config to its coordinator.
+    ///
+    /// A re-sent LRTQ upgrade always produces an error.
+    ///
+    /// TODO: All customer racks have been upgraded to real trust quorum, so we
+    /// should clean this up.
+    async fn tq_send_lrtq_upgrade(
+        &self,
+        opctx: &OpContext,
+        config: &TrustQuorumConfig,
+    ) -> Result<(), Error> {
+        let client = match self.get_coordinator_client(opctx, config).await {
+            Ok(client) => client,
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                self.background_tasks.task_trust_quorum_manager.activate();
+                return Err(coordinator_not_in_service_error(config));
+            }
+            Err(InServiceSledClientError::LookupFailed { error, .. }) => {
+                return Err(error);
+            }
+        };
+        let req = trust_quorum_types::messages::LrtqUpgradeMsg {
+            rack_id: config.rack_id,
+            epoch: config.epoch,
+            members: config.members.keys().cloned().collect(),
+            threshold: config.threshold,
+        };
+        client.trust_quorum_upgrade_from_lrtq(&req).await?;
+        Ok(())
+    }
+
     /// Retrieve a `Sled` from the database for a specific coordinator ID and
-    // create a client to talk to the coordinator sled agent.
+    /// create a client to talk to the coordinator sled agent.
+    ///
+    /// Return an error if the sled is no longer in service, or if the lookup
+    /// fails.
     async fn get_coordinator_client(
         &self,
         opctx: &OpContext,
-        authz_tq: authz::TrustQuorumConfig,
-        epoch: Epoch,
-        coordinator: &BaseboardId,
-    ) -> Result<sled_agent_client::Client, Error> {
-        let rack_id = authz_tq.rack().id();
-        // Retrieve the sled for the coordinator
-        let Some(sled) = self
-            .db_datastore
-            .sled_get_commissioned_by_baseboard_and_rack_id(
-                opctx,
-                rack_id,
-                coordinator.clone(),
-            )
-            .await?
-        else {
-            let msg = format!(
-                "Coordinator sled for trust quorum reconfiguration is no \
-                longer commissioned or is present in another rack. \
-                Configuration stored in database for this configuration will \
-                be aborted. Expected rack_id: {rack_id}, baseboard_id: {}.",
-                coordinator
-            );
-
-            self.db_datastore
-                .tq_abort_config(opctx, authz_tq, epoch, msg.clone())
-                .await
-                .map_err(|e| {
-                    Error::conflict(format!(
-                        "{}. Unfortunately, writing \
-                        the abort to the database also failed with error: {e}. \
-                        Abort will have to be performed explicitly by the \
-                        operator.",
-                        msg
-                    ))
-                })?;
-
-            return Err(Error::conflict(msg));
-        };
-
-        // Construct a sled agent client to talk to the coordinator
+        config: &TrustQuorumConfig,
+    ) -> Result<sled_agent_client::Client, InServiceSledClientError> {
         let timeout = Duration::from_secs(60);
-        let url = format!("http://{}", sled.address());
-        let log = self.log.new(o!("SledAgent" => url.clone()));
         let reqwest_client = internal_http_client_builder()
             .connect_timeout(timeout)
             .timeout(timeout)
             .build()
             .unwrap();
-
-        Ok(sled_agent_client::Client::new_with_client(
-            &url,
+        sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
+            &self.db_datastore,
+            opctx,
+            &config.coordinator,
+            config.rack_id,
+            &self.log,
             reqwest_client,
-            log,
-        ))
+        )
+        .await
     }
 
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
@@ -399,5 +395,59 @@ impl super::Nexus {
             },
             members: new_sleds.union(&existing).cloned().collect(),
         })
+    }
+}
+
+fn coordinator_not_in_service_error(config: &TrustQuorumConfig) -> Error {
+    Error::conflict(format!(
+        "Coordinator {} for the trust quorum configuration at epoch {} is no \
+         longer an in-service sled in rack {}, so the request was not sent to \
+         it. The trust quorum background task will abort this \
+         configuration; retry once it has been aborted.",
+        config.coordinator, config.epoch, config.rack_id
+    ))
+}
+
+// TODO-RAINCLAUDE: the lockstep (support) remove path's wording of ProposedTrustQuorumConfig::remove_sled's refusal; the sled expunge path words it separately for operators.
+fn tq_remove_sled_refusal(refusal: RemoveSledError) -> Error {
+    match refusal {
+        RemoveSledError::NotMember { sled } => Error::invalid_request(format!(
+            "Sled {sled} is not a member of the trust quorum."
+        )),
+        RemoveSledError::TooFewMembers { rack_id, sled, remaining } => {
+            Error::conflict(format!(
+                "Cannot remove sled {sled} from the trust quorum for rack \
+                 {rack_id}: {remaining} sleds would remain, but a trust \
+                 quorum must have at least {TRUST_QUORUM_MIN_MEMBERS}."
+            ))
+        }
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum ReconfigureSendOutcome {
+    // TODO-RAINCLAUDE: the coordinator accepted the config; this call did not change the config's durable state (normally still Preparing).
+    Sent,
+    // TODO-RAINCLAUDE: nothing was sent; NotInService means the sender woke trust_quorum_manager, which aborts the config if it is still preparing, while LookupFailed means whether the coordinator is in service is unknown, so the config may be aborted or stay preparing until it is aborted.
+    CoordinatorUnavailable(InServiceSledClientError),
+    // TODO-RAINCLAUDE: this call did not change the config's durable state, but the coordinator may or may not have received the config, so whether it will be driven is uncertain.
+    SendFailed(sled_agent_client::Error<sled_agent_client::types::Error>),
+}
+
+impl ReconfigureSendOutcome {
+    fn into_result(self, config: &TrustQuorumConfig) -> Result<(), Error> {
+        match self {
+            ReconfigureSendOutcome::Sent => Ok(()),
+            ReconfigureSendOutcome::CoordinatorUnavailable(
+                InServiceSledClientError::NotInService { .. },
+            ) => Err(coordinator_not_in_service_error(config)),
+            ReconfigureSendOutcome::CoordinatorUnavailable(
+                InServiceSledClientError::LookupFailed { error, .. },
+            ) => Err(error),
+            ReconfigureSendOutcome::SendFailed(error) => {
+                Err(Error::from(error))
+            }
+        }
     }
 }

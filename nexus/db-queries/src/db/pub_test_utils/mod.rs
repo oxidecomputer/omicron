@@ -25,6 +25,7 @@ pub mod fm;
 pub mod helpers;
 pub mod multicast;
 pub mod simulated_sleds;
+pub mod sled_expunge_request;
 
 /// A fixed Git version for datastores built by test utilities.
 ///
