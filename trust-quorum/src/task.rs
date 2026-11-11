@@ -32,7 +32,9 @@ use trust_quorum_protocol::{
 };
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
-use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::status::{
+    CommitStatus, CoordinatorStatus, NodeStatus, NotCoordinatingStatus,
+};
 use trust_quorum_types::types::Epoch;
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
@@ -53,7 +55,7 @@ const CONN_TO_MAIN_CHANNEL_BOUND: usize = 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoordinatorStatusSnapshot {
     Coordinating { status: CoordinatorStatus },
-    NotCoordinating { latest_config_epoch: Option<Epoch> },
+    NotCoordinating(NotCoordinatingStatus),
 }
 
 #[derive(Debug, Clone)]
@@ -271,9 +273,12 @@ impl NodeTaskHandle {
             CoordinatorStatusSnapshot::Coordinating { status } => {
                 Ok(Some(status))
             }
-            CoordinatorStatusSnapshot::NotCoordinating {
-                latest_config_epoch: _,
-            } => Ok(None),
+            CoordinatorStatusSnapshot::NotCoordinating(
+                NotCoordinatingStatus {
+                    latest_config_epoch: _,
+                    latest_committed_epoch: _,
+                },
+            ) => Ok(None),
         }
     }
 
@@ -742,13 +747,19 @@ impl NodeTask {
                             acked_prepares: cs.op().acked_prepares(),
                         },
                     },
-                    None => CoordinatorStatusSnapshot::NotCoordinating {
-                        latest_config_epoch: self
-                            .ctx
-                            .persistent_state()
-                            .latest_config()
-                            .map(|c| c.epoch),
-                    },
+                    None => CoordinatorStatusSnapshot::NotCoordinating(
+                        NotCoordinatingStatus {
+                            latest_config_epoch: self
+                                .ctx
+                                .persistent_state()
+                                .latest_config()
+                                .map(|c| c.epoch),
+                            latest_committed_epoch: self
+                                .ctx
+                                .persistent_state()
+                                .latest_committed_epoch(),
+                        },
+                    ),
                 };
                 let _ = tx.send(snapshot);
             }
@@ -1029,6 +1040,7 @@ mod tests {
     use std::time::Duration;
     use tokio::task::JoinHandle;
     use trust_quorum_protocol::NodeHandlerCtx;
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use trust_quorum_types::types::Threshold;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
@@ -1499,7 +1511,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -1516,9 +1531,10 @@ mod tests {
         // coordinating nor has persisted any config.
         assert_eq!(
             coordinator.coordinator_status_snapshot().await.unwrap(),
-            CoordinatorStatusSnapshot::NotCoordinating {
+            CoordinatorStatusSnapshot::NotCoordinating(NotCoordinatingStatus {
                 latest_config_epoch: None,
-            },
+                latest_committed_epoch: None,
+            }),
         );
 
         coordinator.reconfigure(initial_config.clone()).await.unwrap();
@@ -1577,12 +1593,13 @@ mod tests {
         assert_eq!(acked, num_nodes);
 
         // After committing, the coordinator stops coordinating but still
-        // reports the persisted epoch.
+        // reports both the persisted and the committed epoch.
         assert_eq!(
             coordinator.coordinator_status_snapshot().await.unwrap(),
-            CoordinatorStatusSnapshot::NotCoordinating {
-                latest_config_epoch: Some(Epoch(1))
-            },
+            CoordinatorStatusSnapshot::NotCoordinating(NotCoordinatingStatus {
+                latest_config_epoch: Some(Epoch(1)),
+                latest_committed_epoch: Some(Epoch(1)),
+            }),
         );
 
         // Now load the rack secret at all nodes
@@ -1619,7 +1636,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -1754,7 +1774,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -1967,7 +1990,10 @@ mod tests {
         let msg = LrtqUpgradeMsg {
             rack_id,
             epoch: Epoch(2),
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -2056,7 +2082,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 
@@ -2341,7 +2370,10 @@ mod tests {
             rack_id,
             epoch: Epoch(1),
             last_committed_epoch: None,
-            members: setup.members().cloned().collect(),
+            members: TrustQuorumMembers::new(
+                setup.members().cloned().collect(),
+            )
+            .expect("test membership is within the size bounds"),
             threshold: Threshold(3),
         };
 

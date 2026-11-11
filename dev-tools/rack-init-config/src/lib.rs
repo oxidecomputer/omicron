@@ -67,6 +67,7 @@ mod tests {
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
+    use trust_quorum_types::membership::TrustQuorumMembers;
 
     // The hash for the password "oxide", copied from
     // smf/sled-agent/non-gimlet/config-rss.toml.
@@ -97,13 +98,16 @@ mod tests {
         IdOrdMap::from_iter_unique([pool]).unwrap()
     }
 
-    fn trust_quorum_peers() -> Vec<BaseboardId> {
-        (0..3)
-            .map(|index| BaseboardId {
-                part_number: "913-0000019".to_string(),
-                serial_number: format!("2FAKE00{index}"),
-            })
-            .collect()
+    fn trust_quorum_peers() -> TrustQuorumMembers {
+        TrustQuorumMembers::new(
+            (0..3)
+                .map(|index| BaseboardId {
+                    part_number: "913-0000019".to_string(),
+                    serial_number: format!("2FAKE00{index}"),
+                })
+                .collect(),
+        )
+        .expect("test membership is within the size bounds")
     }
 
     fn bootstrap_addrs() -> BTreeSet<Ipv6Addr> {
