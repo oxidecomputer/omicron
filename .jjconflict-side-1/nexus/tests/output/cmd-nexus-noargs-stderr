@@ -1,0 +1,11 @@
+See README.adoc for more information
+
+Usage: nexus [CONFIG_FILE_PATH]
+
+Arguments:
+  [CONFIG_FILE_PATH]  
+
+Options:
+  -h, --help  Print help
+
+nexus: CONFIG_FILE_PATH is required

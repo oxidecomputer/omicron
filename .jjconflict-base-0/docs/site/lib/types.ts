@@ -1,0 +1,41 @@
+import type { ComponentType, SVGProps } from 'react'
+
+import type { SearchProvider } from './search/types.ts'
+
+/** Site config: the pages to publish and how to present them */
+export type Site = {
+  /** Project name, e.g. `Omicron` */
+  title: string
+  /** Shown after the title, e.g. `developer docs` */
+  tagline: string
+  /** GitHub URL, e.g. `https://github.com/oxidecomputer/omicron` */
+  repo: string
+  /** Branch that source links point at */
+  branch: string
+  /** Leave out for no search */
+  search?: SearchProvider
+  sections: {
+    title: string
+    /** 16px icon from `@oxide/design-system/icons/react`, shown on the homepage */
+    icon?: ComponentType<SVGProps<SVGSVGElement>>
+    /** Paths relative to the repo root, optionally with a title override */
+    pages: (string | { path: string; title?: string })[]
+  }[]
+}
+
+export type TocItem = { id: string; title: string; children: TocItem[] }
+
+/** A rendered page */
+export type Page = {
+  /** Source path relative to the repo root, e.g. `docs/how-to-run.adoc` */
+  src: string
+  /** URL path relative to the site root, e.g. `docs/how-to-run/`. See `outPath` */
+  out: string
+  section: string
+  title: string
+  /** HTML body, not yet link-rewritten */
+  body: string
+  toc: TocItem[]
+}
+
+export type Section = Omit<Site['sections'][number], 'pages'> & { pages: Page[] }

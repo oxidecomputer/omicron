@@ -741,8 +741,9 @@ mod tests {
     use sled_agent_types::early_networking::{
         LinkSpeed, PortConfig, RackNetworkConfig, SwitchSlot, UplinkPorts,
     };
-    use std::collections::BTreeSet;
+    use sled_hardware_types::BaseboardId;
     use std::time::Duration;
+    use trust_quorum_types::membership::TrustQuorumMembers;
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -766,7 +767,15 @@ mod tests {
             allow_ddm_traffic: false,
         }];
         MultirackJoinRequest {
-            trust_quorum_peers: BTreeSet::new(),
+            trust_quorum_peers: TrustQuorumMembers::new(
+                (0..3)
+                    .map(|index| BaseboardId {
+                        part_number: "test-part".to_string(),
+                        serial_number: format!("test-serial-{index}"),
+                    })
+                    .collect(),
+            )
+            .expect("test membership is within the size bounds"),
             rack_network_config: RackNetworkConfig {
                 rack_subnet: "fd00:abcd:ffff::/56".parse().unwrap(),
                 infra_ip_first: "10.0.0.1".parse().unwrap(),

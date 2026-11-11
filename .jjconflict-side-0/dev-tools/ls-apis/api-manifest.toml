@@ -1,0 +1,882 @@
+# Describes all the Dropshot/OpenAPI/Progenitor APIs in the system
+#
+# See README.adoc in this package for details.
+#
+# TODO It would be nice to collect a bunch of this information from the same
+# sources that drive the actual build process (e.g., package-manifest.toml).
+# For non-Omicron components, the deployment units (zone images and tarballs
+# that get unpacked into the switch zone or global zone) come from buildomat
+# jobs on other repositories.  In at least some components those come from those
+# components' package-manifest.toml files, which we probably have available, so
+# we could still incorporate that information.
+#
+# TODO The metadata here overlaps with metadata hardcoded in
+# `dev-tools/dropshot-apis`.
+
+################################################################################
+# Ignored non-client packages
+#
+# These are packages that may be flagged as clients because they directly depend
+# on Progenitor, but which are not really clients.
+#
+# These are cases that cannot be easily handled by the evaluation rules later in
+# this file because they need to be processed earlier.
+################################################################################
+
+ignored_non_clients = [
+    # omicron-common depends on progenitor so that it can define some generic
+    # error handling and a generic macro for defining clients.  omicron-common
+    # itself is not a progenitor-based client.
+    "omicron-common",
+
+    # propolis-mock-server uses Progenitor to generate types that are
+    # compatible with the real Propolis server.  It doesn't actually use the
+    # client and we don't really care about it for these purposes anyway.
+    "propolis-mock-server",
+]
+
+################################################################################
+# Deployment Units
+#
+# A deployment unit is a set of Rust packages that are always deployed together.
+# This is particularly relevant for upgrade because we'll want to construct a
+# DAG describing the order in which we update components.  It's possible that we
+# could have a DAG among the Rust packages that get deployed but there may
+# still be cycles within the deployment unit dependency graph.
+################################################################################
+
+# The host OS includes Sled Agent, Propolis, and all the components that get
+# bundled into the switch zone.
+[[deployment_units]]
+name = "Host OS"
+packages = [
+    "omicron-sled-agent",
+    "propolis-server",
+    # switch zone
+    "ddmd",
+    "dpd",
+    "lldpd",
+    "mgd",
+    "omicron-gateway",
+    "tfportd",
+    "wicketd",
+]
+# sled-agent-rack-setup is a library inside the omicron-sled-agent binary. It is
+# listed here as an embedded component so its API dependencies (which only
+# matter during RSS) are reported separately from the steady-state dependencies
+# of omicron-sled-agent.  Setting `inside = "omicron-sled-agent"` means that
+# when ls-apis walks omicron-sled-agent's Cargo dependencies, sled-agent-rack-
+# setup itself is skipped, so API dependencies reachable only through it are
+# attributed to the embedded component rather than to omicron-sled-agent.
+#
+# The `rack-init` lifecycle marks this embedded component as running only
+# during rack initialization.  Edges from `rack-init` components are excluded
+# from the upgrade DAG, so that sled-agent-rack-setup doesn't impose any
+# ordering constraints on the upgrade DAG.
+embedded_components = [
+    { name = "sled-agent-rack-setup", inside = "omicron-sled-agent", lifecycle = "rack-init" },
+]
+
+# Installinator gets packaged into its own host OS image.
+[[deployment_units]]
+name = "Installinator"
+packages = [ "installinator" ]
+
+# The rest of these get bundled by standard control plane zone images.
+
+[[deployment_units]]
+name = "Crucible"
+packages = [ "crucible-agent", "crucible-downstairs" ]
+
+[[deployment_units]]
+name = "Crucible Pantry"
+packages = [ "crucible-pantry" ]
+
+[[deployment_units]]
+name = "Cockroach"
+packages = [ "omicron-cockroach-admin" ]
+
+# This is really three distinct deployment units:
+#
+# * single-node ClickHouse
+# * multi-node ClickHouse Server
+# * multi-node ClickHouse Keeper
+#
+# but they behave the same for our purposes, and the tooling doesn't support
+# multiple deployment units that each expose a particular service.
+[[deployment_units]]
+name = "ClickHouse"
+packages = [ "omicron-clickhouse-admin" ]
+
+[[deployment_units]]
+name = "DNS Server"
+packages = [ "dns-server" ]
+
+[[deployment_units]]
+name = "Nexus"
+packages = [ "omicron-nexus" ]
+
+[[deployment_units]]
+name = "NTP"
+packages = [ "omicron-ntp-admin" ]
+
+[[deployment_units]]
+name = "Oximeter"
+packages = [ "oximeter-collector" ]
+
+
+################################################################################
+# APIs
+#
+# Each API includes:
+#
+# `client_package_name`: the name of the Rust package that's a
+# Progenitor-based client for this API.  This is used as a primary key for the
+# API.
+#
+# `label`: a human-readable name for this API
+#
+# `server_package_name`: the package that contains the Dropshot API definition.
+#
+# `versioned_how`: one of:
+#
+#   "server":  this component uses server-side versioning only, meaning that the
+#              update system can ensure that servers are always updated before
+#              clients.
+#
+#   "client":  this component uses client-side versioning, meaning that the
+#              update system cannot ensure that servers are always updated
+#              before clients, so clients need to deal with multiple different
+#              server versions.
+#
+#              You must also specify `versioned_how_reason` if you use "client".
+#
+#   "unknown": this has not been determined.  This will break tests.  But the
+#              tooling supports this value so that during development you can
+#              relax these constraints.
+#
+# "server" and "client" versioning is elaborated on more in RFD 532.  Note that
+# "lockstep" collapses into "server" here, as it's trivially the case that if
+# the server and client(s) are updated atomically the server does not have to
+# support older clients.  Additionally, the "updated before" relationship is
+# discussed some in RFD 565, [Update
+# sequence](https://rfd.shared.oxide.computer/rfd/0565#_update_sequence).
+#
+# [`versioned_how_reason`]: free text string explaining why `versioned_how` must
+# be "client" for this API.  This is printed in documentation and command output
+# and serves as documentation for developers to understand why we made this
+# choice.  This should be present only if `versioned_how = "client"`.
+#
+# [`notes`]: optional free-form human-readable summary documentation about this
+# API
+################################################################################
+
+[[apis]]
+client_package_name = "bootstrap-agent-lockstep-client"
+label = "Bootstrap Agent Lockstep API"
+server_package_name = "bootstrap-agent-lockstep-api"
+versioned_how = "client"
+versioned_how_reason = "wicketd can wind up calling into sled agent on different sleds"
+notes = """
+Lockstep API for rack initialization.  Only used by wicketd.  Generally
+speaking, Wicketd only talks to the sled agent on the same sled, which is in the
+same deployment unit as Wicketd itself (host OS).  However, it may pick a
+different one if for some reason the local baseboard information is not
+available.
+
+Either way, none of this matters for API versioning or software update because
+we expect that during rack initialization, all components are running the same
+system release.
+"""
+
+[[apis]]
+client_package_name = "clickhouse-admin-keeper-client"
+label = "Clickhouse Cluster Admin for Keepers"
+server_package_name = "clickhouse-admin-api"
+versioned_how = "server"
+notes = """
+This is the server running inside multi-node Clickhouse keeper zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
+client_package_name = "clickhouse-admin-server-client"
+label = "Clickhouse Cluster Admin for Servers"
+server_package_name = "clickhouse-admin-api"
+versioned_how = "server"
+notes = """
+This is the server running inside multi-node Clickhouse server zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
+client_package_name = "clickhouse-admin-single-client"
+label = "Clickhouse Single-Node Cluster Admin"
+server_package_name = "clickhouse-admin-api"
+versioned_how = "server"
+notes = """
+This is the server running inside single-node Clickhouse server zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
+client_package_name = "cockroach-admin-client"
+label = "CockroachDB Cluster Admin"
+server_package_name = "cockroach-admin-api"
+versioned_how = "server"
+notes = """
+This is the server running inside CockroachDB zones that performs \
+configuration and monitoring that requires the `cockroach` CLI.
+"""
+
+[[apis]]
+client_package_name = "ntp-admin-client"
+label = "NTP Admin"
+server_package_name = "ntp-admin-api"
+versioned_how = "client"
+versioned_how_reason = """
+Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated \
+before NTP. This requires that the NTP Admin API be client-side versioned.
+"""
+notes = """
+This is the server running inside NTP zones that performs \
+monitoring on 'chrony'.
+"""
+
+[[apis]]
+client_package_name = "crucible-agent-client"
+label = "Crucible Agent"
+server_package_name = "crucible-agent"
+versioned_how = "server"
+
+[[apis]]
+client_package_name = "repair-client"
+label = "Crucible Repair"
+server_package_name = "crucible-downstairs"
+versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
+notes = """
+The repair service offered by a crucible-downstairs supports both repairing \
+one downstairs from another, and making a clone of a read-only downstairs \
+when creating a new region in the crucible agent.
+"""
+
+[[apis]]
+client_package_name = "crucible-pantry-client"
+label = "Crucible Pantry"
+server_package_name = "crucible-pantry"
+versioned_how = "server"
+
+[[apis]]
+client_package_name = "ddm-admin-client"
+label = "Maghemite DDM Admin"
+server_package_name = "ddmd"
+versioned_how = "server"
+notes = """
+The `ddmd` server runs in each sled GZ and each switch zone. These daemons \
+provide an interface for advertising network prefixes, and observing what \
+prefixes have been received from other DDM daemons in the rack. Sled agent \
+uses this interface to announce bootstrap and underlay network prefixes, as \
+well as learn about routes to other sleds and services in the rack. This \
+interface is required in early-networking before a rack is fully up with Nexus \
+running. Nexus does not consume this interface today, but will for \
+observability APIs in the future.
+"""
+
+[[apis]]
+client_package_name = "dns-service-client"
+label = "DNS Server"
+server_package_name = "dns-server-api"
+versioned_how = "server"
+
+[[apis]]
+client_package_name = "dpd-client"
+label = "Dendrite DPD"
+server_package_name = "dpd"
+versioned_how = "server"
+notes = """
+Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
+the rack switches. It's consumed by sled-agent to get the rack off the \
+ground. The dpd API is also used by nexus as operators make changes to the \
+rack external network configuration, these changes are synchronized by nexus \
+to `dpd`. The `dpd` API is a auto-generated from it's OpenAPI specification \
+and exists as a client library within omicron. This is because the Dendrite \
+repo is not currently open source.
+"""
+
+[[apis]]
+client_package_name = "lldpd-client"
+label = "LLDP daemon"
+server_package_name = "lldpd"
+versioned_how = "server"
+notes = "The LLDP daemon runs in the switch zone and is deployed next to dpd."
+
+[[apis]]
+client_package_name = "gateway-client"
+label = "Management Gateway Service"
+server_package_name = "gateway-api"
+versioned_how = "server"
+notes = "Wicketd is deployed in a unit with MGS so we can ignore that one."
+
+[[apis]]
+client_package_name = "installinator-client"
+label = "Wicketd Installinator"
+server_package_name = "installinator-api"
+# The installinator-client is used only by Installinator.  This is part of the
+# recovery OS image.  Today, this is not really "shipped" in the traditional
+# sense.  The only way it gets used today is by an operator uploading it to
+# Wicket and then performing a MUPdate.  In this sense, we do not control the
+# client, so we mark this client-managed -- it's up to the operator to make sure
+# they're using a TUF repo whose recovery image contains an Installinator that's
+# compatible with the API served by Wicket on the deployed system.  In practice,
+# we're almost certainly just going to avoid changing this API.
+versioned_how = "client"
+versioned_how_reason = "client is provided implicitly by the operator"
+
+[[apis]]
+client_package_name = "mg-admin-client"
+label = "Maghemite MG Admin"
+server_package_name = "mgd"
+versioned_how = "server"
+notes = """
+The `mgd` daemon runs in each switch zone. This daemon is responsible for all \
+external route management for a switch. It provides interfaces for static \
+route management, BGP configuration and BFD configuration. This interface is \
+consumed by both nexus and sled agent, since we need external connectivity to \
+bring the rack up.
+"""
+
+[[apis]]
+client_package_name = "nexus-client"
+label = "Nexus Internal API"
+server_package_name = "nexus-internal-api"
+# nexus-client has to be client-versioned today because it's got a cyclic
+# dependency with sled-agent-client, which is server-versioned.
+versioned_how = "client"
+versioned_how_reason = "Circular dependencies between Nexus and other services"
+
+[[apis]]
+client_package_name = "nexus-lockstep-client"
+label = "Nexus Internal Lockstep API"
+server_package_name = "nexus-lockstep-api"
+# nexus-lockstep-client has to be client-versioned because it's got a cyclic
+# dependency with sled-agent-client, which is server-versioned.
+versioned_how = "client"
+versioned_how_reason = "Circular dependencies between Nexus and other services"
+# Exactly these consumers (Rust packages specified in one or more of the
+# `packages` arrays in the deployment_units table above, or via
+# `embedded_components` entries in the same table) are allowed to use this
+# API.  ls-apis check will error out if the list of consumers is incorrect.
+restricted_to_consumers = [
+     { name = "omicron-sled-agent", reason = "Only sled-agent-sim uses this API, which is not part of upgrade" },
+     { name = "sled-agent-rack-setup", reason = "Only RSS uses this API, which is not part of upgrade" },
+]
+
+[[apis]]
+client_package_name = "oxide-client"
+label = "External API"
+server_package_name = "nexus-external-api"
+# The versioning strategy for the external API is outside the scope of this
+# tool.  It doesn't matter what we put here.
+versioned_how = "server"
+notes = "Special case, since we don't fully control all clients"
+
+[[apis]]
+client_package_name = "oximeter-client"
+label = "Oximeter"
+server_package_name = "oximeter-api"
+versioned_how = "server"
+notes = """
+Shared types for this interface are in `omicron-common`. The producer makes \
+requests to Nexus, and receives them from `oximeter-collector`. \
+`oximeter-collector` makes requests to Nexus and the producer, and receives \
+them from Nexus (for periodic renewals). Nexus receives requests from both, \
+and makes the periodic renewal requests to `oximeter-collector`.
+"""
+
+[[apis]]
+client_package_name = "propolis-client"
+label = "Propolis"
+server_package_name = "propolis-server"
+versioned_how = "server"
+notes = """
+Sled Agent is deployed in a unit with Propolis so we can ignore that one.
+"""
+
+[[apis]]
+client_package_name = "sled-agent-client"
+label = "Sled Agent"
+server_package_name = "sled-agent-api"
+versioned_how = "server"
+
+[[apis]]
+client_package_name = "repo-depot-client"
+label = "Repo Depot API"
+server_package_name = "repo-depot-api"
+versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
+
+[[apis]]
+client_package_name = "wicketd-client"
+label = "Wicketd"
+server_package_name = "wicketd-api"
+versioned_how = "server"
+notes = """
+wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
+"""
+
+[[apis]]
+client_package_name = "wicketd-commission-client"
+label = "Wicketd Commission"
+server_package_name = "wicketd-commission-api"
+versioned_how = "server"
+notes = """
+Stable rack commissioning API (RFD 710), served by wicketd on its own port. The
+production consumer is rkdeploy, which lives outside this workspace and is
+not currently modeled by ls-apis. Wicket also uses it, and is deployed in a
+unit with wicketd.
+"""
+
+[[apis]]
+client_package_name = "crucible-control-client"
+label = "Crucible Control (for testing only)"
+server_package_name = "crucible"
+versioned_how = "server"
+notes = """
+Exposed by Crucible upstairs for debugging via the `cmon` debugging tool.
+"""
+
+[[apis]]
+client_package_name = "dsc-client"
+label = "Downstairs Controller (debugging only)"
+server_package_name = "dsc"
+versioned_how = "server"
+dev_only = true
+notes = """
+`dsc` is a control program for spinning up and controlling instances of Crucible
+downstairs for testing.  You can use the same program to control a running `dsc`
+instance.  It's also used by `crutest` for testing.
+"""
+
+################################################################################
+# Dependency filter rules
+#
+# These rules are used to postprocess the API dependencies that are inferred
+# from the Cargo dependencies.  Each rule has properties:
+#
+# * `ancestor`: a Rust package name
+# * `client`: the name of a Rust package that's a Progenitor-based API client
+# * `evaluation`: a developer-maintained flag for this dependency
+# * `note`: a human-readable explanation for the evaluation
+#
+# This tool works by assembling a list of _possible_ API dependencies based on
+# Cargo package dependencies and then applying these rules to filter some out.
+# A rule matches a possible API dependency on `client` if the Cargo package
+# dependency path goes through `ancestor`.  For example: omicron-sled-agent
+# depends on omicron-common, which depends on mg-admin-client.  This causes the
+# tool to initially think that omicron-sled-agent uses the MGD Admin API.  A
+# rule with `client = mg-admin-client` and `ancestor = omicron-common` would
+# filter this out.
+#
+# See the README for more details, including what the different evaluations mean.
+################################################################################
+
+#
+# There are no DAG dependencies yet because we've only started evaluating which
+# edges should be in that graph.
+#
+
+#
+# Non-DAG dependencies.  See above for details.
+#
+
+[[dependency_filter_rules]]
+ancestor = "oximeter-producer"
+client = "nexus-client"
+evaluation = "non-dag"
+note = """
+All Oximeter producers are Nexus clients.  This is a good candidate for a
+non-DAG dependency because the API is small and stable and the reverse
+directions are often not.
+"""
+
+#
+# "Not-deployed" dependencies.  See above for details.
+#
+# TODO All things being equal, it would be better to separate these programs
+# into their own packages that are separate from the package that *is* deployed.
+# Then we wouldn't need these rules.  As it is, these rules rely on manual
+# vetting that the dependency _is_ only in the dev/test program.  If things ever
+# changed (e.g., if one of these grew a real dependency on the same API), we'd
+# miss it in this tooling.
+#
+
+[[dependency_filter_rules]]
+ancestor = "oximeter-collector"
+client = "oximeter-client"
+evaluation = "not-deployed"
+note = """
+Oximeter provides a standalone collector that is not used in deployed systems.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "wicketd"
+client = "wicketd-client"
+evaluation = "not-deployed"
+note = """
+Wicketd provides a function to refresh the server's config.  This could probably
+move into the client package instead.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "sled-agent-client"
+evaluation = "not-deployed"
+note = """
+Sled Agent uses a Sled Agent client for the `zone-bundle` binary, which is not
+deployed.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "transient-dns-server"
+client = "dns-service-client"
+evaluation = "not-deployed"
+note = """
+transient-dns-server is only used by the simulated sled-agent and tests, neither
+of which are deployed.
+"""
+
+#
+# "Bogus" dependencies.  See above for details.
+#
+# In most of these cases, some crate is using a client crate for its types, not
+# its client.  In these cases, if the component has a real dependency on that
+# other API, then it will need some other dependency on the client and that will
+# show up as a non-bogus dependency.
+#
+# TODO It would be nice to remove the need for all of these to avoid accidental
+# future false negatives.
+#
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-client"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+sled-agent-client re-exports some (Crucible!) types from propolis-client for
+sled-agent-client's consumers.  Ideally sled-agent-client would not need to
+depend on propolis-client even just for types, but until that's untangled, this
+Cargo dependency does not represent a real API relationship.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "omicron-common"
+client = "mg-admin-client"
+evaluation = "bogus"
+note = """
+omicron_common depends on mg-admin-client solely to impl some `From`
+conversions.  That makes it look like just about everything depends on
+mg-admin-client, which isn't true.  It'd be nice to remove this.  Most clients
+put those conversions into the client rather than omicron_common.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "mg-admin-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on mg-admin-client to impl some `From` conversions and for
+defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "gateway-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on gateway-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "internal-dns"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+Past versions of internal-dns (which does not exist any more) depended on
+dns-service-client for defining some types.  We can remove this when other repos
+that depend on Omicron have updated past the removal of the "internal-dns"
+package.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+Past versions of nexus-types that are still referenced in the dependency tree
+depended on dns-service-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "sled-agent-client"
+evaluation = "bogus"
+note = """
+Past versions of nexus-types that are still referenced in the dependency tree
+depended on sled-agent-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-types"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+sled-agent-types uses propolis-client for types only.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "crucible-agent-client"
+evaluation = "bogus"
+note = """
+Sled Agent uses the Crucible Agent client types only, and only in the simulated
+sled agent.
+"""
+
+################################################################################
+# Intra-deployment-unit-only edges
+#
+# These edges are excluded from the deployment unit dependency graph because
+# they represent communication that only happens locally within a *single
+# instance* of a single deployment unit, not across deployment unit boundaries.
+# A single deployment unit is updated atomically, so there's no risk of version
+# skew with intra_deployment_unit-only edges.
+#
+# Note that things do not belong here when they cross different instances of the
+# same deployment unit.  For example, Sled Agent and MGS are in the same
+# deployment unit (the host OS), but Sled Agent's use of MGS crosses different
+# instances of the deployment unit (i.e., different sleds).  Those don't belong
+# in this category.
+################################################################################
+
+[[intra_deployment_unit_only_edges]]
+server = "ddmd"
+client = "dpd-client"
+note = """
+ddmd runs in both the global zone and the switch zone. The switch zone is
+configured with dpd_host=[::1] (services.rs:3127). The global zone configures
+"dendrite" to false, meaning it does not expose a dendrite server
+(ddm/manifest.xml:25).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L3127",
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/smf/ddm/manifest.xml#L25",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "dpd"
+client = "gateway-client"
+note = """
+dpd defaults to [::1]:MGS_PORT (switch_identifiers.rs:60), and the SMF start
+script doesn't pass in --mgs-address.  The comment also explains that it
+explicitly wants the local MGS and this can only be overridden for testing.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/dpd/src/switch_identifiers.rs#L60",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/dpd/misc/dpd.xml",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tools/svc-dpd",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "lldpd"
+client = "dpd-client"
+note = """
+lldpd defaults to localhost for dpd (dendrite.rs:194), and the SMF start
+script doesn't pass in --host.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/src/dendrite.rs#L194",
+    "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/misc/lldpd.xml",
+    "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/misc/svc-lldpd",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "lldpd"
+client = "gateway-client"
+note = """
+lldpd defaults to localhost for gateway (main.rs:194), and the SMF start
+script doesn't override it.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/lldp/blob/d22509dfdb051321b859e924948605115691b93c/lldpd/src/main.rs#L148-L154",
+    "https://github.com/oxidecomputer/lldp/blob/d22509dfdb051321b859e924948605115691b93c/lldpd/misc/svc-lldpd",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "mgd"
+client = "ddm-admin-client"
+note = "mg-lower hardcodes localhost:8000."
+permalinks = [
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/mg-lower/src/ddm.rs#L110",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "mgd"
+client = "dpd-client"
+note = "mg-lower hardcodes localhost."
+permalinks = [
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/mg-lower/src/dendrite.rs#L491",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "mgd"
+client = "gateway-client"
+note = """
+mgd defaults to [::1]:12225 (mgd main.rs:93), and the SMF start script
+doesn't set --mgs-addr.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/mgd/src/main.rs#L93",
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/smf/mgd/manifest.xml",
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/smf/mgd_method_script.sh",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "ddm-admin-client"
+note = """
+Sled Agent talks to ddm-admin over localhost in multiple places: to get
+bootstrap prefixes in the global zone as part of `bootstrap_setup.rs:92` and
+`sled_agent.rs:1378`, and to reconcile external network config as part of
+`ddm_reconciler.rs:56` in the global zone, and to reconcile external network
+config in the switch zone in "handle.rs:201".
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/ddm_reconciler.rs#L56",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/bootstore_setup.rs#L92",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/sled_agent.rs#L1378",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/scrimlet-reconcilers/src/handle.rs#201", 
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "mg-admin-client"
+note = """
+Sled Agent's scrimlet reconcilers (sled-agent-scrimlet-reconcilers) includes
+an `mgd` reconciler responsible for configuring BGP, BFD, etc., within the
+local switch zone. This is within the same deployment unit as the global zone.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/handle.rs#L136-L138",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "propolis-client"
+note = """
+Only queries the Propolis server on the same sled, so Propolis is in the
+same deployment unit.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/instance.rs#L2283",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "propolis-server"
+client = "sled-agent-client"
+note = """
+The Propolis attestation server uses dice-verifier's AttestSledAgent to call
+RoT attestation endpoints on Sled Agent. The Sled Agent address is
+derived from propolis-server's own IPv6 listen address by computing the sled
+subnet and calling get_sled_address (propolis-server/src/main.rs:326), so it
+can only ever resolve to the same sled (and therefore, the same Host OS
+deployment unit).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/propolis/blob/58ab73bde89ade637b0ca8118682ee9575da6c2a/bin/propolis-server/src/main.rs#L326-L337",
+    "https://github.com/oxidecomputer/dice-util/blob/d7472bfa91aee859c3fe0bdc1dbb1e320285228e/verifier/src/sled_agent.rs#L19-L25",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "gateway-client"
+note = """
+Sled Agent on scrimlets talks to MGS within its own sled's switch zone. The
+`sled-agent-scrimlet-reconcilers` crate attempts to go out of its way to ensure
+it's only ever used in this way. The switch zone is within the same deployment
+unit as the global zone on its own sled, so this is okay.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/switch_zone_slot.rs#L46-L59",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "dpd-client"
+note = """
+Sled Agent on scrimlets talks to dendrite within its own sled's switch zone. The
+`sled-agent-scrimlet-reconcilers` crate attempts to go out of its way to ensure
+it's only ever used in this way. The switch zone is within the same deployment
+unit as the global zone on its own sled, so this is okay.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/switch_zone_slot.rs#L46-L59",
+]
+
+# Note: sled-agent-rack-setup (RSS) is marked with `lifecycle = "rack-init"`
+# in its embedded-component declaration, so its API consumption is excluded
+# from the upgrade DAG entirely.  No IDU annotation is needed for edges from
+# RSS.
+
+[[intra_deployment_unit_only_edges]]
+server = "tfportd"
+client = "dpd-client"
+note = """
+The tfportd service has the dpd_host SMF property (tfport.xml:52) set to [::1]
+(services.rs:2852). tfportd has a --dpd-host option (main.rs:81) but the SMF
+start script (svc-tfportd:12) does not use it.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L2852",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tfportd/misc/tfport.xml#L52-L53",
+    "https://github.com/oxidecomputer/dendrite/blob/cf31be9/tfportd/src/main.rs#L81-L83",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tools/svc-tfportd#L12",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "tfportd"
+client = "lldpd-client"
+note = "tfportd hardcodes localhost for its lldpd-client (tfport.rs:88)."
+permalinks = [
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tfportd/src/tfport.rs#L88",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "wicketd"
+client = "ddm-admin-client"
+note = "wicketd uses DdmAdminClient::localhost() (bootstrap_addrs.rs:162)."
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/wicketd/src/bootstrap_addrs.rs#L162",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "wicketd"
+client = "dpd-client"
+note = "wicketd hardcodes [::1] (uplink.rs:83)."
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/wicketd/src/preflight_check/uplink.rs#L83",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "wicketd"
+client = "gateway-client"
+note = """
+wicketd's mgs-address config (wicketd.rs:35) is always set to [::1]
+(services.rs:2586). This config is passed into wicketd at startup
+(manifest.xml:20).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L2685-L2689",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/wicketd/src/bin/wicketd.rs#L35",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/smf/wicketd/manifest.xml#L20",
+]

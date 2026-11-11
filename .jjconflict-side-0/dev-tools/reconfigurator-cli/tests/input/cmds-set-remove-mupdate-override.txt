@@ -1,0 +1,44 @@
+# Load example system with 7 sleds:
+#
+# serial0: unset -> unset (unchanged)
+# serial1: unset -> set
+# serial2: set -> unset
+# serial3: set -> set (unchanged)
+# serial4: set -> set (changed)
+# serial5: set -> set (unchanged) but change something else
+# serial6: set -> sled removed
+#
+# We'll also add another sled below (new_sled_id) with
+# remove_mupdate_override set.
+
+load-example --nsleds 7 --ndisks-per-sled 1
+sled-list
+
+# Set the field on sleds 2-6 (0-indexed).
+blueprint-edit latest set-remove-mupdate-override serial2 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override serial3 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override serial4 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override serial5 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override serial6 00000000-0000-0000-0000-000000000000
+
+blueprint-show latest
+
+# Now make another blueprint, starting by adding a new sled and removing sled 6.
+sled-add --ndisks 0
+blueprint-edit latest debug remove-sled serial6
+sled-remove serial6
+inventory-generate
+
+# Edit sleds 1, 2, 4, 5, and the new one.
+blueprint-edit latest set-remove-mupdate-override serial1 ffffffff-ffff-ffff-ffff-ffffffffffff
+blueprint-edit latest set-remove-mupdate-override serial2 unset
+blueprint-edit latest set-remove-mupdate-override serial4 ffffffff-ffff-ffff-ffff-ffffffffffff
+blueprint-edit latest debug force-sled-generation-bump serial5
+blueprint-edit latest set-remove-mupdate-override serial7 ffffffff-ffff-ffff-ffff-ffffffffffff
+
+blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba latest
+
+# Set the target release minimum generation for the blueprint.
+blueprint-edit latest set-target-release-min-gen 2
+blueprint-show latest
+blueprint-diff afb09faf-a586-4483-9289-04d4f1d8ba23 latest

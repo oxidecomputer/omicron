@@ -1,0 +1,11 @@
+See README.adoc for more information
+
+Usage: sled-agent <COMMAND>
+
+Commands:
+  run   Runs the Sled Agent server
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version

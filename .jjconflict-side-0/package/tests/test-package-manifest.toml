@@ -1,0 +1,45 @@
+# Package manifest used for testing dot(1) output
+
+# test: "local" package source with just a Rust binary
+[package.top1]
+service_name = "top1_rust"
+source.type = "local"
+source.rust.binary_names = [ "a_binary"]
+source.rust.release = true
+output.type = "zone"
+
+# test: "local" package source with just files
+[package.top2]
+service_name = "top2_files_only"
+source.type = "local"
+source.paths = [ { from = "extra2", to = "/files2" } ]
+output.type = "zone"
+
+# test: "local" package source with just a Rust binary
+[package.top3]
+service_name = "top3_blob_only"
+source.type = "local"
+source.blobs = [ "something_in_s3.zip" ]
+output.type = "zone"
+
+# test: "composite" package source
+[package.top4]
+service_name = "top4_composite"
+source.type = "composite"
+source.packages = [ "leaf1.tar.gz", "leaf2.tar.gz" ]
+output.type = "zone"
+
+# test: "prebuilt" package source (buildomat source)
+[package.leaf1]
+service_name = "leaf1"
+source.type = "prebuilt"
+source.repo = "prebuilt_thing_1"
+source.commit = "123"
+source.sha256 = "456"
+output.type = "zone"
+
+# test: "manual" package source
+[package.leaf2]
+service_name = "leaf2"
+source.type = "manual"
+output.type = "zone"

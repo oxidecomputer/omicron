@@ -5596,11 +5596,7 @@
             "$ref": "#/components/schemas/BaseboardId"
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           }
         },
         "required": [
@@ -10456,6 +10452,15 @@
           "prepared",
           "committed"
         ]
+      },
+      "TrustQuorumMembers": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TufRepoVersion": {
         "oneOf": [

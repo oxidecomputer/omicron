@@ -1,0 +1,153 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::DbSwitchSlot;
+use crate::DbTypedUuid;
+use crate::SqlU16;
+use crate::impl_enum_type;
+use db_macros::Asset;
+use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
+use nexus_types::external_api::networking as networking_types;
+use nexus_types::identity::Asset;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::LoopbackAddressKind;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::TypedUuid;
+use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::SwitchSlot;
+use uuid::Uuid;
+
+impl_enum_type!(
+    SwitchInterfaceKindEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Serialize,
+        Deserialize
+    )]
+    pub enum DbSwitchInterfaceKind;
+
+    Primary => b"primary"
+    Vlan => b"vlan"
+    Loopback => b"loopback"
+);
+
+impl From<networking_types::SwitchInterfaceKind> for DbSwitchInterfaceKind {
+    fn from(k: networking_types::SwitchInterfaceKind) -> Self {
+        match k {
+            networking_types::SwitchInterfaceKind::Primary => {
+                DbSwitchInterfaceKind::Primary
+            }
+            networking_types::SwitchInterfaceKind::Vlan(_) => {
+                DbSwitchInterfaceKind::Vlan
+            }
+            networking_types::SwitchInterfaceKind::Loopback => {
+                DbSwitchInterfaceKind::Loopback
+            }
+        }
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_vlan_interface_config)]
+pub struct SwitchVlanInterfaceConfig {
+    pub interface_config_id: Uuid,
+    pub vid: SqlU16,
+}
+
+impl SwitchVlanInterfaceConfig {
+    pub fn new(interface_config_id: Uuid, vid: u16) -> Self {
+        Self { interface_config_id, vid: vid.into() }
+    }
+}
+
+impl Into<networking_types::SwitchVlanInterfaceConfig>
+    for SwitchVlanInterfaceConfig
+{
+    fn into(self) -> networking_types::SwitchVlanInterfaceConfig {
+        networking_types::SwitchVlanInterfaceConfig {
+            interface_config_id: self.interface_config_id,
+            vlan_id: self.vid.into(),
+        }
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Asset,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = loopback_address)]
+#[asset(uuid_kind = LoopbackAddressKind)]
+pub struct LoopbackAddress {
+    #[diesel(embed)]
+    pub identity: LoopbackAddressIdentity,
+    pub address_lot_block_id: Uuid,
+    pub rsvd_address_lot_block_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub address: IpNetwork,
+    pub anycast: bool,
+    pub switch_slot: DbSwitchSlot,
+}
+
+impl LoopbackAddress {
+    pub fn new(
+        id: Option<TypedUuid<LoopbackAddressKind>>,
+        address_lot_block_id: Uuid,
+        rsvd_address_lot_block_id: Uuid,
+        rack_id: RackUuid,
+        switch_slot: SwitchSlot,
+        address: IpNetwork,
+        anycast: bool,
+    ) -> Self {
+        Self {
+            identity: LoopbackAddressIdentity::new(
+                id.unwrap_or(TypedUuid::new_v4()),
+            ),
+            address_lot_block_id,
+            rsvd_address_lot_block_id,
+            rack_id: rack_id.into(),
+            switch_slot: switch_slot.into(),
+            address,
+            anycast,
+        }
+    }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
+    }
+}
+
+impl Into<networking_types::LoopbackAddress> for LoopbackAddress {
+    fn into(self) -> networking_types::LoopbackAddress {
+        networking_types::LoopbackAddress {
+            id: self.identity().id,
+            address_lot_block_id: self.address_lot_block_id,
+            rack_id: self.rack_id.into_untyped_uuid(),
+            switch_slot: self.switch_slot.into(),
+            address: self.address.into(),
+        }
+    }
+}

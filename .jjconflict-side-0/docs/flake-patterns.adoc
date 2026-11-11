@@ -1,0 +1,204 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Flaky test code patterns
+
+Omicron is a large distributed system, as a result of which it is somewhat susceptible to flaky tests. This document outlines some common patterns that have been observed to lead to flaky tests and how to avoid them.
+
+== Glossary [[glossary]]
+
+Background task:: A task that runs periodically in the background on a timer. Most background tasks implement the _reliable persistent workflow_ or _RPW_ pattern; see https://rfd.shared.oxide.computer/rfd/0373[RFD 373 Reliable Persistent Workflows].
+Nexus test:: A test that uses the Nexus test framework, typically represented as an async function annotated with `#[nexus_test]`. (Some tests may manually set up Nexus.)
+System under test (SUT):: The production code (components or systems) being tested.
+
+== Patterns [[patterns]]
+
+=== Asserting before async setup completes [[asserting-before-async-setup-completes]]
+
+**What this is:** A Nexus or other integration test starts, and an assertion made by the test races with a background async setup task that the SUT requires.
+
+This is most commonly observed with inventory collections, with two variations:
+
+* A SUT requires that an inventory be present in the database, but the test does not wait for inventory to be present before making an assertion.
+* A SUT requires that an inventory be present in the Nexus in-memory watch channel, but the test either does not wait for inventory to be present, or waits for it to be present in the _database_ but not the _watch channel_.
+
+**Why this is bad:** In most cases the test takes long enough before making the assertions that the async setup completes, but sometimes, particularly when the machine is under heavy load, it does not. This results in a race condition.
+
+**How to fix this:** Use the appropriate `wait_for_condition` helper at the start of the test. For example:
+
+* `test-utils/src/dev/poll.rs` has `wait_for_condition` and `wait_for_watch_channel_condition`.
+* `nexus/test-utils/src/nexus_test.rs` has `wait_for_at_least_one_inventory_collection`.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/ab351dd669b8[`ab351dd669b8`] fixes several flaky tests by waiting for an inventory collection in the database.
+* https://github.com/oxidecomputer/omicron/commit/3026d8207604[`3026d8207604`] and https://github.com/oxidecomputer/omicron/commit/e082eb161e71[`e082eb161e71`] are followups that fix some of _those_ tests to wait on the watch channel instead of the database.
+
+=== Asserting before an async operation completes [[asserting-before-async-operation-completes]]
+
+**What this is:** A test performs an async operation, then does not wait for it to complete before making assertions.
+
+**Why this is bad:** The async operation races with the test assertion.
+
+**How to fix this:** Wait for the async operation to complete. This may either be waiting for an explicit condition with `wait_for_condition`, or configuring the operation to be synchronous.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/1bb7b11bbbe3[`1bb7b11bbbe3`] tells ClickHouse to perform an `ALTER TABLE` operation synchronously.
+* https://github.com/oxidecomputer/omicron/commit/9f1029da32f2[`9f1029da32f2`] waits for instance-update saga nodes that run after the node that makes the instance externally `Running`, instead of asserting on their effects immediately.
+
+=== Stale watch channel notifications [[stale-watch-channel-notifications]]
+
+**What this is:** A test triggers a background operation, then waits for it to complete by awaiting `changed()` on a Tokio watch channel. The notification that satisfies `changed()` can come from an _earlier_, still-in-flight operation rather than the one the test triggered.
+
+`changed()` answers "has the value changed since this receiver last observed it?", not "has the value reached the state I need?". This can lead to two kinds of races:
+
+* If the receiver is subscribed (or `mark_unchanged()` is called) while a previous operation is still in flight, that operation's completion satisfies `changed()`, and the test proceeds before the operation it actually cares about has run.
+* Watch channels coalesce notifications: several writes in quick succession may be observed as a single change, so it is incorrect to assume one notification per write.
+
+**Why this is bad:** The test's assertions race with the operation it believed it had waited for. In other words, the wait is _edge-triggered_ on a changed notification rather than _level-triggered_ on reaching the desired state.
+
+**How to fix this:** Switch the wait to being level-triggered by waiting on a predicate over the channel's _value_: use `wait_for_watch_channel_condition` with a reasonable timeout. This requires the channel to carry enough state to express "the operation I triggered is done". This could be, for example, a generation number the test compares with `>=` (which also tolerates coalescing).
+
+**Example commits:**
+
+// FIXME: replace XXXX with the merged commit hash of the test_repo_upload race-fix PR.
+* https://github.com/oxidecomputer/omicron/commit/XXXX[`XXXX`] replaces `changed()` waits on the sled agents' delete-reconciler channels with a `generation >= pruned_generation` predicate.
+* https://github.com/oxidecomputer/omicron/commit/cfdb3c3018f1[`cfdb3c3018f1`] replaces a `has_changed()` wait on the oximeter producer-details channel (which a spurious notification could satisfy) with a level-triggered `n_collections + n_failures >= n` predicate.
+
+=== Infinite retry loops [[infinite-retry-loops]]
+
+**What this is:** A Nexus or other integration test starts, but waits forever for a condition to be met rather than setting a reasonable timeout.
+
+**Why this is bad:** In cases where the SUT is truly stuck, the test spins until nextest imposes its test-specific or global timeout. The failing test output might have less useful information as a result.
+
+**How to fix this:** Use the bounded `wait_for_condition` helper instead of a manually-written while loop. `wait_for_condition` requires that a timeout be passed in; a typical timeout to use is 60 seconds.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/9ec43bc28a0e[`9ec43bc28a0e`] switches the `restart_dendrite` method to have a 60 second timeout on restarting Dendrite.
+
+=== Background tasks mutating the SUT [[background-tasks-mutating-the-sut]]
+
+**What this is:** A background task is started that mutates the SUT state in a way that is not expected by the test.
+
+**Why this is bad:** There is a race between the background task completing and the test observing its state.
+
+**How to fix this:** Either disable the background task for the test, or change the assertion to account for the background task potentially changing the state. The latter is easiest to do if the operation being tested is idempotent.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/2050ef3a67d2[`2050ef3a67d2`] disables the `sp_ereport_ingester` background task for most tests, but re-enables it for `test_omdb_success_cases`.
+* https://github.com/oxidecomputer/omicron/commit/4bd9ebbc71e9[`4bd9ebbc71e9`] makes Nexus's startup-time switch-port insertion (exercised by `omicron-dev run-all`) accept `Error::ObjectAlreadyExists` when a background task wins the race to insert the same record.
+
+=== Relying on periodic background-task activation [[relying-on-periodic-background-task-activation]]
+
+**What this is:** A test waits for a state change that only a Nexus background task performs, but never activates the task explicitly. Instead, it relies on the task's periodic timer firing while the test waits.
+
+**Why this is bad:** Task activation periods are often at the same time scale as test timeouts. For example, the `abandoned_vmm_reaper` task's period and a typical `wait_for_condition` timeout are both 60 seconds, so whether an activation lands inside the wait window depends on when the timer last fired. Even when the test doesn't flake, it spends most of its runtime sleeping.
+
+**How to fix this:** Activate the task explicitly through the Nexus lockstep API, using either `activate_background_task` in `nexus/test-utils/src/background.rs` or a task-specific `run_*` wrapper.
+
+Note that a background task activation that fires too early (e.g., one that requires a saga to complete) can be a no-op.
+
+* If the prerequisite is directly observable, wait for it first and then activate the task once.
+* If it is not, activate the task on each iteration of the surrounding `wait_for_condition` loop, which makes the wait level-triggered. This relies on the general design principle that background tasks are idempotent.
+
+It is fine to call `activate_background_task` in a loop since it is synchronous: it waits for the task to go idle, activates it, and waits for a newer completed iteration before returning.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/9f1029da32f2[`9f1029da32f2`] activates the `abandoned_vmm_reaper` task on each poll instead of waiting out its periodic activation interval.
+// FIXME: replace WWWW with the merged commit hash of the dead-switch NAT race-fix PR.
+* https://github.com/oxidecomputer/omicron/commit/8038f747226b[`8038f747226b`] makes it so that when checking that a restarted switch zone has received its NAT entries, the test triggers dendrite's NAT reconciliation on each poll rather than waiting for dendrite's own periodic background task poll. Here, the background task lives inside `dpd` rather than Nexus, so it is triggered through the `dpd` client's `nat_trigger_update` rather than the Nexus lockstep API.
+
+=== Teardown ordering races [[teardown-ordering-races]]
+
+**What this is:** A test completes, but two or more bits of teardown code race with each other during process shutdown. This may be a bug in either the test or the SUT.
+
+**Why this is bad:** This can turn a successful test into a failing one, or obscure the root cause of a genuine failure.
+
+**How to fix this:** Reorder teardown code to eliminate races.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/be164f13ba4f[`be164f13ba4f`] manually constructs a Tokio runtime to ensure that a `Utf8TempDir` is always dropped after the Tokio runtime is fully shut down.
+* https://github.com/oxidecomputer/omicron/commit/6a9df62a4d7f[`6a9df62a4d7f`] only detaches multicast state after the active VMM reaches a terminal state. This was a **genuine SUT bug**, not a test bug.
+
+NOTE: Flaky tests sometimes reveal genuine SUT bugs rather than test bugs. Besides the multicast example above, https://github.com/oxidecomputer/omicron/commit/e6733679c2ad[`e6733679c2ad`] fixed a NULL-handling bug in the next-item allocator that had been surfacing as flaky Terraform tests downstream.
+
+=== Bounded-channel backpressure [[bounded-channel-backpressure]]
+
+**What this is:** A bounded channel is full, and the test fails rather than waiting until the channel has available capacity.
+
+This is particularly susceptible to happening with Tokio's paused timer, which when advanced by a large increment can cause several messages to be sent to the channel in quick succession.
+
+**Why this is bad:** The channel being full is a transient condition that can be resolved by waiting.
+
+**How to fix this:** Treat backpressure as a transient condition (using `wait_for_condition` with a timeout), or advance time in smaller increments and use a synchronization mechanism like a watch channel to ensure progress is made.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/ca3b41b1e3f4[`ca3b41b1e3f4`] treats a `QueueFull` error as a transient `CondCheckError::NotYet`.
+* https://github.com/oxidecomputer/omicron/commit/9b5d906eb468[`9b5d906eb468`] advances Tokio's time by one Oximeter collection at a time, and uses a watch channel to signal that collection has been completed.
+** This fix, while necessary, turned out to not be sufficient: it stopped advancing time once a collection completed, but kept advancing while one was in flight, so under load further timer ticks could still overflow the channel.
+** The followup https://github.com/oxidecomputer/omicron/commit/cfdb3c3018f1[`cfdb3c3018f1`] makes the Oximeter collection interval far longer than the test's runtime (effectively disabling periodic collections after the first one), and makes the tests request each further collection explicitly. This prevents the bounded channel from ever filling up.
+
+=== Database time resolution mismatch [[database-time-resolution-mismatch]]
+
+**What this is:** `Utc::now()` in Rust represents timestamps with nanosecond precision, while the CockroachDB database truncates to microsecond precision.
+This can lead to assertions like `after > before` failing, if `after` is derived from the database while `before` is `Utc::now()`.
+
+For example:
+
+* Suppose `before` is `Utc::now()`, which is `2026-01-01 00:00:00.100_000_100` (i.e., 100 nanoseconds after the last microsecond).
+* Then an operation is made at `2026-01-01 00:00:00.100_000_200` (200 nanoseconds after the last microsecond).
+* This is stored in the database as `2026-01-01 00:00:00.100_000_000` (truncating to the nearest microsecond).
+* The value stored in the database is returned as `after`.
+
+Then, `after` is compared to `before`, and this assertion fails.
+
+**Why this is bad:** Most of the time the test would have crossed over into the next microsecond, but sometimes the test runs so quickly that that crossover doesn't occur.
+
+**How to fix this:** Use `now_db_precision()` in `common/src/lib.rs` to obtain `Utc::now()` with microsecond precision.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/8676f301cd44[`8676f301cd44`] switches timestamps from `Utc::now()` to `now_db_precision()`.
+
+=== Inadequate test isolation [[inadequate-test-isolation]]
+
+**What this is:** Tests do not use sufficient isolation, causing either two tests or two concurrently running tasks within the same test to trample over each other's state while executing.
+
+**Why this is bad:** Whether the test passes or fails depends on test and task scheduling.
+
+**How to fix this:** Isolate tests appropriately (preferred), or force them to run serially. The latter can be done in two different ways:
+
+. By having a single test that executes scenarios serially.
+. By setting up a nextest test group.
+
+NOTE: The `serial_test` crate **does not work** within Omicron: it depends on an in-process mutex, but nextest runs every test in its own process.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/c9dec4111860[`c9dec4111860`] ensures that learner nodes' ledger file names cannot collide with those of regular peer nodes. (Learner 1 and peer node `pc-b-1` both generated `test-1-network-config-ledger`.)
+* https://github.com/oxidecomputer/omicron/commit/067c79302158[`067c79302158`] changes a scenario from being a separate test to being listed within `test_replicated`.
+
+=== Ephemeral port reuse races [[ephemeral-port-reuse-races]]
+
+**What this is:** A test performs the following sequence of operations:
+
+. Start a service on an ephemeral TCP port (i.e., bind to port 0).
+. Kill the service.
+. Restart the service, attempting to bind to the port determined in step 1.
+
+In between steps 2 and 3, a different process such as a test running concurrently can grab the same port. This can result in test flakiness.
+
+**Why this is bad:** This is a test flake at best and cross-test interference at worst.
+
+**How to fix this:** Use the `RetargetableTcpProxy` available at `test-utils/src/dev/tcp-proxy.rs`. That provides a persistent port that stays bound throughout process restarts.
+
+**Example commits:**
+
+* https://github.com/oxidecomputer/omicron/commit/1a1529176b54[`1a1529176b54`] introduces the TCP proxy.

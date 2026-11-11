@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Version="2.0" ID="_f2f02ca12d7292f8a4e03b7b99d71a45f8896c2677" IssueInstant="2022-05-04T15:36:12.631Z" Destination="https://customer.site/oxide_rack/saml">
+  <saml:Issuer>https://some.idp.test/oxide_rack/</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Version="2.0" ID="_a8d644a6c83fc56337b0330d8b0ff684978a5fe56c" IssueInstant="2022-05-04T15:36:12.556Z">
+    <saml:Issuer>https://some.idp.test/oxide_rack/</saml:Issuer>
+    <saml:Subject>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">some@customer.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="3923-09-01T02:16:12.556Z" Recipient="https://customer.site/oxide_rack/saml"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2022-05-04T15:36:12.556Z" NotOnOrAfter="3923-09-01T02:16:12.556Z"/>
+    <saml:AuthnStatement AuthnInstant="2022-05-04T15:36:12.556Z" SessionNotOnOrAfter="3923-09-01T02:16:12.556Z" SessionIndex="_samling_4356273_859641652">
+      <saml:AuthnContext>
+        <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified</saml:AuthnContextClassRef>
+      </saml:AuthnContext>
+    </saml:AuthnStatement>
+  </saml:Assertion>
+</samlp:Response>

@@ -1,0 +1,1938 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Interface for building inventory [`Collection`] dynamically
+//!
+//! This separates the concerns of _collection_ (literally just fetching data
+//! from sources like MGS) from assembling a representation of what was
+//! collected.
+
+use anyhow::Context;
+use anyhow::anyhow;
+use chrono::DateTime;
+use chrono::Utc;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId;
+use gateway_client::types::SpComponentCaboose;
+use gateway_types::component::SpState;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map;
+use nexus_types::inventory::Caboose;
+use nexus_types::inventory::CabooseFound;
+use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::CockroachStatus;
+use nexus_types::inventory::Collection;
+use nexus_types::inventory::DiscoveredRack;
+use nexus_types::inventory::HostPhase1ActiveSlot;
+use nexus_types::inventory::HostPhase1FlashHash;
+use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::PowerShelf;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuSlot;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageFound;
+use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::RotState;
+use nexus_types::inventory::ServiceProcessor;
+use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::SpType;
+use nexus_types::inventory::TimeSync;
+use nexus_types::inventory::Zpool;
+use omicron_cockroach_metrics::CockroachMetric;
+use omicron_cockroach_metrics::PrometheusMetrics;
+use omicron_uuid_kinds::CollectionKind;
+use omicron_uuid_kinds::RackUuid;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::inventory::Inventory;
+use sled_hardware_types::BaseboardId;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::hash::Hash;
+use std::sync::Arc;
+use thiserror::Error;
+use tufaceous_artifact::ArtifactHash;
+use typed_rng::TypedUuidRng;
+
+/// Describes an operational error encountered during the collection process
+///
+/// Examples include a down MGS instance, failure to parse a response from some
+/// other service, etc.  We currently don't need to distinguish these
+/// programmatically.
+#[derive(Debug, Error)]
+pub struct InventoryError(#[from] anyhow::Error);
+
+impl std::fmt::Display for InventoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+/// Describes a mis-use of the [`CollectionBuilder`] object
+///
+/// Example: reporting information about a caboose when the caller has not
+/// already reported information about the corresopnding baseboard.
+///
+/// Unlike `InventoryError`s, which can always happen in a real system, these
+/// errors are not ever expected.  Ideally, all of these problems would be
+/// compile errors.
+#[derive(Debug, Error)]
+pub struct CollectorBug(#[from] anyhow::Error);
+
+impl std::fmt::Display for CollectorBug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+/// Random generator of UUIDs for a [`CollectionBuilder`].
+#[derive(Debug, Clone)]
+pub struct CollectionBuilderRng {
+    // We just generate one UUID for each collection.
+    id_rng: TypedUuidRng<CollectionKind>,
+}
+
+impl CollectionBuilderRng {
+    pub fn from_entropy() -> Self {
+        CollectionBuilderRng { id_rng: TypedUuidRng::from_entropy() }
+    }
+
+    pub fn from_seed<H: Hash>(seed: H) -> Self {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "collection-builder";
+        CollectionBuilderRng {
+            id_rng: TypedUuidRng::from_seed(seed, SEED_EXTRA),
+        }
+    }
+}
+
+/// Build an inventory [`Collection`]
+///
+/// This interface is oriented around the interfaces used by an actual
+/// collector.  Where possible, it accepts types directly provided by the data
+/// sources (e.g., `gateway_client`).
+#[derive(Debug)]
+pub struct CollectionBuilder {
+    // For field documentation, see the corresponding fields in `Collection`.
+    errors: Vec<InventoryError>,
+    time_started: DateTime<Utc>,
+    collector: String,
+    baseboards: BTreeSet<Arc<BaseboardId>>,
+    cabooses: BTreeSet<Arc<Caboose>>,
+    rot_pages: BTreeSet<Arc<RotPage>>,
+    sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    host_phase_1_active_slots: BTreeMap<Arc<BaseboardId>, HostPhase1ActiveSlot>,
+    host_phase_1_flash_hashes:
+        BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
+    rots: BTreeMap<Arc<BaseboardId>, RotState>,
+    cabooses_found:
+        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
+    rot_pages_found:
+        BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+    power_shelves: IdOrdMap<PowerShelf>,
+    sleds: IdOrdMap<SledAgent>,
+    discovered_racks: IdOrdMap<DiscoveredRack>,
+    clickhouse_keeper_cluster_membership:
+        BTreeSet<ClickhouseKeeperClusterMembership>,
+    cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
+    ntp_timesync: IdOrdMap<TimeSync>,
+    internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+    // CollectionBuilderRng is taken by value, rather than passed in as a
+    // mutable ref, to encourage a tree-like structure where each RNG is
+    // generally independent.
+    rng: CollectionBuilderRng,
+}
+
+impl CollectionBuilder {
+    /// Start building a new `Collection`
+    ///
+    /// `collector` is an arbitrary string describing the agent that collected
+    /// this data.  It's generally a Nexus instance uuid but it can be anything.
+    /// It's just for debugging.
+    pub fn new<S>(collector: S) -> Self
+    where
+        String: From<S>,
+    {
+        CollectionBuilder {
+            errors: vec![],
+            time_started: now_db_precision(),
+            collector: String::from(collector),
+            baseboards: BTreeSet::new(),
+            cabooses: BTreeSet::new(),
+            rot_pages: BTreeSet::new(),
+            sps: BTreeMap::new(),
+            host_phase_1_active_slots: BTreeMap::new(),
+            host_phase_1_flash_hashes: BTreeMap::new(),
+            rots: BTreeMap::new(),
+            cabooses_found: BTreeMap::new(),
+            rot_pages_found: BTreeMap::new(),
+            power_shelves: IdOrdMap::new(),
+            sleds: IdOrdMap::new(),
+            discovered_racks: IdOrdMap::new(),
+            clickhouse_keeper_cluster_membership: BTreeSet::new(),
+            cockroach_status: BTreeMap::new(),
+            ntp_timesync: IdOrdMap::new(),
+            internal_dns_generation_status: IdOrdMap::new(),
+            rng: CollectionBuilderRng::from_entropy(),
+        }
+    }
+
+    /// Assemble a complete `Collection` representation
+    pub fn build(mut self) -> Collection {
+        Collection {
+            id: self.rng.id_rng.next(),
+            errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
+            time_started: self.time_started,
+            time_done: now_db_precision(),
+            collector: self.collector,
+            baseboards: self.baseboards,
+            cabooses: self.cabooses,
+            rot_pages: self.rot_pages,
+            sps: self.sps,
+            host_phase_1_active_slots: self.host_phase_1_active_slots,
+            host_phase_1_flash_hashes: self.host_phase_1_flash_hashes,
+            rots: self.rots,
+            cabooses_found: self.cabooses_found,
+            rot_pages_found: self.rot_pages_found,
+            power_shelves: self.power_shelves,
+            sled_agents: self.sleds,
+            discovered_racks: self.discovered_racks,
+            clickhouse_keeper_cluster_membership: self
+                .clickhouse_keeper_cluster_membership,
+            cockroach_status: self.cockroach_status,
+            ntp_timesync: self.ntp_timesync,
+            internal_dns_generation_status: self.internal_dns_generation_status,
+        }
+    }
+
+    /// Within tests, set an RNG for deterministic results.
+    ///
+    /// This will ensure that tests that use this builder will produce the same
+    /// results each time they are run.
+    pub fn set_rng(&mut self, rng: CollectionBuilderRng) -> &mut Self {
+        self.rng = rng;
+        self
+    }
+
+    /// Record service processor state `sp_state` reported by MGS
+    ///
+    /// `sp_type` and `slot` identify which SP this was.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    ///
+    /// `rack_id` is the rack in which the MGS that reported this data is
+    /// located (and therefore the rack in which this SP is located).
+    pub fn found_sp_state(
+        &mut self,
+        source: &str,
+        rack_id: RackUuid,
+        sp_type: SpType,
+        sp_slot: u16,
+        sp_state: SpState,
+    ) -> Option<Arc<BaseboardId>> {
+        // Normalize the baseboard id: i.e., if we've seen this baseboard
+        // before, use the same baseboard id record.  Otherwise, make a new one.
+        let baseboard = Self::normalize_item(
+            &mut self.baseboards,
+            BaseboardId {
+                serial_number: sp_state.serial_number,
+                part_number: sp_state.model,
+            },
+        );
+
+        // Separate the SP state into the SP-specific state and the RoT state,
+        // if any.
+        let now = now_db_precision();
+        let _ = self.sps.entry(baseboard.clone()).or_insert_with(|| {
+            ServiceProcessor {
+                time_collected: now,
+                source: source.to_owned(),
+
+                sp_type,
+                sp_slot,
+
+                baseboard_revision: sp_state.revision,
+                hubris_archive: sp_state.hubris_archive_id,
+                power_state: sp_state.power_state,
+                rack_id,
+            }
+        });
+
+        match sp_state.rot {
+            gateway_types::rot::RotState::V2 {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_sha3_256_digest,
+                slot_b_sha3_256_digest,
+                transient_boot_preference,
+            } => {
+                let _ =
+                    self.rots.entry(baseboard.clone()).or_insert_with(|| {
+                        RotState {
+                            time_collected: now,
+                            source: source.to_owned(),
+                            active_slot: active,
+                            persistent_boot_preference,
+                            pending_persistent_boot_preference,
+                            transient_boot_preference,
+                            slot_a_sha3_256_digest,
+                            slot_b_sha3_256_digest,
+                            stage0_digest: None,
+                            stage0next_digest: None,
+                            slot_a_error: None,
+                            slot_b_error: None,
+                            stage0_error: None,
+                            stage0next_error: None,
+                        }
+                    });
+            }
+            gateway_types::rot::RotState::CommunicationFailed { message } => {
+                self.found_error(InventoryError::from(anyhow!(
+                    "MGS {:?}: reading RoT state for {:?}: {}",
+                    source,
+                    baseboard,
+                    message
+                )));
+            }
+            gateway_types::rot::RotState::V3 {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_fwid,
+                slot_b_fwid,
+                stage0_fwid,
+                stage0next_fwid,
+                transient_boot_preference,
+                slot_a_error,
+                slot_b_error,
+                stage0_error,
+                stage0next_error,
+            } => {
+                let _ =
+                    self.rots.entry(baseboard.clone()).or_insert_with(|| {
+                        RotState {
+                            time_collected: now,
+                            source: source.to_owned(),
+                            active_slot: active,
+                            persistent_boot_preference,
+                            pending_persistent_boot_preference,
+                            transient_boot_preference,
+                            slot_a_sha3_256_digest: Some(slot_a_fwid),
+                            slot_b_sha3_256_digest: Some(slot_b_fwid),
+                            stage0_digest: Some(stage0_fwid),
+                            stage0next_digest: Some(stage0next_fwid),
+                            slot_a_error,
+                            slot_b_error,
+                            stage0_error,
+                            stage0next_error,
+                        }
+                    });
+            }
+        }
+
+        Some(baseboard)
+    }
+
+    /// Returns true if we already found the active host phase 1 flash slot for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_host_phase_1_active_slot_already(
+        &self,
+        baseboard: &BaseboardId,
+    ) -> bool {
+        self.host_phase_1_active_slots.contains_key(baseboard)
+    }
+
+    /// Record the given host phase 1 active slot found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_host_phase_1_active_slot(
+        &mut self,
+        baseboard: &BaseboardId,
+        source: &str,
+        slot: M2Slot,
+    ) -> Result<(), CollectorBug> {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting host phase 1 active slot for unknown baseboard: \
+                    {baseboard:?} ({slot:?})",
+                )
+            })?;
+        if let Some(previous) = self.host_phase_1_active_slots.insert(
+            baseboard.clone(),
+            HostPhase1ActiveSlot {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                slot,
+            },
+        ) {
+            let error = if previous.slot == slot {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported host phase 1 flash hash \
+                     (previously {}, now {slot})",
+                    previous.slot,
+                )
+            };
+            Err(CollectorBug::from(
+                error.context(format!("baseboard {baseboard:?}")),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns true if we already found the host phase 1 flash hash for `slot`
+    /// for baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_host_phase_1_flash_hash_already(
+        &self,
+        baseboard: &BaseboardId,
+        slot: M2Slot,
+    ) -> bool {
+        self.host_phase_1_flash_hashes
+            .get(&slot)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given host phase 1 flash hash found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_host_phase_1_flash_hash(
+        &mut self,
+        baseboard: &BaseboardId,
+        slot: M2Slot,
+        source: &str,
+        hash: ArtifactHash,
+    ) -> Result<(), CollectorBug> {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting host phase 1 flash hash for unknown baseboard: \
+                    {baseboard:?} ({slot:?}: {hash})",
+                )
+            })?;
+        let by_id = self
+            .host_phase_1_flash_hashes
+            .entry(slot)
+            .or_insert_with(BTreeMap::new);
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            HostPhase1FlashHash {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                slot,
+                hash,
+            },
+        ) {
+            let error = if previous.hash == hash {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported host phase 1 flash hash \
+                     (previously {}, now {hash})",
+                    previous.hash,
+                )
+            };
+            Err(CollectorBug::from(
+                error.context(format!("baseboard {baseboard:?} slot {slot:?}")),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns true if we already found the caboose for `which` for baseboard
+    /// `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_caboose_already(
+        &self,
+        baseboard: &BaseboardId,
+        which: CabooseWhich,
+    ) -> bool {
+        self.cabooses_found
+            .get(&which)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given caboose information found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_caboose(
+        &mut self,
+        baseboard: &BaseboardId,
+        which: CabooseWhich,
+        source: &str,
+        caboose: SpComponentCaboose,
+    ) -> Result<(), CollectorBug> {
+        // Normalize the caboose contents: i.e., if we've seen this exact
+        // caboose contents before, use the same record from before.  Otherwise,
+        // make a new one.
+        let sw_caboose =
+            Self::normalize_item(&mut self.cabooses, Caboose::from(caboose));
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting caboose for unknown baseboard: {:?} ({:?})",
+                    baseboard,
+                    sw_caboose
+                )
+            })?;
+        let by_id =
+            self.cabooses_found.entry(which).or_insert_with(|| BTreeMap::new());
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            CabooseFound {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                caboose: sw_caboose.clone(),
+            },
+        ) {
+            let error = if *previous.caboose == *sw_caboose {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported caboose multiple times (previously {:?}, \
+                    now {:?})",
+                    previous,
+                    sw_caboose
+                )
+            };
+            Err(CollectorBug::from(error.context(format!(
+                "baseboard {:?} caboose {:?}",
+                baseboard, which
+            ))))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns true if we already found the root of trust page for `which` for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_rot_page_already(
+        &self,
+        baseboard: &BaseboardId,
+        which: RotPageWhich,
+    ) -> bool {
+        self.rot_pages_found
+            .get(&which)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given root of trust page found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_rot_page(
+        &mut self,
+        baseboard: &BaseboardId,
+        which: RotPageWhich,
+        source: &str,
+        page: RotPage,
+    ) -> Result<(), CollectorBug> {
+        // Normalize the page contents: i.e., if we've seen this exact page
+        // before, use the same record from before.  Otherwise, make a new one.
+        let sw_rot_page = Self::normalize_item(&mut self.rot_pages, page);
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting rot page for unknown baseboard: {:?} ({:?})",
+                    baseboard,
+                    sw_rot_page
+                )
+            })?;
+        let by_id = self.rot_pages_found.entry(which).or_default();
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            RotPageFound {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                page: sw_rot_page.clone(),
+            },
+        ) {
+            let error = if *previous.page == *sw_rot_page {
+                anyhow!("reported multiple times (same value)",)
+            } else {
+                anyhow!(
+                    "reported rot page multiple times (previously {:?}, \
+                    now {:?})",
+                    previous,
+                    sw_rot_page
+                )
+            };
+            Err(CollectorBug::from(error.context(format!(
+                "baseboard {:?} rot page {:?}",
+                baseboard, which
+            ))))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Helper function for normalizing items
+    ///
+    /// If `item` (or its equivalent) is not already in `items`, insert it.
+    /// Either way, return the item from `items`.  (This will either be `item`
+    /// itself or whatever was already in `items`.)
+    fn normalize_item<T: Clone + Ord>(
+        items: &mut BTreeSet<Arc<T>>,
+        item: T,
+    ) -> Arc<T> {
+        match items.get(&item) {
+            Some(found_item) => found_item.clone(),
+            None => {
+                let new_item = Arc::new(item);
+                items.insert(new_item.clone());
+                new_item
+            }
+        }
+    }
+
+    /// Record a collection error
+    ///
+    /// See [`InventoryError`] for more on what kinds of errors are reported
+    /// this way.  These errors are stored as part of the collection so that
+    /// future readers can see what problems might make the collection
+    /// incomplete.  By contrast, [`CollectorBug`]s are not reported and stored
+    /// this way.
+    pub fn found_error(&mut self, error: InventoryError) {
+        self.errors.push(error);
+    }
+
+    /// Record information about a sled that's part of the control plane
+    pub fn found_sled_inventory(
+        &mut self,
+        source: &str,
+        inventory: Inventory,
+    ) -> Result<(), anyhow::Error> {
+        let sled_id = inventory.sled_id;
+
+        let baseboard_id = Some(Self::normalize_item(
+            &mut self.baseboards,
+            inventory.baseboard_id,
+        ));
+
+        // Socket addresses come through the OpenAPI spec as strings, which
+        // means they don't get validated when everything else does.  This
+        // error is an operational error in collecting the data, not a collector
+        // bug.
+        let time_collected = now_db_precision();
+        let sled = SledAgent {
+            source: source.to_string(),
+            sled_agent_address: inventory.sled_agent_address,
+            sled_role: inventory.sled_role,
+            baseboard_id,
+            rack_id: inventory.rack_id,
+            usable_hardware_threads: inventory.usable_hardware_threads,
+            usable_physical_ram: inventory.usable_physical_ram,
+            cpu_family: inventory.cpu_family,
+            reservoir_size: inventory.reservoir_size,
+            time_collected,
+            sled_id,
+            disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
+            zpools: inventory
+                .zpools
+                .into_iter()
+                .map(|z| Zpool::new(time_collected, z))
+                .collect(),
+            datasets: inventory
+                .datasets
+                .into_iter()
+                .map(|d| d.into())
+                .collect(),
+            ledgered_sled_config: inventory.ledgered_sled_config,
+            reconciler_status: inventory.reconciler_status,
+            last_reconciliation: inventory.last_reconciliation,
+            instance_manager_status: inventory.instance_manager_status,
+            file_source_resolver: inventory.file_source_resolver,
+            smf_services_enabled_not_online: inventory
+                .smf_services_enabled_not_online,
+            reference_measurements: inventory.reference_measurements,
+            fmd: inventory.fmd,
+        };
+
+        self.sleds
+            .insert_unique(sled)
+            .map_err(|error| error.into_owned())
+            .with_context(|| {
+                anyhow!("sled {sled_id}: reported sled multiple times")
+            })
+    }
+
+    /// Record information about Keeper cluster membership learned from the
+    /// clickhouse-admin service running in the keeper zones.
+    pub fn found_clickhouse_keeper_cluster_membership(
+        &mut self,
+        membership: ClickhouseKeeperClusterMembership,
+    ) {
+        self.clickhouse_keeper_cluster_membership.insert(membership);
+    }
+
+    /// Record information about timesync
+    pub fn found_ntp_timesync(
+        &mut self,
+        timesync: TimeSync,
+    ) -> Result<(), anyhow::Error> {
+        self.ntp_timesync
+            .insert_unique(timesync)
+            .map_err(|err| err.into_owned())
+            .context("NTP service reported time multiple times")
+    }
+
+    /// Record information about another rack (and the sleds in it) that we've
+    /// discovered, but which may not be part of the cluster yet
+    pub fn found_discovered_rack(
+        &mut self,
+        rack: DiscoveredRack,
+    ) -> Result<(), anyhow::Error> {
+        self.discovered_racks
+            .insert_unique(rack)
+            .map_err(|err| err.into_owned())
+            .context("discovered rack reported multiple times")
+    }
+
+    /// Record metrics from a CockroachDB node
+    pub fn found_cockroach_metrics(
+        &mut self,
+        node_id: InternalNodeId,
+        metrics: PrometheusMetrics,
+    ) {
+        let mut status = CockroachStatus::default();
+        status.ranges_underreplicated =
+            metrics.get_metric_unsigned(CockroachMetric::RangesUnderreplicated);
+        status.liveness_live_nodes =
+            metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
+        self.found_cockroach_status(node_id, status);
+    }
+
+    /// Record pre-built status for a CockroachDB node
+    pub fn found_cockroach_status(
+        &mut self,
+        node_id: InternalNodeId,
+        status: CockroachStatus,
+    ) {
+        self.cockroach_status.insert(node_id, status);
+    }
+
+    /// Record information about internal DNS generation status
+    pub fn found_internal_dns_generation_status(
+        &mut self,
+        status: InternalDnsGenerationStatus,
+    ) -> Result<(), anyhow::Error> {
+        self.internal_dns_generation_status
+            .insert_unique(status)
+            .map_err(|err| err.into_owned())
+            .context(
+                "Internal DNS server reported generation status multiple times",
+            )
+    }
+
+    /// Returns `true` if we have already found *all PSUs* for the PSC with the
+    /// provided baseboard identity.
+    pub fn found_all_psus_already(&self, psc: &BaseboardId) -> bool {
+        self.power_shelf_for_psc(psc)
+            .map(|shelf| {
+                PsuSlot::ALL.iter().all(|slot| found_psu_already(shelf, *slot))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Returns `true` if we already found a given PSU for the PSC with the
+    /// provided baseboard identity.
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_psu_already(&self, psc: &BaseboardId, psu: PsuSlot) -> bool {
+        self.power_shelf_for_psc(psc)
+            .map(|shelf| found_psu_already(shelf, psu))
+            .unwrap_or(false)
+    }
+
+    /// Returns the power shelf at the location of the PSC with the provided
+    /// baseboard identity, if one has been recorded *by that PSC*.
+    ///
+    /// If the shelf at that location was recorded by a different PSC, this
+    /// returns `None`, since nothing has been found from *this* PSC yet. See
+    /// [`CollectionBuilder::found_psu`] for details on this.
+    fn power_shelf_for_psc(&self, psc: &BaseboardId) -> Option<&PowerShelf> {
+        // If we haven't found the PSC's SP yet, we don't know its location.
+        let sp = self.sps.get(psc)?;
+        self.power_shelves
+            .get(&(&sp.rack_id, sp.sp_slot))
+            .filter(|shelf| *shelf.psc_baseboard_id == *psc)
+    }
+
+    /// Record information about a power shelf PSU.
+    ///
+    /// Returns `Ok(true)` if the PSU record was inserted or updated, such as if
+    /// we re-attempted to read the component's VPD after a previous error.
+    /// Returns `Ok(false)` if the record was not updated because the subsequent
+    /// VPD read also failed. Finally, this returns an error if the PSU was
+    /// already successfully inventoried or if the baseboard ID does not refer
+    /// to a power shelf controller SP.
+    ///
+    /// Power shelves are indexed by the shelf's physical location (rack ID and
+    /// shelf slot number), not by the PSC's baseboard identity. If we have
+    /// collected PSU inventory from one power shelf controller, and then that
+    /// PSC was removed and replaced with a different one before we query it
+    /// through the other MGS instance for that rack, we discard the previously
+    /// recorded shelf and re-inventory all the PSUs from the newer PSC. This
+    /// way, we ensure that the collection reflects the most recently seen PSC's
+    /// inventory.
+    pub fn found_psu(
+        &mut self,
+        psc: &BaseboardId,
+        sp_slot: u16,
+        psu: Psu,
+    ) -> Result<bool, CollectorBug> {
+        let (psc, sp) = self.sps.get_key_value(psc).ok_or_else(|| {
+            anyhow::anyhow!("reporting PSU for unknown PSC baseboard {psc:?}")
+        })?;
+        // This really shouldn't happen, but we may as well check for it..
+        if sp.sp_type != SpType::Power {
+            return Err(CollectorBug(anyhow::anyhow!(
+                "reporting a PSU for baseboard {psc:?}, which is not a power \
+                 shelf controller (it's a {})",
+                sp.sp_type
+            )));
+        }
+
+        let rack_id = &sp.rack_id;
+        if sp.sp_slot != sp_slot {
+            return Err(CollectorBug(anyhow::anyhow!(
+                "reporting a PSU for baseboard {psc:?}, which claims to be \
+                 power shelf {sp_slot} but the recorded SP for that baseboard \
+                 claims to be in slot {} in rack {rack_id}",
+                sp.sp_slot
+            )));
+        }
+
+        let make_new_shelf = || PowerShelf {
+            psc_baseboard_id: psc.clone(),
+            rack_id: *rack_id,
+            slot: sp_slot,
+            psus: IdOrdMap::with_capacity(6),
+        };
+        let mut shelf = match self.power_shelves.entry((rack_id, sp_slot)) {
+            id_ord_map::Entry::Occupied(mut entry) => {
+                // If the preexisting entry has a different PSC baseboard ID,
+                // the PSC must have been removed and replaced since the
+                // previous inventory collection. In that case, discard the
+                // previous collection and start over.
+                if entry.get().psc_baseboard_id != *psc {
+                    entry.insert(make_new_shelf());
+                }
+                entry.into_mut()
+            }
+            id_ord_map::Entry::Vacant(entry) => entry.insert(make_new_shelf()),
+        };
+        let psus_for_psc = &mut shelf.psus;
+
+        let psu_slot = psu.slot;
+        match psus_for_psc.entry(psu_slot) {
+            // A previous attempt to collect this PSU's VPD failed, so we tried
+            // again. Overwrite it if the subsequent attempt was not a read
+            // error, otherwise, do nothing..
+            id_ord_map::Entry::Occupied(mut previous)
+                if previous.get().identity().is_error() =>
+            {
+                // Note that we overwrite it with *any* value that does not
+                // contain an identity read error. We may have previously failed
+                // to read the VPD because the PSU was being removed from the
+                // power shelf, so if it was present, and then we read the VPD
+                // and it failed, and then subsequently it was not present, we
+                // want to overwrite the "present/error" with the new "not
+                // present".
+                if !psu.identity().is_error() {
+                    previous.insert(psu);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            // First time we've seen this thing.
+            id_ord_map::Entry::Vacant(entry) => {
+                entry.insert(psu);
+                Ok(true)
+            }
+            // We've already found this PSU, and its VPD was read successfully
+            // or it was not present. We shouldn't have tried to collect it
+            // again!
+            id_ord_map::Entry::Occupied(_) => {
+                Err(CollectorBug(anyhow::anyhow!(
+                    "PSC {sp_slot} in rack {rack_id} ({psc:?}) attempted to \
+                     report PSU {psu_slot} multiple times, but the first \
+                     collection from that PSU succeeded"
+                )))
+            }
+        }
+    }
+
+    /// Returns all zones of a kind from the ledgers of observed sleds
+    pub fn ledgered_zones_of_kind(
+        &self,
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.ledgered_sled_config.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.zones.iter().filter(move |zone_config| {
+                        zone_config.zone_type.kind() == kind
+                    })
+                },
+            )
+        })
+    }
+
+    /// Returns zones from the last reconciled ledger of observed sleds
+    ///
+    /// Does not actually consider whether or not the zone was successfully
+    /// created by the sled reconciliation process
+    pub fn last_reconciled_zones_of_kind(
+        &self,
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.last_reconciliation.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.last_reconciled_config.zones.iter().filter(
+                        move |zone_config| zone_config.zone_type.kind() == kind,
+                    )
+                },
+            )
+        })
+    }
+}
+
+fn found_psu_already(shelf: &PowerShelf, psu_slot: PsuSlot) -> bool {
+    shelf.psus.get(&psu_slot).is_some_and(|psu| {
+        // well, so we found it...were we able to read its identity? if the
+        // attempt to read the PSU's identity failed, let's say that we have not
+        // "found it already" so that we make a second attempt, so that we try
+        // again in the event of a transient I2C error on the SP or similar.
+        !psu.identity().is_error()
+    })
+}
+
+pub use omicron_common::now_db_precision;
+
+#[cfg(test)]
+mod test {
+    use super::CollectionBuilder;
+    use super::now_db_precision;
+    use crate::examples;
+    use crate::examples::ExamplePsuKind;
+    use crate::examples::RACK_UUID;
+    use crate::examples::Representative;
+    use crate::examples::representative;
+    use crate::examples::sp_state;
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use gateway_client::types::SpComponentCaboose;
+    use gateway_types::component::PowerState;
+    use gateway_types::component::SpState;
+    use gateway_types::rot::RotSlot;
+    use gateway_types::rot::RotState;
+    use nexus_types::inventory::Caboose;
+    use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::PsuSlot;
+    use nexus_types::inventory::RotPage;
+    use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SpType;
+    use omicron_common::api::external::ByteCount;
+    use sled_agent_types::inventory::SledRole;
+    use sled_hardware_types::BaseboardId;
+
+    // Verify the contents of an empty collection.
+    #[test]
+    fn test_empty() {
+        let time_before = now_db_precision();
+        let builder = CollectionBuilder::new("test_empty");
+        let collection = builder.build();
+        let time_after = now_db_precision();
+
+        assert!(collection.errors.is_empty());
+        assert!(time_before <= collection.time_started);
+        assert!(collection.time_started <= collection.time_done);
+        assert!(collection.time_done <= time_after);
+        assert_eq!(collection.collector, "test_empty");
+        assert!(collection.baseboards.is_empty());
+        assert!(collection.cabooses.is_empty());
+        assert!(collection.rot_pages.is_empty());
+        assert!(collection.sps.is_empty());
+        assert!(collection.power_shelves.is_empty());
+        assert!(collection.rots.is_empty());
+        assert!(collection.cabooses_found.is_empty());
+        assert!(collection.rot_pages_found.is_empty());
+        assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
+        assert!(collection.cockroach_status.is_empty());
+        assert!(collection.ntp_timesync.is_empty());
+        assert!(collection.internal_dns_generation_status.is_empty());
+    }
+
+    // Simple test of a single, fairly typical collection that contains just
+    // about all kinds of valid data.  That includes exercising:
+    //
+    // - all three baseboard types (switch, sled, PSC)
+    // - successful and failed power shelf PSU VPD inventory
+    // - various valid values for all fields (sources, slot numbers, power
+    //   states, baseboard revisions, cabooses, etc.)
+    // - some empty slots
+    // - some missing cabooses
+    // - some cabooses common to multiple baseboards; others not
+    // - serial number reused across different model numbers
+    // - sled agent inventory
+    // - omicron zone inventory
+    //
+    // This test is admittedly pretty tedious and maybe not worthwhile but it's
+    // a useful quick check.
+    #[test]
+    fn test_basic() {
+        let time_before = now_db_precision();
+        let Representative {
+            builder,
+            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb, sled5_bb, sled6_bb],
+            switch,
+            psc,
+            sled_agents:
+                [
+                    sled_agent_id_basic,
+                    sled_agent_id_extra,
+                    sled_agent_id_pc,
+                    sled_agent_id_unknown,
+                ],
+        } = representative();
+        let collection = builder.build();
+        let time_after = now_db_precision();
+        println!("{:#?}", collection);
+        assert!(time_before <= collection.time_started);
+        assert!(collection.time_started <= collection.time_done);
+        assert!(collection.time_done <= time_after);
+        assert_eq!(collection.collector, "example");
+
+        // Verify the one error that ought to have been produced for the SP with
+        // no RoT information.
+        assert_eq!(
+            collection.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+            ["MGS \"fake MGS 1\": reading RoT state for BaseboardId \
+                { part_number: \"model1\", serial_number: \"s2\" }: test suite \
+                injected error",]
+        );
+
+        // Verify the baseboard ids found.
+        let expected_baseboards = &[
+            &sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &sled5_bb, &sled6_bb,
+            &switch, &psc,
+        ];
+        for bb in expected_baseboards {
+            assert!(collection.baseboards.contains(*bb));
+        }
+        assert_eq!(collection.baseboards.len(), expected_baseboards.len());
+
+        // Verify the stuff that's easy to verify for all SPs: timestamps.
+        // There will be three more baseboards than SPs: one for each of the
+        // three sled agents whose baseboards weren't also reported via an SP.
+        assert_eq!(collection.sps.len() + 3, collection.baseboards.len());
+        for (bb, sp) in collection.sps.iter() {
+            assert!(collection.time_started <= sp.time_collected);
+            assert!(sp.time_collected <= collection.time_done);
+
+            if let Some(rot) = collection.rots.get(bb) {
+                assert_eq!(rot.source, sp.source);
+                assert_eq!(rot.time_collected, sp.time_collected);
+            }
+
+            for which in [CabooseWhich::SpSlot0, CabooseWhich::SpSlot1] {
+                let caboose = collection.caboose_for(which, bb);
+                if let Some(c) = caboose {
+                    assert!(collection.time_started <= c.time_collected);
+                    assert!(c.time_collected <= collection.time_done);
+                    assert!(collection.cabooses.contains(&c.caboose));
+                }
+            }
+        }
+
+        // Verify the common caboose.
+        let common_caboose_baseboards = [&sled1_bb, &sled2_bb, &switch];
+        let common_caboose = Caboose {
+            board: String::from("board_1"),
+            git_commit: String::from("git_commit_1"),
+            name: String::from("name_1"),
+            version: String::from("version_1"),
+            sign: Some(String::from("sign_1")),
+        };
+        for bb in &common_caboose_baseboards {
+            let _ = collection.sps.get(*bb).unwrap();
+            let c0 = collection.caboose_for(CabooseWhich::SpSlot0, bb).unwrap();
+            let c1 = collection.caboose_for(CabooseWhich::SpSlot1, bb).unwrap();
+            assert_eq!(c0.source, "test suite");
+            assert_eq!(*c0.caboose, common_caboose);
+            assert_eq!(c1.source, "test suite");
+            assert_eq!(*c1.caboose, common_caboose);
+
+            let _ = collection.rots.get(*bb).unwrap();
+            let c0 =
+                collection.caboose_for(CabooseWhich::RotSlotA, bb).unwrap();
+            let c1 =
+                collection.caboose_for(CabooseWhich::RotSlotB, bb).unwrap();
+            assert_eq!(c0.source, "test suite");
+            assert_eq!(*c0.caboose, common_caboose);
+            assert_eq!(c1.source, "test suite");
+            assert_eq!(*c1.caboose, common_caboose);
+        }
+        assert!(collection.cabooses.contains(&common_caboose));
+
+        // Verify the common RoT page data.
+        let common_rot_page_baseboards = [&sled1_bb, &sled3_bb, &switch];
+        let common_rot_page = nexus_types::inventory::RotPage {
+            // base64("1") == "MQ=="
+            data_base64: "MQ==".to_string(),
+        };
+        for bb in &common_rot_page_baseboards {
+            let _ = collection.sps.get(*bb).unwrap();
+            let p0 = collection.rot_page_for(RotPageWhich::Cmpa, bb).unwrap();
+            let p1 =
+                collection.rot_page_for(RotPageWhich::CfpaActive, bb).unwrap();
+            let p2 = collection
+                .rot_page_for(RotPageWhich::CfpaInactive, bb)
+                .unwrap();
+            let p3 =
+                collection.rot_page_for(RotPageWhich::CfpaScratch, bb).unwrap();
+            assert_eq!(p0.source, "test suite");
+            assert_eq!(*p0.page, common_rot_page);
+            assert_eq!(p1.source, "test suite");
+            assert_eq!(*p1.page, common_rot_page);
+            assert_eq!(p2.source, "test suite");
+            assert_eq!(*p2.page, common_rot_page);
+            assert_eq!(p3.source, "test suite");
+            assert_eq!(*p3.page, common_rot_page);
+        }
+        assert!(collection.rot_pages.contains(&common_rot_page));
+
+        // Verify the specific, different data for the healthy SPs and RoTs that
+        // we reported.
+        // sled1
+        let sp = collection.sps.get(&sled1_bb).unwrap();
+        assert_eq!(sp.source, "fake MGS 1");
+        assert_eq!(sp.sp_type, SpType::Sled);
+        assert_eq!(sp.sp_slot, 3);
+        assert_eq!(sp.baseboard_revision, 0);
+        assert_eq!(sp.hubris_archive, "hubris1");
+        assert_eq!(sp.power_state, PowerState::A0);
+        let rot = collection.rots.get(&sled1_bb).unwrap();
+        assert_eq!(rot.active_slot, RotSlot::A);
+        assert_eq!(rot.pending_persistent_boot_preference, None);
+        assert_eq!(rot.persistent_boot_preference, RotSlot::A);
+        assert_eq!(
+            rot.slot_a_sha3_256_digest.as_ref().unwrap(),
+            "slotAdigest1"
+        );
+        assert_eq!(
+            rot.slot_b_sha3_256_digest.as_ref().unwrap(),
+            "slotBdigest1"
+        );
+        assert_eq!(rot.transient_boot_preference, None);
+
+        // sled2
+        let sp = collection.sps.get(&sled2_bb).unwrap();
+        assert_eq!(sp.source, "fake MGS 2");
+        assert_eq!(sp.sp_type, SpType::Sled);
+        assert_eq!(sp.sp_slot, 4);
+        assert_eq!(sp.baseboard_revision, 1);
+        assert_eq!(sp.hubris_archive, "hubris2");
+        assert_eq!(sp.power_state, PowerState::A2);
+        let rot = collection.rots.get(&sled2_bb).unwrap();
+        assert_eq!(rot.active_slot, RotSlot::B);
+        assert_eq!(rot.pending_persistent_boot_preference, Some(RotSlot::A));
+        assert_eq!(rot.persistent_boot_preference, RotSlot::A);
+        assert_eq!(
+            rot.slot_a_sha3_256_digest.as_ref().unwrap(),
+            "slotAdigest2"
+        );
+        assert_eq!(
+            rot.slot_b_sha3_256_digest.as_ref().unwrap(),
+            "slotBdigest2"
+        );
+        assert_eq!(rot.transient_boot_preference, Some(RotSlot::B));
+
+        // sled 2 did not have any RoT pages reported
+        assert!(
+            collection.rot_page_for(RotPageWhich::Cmpa, &sled2_bb).is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaActive, &sled2_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaInactive, &sled2_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaScratch, &sled2_bb)
+                .is_none()
+        );
+
+        // switch
+        let sp = collection.sps.get(&switch).unwrap();
+        assert_eq!(sp.source, "fake MGS 2");
+        assert_eq!(sp.sp_type, SpType::Switch);
+        assert_eq!(sp.sp_slot, 0);
+        assert_eq!(sp.baseboard_revision, 2);
+        assert_eq!(sp.hubris_archive, "hubris3");
+        assert_eq!(sp.power_state, PowerState::A1);
+        let rot = collection.rots.get(&switch).unwrap();
+        assert_eq!(rot.active_slot, RotSlot::B);
+        assert_eq!(rot.pending_persistent_boot_preference, None);
+        assert_eq!(rot.persistent_boot_preference, RotSlot::A);
+        assert_eq!(
+            rot.slot_a_sha3_256_digest.as_ref().unwrap(),
+            "slotAdigest3"
+        );
+        assert_eq!(
+            rot.slot_b_sha3_256_digest.as_ref().unwrap(),
+            "slotBdigest3"
+        );
+        assert_eq!(rot.transient_boot_preference, None);
+
+        // PSC
+        let sp = collection.sps.get(&psc).unwrap();
+        assert_eq!(sp.source, "fake MGS 1");
+        assert_eq!(sp.sp_type, SpType::Power);
+        assert_eq!(sp.sp_slot, 1);
+        assert_eq!(sp.baseboard_revision, 3);
+        assert_eq!(sp.hubris_archive, "hubris4");
+        assert_eq!(sp.power_state, PowerState::A2);
+        let rot = collection.rots.get(&psc).unwrap();
+        assert_eq!(rot.active_slot, RotSlot::B);
+        assert_eq!(rot.pending_persistent_boot_preference, None);
+        assert_eq!(rot.persistent_boot_preference, RotSlot::A);
+        assert_eq!(
+            rot.slot_a_sha3_256_digest.as_ref().unwrap(),
+            "slotAdigest4"
+        );
+        assert_eq!(
+            rot.slot_b_sha3_256_digest.as_ref().unwrap(),
+            "slotBdigest4"
+        );
+        assert_eq!(rot.transient_boot_preference, None);
+
+        // The PSC has four different cabooses!
+        let c = &collection
+            .caboose_for(CabooseWhich::SpSlot0, &psc)
+            .unwrap()
+            .caboose;
+        assert_eq!(c.board, "board_psc_sp_0");
+        assert!(collection.cabooses.contains(c));
+        let c = &collection
+            .caboose_for(CabooseWhich::SpSlot1, &psc)
+            .unwrap()
+            .caboose;
+        assert!(collection.cabooses.contains(c));
+        assert_eq!(c.board, "board_psc_sp_1");
+        let c = &collection
+            .caboose_for(CabooseWhich::RotSlotA, &psc)
+            .unwrap()
+            .caboose;
+        assert!(collection.cabooses.contains(c));
+        assert_eq!(c.board, "board_psc_rot_a");
+        let c = &collection
+            .caboose_for(CabooseWhich::RotSlotB, &psc)
+            .unwrap()
+            .caboose;
+        assert!(collection.cabooses.contains(c));
+        assert_eq!(c.board, "board_psc_rot_b");
+
+        // The PSC also has four different RoT pages!
+        let p =
+            &collection.rot_page_for(RotPageWhich::Cmpa, &psc).unwrap().page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cmpa"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaActive, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa active"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa inactive"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa scratch"
+        );
+
+        // Verify the reported SP state for sled3, which did not have a healthy
+        // RoT, nor any cabooses.
+        let sp = collection.sps.get(&sled3_bb).unwrap();
+        assert_eq!(sp.source, "fake MGS 1");
+        assert_eq!(sp.sp_type, SpType::Sled);
+        assert_eq!(sp.sp_slot, 5);
+        assert_eq!(sp.baseboard_revision, 1);
+        assert_eq!(sp.hubris_archive, "hubris5");
+        assert_eq!(sp.power_state, PowerState::A2);
+        assert!(
+            collection.caboose_for(CabooseWhich::SpSlot0, &sled3_bb).is_none()
+        );
+        assert!(
+            collection.caboose_for(CabooseWhich::SpSlot1, &sled3_bb).is_none()
+        );
+        assert!(!collection.rots.contains_key(&sled3_bb));
+
+        // There shouldn't be any other RoTs.
+        assert_eq!(collection.sps.len(), collection.rots.len() + 1);
+
+        // There should be five cabooses: the four used for the PSC (see above),
+        // plus the common one; same for RoT pages.
+        assert_eq!(collection.cabooses.len(), 5);
+        assert_eq!(collection.rot_pages.len(), 5);
+
+        // Verify that we found the sled agents.
+        assert_eq!(collection.sled_agents.len(), 4);
+        for sled_agent in &collection.sled_agents {
+            if sled_agent.sled_id == sled_agent_id_extra {
+                assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
+            } else {
+                assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
+            }
+
+            assert_eq!(
+                sled_agent.sled_agent_address,
+                "[::1]:56792".parse().unwrap()
+            );
+            assert_eq!(sled_agent.usable_hardware_threads, 10);
+            assert_eq!(
+                sled_agent.usable_physical_ram,
+                ByteCount::from(1024 * 1024)
+            );
+            assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
+        }
+
+        let sled1_agent =
+            collection.sled_agents.get(&sled_agent_id_basic).unwrap();
+        let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
+        assert_eq!(sled1_bb.part_number, "model1");
+        assert_eq!(sled1_bb.serial_number, "s1");
+        assert_eq!(sled1_agent.disks.len(), 4);
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
+        assert_eq!(sled1_agent.disks[0].identity.model, "box");
+        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+
+        let sled4_agent =
+            collection.sled_agents.get(&sled_agent_id_extra).unwrap();
+        let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
+        assert_eq!(sled4_bb.serial_number, "s4");
+        let pc_agent = collection.sled_agents.get(&sled_agent_id_pc).unwrap();
+        assert_eq!(
+            pc_agent.baseboard_id.as_ref().unwrap().serial_number,
+            "fellofftruck1"
+        );
+        let unknown_agent =
+            collection.sled_agents.get(&sled_agent_id_unknown).unwrap();
+        assert_eq!(
+            unknown_agent.baseboard_id.as_ref().unwrap().serial_number,
+            "test"
+        );
+    }
+
+    // Exercises all the failure cases that shouldn't happen in real systems.
+    // Despite all of these failures, we should get a valid collection at the
+    // end.
+    #[test]
+    fn test_problems() {
+        let mut builder = CollectionBuilder::new("test_problems");
+
+        let sled1_bb = builder
+            .found_sp_state(
+                "fake MGS 1",
+                RACK_UUID,
+                SpType::Sled,
+                3,
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: String::from("hubris1"),
+                    model: String::from("model1"),
+                    power_state: PowerState::A0,
+                    revision: 0,
+                    rot: RotState::V2 {
+                        active: RotSlot::A,
+                        pending_persistent_boot_preference: None,
+                        persistent_boot_preference: RotSlot::A,
+                        slot_a_sha3_256_digest: None,
+                        slot_b_sha3_256_digest: None,
+                        transient_boot_preference: None,
+                    },
+                    serial_number: String::from("s1"),
+                },
+            )
+            .unwrap();
+
+        // report the same SP again with the same contents
+        let sled1_bb_dup = builder
+            .found_sp_state(
+                "fake MGS 1",
+                RACK_UUID,
+                SpType::Sled,
+                3,
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: String::from("hubris1"),
+                    model: String::from("model1"),
+                    power_state: PowerState::A0,
+                    revision: 0,
+                    rot: RotState::V2 {
+                        active: RotSlot::A,
+                        pending_persistent_boot_preference: None,
+                        persistent_boot_preference: RotSlot::A,
+                        slot_a_sha3_256_digest: None,
+                        slot_b_sha3_256_digest: None,
+                        transient_boot_preference: None,
+                    },
+                    serial_number: String::from("s1"),
+                },
+            )
+            .unwrap();
+        assert_eq!(sled1_bb, sled1_bb_dup);
+
+        // report the same SP again with different contents
+        let sled1_bb_dup = builder
+            .found_sp_state(
+                "fake MGS 1",
+                RACK_UUID,
+                SpType::Sled,
+                3,
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: String::from("hubris1"),
+                    model: String::from("model1"),
+                    power_state: PowerState::A0,
+                    revision: 1,
+                    rot: RotState::V2 {
+                        active: RotSlot::A,
+                        pending_persistent_boot_preference: None,
+                        persistent_boot_preference: RotSlot::A,
+                        slot_a_sha3_256_digest: None,
+                        slot_b_sha3_256_digest: None,
+                        transient_boot_preference: None,
+                    },
+                    serial_number: String::from("s1"),
+                },
+            )
+            .unwrap();
+        assert_eq!(sled1_bb, sled1_bb_dup);
+
+        // report SP caboose for an unknown baseboard
+        let bogus_baseboard = BaseboardId {
+            part_number: String::from("p1"),
+            serial_number: String::from("bogus"),
+        };
+        let caboose1 = SpComponentCaboose {
+            board: String::from("board1"),
+            git_commit: String::from("git_commit1"),
+            name: String::from("name1"),
+            version: String::from("version1"),
+            sign: Some(String::from("sign1")),
+            epoch: None,
+        };
+        assert!(
+            !builder
+                .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0)
+        );
+        let error = builder
+            .found_caboose(
+                &bogus_baseboard,
+                CabooseWhich::SpSlot0,
+                "dummy",
+                caboose1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "reporting caboose for unknown baseboard: \
+            BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
+            (Caboose { board: \"board1\", git_commit: \"git_commit1\", \
+            name: \"name1\", version: \"version1\", sign: Some(\"sign1\") })"
+        );
+        assert!(
+            !builder
+                .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0)
+        );
+
+        // report RoT caboose for an unknown baseboard
+        let error2 = builder
+            .found_caboose(
+                &bogus_baseboard,
+                CabooseWhich::RotSlotA,
+                "dummy",
+                caboose1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(error.to_string(), error2.to_string(),);
+
+        // report the same caboose twice with the same contents
+        builder
+            .found_caboose(
+                &sled1_bb,
+                CabooseWhich::SpSlot0,
+                "dummy",
+                caboose1.clone(),
+            )
+            .unwrap();
+        let error = builder
+            .found_caboose(
+                &sled1_bb,
+                CabooseWhich::SpSlot0,
+                "dummy",
+                caboose1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            format!("{:#}", error),
+            "baseboard BaseboardId { part_number: \"model1\", \
+            serial_number: \"s1\" } caboose SpSlot0: reported multiple \
+            times (same value)"
+        );
+        // report the same caboose again with different contents
+        let error = builder
+            .found_caboose(
+                &sled1_bb,
+                CabooseWhich::SpSlot0,
+                "dummy",
+                SpComponentCaboose {
+                    board: String::from("board2"),
+                    git_commit: String::from("git_commit2"),
+                    name: String::from("name2"),
+                    version: String::from("version2"),
+                    sign: Some(String::from("sign2")),
+                    epoch: None,
+                },
+            )
+            .unwrap_err();
+        let message = format!("{:#}", error);
+        println!("found error: {}", message);
+        assert!(message.contains(
+            "caboose SpSlot0: reported caboose multiple times (previously"
+        ));
+        assert!(message.contains(", now "));
+
+        // report RoT page for an unknown baseboard
+        let rot_page1 = RotPage { data_base64: "page1".to_string() };
+        let rot_page2 = RotPage { data_base64: "page2".to_string() };
+        assert!(
+            !builder
+                .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa)
+        );
+        let error = builder
+            .found_rot_page(
+                &bogus_baseboard,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "reporting rot page for unknown baseboard: \
+            BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
+            (RotPage { data_base64: \"page1\" })"
+        );
+        assert!(
+            !builder
+                .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa)
+        );
+
+        // report the same rot page twice with the same contents
+        builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap();
+        let error = builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            format!("{:#}", error),
+            "baseboard BaseboardId { part_number: \"model1\", \
+            serial_number: \"s1\" } rot page Cmpa: reported multiple \
+            times (same value)"
+        );
+        // report the same rot page again with different contents
+        let error = builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page2.clone(),
+            )
+            .unwrap_err();
+        let message = format!("{:#}", error);
+        println!("found error: {}", message);
+        assert!(message.contains(
+            "rot page Cmpa: reported rot page multiple times (previously"
+        ));
+        assert!(message.contains(", now RotPage { data_base64: \"page2\" }"));
+
+        // We should still get a valid collection.
+        let collection = builder.build();
+        println!("{:#?}", collection);
+        assert_eq!(collection.collector, "test_problems");
+
+        // We should still have the one sled, its SP slot0 caboose, and its Cmpa
+        // RoT page.
+        assert!(collection.baseboards.contains(&sled1_bb));
+        let _ = collection.sps.get(&sled1_bb).unwrap();
+        let caboose =
+            collection.caboose_for(CabooseWhich::SpSlot0, &sled1_bb).unwrap();
+        assert_eq!(caboose.caboose.board, "board2");
+        assert!(collection.cabooses.contains(&caboose.caboose));
+        assert!(
+            collection.caboose_for(CabooseWhich::SpSlot1, &sled1_bb).is_none()
+        );
+        let _ = collection.rots.get(&sled1_bb).unwrap();
+        assert!(
+            collection.caboose_for(CabooseWhich::RotSlotA, &sled1_bb).is_none()
+        );
+        assert!(
+            collection.caboose_for(CabooseWhich::RotSlotB, &sled1_bb).is_none()
+        );
+        let rot_page =
+            collection.rot_page_for(RotPageWhich::Cmpa, &sled1_bb).unwrap();
+        assert!(collection.rot_pages.contains(&rot_page.page));
+
+        // TODO-correctness Is this test correct? We reported the same RoT page
+        // with different data (rot_page1, then rot_page2). The second
+        // `found_rot_page` returned an error, but we overwrote the original
+        // data and did not record the error in `collection.errors`. Should we
+        // either have kept the original data or returned Ok while returning an
+        // error? It seems a little strange we returned Err but accepted the new
+        // data.
+        assert_eq!(rot_page.page.data_base64, rot_page2.data_base64);
+
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaActive, &sled1_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaInactive, &sled1_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaScratch, &sled1_bb)
+                .is_none()
+        );
+
+        // We should see no errors.
+        assert!(collection.errors.is_empty());
+    }
+
+    // Tests that if a different PSC is found at a power shelf location from
+    // which PSUs were already reported (i.e., the PSC was removed and replaced
+    // between MGS queries), the shelf is completely re-inventoried from the
+    // newer PSC, rather than merging the PSUs reported by both PSCs or
+    // rejecting the newer PSC's PSUs.
+    #[test]
+    fn test_power_shelf_psc_replaced() {
+        let mut builder =
+            CollectionBuilder::new("test_power_shelf_psc_replaced");
+        let mgs_1 = "fake MGS 1";
+        let mgs_2 = "fake MGS 2";
+        let psu_device = ExamplePsuKind::Mwocp68;
+
+        // The first MGS finds the original PSC in shelf 0, and a PSC in shelf
+        // 1, which is not replaced and should be unaffected throughout.
+        let old_psc = builder
+            .found_sp_state(mgs_1, RACK_UUID, SpType::Power, 0, sp_state("old"))
+            .unwrap();
+        let other_psc = builder
+            .found_sp_state(
+                mgs_1,
+                RACK_UUID,
+                SpType::Power,
+                1,
+                sp_state("other"),
+            )
+            .unwrap();
+
+        // Populate both PSCs' inventories of PSUs.
+        let old_psus = examples::power_shelf_psus(
+            mgs_1,
+            psu_device,
+            [
+                Some(Ok("old0")),
+                Some(Ok("old1")),
+                Some(Ok("old2")),
+                Some(Err("fake VPD read error")),
+                Some(Ok("old4")),
+                None,
+            ],
+        );
+        let other_psus = examples::power_shelf_psus(
+            mgs_1,
+            psu_device,
+            [
+                None,
+                Some(Ok("other1")),
+                Some(Err("fake VPD read error")),
+                Some(Ok("other3")),
+                Some(Ok("other4")),
+                Some(Ok("other5")),
+            ],
+        );
+        for psu in &old_psus {
+            assert!(
+                builder.found_psu(&old_psc, 0, psu.clone()).unwrap(),
+                "PSU should be inserted"
+            );
+        }
+        for psu in &other_psus {
+            assert!(
+                builder.found_psu(&other_psc, 1, psu.clone()).unwrap(),
+                "PSU should be inserted"
+            );
+        }
+        assert!(builder.found_psu_already(&old_psc, PsuSlot::Psu0));
+
+        // The second MGS finds a different PSC in shelf 0. Nothing has been
+        // found from the new PSC yet, even though the old PSC already reported
+        // PSUs from the same location.
+        let new_psc = builder
+            .found_sp_state(mgs_2, RACK_UUID, SpType::Power, 0, sp_state("new"))
+            .unwrap();
+        assert_ne!(old_psc, new_psc);
+        assert!(
+            !builder.found_psu_already(&new_psc, PsuSlot::Psu0),
+            "found_psu_already() with a different baseboard ID should return \
+             false"
+        );
+        assert!(
+            !builder.found_all_psus_already(&new_psc),
+            "found_all_psus_already() with a different baseboard ID should \
+            return false"
+        );
+
+        // The new PSC reports a different set of PSUs.
+        let new_psus = examples::power_shelf_psus(
+            mgs_2,
+            psu_device,
+            [
+                Some(Ok("new0")),
+                None,
+                Some(Ok("new2")),
+                Some(Ok("new3")),
+                Some(Ok("new4")),
+                Some(Ok("new5")),
+            ],
+        );
+        let (first_new_psu, rest_new_psus) = new_psus.split_first().unwrap();
+
+        // The new PSC reports PSU0, which the old PSC already reported
+        // successfully. This would be an error if it were the same PSC.
+        assert!(
+            builder.found_psu(&new_psc, 0, first_new_psu.clone()).unwrap(),
+            "PSU should be inserted"
+        );
+        assert!(builder.found_psu_already(&new_psc, PsuSlot::Psu0));
+        // The shelf now belongs to the new PSC, and *all* of the old PSC's
+        // reports were discarded, not just the one for the slot the new PSC
+        // reported: the old PSC's PSU1 must not be carried over.
+        assert!(!builder.found_psu_already(&new_psc, PsuSlot::Psu1));
+        assert!(!builder.found_psu_already(&old_psc, PsuSlot::Psu0));
+        assert!(!builder.found_psu_already(&old_psc, PsuSlot::Psu1));
+        // The other power shelf is unaffected.
+        assert!(builder.found_psu_already(&other_psc, PsuSlot::Psu1));
+
+        // Finish populating the new PSC's shelf.
+        for psu in rest_new_psus {
+            assert!(
+                builder.found_psu(&new_psc, 0, psu.clone()).unwrap(),
+                "PSU should be inserted"
+            );
+        }
+        assert!(builder.found_all_psus_already(&new_psc));
+
+        let collection = builder.build();
+        assert!(collection.errors.is_empty(), "{:#?}", collection.errors);
+        assert_eq!(collection.power_shelves.len(), 2);
+
+        // Shelf 0 contains the PSUs reported by the second PSC in that slot.
+        let shelf0 = collection.power_shelves.get(&(&RACK_UUID, 0)).unwrap();
+        assert_eq!(shelf0.psc_baseboard_id, new_psc);
+        assert_eq!(shelf0.rack_id, RACK_UUID);
+        assert_eq!(shelf0.slot, 0);
+        assert_eq!(shelf0.psus.iter().cloned().collect::<Vec<_>>(), new_psus);
+
+        // Shelf 1 is unchanged.
+        let shelf1 = collection.power_shelves.get(&(&RACK_UUID, 1)).unwrap();
+        assert_eq!(shelf1.psc_baseboard_id, other_psc);
+        assert_eq!(shelf1.rack_id, RACK_UUID);
+        assert_eq!(shelf1.slot, 1);
+        assert_eq!(shelf1.psus.iter().cloned().collect::<Vec<_>>(), other_psus);
+
+        // Both PSCs' SP records are still present, which is how the collection
+        // reflects that the swap occurred.
+        assert_eq!(collection.sps[&old_psc].sp_slot, 0);
+        assert_eq!(collection.sps[&new_psc].sp_slot, 0);
+    }
+
+    // Tests that a PSU whose VPD could not be read can be re-reported (as the
+    // collector does when querying another MGS), and that the retry replaces
+    // the earlier error unless it also failed. Also tests that a PSU which was
+    // already collected successfully cannot be reported again.
+    #[test]
+    fn test_psu_vpd_retry() {
+        let mut builder = CollectionBuilder::new("test_psu_vpd_retry");
+        let mgs_1 = "fake MGS 1";
+        let mgs_2 = "fake MGS 2";
+        let psu_device = ExamplePsuKind::Mwocp68;
+        let psc = builder
+            .found_sp_state(mgs_1, RACK_UUID, SpType::Power, 0, sp_state("psc"))
+            .unwrap();
+
+        // The first MGS inventories all six PSU slots, but fails to read the
+        // VPD of three of the PSUs.
+        let first_psus = examples::power_shelf_psus(
+            mgs_1,
+            psu_device,
+            [
+                Some(Ok("LL2111Q9002T")),
+                Some(Err("lol it broke")),
+                Some(Ok("LL2111Q9013T")),
+                Some(Err("lol it broke again")),
+                Some(Err("this one also didnt work")),
+                None,
+            ],
+        );
+        for psu in &first_psus {
+            assert!(
+                builder.found_psu(&psc, 0, psu.clone()).unwrap(),
+                "first report of a PSU should be inserted"
+            );
+        }
+        // A VPD read error means we should try to collect it again.
+        assert!(!builder.found_all_psus_already(&psc));
+
+        // The second MGS inventories all six PSU slots again. Of the PSUs that
+        // previously failed to report their identities:
+        //
+        // - PSU1's VPD is read successfully, replacing the error.
+        // - PSU3's VPD read fails again, so the earlier error is kept.
+        // - PSU4 is no longer present. That also replaces the error, since we
+        //   may have failed to read its VPD because it was being removed.
+        let second_psus = examples::power_shelf_psus(
+            mgs_2,
+            psu_device,
+            [
+                Some(Ok("LL2111Q9002T")),
+                Some(Ok("LL2111Q9003T")),
+                Some(Ok("LL2111Q9013T")),
+                Some(Err("i accidentally the entire PSU")),
+                None,
+                None,
+            ],
+        );
+        // Like the collector, only report PSUs we haven't already found.
+        let mut retried = Vec::new();
+        for psu in &second_psus {
+            if builder.found_psu_already(&psc, psu.slot) {
+                continue;
+            }
+            let updated = builder.found_psu(&psc, 0, psu.clone()).unwrap();
+            retried.push((psu.slot, updated));
+        }
+        assert_eq!(
+            retried,
+            [
+                (PsuSlot::Psu1, true),
+                (PsuSlot::Psu3, false),
+                (PsuSlot::Psu4, true)
+            ],
+            "only PSUs with VPD read errors should be retried, and a retry \
+             should replace the earlier result unless it also failed",
+        );
+        assert!(!builder.found_all_psus_already(&psc));
+
+        // Reporting a PSU which was already found is a bug, and must not
+        // replace what was found.
+        for psu in &second_psus {
+            if builder.found_psu_already(&psc, psu.slot) {
+                builder
+                    .found_psu(&psc, 0, psu.clone())
+                    .expect_err("reporting a found PSU again should fail");
+            }
+        }
+
+        let collection = builder.build();
+        let shelf = collection.power_shelves.get(&(&RACK_UUID, 0)).unwrap();
+        assert_eq!(
+            shelf.psus.iter().cloned().collect::<Vec<_>>(),
+            [
+                first_psus[0].clone(),
+                second_psus[1].clone(),
+                first_psus[2].clone(),
+                first_psus[3].clone(),
+                second_psus[4].clone(),
+                first_psus[5].clone(),
+            ],
+        );
+    }
+}

@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Version="2.0" ID="_f2f02ca12d7292f8a4e03b7b99d71a45f8896c2677" IssueInstant="2022-05-04T15:36:12.631Z" Destination="https://customer.site/oxide_rack/saml">
+  <saml:Issuer>https://some.idp.test/oxide_rack/</saml:Issuer>
+  <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+    <ds:SignedInfo>
+      <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+      <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
+      <ds:Reference URI="#_f2f02ca12d7292f8a4e03b7b99d71a45f8896c2677">
+        <ds:Transforms>
+          <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+          <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        </ds:Transforms>
+        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <ds:DigestValue>WHvbejjyGT6u9Wdq8/O1N7DpygBsQRRpdTvAKX76PQI=</ds:DigestValue>
+      </ds:Reference>
+    </ds:SignedInfo>
+    <ds:SignatureValue>XdguXPB1Jh0Oh2DK7odBh18wtzUoZIAZxsKcnC3dZMUASM82x84jcfMy2evmnSub
+B5A4tb70b6FR5lHZBQiczQ==</ds:SignatureValue>
+    <ds:KeyInfo>
+      <ds:X509Data>
+        <ds:X509Certificate>MIIB0TCCAXagAwIBAgIUFrkxTnQdOAY/7qJw7hJE99G4MOIwCgYIKoZIzj0EAwIw
+RjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNp
+c2NvMRIwEAYDVQQDEwlzYW1sLnRlc3QwHhcNMjIwNTA0MTgxNDAwWhcNMjcwNTAz
+MTgxNDAwWjBGMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDVNh
+biBGcmFuY2lzY28xEjAQBgNVBAMTCXNhbWwudGVzdDBZMBMGByqGSM49AgEGCCqG
+SM49AwEHA0IABMgWYNrJmHdkCegHMHKGSK9kPL7YYB4tYNlGK3s/FseZQUvMMOoz
+0ot7E6kBtPo+Gk+KnoYrJBBqp9ibXIvu9WyjQjBAMA4GA1UdDwEB/wQEAwIBBjAP
+BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRYXi3sj9FVb0R7DsaU/9P2OT/49TAK
+BggqhkjOPQQDAgNJADBGAiEA74YxpJxWJeWl9r1KQw1dcJ2GtNTr4bH9LVDMaRt2
+kGkCIQDz7Vufp+bIl5AFdAcJzri6LyyZ4xzkViFenAkdxtcqnQ==</ds:X509Certificate>
+      </ds:X509Data>
+    </ds:KeyInfo>
+  </ds:Signature>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" Version="2.0" ID="_a8d644a6c83fc56337b0330d8b0ff684978a5fe56c" IssueInstant="2022-05-04T15:36:12.556Z">
+    <saml:Issuer>https://some.idp.test/oxide_rack/</saml:Issuer>
+    <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+      <ds:SignedInfo>
+        <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
+        <ds:Reference URI="#_a8d644a6c83fc56337b0330d8b0ff684978a5fe56c">
+          <ds:Transforms>
+            <ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+            <ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+          </ds:Transforms>
+          <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+          <ds:DigestValue>RcotwJw6L51LrDiS1KNZ2wiLP8KXANJ4rFGjMkqa1CY=</ds:DigestValue>
+        </ds:Reference>
+      </ds:SignedInfo>
+      <ds:SignatureValue>YDvwwKKq/yD87dJ9DBvvNnK1892wRymgcN6wCFVjmD6BhdHiBNiHI7lNDSS2hLEY
+m1zFzAjAIqOyNfecz4bh/A==</ds:SignatureValue>
+      <ds:KeyInfo>
+        <ds:X509Data>
+          <ds:X509Certificate>MIIB0TCCAXagAwIBAgIUFrkxTnQdOAY/7qJw7hJE99G4MOIwCgYIKoZIzj0EAwIw
+RjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNp
+c2NvMRIwEAYDVQQDEwlzYW1sLnRlc3QwHhcNMjIwNTA0MTgxNDAwWhcNMjcwNTAz
+MTgxNDAwWjBGMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDVNh
+biBGcmFuY2lzY28xEjAQBgNVBAMTCXNhbWwudGVzdDBZMBMGByqGSM49AgEGCCqG
+SM49AwEHA0IABMgWYNrJmHdkCegHMHKGSK9kPL7YYB4tYNlGK3s/FseZQUvMMOoz
+0ot7E6kBtPo+Gk+KnoYrJBBqp9ibXIvu9WyjQjBAMA4GA1UdDwEB/wQEAwIBBjAP
+BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRYXi3sj9FVb0R7DsaU/9P2OT/49TAK
+BggqhkjOPQQDAgNJADBGAiEA74YxpJxWJeWl9r1KQw1dcJ2GtNTr4bH9LVDMaRt2
+kGkCIQDz7Vufp+bIl5AFdAcJzri6LyyZ4xzkViFenAkdxtcqnQ==</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </ds:Signature>
+    <saml:Subject>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">some@customer.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="3923-09-01T02:16:12.556Z" Recipient="https://customer.site/oxide_rack/saml"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2022-05-04T15:36:12.556Z" NotOnOrAfter="3923-09-01T02:16:12.556Z"/>
+    <saml:AuthnStatement AuthnInstant="2022-05-04T15:36:12.556Z" SessionNotOnOrAfter="3923-09-01T02:16:12.556Z" SessionIndex="_samling_4356273_859641652">
+      <saml:AuthnContext>
+        <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified</saml:AuthnContextClassRef>
+      </saml:AuthnContext>
+    </saml:AuthnStatement>
+  </saml:Assertion>
+</samlp:Response>

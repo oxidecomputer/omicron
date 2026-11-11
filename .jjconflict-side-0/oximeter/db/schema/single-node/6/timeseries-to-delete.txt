@@ -1,0 +1,8 @@
+bfd_session:message_recieve_error
+instance_uuid:pv_panic_guest_handled
+instance_uuid:pv_panic_host_handled
+instance_uuid:reset
+virtual_machine:pv_panic_guest_handled
+virtual_machine:pv_panic_host_handled
+virtual_machine:reset
+virtual_machine:vcpu_usage

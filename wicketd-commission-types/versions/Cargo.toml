@@ -22,6 +22,7 @@ sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
+trust-quorum-types-versions.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 

@@ -1,0 +1,10138 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::BTreeMap;
+
+use anyhow::anyhow;
+use dropshot::Body;
+use dropshot::{
+    EmptyScanParams, EndpointTagPolicy, Header, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseSeeOther, HttpResponseUpdatedNoContent, PaginationParams, Path,
+    Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
+    WebsocketChannelResult, WebsocketConnection,
+};
+use dropshot_api_manager_types::{ValidationContext, api_versions};
+use http::Response;
+use ipnetwork::IpNetwork;
+use nexus_types::authn::cookies::Cookies;
+use nexus_types_versions::latest;
+use nexus_types_versions::latest::headers;
+use nexus_types_versions::v2025_11_20_00;
+use nexus_types_versions::v2025_12_03_00;
+use nexus_types_versions::v2025_12_12_00;
+use nexus_types_versions::v2025_12_23_00;
+use nexus_types_versions::v2026_01_01_00;
+use nexus_types_versions::v2026_01_03_00;
+use nexus_types_versions::v2026_01_05_00;
+use nexus_types_versions::v2026_01_08_00;
+use nexus_types_versions::v2026_01_15_00;
+use nexus_types_versions::v2026_01_16_00;
+use nexus_types_versions::v2026_01_16_01;
+use nexus_types_versions::v2026_01_21_00;
+use nexus_types_versions::v2026_01_22_00;
+use nexus_types_versions::v2026_01_30_01;
+use nexus_types_versions::v2026_01_31_00;
+use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_04_16_00;
+use nexus_types_versions::v2026_05_07_00;
+use nexus_types_versions::v2026_06_05_00;
+use nexus_types_versions::v2026_08_14_00;
+use omicron_common::address::IpRange;
+use omicron_common::api::external::{
+    http_pagination::{
+        PaginatedById, PaginatedByName, PaginatedByNameOrId,
+        PaginatedByTimeAndId, PaginatedByVersion,
+    },
+    *,
+};
+use openapiv3::OpenAPI;
+use slog_error_chain::InlineErrorChain;
+
+/// Types that convert to/from `omicron-common` types and thus cannot live in
+/// `nexus-types-versions`. These will go away once `omicron-common-versions`
+/// exists.
+mod v2025_11_20_00_local;
+mod v2026_01_01_00_local;
+mod v2026_01_30_00_local;
+mod v2026_03_24_00_local;
+mod v2026_05_20_00_local;
+
+api_versions!([
+    // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
+    // YYYY_MM_DD_NN. Here, NN is a two-digit number starting at 00 for a
+    // particular date.
+    //
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- First, determine the next API version number to use.
+    // |
+    // |  * On the main branch: Take today's date in YYYY_MM_DD format, e.g.
+    // |    2025_11_12. Find the smallest NN that isn't already defined in the
+    // |    list below. In most cases, that is 00, but if 00 is already taken,
+    // |    use 01, 02, etc.
+    // |
+    // |  * On a release branch, don't alter the date. Instead, always bump the NN.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // |
+    // |  If there's a merge conflict, update the version number to the current
+    // |  date. Otherwise, it is okay to leave the version number unchanged even
+    // |  if you land your change on a different day from the one you make it on.
+    // |
+    // |  Ensure that version numbers are sorted in descending order. (This macro
+    // |  will panic at runtime if they're not in descending order.) The newest
+    // |  date-based version should be at the top of the list.
+    // v
+    // (next_yyyy_mm_dd_nn, IDENT),
+    //
+    (2026_11_05_00, PROBLEMS),
+    (2026_11_04_00, UNADOPTED_RACK_LIST),
+    (2026_11_02_00, LAST_CERTIFICATE_DOCS),
+    (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
+    (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
+    (2026_10_15_00, SYSTEM_CERTIFICATES),
+    (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
+    (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
+    (2026_09_11_00, ALERT_PAYLOAD),
+    (2026_09_08_00, PROJECT_AND_VPC_CREATE_DEFAULTS),
+    (2026_08_28_00, SILO_USER_DOCS),
+    (2026_08_19_01, BGP_PEER_SRC_ADDR),
+    (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
+    (2026_08_14_00, ALERT_LIST),
+    (2026_08_12_00, SLED_SLOT),
+    (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
+    (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
+    (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
+    (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
+    (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
+    (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
+    (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
+    (2026_06_03_00, DISK_BLOCK_SIZE_TYPE),
+    (2026_05_20_00, ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS),
+    (2026_05_08_00, MANUAL_DISK_ADOPTION),
+    (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
+    (2026_04_30_00, PROBE_AND_SAML_DOCS),
+    (2026_04_29_00, METRICS_ADD_JOULES),
+    (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
+    (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),
+    (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
+    (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
+    (2026_03_24_00, ADD_ICMPV6_FIREWALL_SUPPORT),
+    (2026_03_23_00, RENAME_PREFIX_LEN),
+    (2026_03_14_00, MULTICAST_DROP_MVLAN),
+    (2026_03_12_00, CAPITALIZE_DESCRIPTIONS),
+    (2026_03_06_01, SWITCH_SLOT_ENUM),
+    (2026_03_06_00, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
+    (2026_03_02_00, ADD_TIME_FIELDS_TO_USERS),
+    (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
+    (2026_02_19_00, REMOVE_SLED_ADD),
+    (2026_02_13_01, BGP_UNNUMBERED_PEERS),
+    (2026_02_13_00, STALE_DOCS_AND_PUNCTUATION),
+    (2026_02_09_01, UPDATE_EXTERNAL_SUBNET_DOCS),
+    (2026_02_09_00, RENAME_POOL_ENDPOINTS),
+    (2026_02_06_00, ADD_SILO_SUBNET_POOLS),
+    (2026_02_02_00, TRUST_QUORUM_ABORT_CONFIG),
+    (2026_01_31_00, READ_ONLY_DISKS_NULLABLE),
+    (2026_01_30_01, READ_ONLY_DISKS),
+    (2026_01_30_00, INSTANCES_EXTERNAL_SUBNETS),
+    (2026_01_28_00, REMOVE_SUBNET_POOL_POOL_TYPE),
+    (2026_01_23_00, DUAL_STACK_EPHEMERAL_IP),
+    (2026_01_22_01, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
+    (2026_01_22_00, FLOATING_IP_ALLOCATOR_UPDATE),
+    (2026_01_21_00, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
+    (2026_01_16_01, EXTERNAL_SUBNET_ATTACHMENT),
+    (2026_01_16_00, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
+    (2026_01_15_01, AUDIT_LOG_CREDENTIAL_ID),
+    (2026_01_15_00, AUDIT_LOG_AUTH_METHOD_ENUM),
+    (2026_01_13_00, DOC_LINT_SUMMARY_TRAILING_PERIOD),
+    (2026_01_11_00, MULTICAST_JOIN_LEAVE_DOCS),
+    (2026_01_08_00, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2026_01_05_00, POOL_SELECTION_ENUMS),
+    (2026_01_03_00, DUAL_STACK_NICS),
+    (2026_01_01_00, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
+    (2025_12_23_00, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
+    (2025_12_12_00, BGP_PEER_COLLISION_STATE),
+    (2025_12_03_00, LOCAL_STORAGE),
+    (2025_11_20_00, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2025_12_01_00, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
+
+const MIB: usize = 1024 * 1024;
+const GIB: usize = 1024 * MIB;
+const DISK_BULK_WRITE_MAX_BYTES: usize = 8 * MIB;
+// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
+// continue growing.
+const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
+
+// API ENDPOINT FUNCTION NAMING CONVENTIONS
+//
+// Generally, HTTP resources are grouped within some collection. For a
+// relatively simple example:
+//
+//   GET    v1/projects                (list the projects in the collection)
+//   POST   v1/projects                (create a project in the collection)
+//   GET    v1/projects/{project}      (look up a project in the collection)
+//   DELETE v1/projects/{project}      (delete a project in the collection)
+//   PUT    v1/projects/{project}      (update a project in the collection)
+//
+// We pick a name for the function that implements a given API entrypoint
+// based on how we expect it to appear in the CLI subcommand hierarchy. For
+// example:
+//
+//   GET    v1/projects                 -> project_list()
+//   POST   v1/projects                 -> project_create()
+//   GET    v1/projects/{project}       -> project_view()
+//   DELETE v1/projects/{project}       -> project_delete()
+//   PUT    v1/projects/{project}       -> project_update()
+//
+// Note that the path typically uses the entity's plural form while the
+// function name uses its singular.
+//
+// Operations beyond list, create, view, delete, and update should use a
+// descriptive noun or verb, again bearing in mind that this will be
+// transcribed into the CLI and SDKs:
+//
+//   POST   -> instance_reboot
+//   POST   -> instance_stop
+//   GET    -> instance_serial_console
+//
+// Note that these function names end up in generated OpenAPI spec as the
+// operationId for each endpoint, and therefore represent a contract with
+// clients. Client generators use operationId to name API methods, so changing
+// a function name is a breaking change from a client perspective.
+
+#[dropshot::api_description {
+    tag_config = {
+        allow_other_tags = false,
+        policy = EndpointTagPolicy::ExactlyOne,
+        tags = {
+            "affinity" = {
+                description = "Anti-affinity groups give control over instance placement.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/affinity"
+                }
+
+            },
+            "console-auth" = {
+                description = "API for console authentication",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/console-auth"
+                }
+            },
+            "current-user" = {
+                description = "Information pertaining to the current user.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/current-user"
+                }
+            },
+            "disks" = {
+                description = "Virtual disks are used to store instance-local data which includes the operating system.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/disks"
+                }
+            },
+            "experimental" = {
+                description = "Experimental, unstable interfaces, primarily for use by Oxide personnel",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/experimental"
+                }
+            },
+            "floating-ips" = {
+                description = "Floating IPs allow a project to allocate well-known IPs to instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/floating-ips"
+                }
+            },
+            "external-subnets" = {
+                description = "External subnets that can be attached to instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/external-subnets"
+                }
+            },
+            "images" = {
+                description = "Images are read-only virtual disks that may be used to boot virtual machines.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/images"
+                }
+            },
+            "instances" = {
+                description = "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/instances"
+                }
+            },
+            "ip-pools" = {
+                description = "IP pools are collections of external IPs \
+                    that can be allocated and attached to instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/ip-pools"
+                }
+            },
+            "login" = {
+                description = "Authentication endpoints",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/login"
+                }
+            },
+            "metrics" = {
+                description = "Silo-scoped metrics",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/metrics"
+                }
+            },
+            "multicast-groups" = {
+                description = "Multicast groups provide efficient one-to-many network communication.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/multicast-groups"
+                }
+            },
+            "policy" = {
+                description = "System-wide IAM policy",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/policy"
+                }
+            },
+            "projects" = {
+                description = "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/projects"
+                }
+            },
+            "silos" = {
+                description = "Silos represent a logical partition of users and resources.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/silos"
+                }
+            },
+            "snapshots" = {
+                description = "Snapshots of virtual disks at a particular point in time.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/snapshots"
+                }
+            },
+            "subnet-pools" = {
+                description = "Subnet pools are collections of external \
+                    subnets that can be allocated and attached \
+                    to instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/subnet-pools"
+                }
+            },
+            "tokens" = {
+                description = "API clients use device access tokens for authentication.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/tokens"
+                }
+            },
+            "vpcs" = {
+                description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/problems" = {
+                description = "Problems detected by the fault management \
+                 subsystem.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/problems"
+                }
+            },
+            "system/alerts" = {
+                description = "Alerts deliver notifications for events that occur on the Oxide rack",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/alerts"
+                }
+            },
+            "system/audit-log" = {
+                description = "These endpoints relate to audit logs.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-audit-log"
+                }
+            },
+            "system/probes" = {
+                description = "Probes for testing network connectivity",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/probes"
+                }
+            },
+            "system/status" = {
+                description = "Endpoints related to system health",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-status"
+                }
+            },
+            "system/hardware" = {
+                description = "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-hardware"
+                }
+            },
+            "system/metrics" = {
+                description = "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-metrics"
+                }
+            },
+            "system/ip-pools" = {
+                description = "IP pools are collections of external IPs. \
+                    Linking a pool to a silo makes it available \
+                    for allocation by users in that silo.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-ip-pools"
+                }
+            },
+            "system/subnet-pools" = {
+                description = "Subnet pools are collections of external \
+                    subnets. Linking a pool to a silo makes it \
+                    available for allocation by users in that \
+                    silo.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-subnet-pools"
+                }
+            },
+            "system/networking" = {
+                description = "This provides rack-level network configuration.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-networking"
+                }
+            },
+            "system/silos" = {
+                description = "Silos represent a logical partition of users and resources.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-silos"
+                }
+            },
+            "system/support-bundles" = {
+                description = "Support bundles collect debugging information from the rack for use by Oxide support.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-support-bundles"
+                }
+            },
+            "system/update" = {
+                description = "Upload and manage system updates",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-update"
+                }
+            },
+        }
+    }
+}]
+pub trait NexusExternalApi {
+    type Context;
+
+    /// Ping API
+    ///
+    /// Always responds with Ok if it responds at all.
+    #[endpoint {
+        method = GET,
+        path = "/v1/ping",
+        tags = ["system/status"],
+    }]
+    async fn ping(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::system::Ping>, HttpError> {
+        Ok(HttpResponseOk(latest::system::Ping {
+            status: latest::system::PingStatus::Ok,
+        }))
+    }
+
+    /// Fetch top-level IAM policy
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/policy",
+        tags = ["policy"],
+    }]
+    async fn system_policy_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::FleetRole>>,
+        HttpError,
+    >;
+
+    /// Update top-level IAM policy
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/policy",
+        tags = ["policy"],
+    }]
+    async fn system_policy_update(
+        rqctx: RequestContext<Self::Context>,
+        new_policy: TypedBody<
+            latest::policy::Policy<latest::policy::FleetRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::FleetRole>>,
+        HttpError,
+    >;
+
+    /// Fetch fleet-wide networking settings
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+    }]
+    async fn system_networking_settings_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
+        HttpError,
+    >;
+
+    /// Update fleet-wide networking settings
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+    }]
+    async fn system_networking_settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            latest::system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
+        HttpError,
+    >;
+
+    /// Fetch current silo's IAM policy
+    #[endpoint {
+        method = GET,
+        path = "/v1/policy",
+        tags = ["silos"],
+    }]
+    async fn policy_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    /// Update current silo's IAM policy
+    #[endpoint {
+        method = PUT,
+        path = "/v1/policy",
+        tags = ["silos"],
+    }]
+    async fn policy_update(
+        rqctx: RequestContext<Self::Context>,
+        new_policy: TypedBody<latest::policy::Policy<latest::policy::SiloRole>>,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    /// Fetch current silo's auth settings
+    #[endpoint {
+        method = GET,
+        path = "/v1/auth-settings",
+        tags = ["silos"],
+    }]
+    async fn auth_settings_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::silo::SiloAuthSettings>, HttpError>;
+
+    /// Update current silo's auth settings
+    #[endpoint {
+        method = PUT,
+        path = "/v1/auth-settings",
+        tags = ["silos"],
+    }]
+    async fn auth_settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<latest::silo::SiloAuthSettingsUpdate>,
+    ) -> Result<HttpResponseOk<latest::silo::SiloAuthSettings>, HttpError>;
+
+    /// Fetch resource utilization for user's current silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/utilization",
+        tags = ["silos"],
+    }]
+    async fn utilization_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::silo::Utilization>, HttpError>;
+
+    /// Fetch current utilization for given silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/utilization/silos/{silo}",
+        tags = ["system/silos"],
+    }]
+    async fn silo_utilization_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<HttpResponseOk<latest::silo::SiloUtilization>, HttpError>;
+
+    /// List current utilization state for all silos
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/utilization/silos",
+        tags = ["system/silos"],
+    }]
+    async fn silo_utilization_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::silo::SiloUtilization>>,
+        HttpError,
+    >;
+
+    /// List resource quotas for all silos
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silo-quotas",
+        tags = ["system/silos"],
+    }]
+    async fn system_quotas_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::silo::SiloQuotas>>, HttpError>;
+
+    /// Fetch resource quotas for silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/quotas",
+        tags = ["system/silos"],
+    }]
+    async fn silo_quotas_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<HttpResponseOk<latest::silo::SiloQuotas>, HttpError>;
+
+    /// Update resource quotas for silo
+    ///
+    /// If a quota value is not specified, it will remain unchanged.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/silos/{silo}/quotas",
+        tags = ["system/silos"],
+    }]
+    async fn silo_quotas_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        new_quota: TypedBody<latest::silo::SiloQuotasUpdate>,
+    ) -> Result<HttpResponseOk<latest::silo::SiloQuotas>, HttpError>;
+
+    /// List silos
+    ///
+    /// Lists silos that are discoverable based on the current permissions.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos",
+        tags = ["system/silos"],
+    }]
+    async fn silo_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::silo::Silo>>, HttpError>;
+
+    /// Create silo
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/silos",
+        tags = ["system/silos"],
+        versions = VERSION_REMOVE_SILO_DISCOVERABLE..,
+    }]
+    async fn silo_create(
+        rqctx: RequestContext<Self::Context>,
+        new_silo_params: TypedBody<latest::silo::SiloCreate>,
+    ) -> Result<HttpResponseCreated<latest::silo::Silo>, HttpError>;
+
+    /// Create silo
+    #[endpoint {
+        operation_id = "silo_create",
+        method = POST,
+        path = "/v1/system/silos",
+        tags = ["system/silos"],
+        versions = ..VERSION_REMOVE_SILO_DISCOVERABLE,
+    }]
+    async fn silo_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_silo_params: TypedBody<v2025_11_20_00::silo::SiloCreate>,
+    ) -> Result<HttpResponseCreated<latest::silo::Silo>, HttpError> {
+        Self::silo_create(rqctx, new_silo_params.map(Into::into)).await
+    }
+
+    /// Fetch silo
+    ///
+    /// Fetch silo by name or ID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}",
+        tags = ["system/silos"],
+    }]
+    async fn silo_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<HttpResponseOk<latest::silo::Silo>, HttpError>;
+
+    /// List IP pools linked to silo
+    ///
+    /// Linked IP pools are available to users in the specified silo. A silo
+    /// can have at most one default pool. IPs are allocated from the default
+    /// pool when users ask for one without specifying a pool.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/ip-pools",
+        tags = ["system/silos"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..,
+    }]
+    async fn silo_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::ip_pool::SiloIpPool>>,
+        HttpError,
+    >;
+
+    /// List IP pools linked to silo
+    ///
+    /// Linked IP pools are available to users in the specified silo. A silo
+    /// can have at most one default pool. IPs are allocated from the default
+    /// pool when users ask for one without specifying a pool.
+    #[endpoint {
+        operation_id = "silo_ip_pool_list",
+        method = GET,
+        path = "/v1/system/silos/{silo}/ip-pools",
+        tags = ["system/silos"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn silo_ip_pool_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        let page =
+            Self::silo_ip_pool_list(rqctx, path_params, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// Delete silo
+    ///
+    /// Delete a silo by name or ID.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/silos/{silo}",
+        tags = ["system/silos"],
+    }]
+    async fn silo_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Fetch silo IAM policy
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/policy",
+        tags = ["system/silos"],
+    }]
+    async fn silo_policy_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    /// Update silo IAM policy
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/silos/{silo}/policy",
+        tags = ["system/silos"],
+    }]
+    async fn silo_policy_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        new_policy: TypedBody<latest::policy::Policy<latest::policy::SiloRole>>,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    // Silo-specific user endpoints
+
+    /// List users in silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/users",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn silo_user_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
+
+    /// List users in silo
+    #[endpoint {
+        operation_id = "silo_user_list",
+        method = GET,
+        path = "/v1/system/users",
+        tags = ["system/silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn silo_user_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>,
+        HttpError,
+    > {
+        Self::silo_user_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
+    /// Fetch user in silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/users/{user_id}",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn silo_user_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
+
+    /// Fetch user in silo
+    #[endpoint {
+        operation_id = "silo_user_view",
+        method = GET,
+        path = "/v1/system/users/{user_id}",
+        tags = ["system/silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn silo_user_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::User>, HttpError> {
+        Self::silo_user_view(rqctx, path_params, query_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
+
+    // Silo identity providers
+
+    /// List identity providers for silo
+    ///
+    /// List identity providers for silo by silo name or ID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/identity-providers",
+        tags = ["system/silos"],
+    }]
+    async fn silo_identity_provider_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::silo::SiloSelector>>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::identity_provider::IdentityProvider>,
+        >,
+        HttpError,
+    >;
+
+    // Silo SAML identity providers
+
+    /// Create SAML identity provider
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/identity-providers/saml",
+        tags = ["system/silos"],
+    }]
+    async fn saml_identity_provider_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+        new_provider: TypedBody<
+            latest::identity_provider::SamlIdentityProviderCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::identity_provider::SamlIdentityProvider>,
+        HttpError,
+    >;
+
+    /// Fetch SAML identity provider
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/identity-providers/saml/{provider}",
+        tags = ["system/silos"],
+    }]
+    async fn saml_identity_provider_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProviderPath>,
+        query_params: Query<latest::silo::OptionalSiloSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::identity_provider::SamlIdentityProvider>,
+        HttpError,
+    >;
+
+    // TODO: no DELETE for identity providers?
+
+    // "Local" Identity Provider
+
+    /// Create user
+    ///
+    /// Users can only be created in Silos with `provision_type` == `Fixed`.
+    /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user
+    /// first logs in using an external Identity Provider.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/identity-providers/local/users",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn local_idp_user_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+        new_user_params: TypedBody<latest::user::UserCreate>,
+    ) -> Result<HttpResponseCreated<latest::user::User>, HttpError>;
+
+    /// Create user
+    ///
+    /// Users can only be created in Silos with `provision_type` == `Fixed`.
+    /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user
+    /// first logs in using an external Identity Provider.
+    #[endpoint {
+        operation_id = "local_idp_user_create",
+        method = POST,
+        path = "/v1/system/identity-providers/local/users",
+        tags = ["system/silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn local_idp_user_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+        new_user_params: TypedBody<latest::user::UserCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::user::User>, HttpError>
+    {
+        Self::local_idp_user_create(rqctx, query_params, new_user_params)
+            .await
+            .map(|HttpResponseCreated(u)| HttpResponseCreated(u.into()))
+    }
+
+    /// Delete user
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/identity-providers/local/users/{user_id}",
+        tags = ["system/silos"],
+    }]
+    async fn local_idp_user_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Set or invalidate user's password
+    ///
+    /// Passwords can only be updated for users in Silos with identity mode
+    /// `LocalOnly`.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
+        tags = ["system/silos"],
+    }]
+    async fn local_idp_user_set_password(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserParam>,
+        query_params: Query<latest::path_params::SiloPath>,
+        update: TypedBody<latest::user::UserPassword>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // SAML+SCIM Identity Provider
+
+    /// List SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/scim/tokens",
+        tags = ["system/silos"],
+    }]
+    async fn scim_token_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::scim::ScimClientBearerToken>>,
+        HttpError,
+    >;
+
+    /// Create SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter. Be sure
+    /// to save the bearer token in the response. It will not be retrievable
+    /// later through the token view and list endpoints.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/scim/tokens",
+        tags = ["system/silos"],
+    }]
+    async fn scim_token_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<
+        HttpResponseCreated<latest::scim::ScimClientBearerTokenValue>,
+        HttpError,
+    >;
+
+    /// Fetch SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/scim/tokens/{token_id}",
+        tags = ["system/silos"],
+    }]
+    async fn scim_token_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2TokenPathParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseOk<latest::scim::ScimClientBearerToken>, HttpError>;
+
+    /// Delete SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/scim/tokens/{token_id}",
+        tags = ["system/silos"],
+    }]
+    async fn scim_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2TokenPathParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // SCIM user endpoints
+    // XXX is "silos" the correct tag?
+
+    #[endpoint {
+        method = GET,
+        path = "/scim/v2/Users",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_list_users(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<scim2_rs::QueryParams>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/scim/v2/Users/{user_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_get_user(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2UserPathParam>,
+        query_params: Query<scim2_rs::QueryParams>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/scim/v2/Users",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_create_user(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<scim2_rs::CreateUserRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/scim/v2/Users/{user_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_put_user(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2UserPathParam>,
+        body: TypedBody<scim2_rs::CreateUserRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = PATCH,
+        path = "/scim/v2/Users/{user_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_patch_user(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2UserPathParam>,
+        body: TypedBody<scim2_rs::PatchRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/scim/v2/Users/{user_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_delete_user(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2UserPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    // SCIM group endpoints
+
+    #[endpoint {
+        method = GET,
+        path = "/scim/v2/Groups",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_list_groups(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<scim2_rs::QueryParams>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/scim/v2/Groups/{group_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_get_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2GroupPathParam>,
+        query_params: Query<scim2_rs::QueryParams>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/scim/v2/Groups",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_create_group(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<scim2_rs::CreateGroupRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/scim/v2/Groups/{group_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_put_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2GroupPathParam>,
+        body: TypedBody<scim2_rs::CreateGroupRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = PATCH,
+        path = "/scim/v2/Groups/{group_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_patch_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2GroupPathParam>,
+        body: TypedBody<scim2_rs::PatchRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/scim/v2/Groups/{group_id}",
+        tags = ["silos"],
+        unpublished = true,
+    }]
+    async fn scim_v2_delete_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::scim::ScimV2GroupPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    // Projects
+
+    /// List projects
+    #[endpoint {
+        method = GET,
+        path = "/v1/projects",
+        tags = ["projects"],
+    }]
+    async fn project_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::project::Project>>, HttpError>;
+
+    /// Create project
+    #[endpoint {
+        method = POST,
+        path = "/v1/projects",
+        tags = ["projects"],
+        versions = VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS..,
+    }]
+    async fn project_create(
+        rqctx: RequestContext<Self::Context>,
+        new_project: TypedBody<latest::project::ProjectCreate>,
+    ) -> Result<HttpResponseCreated<latest::project::Project>, HttpError>;
+
+    /// Create project
+    #[endpoint {
+        operation_id = "project_create",
+        method = POST,
+        path = "/v1/projects",
+        tags = ["projects"],
+        versions = ..VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS,
+    }]
+    async fn project_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_project: TypedBody<v2025_11_20_00::project::ProjectCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::project::Project>, HttpError>
+    {
+        Self::project_create(rqctx, new_project.map(Into::into)).await
+    }
+
+    /// Fetch project
+    #[endpoint {
+        method = GET,
+        path = "/v1/projects/{project}",
+        tags = ["projects"],
+    }]
+    async fn project_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+    ) -> Result<HttpResponseOk<latest::project::Project>, HttpError>;
+
+    /// Delete project
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/projects/{project}",
+        tags = ["projects"],
+    }]
+    async fn project_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // TODO-correctness: Is it valid for PUT to accept application/json that's
+    // a subset of what the resource actually represents?  If not, is that a
+    // problem? (HTTP may require that this be idempotent.)  If so, can we get
+    // around that having this be a slightly different content-type (e.g.,
+    // "application/json-patch")?  We should see what other APIs do.
+    /// Update project
+    #[endpoint {
+        method = PUT,
+        path = "/v1/projects/{project}",
+        tags = ["projects"],
+    }]
+    async fn project_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+        updated_project: TypedBody<latest::project::ProjectUpdate>,
+    ) -> Result<HttpResponseOk<latest::project::Project>, HttpError>;
+
+    /// Fetch project's IAM policy
+    #[endpoint {
+        method = GET,
+        path = "/v1/projects/{project}/policy",
+        tags = ["projects"],
+    }]
+    async fn project_policy_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::ProjectRole>>,
+        HttpError,
+    >;
+
+    /// Update project's IAM policy
+    #[endpoint {
+        method = PUT,
+        path = "/v1/projects/{project}/policy",
+        tags = ["projects"],
+    }]
+    async fn project_policy_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+        new_policy: TypedBody<
+            latest::policy::Policy<latest::policy::ProjectRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::policy::Policy<latest::policy::ProjectRole>>,
+        HttpError,
+    >;
+
+    // IP Pools
+
+    /// List IP pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::ip_pool::IpPoolFilter>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::ip_pool::SiloIpPool>>,
+        HttpError,
+    >;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "ip_pool_list",
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        Self::project_ip_pool_list_v2026_01_01_00(rqctx, query_params).await
+    }
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "project_ip_pool_list",
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn project_ip_pool_list_v2026_01_01_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    >;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "project_ip_pool_list",
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn project_ip_pool_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        let page =
+            Self::project_ip_pool_list_v2026_01_01_00(rqctx, query_params)
+                .await?
+                .0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn ip_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::SiloIpPool>, HttpError>;
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "project_ip_pool_view",
+        method = GET,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn project_ip_pool_view_v2026_01_01_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2026_01_01_00::ip_pool::SiloIpPool>, HttpError>
+    {
+        Self::ip_pool_view(rqctx, path_params).await
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "project_ip_pool_view",
+        method = GET,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn project_ip_pool_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::SiloIpPool>, HttpError>
+    {
+        Self::ip_pool_view(rqctx, path_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// List IP pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::ip_pool::SystemIpPoolFilter>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::ip_pool::IpPool>>, HttpError>;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "system_ip_pool_list",
+        method = GET,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
+        HttpError,
+    >;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "ip_pool_list",
+        method = GET,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_list_v2026_02_09_00(rqctx, query_params).await
+    }
+
+    /// Create IP pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<latest::ip_pool::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Create IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_create",
+        method = POST,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_create_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_create(rqctx, pool_params.map(Into::into))
+            .await?
+            .map(Into::into))
+    }
+
+    /// Create IP pool
+    #[endpoint {
+        operation_id = "ip_pool_create",
+        method = POST,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_create_v2026_02_09_00(rqctx, pool_params).await
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_view",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_view_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_view(rqctx, path_params).await?.map(Into::into))
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "ip_pool_view",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_view_v2026_02_09_00(rqctx, path_params).await
+    }
+
+    /// Delete IP pool
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Delete IP pool
+    #[endpoint {
+        operation_id = "ip_pool_delete",
+        method = DELETE,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_delete_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Self::system_ip_pool_delete(rqctx, path_params).await
+    }
+
+    /// Update IP pool
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Update IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_update(rqctx, path_params, updates)
+            .await?
+            .map(Into::into))
+    }
+
+    /// Update IP pool
+    #[endpoint {
+        operation_id = "ip_pool_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        updates: TypedBody<v2025_11_20_00::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_update_v2026_02_09_00(rqctx, path_params, updates)
+            .await
+    }
+
+    /// Fetch IP pool utilization
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/utilization",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_utilization_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPoolUtilization>, HttpError>;
+
+    /// Fetch IP pool utilization
+    #[endpoint {
+        operation_id = "ip_pool_utilization_view",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/utilization",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_utilization_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::ip_pool::IpPoolUtilization>,
+        HttpError,
+    > {
+        Self::system_ip_pool_utilization_view(rqctx, path_params).await
+    }
+
+    /// List IP pool's linked silos
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/silos",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_silo_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        // paginating by resource_id because they're unique per pool. most robust
+        // option would be to paginate by a composite key representing the (pool,
+        // resource_type, resource)
+        query_params: Query<PaginatedById>,
+        // TODO: this could just list latest::silo::Silo -- it's not like knowing silo_id
+        // and nothing else is particularly useful -- except we also want to say
+        // whether the pool is marked default on each silo. So one option would
+        // be  to do the same as we did with SiloIpPool -- include is_default on
+        // whatever the thing is. Still... all we'd have to do to make this usable
+        // in both places would be to make it { ...IpPool, silo_id, silo_name,
+        // is_default }
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::ip_pool::IpPoolSiloLink>>,
+        HttpError,
+    >;
+
+    /// List IP pool's linked silos
+    #[endpoint {
+        operation_id = "ip_pool_silo_list",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/silos",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_silo_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPoolSiloLink>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_silo_list(rqctx, path_params, query_params).await
+    }
+
+    /// Link IP pool to silo
+    ///
+    /// Users in linked silos can allocate external IPs from this pool for their
+    /// instances. A silo can have at most one default pool. IPs are allocated
+    /// from the default pool when users ask for one without specifying a pool.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/silos",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_silo_link(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        resource_assoc: TypedBody<latest::ip_pool::IpPoolLinkSilo>,
+    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolSiloLink>, HttpError>;
+
+    /// Link IP pool to silo
+    ///
+    /// Users in linked silos can allocate external IPs from this pool for their
+    /// instances. A silo can have at most one default pool. IPs are allocated
+    /// from the default pool when users ask for one without specifying a pool.
+    #[endpoint {
+        operation_id = "ip_pool_silo_link",
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/silos",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_silo_link_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        resource_assoc: TypedBody<v2025_11_20_00::ip_pool::IpPoolLinkSilo>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::ip_pool::IpPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_ip_pool_silo_link(
+            rqctx,
+            path_params,
+            resource_assoc.map(Into::into),
+        )
+        .await
+    }
+
+    /// Unlink IP pool from silo
+    ///
+    /// Will fail if there are any outstanding IPs allocated in the silo.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_silo_unlink(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::ip_pool::IpPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Unlink IP pool from silo
+    ///
+    /// Will fail if there are any outstanding IPs allocated in the silo.
+    #[endpoint {
+        operation_id = "ip_pool_silo_unlink",
+        method = DELETE,
+        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_silo_unlink_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::ip_pool::IpPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_ip_pool_silo_unlink(rqctx, path_params).await
+    }
+
+    /// Make IP pool default for silo
+    ///
+    /// When a user asks for an IP (e.g., at instance create time) without
+    /// specifying a pool, the IP comes from the default pool if a default is
+    /// configured. When a pool is made the default for a silo, any existing
+    /// default will remain linked to the silo, but will no longer be the
+    /// default.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_silo_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::ip_pool::IpPoolSiloPath>,
+        update: TypedBody<latest::ip_pool::IpPoolSiloUpdate>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPoolSiloLink>, HttpError>;
+
+    /// Make IP pool default for silo
+    ///
+    /// When a user asks for an IP (e.g., at instance create time) without
+    /// specifying a pool, the IP comes from the default pool if a default is
+    /// configured. When a pool is made the default for a silo, any existing
+    /// default will remain linked to the silo, but will no longer be the
+    /// default.
+    #[endpoint {
+        operation_id = "ip_pool_silo_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_silo_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::ip_pool::IpPoolSiloPath>,
+        update: TypedBody<v2025_11_20_00::ip_pool::IpPoolSiloUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::ip_pool::IpPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_ip_pool_silo_update(
+            rqctx,
+            path_params,
+            update.map(Into::into),
+        )
+        .await
+    }
+
+    /// Assign IP pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/assignment",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_assign(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        assign_params: TypedBody<latest::ip_pool::IpPoolAssignParam>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Fetch Oxide service IP pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools-service",
+        tags = ["system/ip-pools"],
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_service_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>;
+
+    /// Fetch Oxide service IP pool
+    #[endpoint {
+        operation_id = "ip_pool_service_view",
+        method = GET,
+        path = "/v1/system/ip-pools-service",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_service_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_service_view(rqctx).await
+    }
+
+    /// List ranges for IP pool
+    ///
+    /// Ranges are ordered by their first address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/ranges",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_range_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::ip_pool::IpPoolRange>>,
+        HttpError,
+    >;
+
+    /// List ranges for IP pool
+    ///
+    /// Ranges are ordered by their first address.
+    #[endpoint {
+        operation_id = "ip_pool_range_list",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/ranges",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_range_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPoolRange>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_range_list(rqctx, path_params, query_params).await
+    }
+
+    /// Add range to IP pool
+    ///
+    /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
+    /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
+    /// ranges in the same pool is not allowed.
+    ///
+    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
+    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/ranges/add",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_range_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolRange>, HttpError>;
+
+    /// Add range to IP pool
+    ///
+    /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
+    /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
+    /// ranges in the same pool is not allowed.
+    ///
+    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
+    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
+    #[endpoint {
+        operation_id = "ip_pool_range_add",
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/ranges/add",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_range_add_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::ip_pool::IpPoolRange>,
+        HttpError,
+    > {
+        Self::system_ip_pool_range_add(rqctx, path_params, range_params).await
+    }
+
+    /// Remove range from IP pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/ranges/remove",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_ip_pool_range_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Remove range from IP pool
+    #[endpoint {
+        operation_id = "ip_pool_range_remove",
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/ranges/remove",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_range_remove_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_ip_pool_range_remove(rqctx, path_params, range_params)
+            .await
+    }
+
+    /// List IP ranges for the Oxide service pool
+    ///
+    /// Ranges are ordered by their first address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools-service/ranges",
+        tags = ["system/ip-pools"],
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_service_range_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::ip_pool::IpPoolRange>>,
+        HttpError,
+    >;
+
+    /// List IP ranges for the Oxide service pool
+    ///
+    /// Ranges are ordered by their first address.
+    #[endpoint {
+        operation_id = "ip_pool_service_range_list",
+        method = GET,
+        path = "/v1/system/ip-pools-service/ranges",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_service_range_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPoolRange>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_service_range_list(rqctx, query_params).await
+    }
+
+    /// Add IP range to Oxide service pool
+    ///
+    /// IPv6 ranges are not allowed yet.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools-service/ranges/add",
+        tags = ["system/ip-pools"],
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_service_range_add(
+        rqctx: RequestContext<Self::Context>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolRange>, HttpError>;
+
+    /// Add IP range to Oxide service pool
+    ///
+    /// IPv6 ranges are not allowed yet.
+    #[endpoint {
+        operation_id = "ip_pool_service_range_add",
+        method = POST,
+        path = "/v1/system/ip-pools-service/ranges/add",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_service_range_add_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::ip_pool::IpPoolRange>,
+        HttpError,
+    > {
+        Self::system_ip_pool_service_range_add(rqctx, range_params).await
+    }
+
+    /// Remove IP range from Oxide service pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools-service/ranges/remove",
+        tags = ["system/ip-pools"],
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_service_range_remove(
+        rqctx: RequestContext<Self::Context>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Remove IP range from Oxide service pool
+    #[endpoint {
+        operation_id = "ip_pool_service_range_remove",
+        method = POST,
+        path = "/v1/system/ip-pools-service/ranges/remove",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_service_range_remove_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_ip_pool_service_range_remove(rqctx, range_params).await
+    }
+
+    // Subnet Pools
+
+    /// List subnet pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPool>>,
+        HttpError,
+    >;
+
+    /// List subnet pools
+    #[endpoint {
+        operation_id = "subnet_pool_list",
+        method = GET,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_list_v2026_01_28_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_22_00::subnet_pool::SubnetPool>>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_list(rqctx, query_params).await
+    }
+
+    /// List subnet pools
+    #[endpoint {
+        operation_id = "subnet_pool_list",
+        method = GET,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn subnet_pool_list_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_16_01::subnet_pool::SubnetPool>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::system_subnet_pool_list(rqctx, query_params).await?;
+        let items = items.into_iter().map(Into::into).collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page }))
+    }
+
+    /// Create subnet pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<latest::subnet_pool::SubnetPoolCreate>,
+    ) -> Result<HttpResponseCreated<latest::subnet_pool::SubnetPool>, HttpError>;
+
+    /// Create subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_create",
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_create_v2026_01_28_00(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2026_01_22_00::subnet_pool::SubnetPoolCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_22_00::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_create(rqctx, pool_params).await
+    }
+
+    /// Create subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_create",
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn subnet_pool_create_v2026_01_22_01(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2026_01_22_00::subnet_pool::SubnetPoolCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        let HttpResponseCreated(pool) =
+            Self::system_subnet_pool_create(rqctx, pool_params).await?;
+        Ok(HttpResponseCreated(pool.into()))
+    }
+
+    /// Create subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_create",
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
+    }]
+    async fn subnet_pool_create_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        let pool_params = pool_params.try_map(TryInto::try_into)?;
+        let HttpResponseCreated(pool) =
+            Self::subnet_pool_create_v2026_01_22_01(rqctx, pool_params).await?;
+        Ok(HttpResponseCreated(pool))
+    }
+
+    /// Fetch subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<latest::subnet_pool::SubnetPool>, HttpError>;
+
+    /// Fetch subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_view_v2026_01_28_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_22_00::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_view(rqctx, path_params).await
+    }
+
+    /// Fetch subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn subnet_pool_view_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        let HttpResponseOk(pool) =
+            Self::system_subnet_pool_view(rqctx, path_params).await?;
+        Ok(HttpResponseOk(pool.into()))
+    }
+
+    /// Update subnet pool
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<latest::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<latest::subnet_pool::SubnetPool>, HttpError>;
+
+    /// Update subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_update",
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_update_v2026_01_28_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_22_00::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_update(rqctx, path_params, updates).await
+    }
+
+    /// Update subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_update",
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn subnet_pool_update_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
+        let HttpResponseOk(pool) =
+            Self::system_subnet_pool_update(rqctx, path_params, updates)
+                .await?;
+        Ok(HttpResponseOk(pool.into()))
+    }
+
+    /// Delete subnet pool
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Delete subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_delete",
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_delete_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Self::system_subnet_pool_delete(rqctx, path_params).await
+    }
+
+    /// List members in subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/members",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_member_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        query_params: Query<SubnetPoolMemberPaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPoolMember>>,
+        HttpError,
+    >;
+
+    /// List members in subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_list",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/members",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_member_list_v2026_01_28_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        query_params: Query<SubnetPoolMemberPaginationParams>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_22_00::subnet_pool::SubnetPoolMember>,
+        >,
+        HttpError,
+    > {
+        Self::system_subnet_pool_member_list(rqctx, path_params, query_params)
+            .await
+    }
+
+    /// List members in subnet pool
+    //
+    // In this API version, we were paginating by name. Now, we want to paginate
+    // by the IP subnet. It's certainly possible to design a 1-1 encoding
+    // between those two so that we could correctly translate pagination
+    // querystrings between the versions.
+    //
+    // But that's really complicated, and the previous version of server always
+    // returned "unimplemented" for that endpoint anyway. We'll just keep on
+    // doing that in this version, rather than trying to translate.
+    #[endpoint {
+        operation_id = "subnet_pool_member_list",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/members",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn subnet_pool_member_list_v2026_01_16_01(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        _query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_16_01::subnet_pool::SubnetPoolMember>,
+        >,
+        HttpError,
+    > {
+        Err(HttpError::for_internal_error(
+            "endpoint is not implemented".to_string(),
+        ))
+    }
+
+    /// Add member to subnet pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_member_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<latest::subnet_pool::SubnetPoolMemberAdd>,
+    ) -> Result<
+        HttpResponseCreated<latest::subnet_pool::SubnetPoolMember>,
+        HttpError,
+    >;
+
+    /// Add member to subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_add",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_member_add_v2026_01_28_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_22_00::subnet_pool::SubnetPoolMember>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_member_add(rqctx, path_params, subnet_params)
+            .await
+    }
+
+    /// Add member to subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_add",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn subnet_pool_member_add_v2026_01_22_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPoolMember>,
+        HttpError,
+    > {
+        let HttpResponseCreated(pool) = Self::system_subnet_pool_member_add(
+            rqctx,
+            path_params,
+            subnet_params.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(pool.into()))
+    }
+
+    /// Add member to subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_add",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
+    }]
+    async fn subnet_pool_member_add_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::subnet_pool::SubnetPoolMemberAdd,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPoolMember>,
+        HttpError,
+    > {
+        let HttpResponseCreated(pool) = Self::system_subnet_pool_member_add(
+            rqctx,
+            path_params,
+            subnet_params.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(pool.into()))
+    }
+
+    /// Remove member from subnet pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/remove",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_member_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<latest::subnet_pool::SubnetPoolMemberRemove>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Remove member from subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_remove",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/remove",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_member_remove_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::subnet_pool::SubnetPoolMemberRemove,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_subnet_pool_member_remove(
+            rqctx,
+            path_params,
+            subnet_params,
+        )
+        .await
+    }
+
+    /// List silos linked to subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_silo_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPoolSiloLink>>,
+        HttpError,
+    >;
+
+    /// List silos linked to subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_silo_list",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_silo_list_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_16_01::subnet_pool::SubnetPoolSiloLink>,
+        >,
+        HttpError,
+    > {
+        Self::system_subnet_pool_silo_list(rqctx, path_params, query_params)
+            .await
+    }
+
+    /// List subnet pools linked to a silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/subnet-pools",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..,
+    }]
+    async fn silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::subnet_pool::SiloSubnetPool>>,
+        HttpError,
+    >;
+
+    /// List subnet pools
+    #[endpoint {
+        method = GET,
+        path = "/v1/subnet-pools",
+        tags = ["subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::subnet_pool::SiloSubnetPool>>,
+        HttpError,
+    >;
+
+    /// List subnet pools
+    #[endpoint {
+        operation_id = "current_silo_subnet_pool_list",
+        method = GET,
+        path = "/v1/subnet-pools",
+        tags = ["projects"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn current_silo_subnet_pool_list_v2026_02_06_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_22_00::subnet_pool::SiloSubnetPool>,
+        >,
+        HttpError,
+    > {
+        Self::subnet_pool_list(rqctx, query_params).await
+    }
+
+    /// Fetch subnet pool
+    #[endpoint {
+        method = GET,
+        path = "/v1/subnet-pools/{pool}",
+        tags = ["subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn subnet_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<latest::subnet_pool::SiloSubnetPool>, HttpError>;
+
+    /// Link subnet pool to silo
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_silo_link(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        silo_link: TypedBody<latest::subnet_pool::SubnetPoolLinkSilo>,
+    ) -> Result<
+        HttpResponseCreated<latest::subnet_pool::SubnetPoolSiloLink>,
+        HttpError,
+    >;
+
+    /// Link subnet pool to silo
+    #[endpoint {
+        operation_id = "subnet_pool_silo_link",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_silo_link_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        silo_link: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolLinkSilo>,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_silo_link(rqctx, path_params, silo_link).await
+    }
+
+    /// Update subnet pool's link to silo
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_silo_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolSiloPath>,
+        update: TypedBody<latest::subnet_pool::SubnetPoolSiloUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::subnet_pool::SubnetPoolSiloLink>,
+        HttpError,
+    >;
+
+    /// Update subnet pool's link to silo
+    #[endpoint {
+        operation_id = "subnet_pool_silo_update",
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_silo_update_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolSiloPath>,
+        update: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolSiloUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_silo_update(rqctx, path_params, update).await
+    }
+
+    /// Unlink subnet pool from silo
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+    }]
+    async fn system_subnet_pool_silo_unlink(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Unlink subnet pool from silo
+    #[endpoint {
+        operation_id = "subnet_pool_silo_unlink",
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_silo_unlink_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_subnet_pool_silo_unlink(rqctx, path_params).await
+    }
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_SUBNET_POOL_UTILIZATION_REMAINING..,
+    }]
+    async fn system_subnet_pool_utilization_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<latest::subnet_pool::SubnetPoolUtilization>,
+        HttpError,
+    >;
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        operation_id = "system_subnet_pool_utilization_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_SUBNET_POOL_UTILIZATION_REMAINING,
+    }]
+    async fn system_subnet_pool_utilization_view_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
+        HttpError,
+    > {
+        Ok(Self::system_subnet_pool_utilization_view(rqctx, path_params)
+            .await?
+            .map(v2026_01_16_01::subnet_pool::SubnetPoolUtilization::from))
+    }
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        operation_id = "subnet_pool_utilization_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_utilization_view_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_utilization_view_v2026_02_09_00(
+            rqctx,
+            path_params,
+        )
+        .await
+    }
+
+    // External Subnets
+
+    /// List external subnets
+    #[endpoint {
+        method = GET,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::external_subnet::ExternalSubnet>>,
+        HttpError,
+    >;
+
+    /// Create external subnet
+    #[endpoint {
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions = VERSION_RENAME_PREFIX_LEN..,
+    }]
+    async fn external_subnet_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        subnet_params: TypedBody<latest::external_subnet::ExternalSubnetCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    >;
+
+    /// Create external subnet
+    #[endpoint {
+        operation_id = "external_subnet_create",
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_RENAME_PREFIX_LEN,
+    }]
+    async fn external_subnet_create_v2026_01_22_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::external_subnet::ExternalSubnetCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    > {
+        let subnet_params = subnet_params.map(Into::into);
+        Self::external_subnet_create(rqctx, query_params, subnet_params).await
+    }
+
+    /// Create external subnet
+    #[endpoint {
+        operation_id = "external_subnet_create",
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
+    }]
+    async fn external_subnet_create_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::external_subnet::ExternalSubnetCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    > {
+        let subnet_params = subnet_params.try_map(TryInto::try_into)?;
+        Self::external_subnet_create_v2026_01_22_01(
+            rqctx,
+            query_params,
+            subnet_params,
+        )
+        .await
+    }
+
+    /// Fetch external subnet
+    #[endpoint {
+        method = GET,
+        path = "/v1/external-subnets/{external_subnet}",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::external_subnet::ExternalSubnetPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    >;
+
+    /// Update external subnet
+    #[endpoint {
+        method = PUT,
+        path = "/v1/external-subnets/{external_subnet}",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::external_subnet::ExternalSubnetPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        subnet_params: TypedBody<latest::external_subnet::ExternalSubnetUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    >;
+
+    /// Delete external subnet
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/external-subnets/{external_subnet}",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::external_subnet::ExternalSubnetPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Attach external subnet to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/external-subnets/{external_subnet}/attach",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::external_subnet::ExternalSubnetPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        attach_params: TypedBody<latest::external_subnet::ExternalSubnetAttach>,
+    ) -> Result<
+        HttpResponseAccepted<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    >;
+
+    /// Detach external subnet from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/external-subnets/{external_subnet}/detach",
+        tags = ["external-subnets"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+    }]
+    async fn external_subnet_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::external_subnet::ExternalSubnetPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<
+        HttpResponseAccepted<latest::external_subnet::ExternalSubnet>,
+        HttpError,
+    >;
+
+    // Floating IP Addresses
+
+    /// List floating IPs
+    #[endpoint {
+        method = GET,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+    }]
+    async fn floating_ip_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::floating_ip::FloatingIp>>,
+        HttpError,
+    >;
+
+    /// Create floating IP
+    ///
+    /// A specific IP address can be reserved, or an IP can be auto-allocated
+    /// from a specific pool or the silo's default pool.
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_FLOATING_IP_ALLOCATOR_UPDATE..,
+    }]
+    async fn floating_ip_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        floating_params: TypedBody<latest::floating_ip::FloatingIpCreate>,
+    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>;
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..VERSION_FLOATING_IP_ALLOCATOR_UPDATE,
+    }]
+    async fn floating_ip_create_v2026_01_16_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2026_01_16_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        Self::floating_ip_create(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
+    }]
+    async fn floating_ip_create_v2026_01_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2026_01_05_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        Self::floating_ip_create_v2026_01_16_00(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
+            ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn floating_ip_create_v2025_12_23_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2025_12_23_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        let floating_params = floating_params.try_map(TryInto::try_into)?;
+        Self::floating_ip_create_v2026_01_05_00(
+            rqctx,
+            query_params,
+            floating_params,
+        )
+        .await
+    }
+
+    /// Create floating IP
+    #[endpoint {
+        operation_id = "floating_ip_create",
+        method = POST,
+        path = "/v1/floating-ips",
+        tags = ["floating-ips"],
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn floating_ip_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2025_11_20_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        Self::floating_ip_create_v2025_12_23_00(
+            rqctx,
+            query_params,
+            floating_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Update floating IP
+    #[endpoint {
+        method = PUT,
+        path = "/v1/floating-ips/{floating_ip}",
+        tags = ["floating-ips"],
+    }]
+    async fn floating_ip_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::FloatingIpPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        updated_floating_ip: TypedBody<latest::floating_ip::FloatingIpUpdate>,
+    ) -> Result<HttpResponseOk<latest::floating_ip::FloatingIp>, HttpError>;
+
+    /// Delete floating IP
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/floating-ips/{floating_ip}",
+        tags = ["floating-ips"],
+    }]
+    async fn floating_ip_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::FloatingIpPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Fetch floating IP
+    #[endpoint {
+        method = GET,
+        path = "/v1/floating-ips/{floating_ip}",
+        tags = ["floating-ips"]
+    }]
+    async fn floating_ip_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::FloatingIpPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<latest::floating_ip::FloatingIp>, HttpError>;
+
+    /// Attach floating IP
+    ///
+    /// Attach floating IP to an instance or other resource.
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips/{floating_ip}/attach",
+        tags = ["floating-ips"],
+    }]
+    async fn floating_ip_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::FloatingIpPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        target: TypedBody<latest::floating_ip::FloatingIpAttach>,
+    ) -> Result<HttpResponseAccepted<latest::floating_ip::FloatingIp>, HttpError>;
+
+    /// Detach floating IP
+    ///
+    // Detach floating IP from instance or other resource.
+    #[endpoint {
+        method = POST,
+        path = "/v1/floating-ips/{floating_ip}/detach",
+        tags = ["floating-ips"],
+    }]
+    async fn floating_ip_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::FloatingIpPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseAccepted<latest::floating_ip::FloatingIp>, HttpError>;
+
+    // Multicast Groups
+    //
+    // TODO: Consider adding `.map()` to dropshot's `Path<T>` (like `TypedBody`)
+    // to enable inline delegation when path types differ between API versions.
+
+    /// List multicast groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
+    }]
+    async fn multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroup>>,
+        HttpError,
+    >;
+
+    /// List multicast groups
+    ///
+    /// Response includes the mvlan field (always null)
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn multicast_group_list_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_08_00::multicast::MulticastGroup>>,
+        HttpError,
+    > {
+        Self::multicast_group_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
+    /// List multicast groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::multicast::MulticastGroup>>,
+        HttpError,
+    > {
+        Self::multicast_group_list_v2026_01_08_00(rqctx, query_params)
+            .await
+            .map(|HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            })
+    }
+
+    /// Create multicast group
+    ///
+    /// Deprecated: Groups are created implicitly when adding members in newer
+    /// API versions.
+    #[endpoint {
+        operation_id = "multicast_group_create",
+        method = POST,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_create_v2025_11_20_00(
+        _rqctx: RequestContext<Self::Context>,
+        _new_group: TypedBody<v2025_11_20_00::multicast::MulticastGroupCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        Err(HttpError::for_client_error(
+            None,
+            dropshot::ClientErrorStatusCode::GONE,
+            "multicast group creation is deprecated; groups are created \
+             implicitly when instances join via: \
+             PUT /v1/instances/{instance}/multicast-groups/{group}"
+                .to_string(),
+        ))
+    }
+
+    /// Fetch multicast group
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    /// (e.g., "224.1.2.3" or "ff38::1").
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
+    }]
+    async fn multicast_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::multicast::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<latest::multicast::MulticastGroup>, HttpError>;
+
+    /// Fetch multicast group
+    ///
+    /// Response includes the mvlan field (always null)
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn multicast_group_view_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_08_00::multicast::MulticastGroupPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_08_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        Self::multicast_group_view(rqctx, path_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch multicast group
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        let path = path_params.map(Into::into);
+        Self::multicast_group_view_v2026_01_08_00(rqctx, path)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Update multicast group
+    ///
+    /// Deprecated: groups are managed implicitly through member operations.
+    #[endpoint {
+        operation_id = "multicast_group_update",
+        method = PUT,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_update_v2025_11_20_00(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+        _update_params: TypedBody<
+            v2025_11_20_00::multicast::MulticastGroupUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        Err(HttpError::for_client_error(
+            None,
+            dropshot::ClientErrorStatusCode::GONE,
+            "multicast group update is deprecated; groups are managed \
+             implicitly through member operations"
+                .to_string(),
+        ))
+    }
+
+    /// Delete multicast group
+    ///
+    /// Deprecated: groups are deleted automatically when the last member leaves.
+    #[endpoint {
+        operation_id = "multicast_group_delete",
+        method = DELETE,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_delete_v2025_11_20_00(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Err(HttpError::for_client_error(
+            None,
+            dropshot::ClientErrorStatusCode::GONE,
+            "multicast group deletion is deprecated; groups are \
+             automatically deleted when all members leave"
+                .to_string(),
+        ))
+    }
+
+    /// List members of multicast group
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn multicast_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::multicast::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroupMember>>,
+        HttpError,
+    >;
+
+    /// List members of multicast group
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_member_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::multicast::MulticastGroupMember>,
+        >,
+        HttpError,
+    > {
+        let path = path_params.map(Into::into);
+        Self::multicast_group_member_list(rqctx, path, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(|m| m.into()).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
+    /// Add instance to multicast group
+    ///
+    /// Deprecated: use the instance join endpoint which supports implicit group
+    /// creation and accepts group by name, UUID, or IP address.
+    #[endpoint {
+        method = POST,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_add",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_member_add_v2025_11_20_00(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+        _query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        _member_params: TypedBody<
+            v2025_11_20_00::multicast::MulticastGroupMemberAdd,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroupMember>,
+        HttpError,
+    > {
+        Err(HttpError::for_client_error(
+            None,
+            dropshot::ClientErrorStatusCode::GONE,
+            "multicast group member add is deprecated; use the instance \
+             join endpoint: PUT /v1/instances/{instance}/multicast-groups/{group}"
+                .to_string(),
+        ))
+    }
+
+    /// Remove instance from multicast group
+    ///
+    /// Deprecated: use the instance leave endpoint which accepts group by name,
+    /// UUID, or IP address.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_remove",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_member_remove_v2025_11_20_00(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<v2025_11_20_00::multicast::MulticastGroupMemberPath>,
+        _query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Err(HttpError::for_client_error(
+            None,
+            dropshot::ClientErrorStatusCode::GONE,
+            "multicast group member remove is deprecated; use the instance \
+             leave endpoint: DELETE /v1/instances/{instance}/multicast-groups/{group}"
+                .to_string(),
+        ))
+    }
+
+    /// Look up multicast group by IP address
+    ///
+    /// Deprecated: use the main view endpoint which accepts IP addresses directly.
+    #[endpoint {
+        operation_id = "lookup_multicast_group_by_ip",
+        method = GET,
+        path = "/v1/system/multicast-groups/by-ip/{address}",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn lookup_multicast_group_by_ip_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            v2025_11_20_00::multicast::MulticastGroupIpLookupPath,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        let path = path_params.map(Into::into);
+        Self::multicast_group_view_v2026_01_08_00(rqctx, path)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    // Disks
+
+    /// List disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+    }]
+    async fn disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
+
+    /// List disks
+    #[endpoint {
+        operation_id = "disk_list",
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_list_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_05_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks
+    #[endpoint {
+        operation_id = "disk_list",
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn disk_list_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_30_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks
+    #[endpoint {
+        operation_id = "disk_list",
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn disk_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list_v2025_12_03_00(rqctx, query_params).await.and_then(
+            |HttpResponseOk(page)| {
+                let items: Result<Vec<_>, _> =
+                    page.items.into_iter().map(TryInto::try_into).collect();
+                items.map(|items| {
+                    HttpResponseOk(ResultsPage {
+                        next_page: page.next_page,
+                        items,
+                    })
+                })
+            },
+        )
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+    }]
+    async fn disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_disk: TypedBody<latest::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<Disk>, HttpError>;
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_create_v2026_01_31_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_disk: TypedBody<latest::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::disk_create(rqctx, query_params, new_disk)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+    }]
+    async fn disk_create_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_disk: TypedBody<v2026_01_30_01::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::disk_create_v2026_01_31_00(
+            rqctx,
+            query_params,
+            new_disk.map(Into::into),
+        )
+        .await
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn disk_create_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_disk: TypedBody<v2025_12_03_00::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026_01_30_00_local::Disk>, HttpError>
+    {
+        Self::disk_create_v2026_01_30_01(
+            rqctx,
+            query_params,
+            new_disk.map(Into::into),
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn disk_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_disk: TypedBody<v2025_11_20_00::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00_local::Disk>, HttpError>
+    {
+        let body = new_disk.map(Into::into);
+        Self::disk_create_v2025_12_03_00(rqctx, query_params, body)
+            .await
+            .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+    }]
+    async fn disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<Disk>, HttpError>;
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_view_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026_05_20_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn disk_view_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::DiskPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026_01_30_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn disk_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::DiskPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
+
+    /// Delete disk
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+    }]
+    async fn disk_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Start importing blocks into disk
+    ///
+    /// Start the process of importing blocks into a disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks/{disk}/bulk-write-start",
+        tags = ["disks"],
+    }]
+    async fn disk_bulk_write_import_start(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Import blocks into disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks/{disk}/bulk-write",
+        tags = ["disks"],
+        request_body_max_bytes = DISK_BULK_WRITE_MAX_BYTES,
+    }]
+    async fn disk_bulk_write_import(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        import_params: TypedBody<latest::disk::ImportBlocksBulkWrite>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Stop importing blocks into disk
+    ///
+    /// Stop the process of importing blocks into a disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks/{disk}/bulk-write-stop",
+        tags = ["disks"],
+    }]
+    async fn disk_bulk_write_import_stop(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Confirm disk block import completion
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks/{disk}/finalize",
+        tags = ["disks"],
+    }]
+    async fn disk_finalize_import(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        finalize_params: TypedBody<latest::disk::FinalizeDisk>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Instances
+
+    /// List instances
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::instance::Instance>>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        operation_id = "instance_list",
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_list_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_06_05_00::instance::Instance>>,
+        HttpError,
+    > {
+        let resp = Self::instance_list(rqctx, query_params).await?;
+        let inner = resp.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: inner
+                .items
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+            next_page: inner.next_page,
+        }))
+    }
+
+    #[endpoint {
+        operation_id = "instance_list",
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::instance::Instance>>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_list_v2026_06_05_00(rqctx, query_params).await?;
+        let inner = resp.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: inner.items.into_iter().map(Into::into).collect(),
+            next_page: inner.next_page,
+        }))
+    }
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_instance: TypedBody<latest::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_create_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_06_05_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_create_v2026_01_31_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_31_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_create_v2026_06_05_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(resp.0.into()))
+    }
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+    }]
+    async fn instance_create_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_30_01::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        Self::instance_create_v2026_01_31_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn instance_create_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_08_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        Self::instance_create_v2026_01_30_01(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_create_v2026_01_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_05_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        Self::instance_create_v2026_01_08_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn instance_create_v2026_01_03_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_03_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create_v2026_01_05_00(rqctx, query_params, new_instance)
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions =
+            VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_create_v2025_12_23_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2025_12_23_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create_v2026_01_03_00(rqctx, query_params, new_instance)
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn instance_create_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2025_12_03_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        Self::instance_create_v2025_12_23_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2025_11_20_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        Self::instance_create_v2025_12_03_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
+    }
+
+    /// Fetch instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_view",
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_view_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<v2026_06_05_00::instance::Instance>, HttpError>
+    {
+        let resp =
+            Self::instance_view(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseOk(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_view",
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
+        let resp = Self::instance_view_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseOk(resp.0.into()))
+    }
+
+    /// Delete instance
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+    }]
+    async fn instance_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+        instance_config: TypedBody<latest::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<latest::instance::Instance>, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_update_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2026_06_05_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<v2026_06_05_00::instance::Instance>, HttpError>
+    {
+        let resp = Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseOk(resp.0.try_into()?))
+    }
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_update_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2026_01_08_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
+        let resp = Self::instance_update_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseOk(resp.0.into()))
+    }
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
+        Self::instance_update_v2026_01_08_00(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await
+    }
+
+    /// Reboot instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_reboot(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_reboot",
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_reboot_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_reboot(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_reboot",
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_reboot_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_reboot_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
+
+    /// Boot instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/start",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_start(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_start",
+        method = POST,
+        path = "/v1/instances/{instance}/start",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_start_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_start(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_start",
+        method = POST,
+        path = "/v1/instances/{instance}/start",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_start_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_start_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
+
+    /// Stop instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
+    }]
+    async fn instance_stop(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_stop",
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_stop_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_stop(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_stop",
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_stop_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_stop_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
+
+    /// Fetch instance serial console
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/serial-console",
+        tags = ["instances"],
+    }]
+    async fn instance_serial_console(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::instance::InstanceSerialConsoleRequest>,
+    ) -> Result<
+        HttpResponseOk<latest::instance::InstanceSerialConsoleData>,
+        HttpError,
+    >;
+
+    /// Stream instance serial console
+    #[channel {
+        protocol = WEBSOCKETS,
+        path = "/v1/instances/{instance}/serial-console/stream",
+        tags = ["instances"],
+    }]
+    async fn instance_serial_console_stream(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<
+            latest::instance::InstanceSerialConsoleStreamRequest,
+        >,
+        conn: WebsocketConnection,
+    ) -> WebsocketChannelResult;
+
+    /// List SSH public keys for instance
+    ///
+    /// List SSH public keys injected via cloud-init during instance creation.
+    /// Note that this list is a snapshot in time and will not reflect updates
+    /// made after the instance is created.
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/ssh-public-keys",
+        tags = ["instances"],
+    }]
+    async fn instance_ssh_public_key_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::ssh_key::SshKey>>, HttpError>;
+
+    /// List disks for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+    }]
+    async fn instance_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
+
+    /// List disks for instance
+    #[endpoint {
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_list_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_05_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn instance_disk_list_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<
+                v2025_11_20_00::project::OptionalProjectSelector,
+            >,
+        >,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_30_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_disk_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<
+                v2025_11_20_00::project::OptionalProjectSelector,
+            >,
+        >,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params)
+            .await
+            .and_then(|HttpResponseOk(page)| {
+                let items: Result<Vec<_>, _> =
+                    page.items.into_iter().map(TryInto::try_into).collect();
+                items.map(|items| {
+                    HttpResponseOk(ResultsPage {
+                        next_page: page.next_page,
+                        items,
+                    })
+                })
+            })
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+    }]
+    async fn instance_disk_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Attach disk to instance
+    #[endpoint {
+        operation_id = "instance_disk_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_attach_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        operation_id = "instance_disk_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn instance_disk_attach_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_01_30_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        operation_id = "instance_disk_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_disk_attach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
+    }]
+    async fn instance_disk_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_detach_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn instance_disk_detach_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_01_30_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_disk_detach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
+
+    /// List affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/affinity-groups",
+        tags = ["experimental"],
+    }]
+    async fn instance_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AffinityGroup>>,
+        HttpError,
+    >;
+
+    /// List anti-affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/anti-affinity-groups",
+        tags = ["instances"],
+    }]
+    async fn instance_anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AntiAffinityGroup>>,
+        HttpError,
+    >;
+
+    // Affinity Groups
+
+    /// List affinity groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AffinityGroup>>,
+        HttpError,
+    >;
+
+    /// Fetch affinity group
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::AffinityGroupPath>,
+    ) -> Result<HttpResponseOk<latest::affinity::AffinityGroup>, HttpError>;
+
+    /// List affinity group members
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}/members",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::AffinityGroupPath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AffinityGroupMember>>,
+        HttpError,
+    >;
+
+    /// Fetch affinity group member
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_member_instance_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseOk<latest::affinity::AffinityGroupMember>, HttpError>;
+
+    /// Add member to affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_member_instance_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AffinityGroupMember>,
+        HttpError,
+    >;
+
+    /// Remove member from affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_member_instance_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/affinity-groups",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_affinity_group_params: TypedBody<
+            latest::affinity::AffinityGroupCreate,
+        >,
+    ) -> Result<HttpResponseCreated<latest::affinity::AffinityGroup>, HttpError>;
+
+    /// Update affinity group
+    #[endpoint {
+        method = PUT,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::AffinityGroupPath>,
+        updated_group: TypedBody<latest::affinity::AffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<latest::affinity::AffinityGroup>, HttpError>;
+
+    /// Delete affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["experimental"],
+    }]
+    async fn affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::AffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List anti-affinity groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AntiAffinityGroup>>,
+        HttpError,
+    >;
+
+    /// Fetch anti-affinity group
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseOk<latest::affinity::AntiAffinityGroup>, HttpError>;
+
+    /// List anti-affinity group members
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::AntiAffinityGroupPath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AntiAffinityGroupMember>>,
+        HttpError,
+    >;
+
+    /// Fetch anti-affinity group member
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_instance_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<
+            latest::affinity::AntiAffinityInstanceGroupMemberPath,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
+
+    /// Add member to anti-affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_instance_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<
+            latest::affinity::AntiAffinityInstanceGroupMemberPath,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
+
+    /// Remove member from anti-affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_instance_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<
+            latest::affinity::AntiAffinityInstanceGroupMemberPath,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create anti-affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/anti-affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_affinity_group_params: TypedBody<
+            latest::affinity::AntiAffinityGroupCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AntiAffinityGroup>,
+        HttpError,
+    >;
+
+    /// Update anti-affinity group
+    #[endpoint {
+        method = PUT,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::AntiAffinityGroupPath>,
+        updated_group: TypedBody<latest::affinity::AntiAffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<latest::affinity::AntiAffinityGroup>, HttpError>;
+
+    /// Delete anti-affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Certificates
+
+    /// List TLS certificates in current silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/certificates",
+        tags = ["silos"],
+    }]
+    async fn certificate_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::certificate::Certificate>>,
+        HttpError,
+    >;
+
+    /// Create TLS certificate in current silo
+    ///
+    /// This certificate is automatically used by the Oxide control plane to serve
+    /// API requests.
+    #[endpoint {
+        method = POST,
+        path = "/v1/certificates",
+        tags = ["silos"]
+    }]
+    async fn certificate_create(
+        rqctx: RequestContext<Self::Context>,
+        new_cert: TypedBody<latest::certificate::CertificateCreate>,
+    ) -> Result<HttpResponseCreated<latest::certificate::Certificate>, HttpError>;
+
+    /// Fetch TLS certificate in current silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/certificates/{certificate}",
+        tags = ["silos"],
+    }]
+    async fn certificate_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::CertificatePath>,
+    ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
+
+    /// Delete TLS certificate in current silo
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/certificates/{certificate}",
+        tags = ["silos"],
+    }]
+    async fn certificate_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::CertificatePath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List TLS certificates in silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/certificates",
+        tags = ["system/silos"],
+        versions = VERSION_SYSTEM_CERTIFICATES..,
+    }]
+    async fn silo_certificate_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::silo::SiloSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::certificate::Certificate>>,
+        HttpError,
+    >;
+
+    /// Create TLS certificate in silo
+    ///
+    /// This certificate is automatically used by the Oxide control plane to serve
+    /// API requests.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/certificates",
+        tags = ["system/silos"],
+        versions = VERSION_SYSTEM_CERTIFICATES..,
+    }]
+    async fn silo_certificate_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+        new_cert: TypedBody<latest::certificate::CertificateCreate>,
+    ) -> Result<HttpResponseCreated<latest::certificate::Certificate>, HttpError>;
+
+    /// Fetch TLS certificate in silo
+    ///
+    /// The silo must be specified if the certificate is specified by name, and
+    /// must not be specified if the certificate is specified by ID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/certificates/{certificate}",
+        tags = ["system/silos"],
+        versions = VERSION_SYSTEM_CERTIFICATES..,
+    }]
+    async fn silo_certificate_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::CertificatePath>,
+        query_params: Query<latest::silo::OptionalSiloSelector>,
+    ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
+
+    /// Delete TLS certificate in silo
+    ///
+    /// The silo must be specified if the certificate is specified by name, and
+    /// must not be specified if the certificate is specified by ID.
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/certificates/{certificate}",
+        tags = ["system/silos"],
+        versions = VERSION_SYSTEM_CERTIFICATES..,
+    }]
+    async fn silo_certificate_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::CertificatePath>,
+        query_params: Query<latest::silo::OptionalSiloSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create address lot
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/address-lot",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_create(
+        rqctx: RequestContext<Self::Context>,
+        new_address_lot: TypedBody<latest::networking::AddressLotCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::networking::AddressLotCreateResponse>,
+        HttpError,
+    >;
+
+    /// Delete address lot
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/address-lot/{address_lot}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::AddressLotPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List address lots
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/address-lot",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::AddressLot>>,
+        HttpError,
+    >;
+
+    /// Fetch address lot
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/address-lot/{address_lot}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::AddressLotPath>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::AddressLotViewResponse>,
+        HttpError,
+    >;
+
+    /// List blocks in address lot
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/address-lot/{address_lot}/blocks",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_block_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::AddressLotPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::AddressLotBlock>>,
+        HttpError,
+    >;
+
+    /// Create loopback address
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_loopback_address_create(
+        rqctx: RequestContext<Self::Context>,
+        new_loopback_address: TypedBody<
+            latest::networking::LoopbackAddressCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::networking::LoopbackAddress>,
+        HttpError,
+    >;
+
+    /// Create loopback address
+    #[endpoint {
+        operation_id = "networking_loopback_address_create",
+        method = POST,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_loopback_address: TypedBody<
+            v2025_11_20_00::networking::LoopbackAddressCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::networking::LoopbackAddress>,
+        HttpError,
+    > {
+        let new_loopback_address =
+            new_loopback_address.try_map(TryInto::try_into)?;
+        Self::networking_loopback_address_create(rqctx, new_loopback_address)
+            .await
+            .map(|response| response.map(From::from))
+    }
+
+    /// Delete loopback address
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_loopback_address_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::networking::LoopbackAddressPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Delete loopback address
+    #[endpoint {
+        operation_id = "networking_loopback_address_delete",
+        method = DELETE,
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_delete_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v2025_11_20_00::networking::LoopbackAddressPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let path = path.try_map(TryInto::try_into)?;
+        Self::networking_loopback_address_delete(rqctx, path).await
+    }
+
+    /// List loopback addresses
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_loopback_address_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LoopbackAddress>>,
+        HttpError,
+    >;
+
+    /// List loopback addresses
+    #[endpoint {
+        operation_id = "networking_loopback_address_list",
+        method = GET,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::networking::LoopbackAddress>,
+        >,
+        HttpError,
+    > {
+        Self::networking_loopback_address_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
+
+    /// Create switch port settings
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
+    }]
+    async fn networking_switch_port_settings_create(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<latest::networking::SwitchPortSettingsCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::networking::SwitchPortSettings>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn networking_switch_port_settings_create_v2026_05_07_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_05_07_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_05_07_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
+    }
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES,
+    }]
+    async fn networking_switch_port_settings_create_v2026_04_16_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_04_16_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_04_16_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
+    }
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn networking_switch_port_settings_create_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_02_13_01::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_02_13_01::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create_v2026_04_16_00(
+            rqctx,
+            new_settings.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+        .map(|response| response.map(From::from))
+    }
+
+    /// Create switch port settings (old version with required BgpPeer.addr)
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_switch_port_settings_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2025_11_20_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        match Self::networking_switch_port_settings_create_v2026_02_13_01(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        {
+            Ok(HttpResponseCreated(result)) => {
+                Ok(HttpResponseCreated(result.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Delete switch port settings
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_settings_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::networking::SwitchPortSettingsSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List switch port settings
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_settings_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::networking::SwitchPortSettingsSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::networking::SwitchPortSettingsIdentity>,
+        >,
+        HttpError,
+    >;
+
+    /// Get information about switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
+    }]
+    async fn networking_switch_port_settings_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn networking_switch_port_settings_view_v2026_05_07_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_05_07_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
+    }
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES,
+    }]
+    async fn networking_switch_port_settings_view_v2026_04_16_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_04_16_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
+    }
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn networking_switch_port_settings_view_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_02_13_01::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view_v2026_04_16_00(
+            rqctx,
+            path_params,
+        )
+        .await
+        .map(|response| response.map(From::from))
+    }
+
+    /// Get information about switch port (old version with required BgpPeer.addr)
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_switch_port_settings_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        match Self::networking_switch_port_settings_view_v2026_02_13_01(
+            rqctx,
+            path_params,
+        )
+        .await
+        {
+            Ok(HttpResponseOk(result)) => {
+                Ok(HttpResponseOk(result.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List switch ports
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switch-port",
+        tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::networking::SwitchPortPageSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::SwitchPort>>,
+        HttpError,
+    >;
+
+    /// List switch ports
+    #[endpoint {
+        operation_id = "networking_switch_port_list",
+        method = GET,
+        path = "/v1/system/hardware/switch-port",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::networking::SwitchPortPageSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::networking::SwitchPort>>,
+        HttpError,
+    > {
+        Self::networking_switch_port_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
+
+    /// Get switch port status
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/status",
+        tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_status(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<latest::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<latest::switch::SwitchLinkState>, HttpError>;
+
+    /// Get switch port status
+    #[endpoint {
+        operation_id = "networking_switch_port_status",
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/status",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<latest::switch::SwitchLinkState>, HttpError>
+    {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_status(rqctx, path_params, query_params)
+            .await
+    }
+
+    /// Apply switch port settings
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_apply_settings(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<latest::networking::SwitchPortSelector>,
+        settings_body: TypedBody<latest::networking::SwitchPortApplySettings>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Apply switch port settings
+    #[endpoint {
+        operation_id = "networking_switch_port_apply_settings",
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_apply_settings_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+        settings_body: TypedBody<latest::networking::SwitchPortApplySettings>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_apply_settings(
+            rqctx,
+            path_params,
+            query_params,
+            settings_body,
+        )
+        .await
+    }
+
+    /// Clear switch port settings
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_clear_settings(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<latest::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Clear switch port settings
+    #[endpoint {
+        operation_id = "networking_switch_port_clear_settings",
+        method = DELETE,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_clear_settings_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_clear_settings(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
+    /// Fetch LLDP configuration for switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_lldp_config_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<latest::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<latest::networking::LldpLinkConfig>, HttpError>;
+
+    /// Fetch LLDP configuration for switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_config_view",
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_config_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<latest::networking::LldpLinkConfig>, HttpError>
+    {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_config_view(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
+    /// Update LLDP configuration for switch port
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_lldp_config_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<latest::networking::SwitchPortSelector>,
+        config: TypedBody<latest::networking::LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update LLDP configuration for switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_config_update",
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_config_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+        config: TypedBody<latest::networking::LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_config_update(
+            rqctx,
+            path_params,
+            query_params,
+            config,
+        )
+        .await
+    }
+
+    /// Fetch LLDP neighbors for switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_switch_port_lldp_neighbors(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LldpNeighbor>>,
+        HttpError,
+    >;
+
+    /// Fetch LLDP neighbors for switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_neighbors",
+        method = GET,
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_neighbors_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::networking::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LldpNeighbor>>,
+        HttpError,
+    > {
+        let path_params = path_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_neighbors(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
+    /// Create BGP configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_config_create(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<latest::networking::BgpConfigCreate>,
+    ) -> Result<HttpResponseCreated<latest::networking::BgpConfig>, HttpError>;
+
+    /// Create BGP configuration
+    #[endpoint {
+        operation_id = "networking_bgp_config_create",
+        method = POST,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_config_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<v2025_11_20_00::networking::BgpConfigCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::networking::BgpConfig>,
+        HttpError,
+    > {
+        match Self::networking_bgp_config_create(rqctx, config.map(Into::into))
+            .await
+        {
+            Ok(HttpResponseCreated(result)) => {
+                Ok(HttpResponseCreated(result.into()))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List BGP configurations
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_config_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::BgpConfig>>,
+        HttpError,
+    >;
+
+    /// List BGP configurations
+    #[endpoint {
+        operation_id = "networking_bgp_config_list",
+        method = GET,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_config_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::networking::BgpConfig>>,
+        HttpError,
+    > {
+        let page =
+            Self::networking_bgp_config_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// Get BGP peer status
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpPeerStatus>>, HttpError>;
+
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    /// Get BGP peer status
+    #[endpoint {
+        operation_id = "networking_bgp_status",
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_PEER_COLLISION_STATE..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_status_v2025_12_12_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2025_12_12_00::networking::BgpPeerStatus>>,
+        HttpError,
+    > {
+        Ok(HttpResponseOk(
+            Self::networking_bgp_status(rqctx)
+                .await?
+                .0
+                .into_iter()
+                .map(v2025_12_12_00::networking::BgpPeerStatus::from)
+                .collect(),
+        ))
+    }
+
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    #[endpoint {
+        operation_id = "networking_bgp_status",
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_PEER_COLLISION_STATE,
+    }]
+    async fn networking_bgp_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2025_11_20_00::networking::BgpPeerStatus>>,
+        HttpError,
+    > {
+        let result = Self::networking_bgp_status_v2025_12_12_00(rqctx).await?.0;
+        Ok(HttpResponseOk(
+            result
+                .into_iter()
+                .map(v2025_11_20_00::networking::BgpPeerStatus::from)
+                .collect(),
+        ))
+    }
+
+    /// List BGP exported routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-exported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_exported(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpExported>>, HttpError>;
+
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    /// Get BGP exported routes
+    #[endpoint {
+        operation_id = "networking_bgp_exported",
+        method = GET,
+        path = "/v1/system/networking/bgp-exported",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_exported_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::networking::BgpExported>,
+        HttpError,
+    > {
+        let result = Self::networking_bgp_exported(rqctx).await?.0;
+        Ok(HttpResponseOk(result.into()))
+    }
+
+    /// Get BGP router message history
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-message-history",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_message_history(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::networking::BgpRouteSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::AggregateBgpMessageHistory>,
+        HttpError,
+    >;
+
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    /// Get imported IPv4 BGP routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-routes-ipv4",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_imported_routes_ipv4(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::networking::BgpRouteSelector>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2025_11_20_00::networking::BgpImportedRouteIpv4>>,
+        HttpError,
+    >;
+
+    /// Get imported IPv4 BGP routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-imported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_imported(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::networking::BgpRouteSelector>,
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpImported>>, HttpError>;
+
+    /// Delete BGP configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_config_delete(
+        rqctx: RequestContext<Self::Context>,
+        sel: Query<latest::networking::BgpConfigSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the mutable fields of an existing BGP configuration
+    ///
+    /// The asn field is not updatable; to change the autonomous system number,
+    /// create a new BGP configuration object.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_CONFIGURATION_UPDATE..,
+    }]
+    async fn networking_bgp_config_update(
+        rqctx: RequestContext<Self::Context>,
+        sel: Query<latest::networking::BgpConfigSelector>,
+        update: TypedBody<latest::networking::BgpConfigUpdate>,
+    ) -> Result<HttpResponseOk<latest::networking::BgpConfig>, HttpError>;
+
+    /// Update BGP announce set
+    ///
+    /// If the announce set exists, this endpoint replaces the existing announce
+    /// set with the one specified.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/bgp-announce-set",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_announce_set_update(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<latest::networking::BgpAnnounceSetCreate>,
+    ) -> Result<HttpResponseOk<latest::networking::BgpAnnounceSet>, HttpError>;
+
+    /// List BGP announce sets
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-announce-set",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_announce_set_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::BgpAnnounceSet>>,
+        HttpError,
+    >;
+
+    /// Delete BGP announce set
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/bgp-announce-set/{announce_set}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_announce_set_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::BgpAnnounceSetSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // TODO: is pagination necessary here? How large do we expect the list of
+    // announcements to become in real usage?
+    /// Get originated routes for a specified BGP announce set
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-announce-set/{announce_set}/announcement",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_announcement_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::BgpAnnounceSetSelector>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::BgpAnnouncement>>,
+        HttpError,
+    >;
+
+    /// Enable BFD session
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/bfd-enable",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_bfd_enable(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<latest::networking::BfdSessionEnable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Enable BFD session
+    #[endpoint {
+        operation_id = "networking_bfd_enable",
+        method = POST,
+        path = "/v1/system/networking/bfd-enable",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_enable_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<v2025_11_20_00::networking::BfdSessionEnable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let session = session.try_map(TryInto::try_into)?;
+        Self::networking_bfd_enable(rqctx, session).await
+    }
+
+    /// Disable BFD session
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/bfd-disable",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_bfd_disable(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<latest::networking::BfdSessionDisable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Disable BFD session
+    #[endpoint {
+        operation_id = "networking_bfd_disable",
+        method = POST,
+        path = "/v1/system/networking/bfd-disable",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_disable_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<v2025_11_20_00::networking::BfdSessionDisable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let session = session.try_map(TryInto::try_into)?;
+        Self::networking_bfd_disable(rqctx, session).await
+    }
+
+    /// Get BFD status
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
+    }]
+    async fn networking_bfd_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<latest::bfd::BfdStatus>>, HttpError>;
+
+    /// Get BFD status
+    #[endpoint {
+        operation_id = "networking_bfd_status",
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2025_11_20_00::bfd::BfdStatus>>, HttpError>
+    {
+        Self::networking_bfd_status(rqctx).await.map(|response| {
+            response
+                .map(|statuses| statuses.into_iter().map(From::from).collect())
+        })
+    }
+
+    /// Get user-facing services IP allowlist
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/allow-list",
+        tags = ["system/networking"],
+    }]
+    async fn networking_allow_list_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::system::AllowList>, HttpError>;
+
+    /// Update user-facing services IP allowlist
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/allow-list",
+        tags = ["system/networking"],
+    }]
+    async fn networking_allow_list_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::system::AllowListUpdate>,
+    ) -> Result<HttpResponseOk<latest::system::AllowList>, HttpError>;
+
+    /// Return whether API services can receive limited ICMP traffic
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/inbound-icmp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_inbound_icmp_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ServiceIcmpConfig>, HttpError>;
+
+    /// Set whether API services can receive limited ICMP traffic
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/inbound-icmp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_inbound_icmp_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<ServiceIcmpConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Images
+
+    /// List images
+    ///
+    /// List images which are global or scoped to the specified project.
+    /// The images are returned sorted by creation date, with the most
+    /// recent images appearing first.
+    #[endpoint {
+        method = GET,
+        path = "/v1/images",
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
+    }]
+    async fn image_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::image::Image>>, HttpError>;
+
+    /// List images
+    ///
+    /// List images which are global or scoped to the specified project.
+    /// The images are returned sorted by creation date, with the most
+    /// recent images appearing first.
+    #[endpoint {
+        operation_id = "image_list",
+        method = GET,
+        path = "/v1/images",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::image::Image>>,
+        HttpError,
+    > {
+        Self::image_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// Create image
+    ///
+    /// Create a new image in a project.
+    #[endpoint {
+        method = POST,
+        path = "/v1/images",
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
+    }]
+    async fn image_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        new_image: TypedBody<latest::image::ImageCreate>,
+    ) -> Result<HttpResponseCreated<latest::image::Image>, HttpError>;
+
+    /// Create image
+    ///
+    /// Create a new image in a project.
+    #[endpoint {
+        operation_id = "image_create",
+        method = POST,
+        path = "/v1/images",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        new_image: TypedBody<latest::image::ImageCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::image::Image>, HttpError>
+    {
+        Self::image_create(rqctx, query_params, new_image)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch image
+    ///
+    /// Fetch the details for a specific image in a project.
+    #[endpoint {
+        method = GET,
+        path = "/v1/images/{image}",
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
+    }]
+    async fn image_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<latest::image::Image>, HttpError>;
+
+    /// Fetch image
+    ///
+    /// Fetch the details for a specific image in a project.
+    #[endpoint {
+        operation_id = "image_view",
+        method = GET,
+        path = "/v1/images/{image}",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::image::Image>, HttpError> {
+        Self::image_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Delete image
+    ///
+    /// Permanently delete an image from a project. This operation cannot be undone.
+    /// Any instances in the project using the image will continue to run, however
+    /// new instances can not be created with this image.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/images/{image}",
+        tags = ["images"],
+    }]
+    async fn image_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Promote project image
+    ///
+    /// Promote project image to be visible to all projects in the silo
+    #[endpoint {
+        method = POST,
+        path = "/v1/images/{image}/promote",
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
+    }]
+    async fn image_promote(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseAccepted<latest::image::Image>, HttpError>;
+
+    /// Promote project image
+    ///
+    /// Promote project image to be visible to all projects in the silo
+    #[endpoint {
+        operation_id = "image_promote",
+        method = POST,
+        path = "/v1/images/{image}/promote",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_promote_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00::image::Image>, HttpError>
+    {
+        Self::image_promote(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Demote silo image
+    ///
+    /// Demote silo image to be visible only to a specified project
+    #[endpoint {
+        method = POST,
+        path = "/v1/images/{image}/demote",
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
+    }]
+    async fn image_demote(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::ProjectSelector>,
+    ) -> Result<HttpResponseAccepted<latest::image::Image>, HttpError>;
+
+    /// Demote silo image
+    ///
+    /// Demote silo image to be visible only to a specified project
+    #[endpoint {
+        operation_id = "image_demote",
+        method = POST,
+        path = "/v1/images/{image}/demote",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_demote_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::ProjectSelector>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00::image::Image>, HttpError>
+    {
+        Self::image_demote(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn instance_network_interface_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::instance::InstanceSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError>;
+
+    /// List network interfaces
+    #[endpoint {
+        operation_id = "instance_network_interface_list",
+        method = GET,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_network_interface_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::instance::InstanceSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_01_00_local::InstanceNetworkInterface>,
+        >,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { next_page, items }) =
+            Self::instance_network_interface_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
+            .map_err(HttpError::from)
+    }
+
+    /// Create network interface
+    #[endpoint {
+        method = POST,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn instance_network_interface_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::instance::InstanceSelector>,
+        interface_params: TypedBody<
+            latest::instance::InstanceNetworkInterfaceCreate,
+        >,
+    ) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError>;
+
+    /// Create network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_create",
+        method = POST,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_network_interface_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::instance::InstanceSelector>,
+        interface_params: TypedBody<
+            v2026_01_01_00_local::InstanceNetworkInterfaceCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_01_00_local::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let interface_params = interface_params.try_map(TryInto::try_into)?;
+        let HttpResponseCreated(nic) = Self::instance_network_interface_create(
+            rqctx,
+            query_params,
+            interface_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+    }
+
+    /// Delete network interface
+    ///
+    /// Note that the primary interface for an instance cannot be deleted if there
+    /// are any secondary interfaces. A new primary interface must be designated
+    /// first. The primary interface can be deleted if there are no secondary
+    /// interfaces.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+    }]
+    async fn instance_network_interface_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::NetworkInterfacePath>,
+        query_params: Query<latest::instance::OptionalInstanceSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Fetch network interface
+    #[endpoint {
+        method = GET,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn instance_network_interface_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::NetworkInterfacePath>,
+        query_params: Query<latest::instance::OptionalInstanceSelector>,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError>;
+
+    /// Fetch network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_view",
+        method = GET,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_network_interface_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::NetworkInterfacePath>,
+        query_params: Query<v2025_11_20_00::instance::OptionalInstanceSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_01_00_local::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let HttpResponseOk(nic) = Self::instance_network_interface_view(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// Update network interface
+    #[endpoint {
+        method = PUT,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn instance_network_interface_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::NetworkInterfacePath>,
+        query_params: Query<latest::instance::OptionalInstanceSelector>,
+        updated_iface: TypedBody<
+            latest::instance::InstanceNetworkInterfaceUpdate,
+        >,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError>;
+
+    /// Update network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_update",
+        method = PUT,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_network_interface_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::NetworkInterfacePath>,
+        query_params: Query<v2025_11_20_00::instance::OptionalInstanceSelector>,
+        updated_iface: TypedBody<
+            v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2026_01_01_00_local::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let HttpResponseOk(nic) = Self::instance_network_interface_update(
+            rqctx,
+            path_params,
+            query_params,
+            updated_iface,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    // External IP addresses for instances
+
+    /// List external IP addresses
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/external-ips",
+        tags = ["instances"],
+    }]
+    async fn instance_external_ip_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::external_ip::ExternalIp>>,
+        HttpError,
+    >;
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_POOL_SELECTION_ENUMS..,
+    }]
+    async fn instance_ephemeral_ip_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<latest::instance::EphemeralIpCreate>,
+    ) -> Result<HttpResponseAccepted<latest::external_ip::ExternalIp>, HttpError>;
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        operation_id = "instance_ephemeral_ip_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
+            ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn instance_ephemeral_ip_attach_v2025_12_23_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2025_12_23_00::instance::EphemeralIpCreate>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::external_ip::ExternalIp>,
+        HttpError,
+    > {
+        let ip_to_create = ip_to_create.try_map(TryInto::try_into)?;
+        Self::instance_ephemeral_ip_attach(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create,
+        )
+        .await
+    }
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        operation_id = "instance_ephemeral_ip_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn instance_ephemeral_ip_attach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2025_11_20_00::instance::EphemeralIpCreate>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::external_ip::ExternalIp>,
+        HttpError,
+    > {
+        Self::instance_ephemeral_ip_attach_v2025_12_23_00(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create.map(Into::into),
+        )
+        .await
+    }
+
+    /// Detach and deallocate ephemeral IP from instance
+    ///
+    /// When an instance has both IPv4 and IPv6 ephemeral IPs, the `ip_version`
+    /// query parameter must be specified to identify which IP to detach.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_EPHEMERAL_IP..,
+    }]
+    async fn instance_ephemeral_ip_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::instance::EphemeralIpDetachSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Detach and deallocate ephemeral IP from instance
+    #[endpoint {
+        operation_id = "instance_ephemeral_ip_detach",
+        method = DELETE,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_EPHEMERAL_IP,
+    }]
+    async fn instance_ephemeral_ip_detach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let query_params =
+            query_params.map(|q| latest::instance::EphemeralIpDetachSelector {
+                project: q.project,
+                ip_version: None,
+            });
+        Self::instance_ephemeral_ip_detach(rqctx, path_params, query_params)
+            .await
+    }
+
+    // Instance External Subnets
+
+    /// List external subnets attached to instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/external-subnets",
+        tags = ["instances"],
+        versions = VERSION_INSTANCES_EXTERNAL_SUBNETS..,
+    }]
+    async fn instance_external_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::external_subnet::ExternalSubnet>>,
+        HttpError,
+    >;
+
+    // Instance Multicast Groups
+
+    /// List multicast groups for an instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn instance_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroupMember>>,
+        HttpError,
+    >;
+
+    /// List multicast groups for an instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_multicast_group_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::multicast::MulticastGroupMember>,
+        >,
+        HttpError,
+    > {
+        let query_params =
+            query_params.try_map(|params| {
+                // Easiest to deserialize and serialize the params, since some
+                // fields are private (they really should not be, having them
+                // accessible by serde makes them de-facto public).
+                serde_json::from_value(serde_json::to_value(params).map_err(
+                    |e| HttpError::for_bad_request(None, e.to_string()),
+                )?)
+                .map_err(|e| HttpError::for_bad_request(None, e.to_string()))
+            })?;
+        Self::instance_multicast_group_list(rqctx, query_params, path_params)
+            .await
+            .map(|HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(Into::into).collect(),
+                })
+            })
+    }
+
+    /// Join multicast group by name, IP address, or UUID
+    ///
+    /// Groups can be referenced by name, IP address, or UUID. If the group
+    /// doesn't exist, it's implicitly created with an auto-allocated IP from a
+    /// multicast pool linked to the caller's silo. When referencing by UUID,
+    /// the group must already exist.
+    ///
+    /// Source IPs are optional for ASM addresses but required for SSM addresses
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request
+    /// are automatically deduplicated, with a maximum of 64 source IPs allowed.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn instance_multicast_group_join(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::multicast::InstanceMulticastGroupPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        body_params: TypedBody<latest::multicast::InstanceMulticastGroupJoin>,
+    ) -> Result<
+        HttpResponseCreated<latest::multicast::MulticastGroupMember>,
+        HttpError,
+    >;
+
+    /// Join multicast group
+    ///
+    /// Deprecated: newer version supports implicit group creation, accepts group
+    /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
+    /// required for SSM).
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_join",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_multicast_group_join_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            v2025_11_20_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroupMember>,
+        HttpError,
+    >;
+
+    /// Leave multicast group by name, IP address, or UUID
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn instance_multicast_group_leave(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::multicast::InstanceMulticastGroupPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Leave multicast group
+    ///
+    /// Deprecated: newer version accepts group by name, UUID, or IP address.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_leave",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_multicast_group_leave_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            v2025_11_20_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let path = path_params.map(Into::into);
+        Self::instance_multicast_group_leave(rqctx, path, query_params).await
+    }
+
+    // Snapshots
+
+    /// List snapshots
+    #[endpoint {
+        method = GET,
+        path = "/v1/snapshots",
+        tags = ["snapshots"],
+    }]
+    async fn snapshot_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::snapshot::Snapshot>>,
+        HttpError,
+    >;
+
+    /// Create snapshot
+    ///
+    /// Creates a point-in-time snapshot from a disk.
+    #[endpoint {
+        method = POST,
+        path = "/v1/snapshots",
+        tags = ["snapshots"],
+    }]
+    async fn snapshot_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_snapshot: TypedBody<latest::snapshot::SnapshotCreate>,
+    ) -> Result<HttpResponseCreated<latest::snapshot::Snapshot>, HttpError>;
+
+    /// Fetch snapshot
+    #[endpoint {
+        method = GET,
+        path = "/v1/snapshots/{snapshot}",
+        tags = ["snapshots"],
+    }]
+    async fn snapshot_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SnapshotPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<latest::snapshot::Snapshot>, HttpError>;
+
+    /// Delete snapshot
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/snapshots/{snapshot}",
+        tags = ["snapshots"],
+    }]
+    async fn snapshot_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SnapshotPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // VPCs
+
+    /// List VPCs
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpcs",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::vpc::Vpc>>, HttpError>;
+
+    /// Create VPC
+    #[endpoint {
+        method = POST,
+        path = "/v1/vpcs",
+        tags = ["vpcs"],
+        versions = VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS..,
+    }]
+    async fn vpc_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        body: TypedBody<latest::vpc::VpcCreate>,
+    ) -> Result<HttpResponseCreated<latest::vpc::Vpc>, HttpError>;
+
+    /// Create VPC
+    #[endpoint {
+        operation_id = "vpc_create",
+        method = POST,
+        path = "/v1/vpcs",
+        tags = ["vpcs"],
+        versions = ..VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS,
+    }]
+    async fn vpc_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        body: TypedBody<v2025_11_20_00::vpc::VpcCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::vpc::Vpc>, HttpError> {
+        Self::vpc_create(rqctx, query_params, body.map(Into::into)).await
+    }
+
+    /// Fetch VPC
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpcs/{vpc}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::VpcPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<latest::vpc::Vpc>, HttpError>;
+
+    /// Update VPC
+    #[endpoint {
+        method = PUT,
+        path = "/v1/vpcs/{vpc}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::VpcPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        updated_vpc: TypedBody<latest::vpc::VpcUpdate>,
+    ) -> Result<HttpResponseOk<latest::vpc::Vpc>, HttpError>;
+
+    /// Delete VPC
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/vpcs/{vpc}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::VpcPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List subnets
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-subnets",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::vpc::VpcSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::vpc::VpcSubnet>>, HttpError>;
+
+    /// Create subnet
+    #[endpoint {
+        method = POST,
+        path = "/v1/vpc-subnets",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_subnet_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        create_params: TypedBody<latest::vpc::VpcSubnetCreate>,
+    ) -> Result<HttpResponseCreated<latest::vpc::VpcSubnet>, HttpError>;
+
+    /// Fetch subnet
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-subnets/{subnet}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_subnet_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SubnetPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+    ) -> Result<HttpResponseOk<latest::vpc::VpcSubnet>, HttpError>;
+
+    /// Delete subnet
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/vpc-subnets/{subnet}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_subnet_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SubnetPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update subnet
+    #[endpoint {
+        method = PUT,
+        path = "/v1/vpc-subnets/{subnet}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_subnet_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SubnetPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+        subnet_params: TypedBody<latest::vpc::VpcSubnetUpdate>,
+    ) -> Result<HttpResponseOk<latest::vpc::VpcSubnet>, HttpError>;
+
+    // This endpoint is likely temporary. We would rather list all IPs allocated in
+    // a subnet whether they come from NICs or something else. See
+    // https://github.com/oxidecomputer/omicron/issues/2476
+
+    /// List network interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+        tags = ["vpcs"],
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn vpc_subnet_list_network_interfaces(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SubnetPath>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::vpc::OptionalVpcSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError>;
+
+    /// List network interfaces
+    #[endpoint {
+        operation_id = "vpc_subnet_list_network_interfaces",
+        method = GET,
+        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+        tags = ["vpcs"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn vpc_subnet_list_network_interfaces_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SubnetPath>,
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::vpc::OptionalVpcSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_01_00_local::InstanceNetworkInterface>,
+        >,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::vpc_subnet_list_network_interfaces(
+                rqctx,
+                path_params,
+                query_params,
+            )
+            .await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
+    }
+
+    // VPC Firewalls
+
+    /// List firewall rules
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
+    }]
+    async fn vpc_firewall_rules_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+    ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// List firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_view",
+        method = GET,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_view_v2026_03_24_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+    ) -> Result<HttpResponseOk<v2026_03_24_00_local::VpcFirewallRules>, HttpError>
+    {
+        Self::vpc_firewall_rules_view(rqctx, query_params).await.and_then(
+            |resp| resp.try_map(TryInto::try_into).map_err(HttpError::from),
+        )
+    }
+
+    // Note: the limits in the below comment come from the firewall rules model
+    // file, nexus/db-model/src/vpc_firewall_rule.rs.
+
+    /// Replace firewall rules
+    ///
+    /// The maximum number of rules per VPC is 1024.
+    ///
+    /// Targets are used to specify the set of instances to which a firewall rule
+    /// applies. You can target instances directly by name, or specify a VPC, VPC
+    /// subnet, IP, or IP subnet, which will apply the rule to traffic going to
+    /// all matching instances. Targets are additive: the rule applies to instances
+    /// matching ANY target. The maximum number of targets is 256.
+    ///
+    /// Filters reduce the scope of a firewall rule. Without filters, the rule
+    /// applies to all packets to the targets (or from the targets, if it's an
+    /// outbound rule). With multiple filters, the rule applies only to packets
+    /// matching ALL filters. The maximum number of each type of filter is 256.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
+    }]
+    async fn vpc_firewall_rules_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        update: TypedBody<VpcFirewallRuleUpdateParams>,
+    ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError>;
+
+    /// Replace firewall rules
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_update",
+        method = PUT,
+        path = "/v1/vpc-firewall-rules",
+        tags = ["vpcs"],
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_update_v2026_03_24_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        update: TypedBody<v2026_03_24_00_local::VpcFirewallRuleUpdateParams>,
+    ) -> Result<HttpResponseOk<v2026_03_24_00_local::VpcFirewallRules>, HttpError>
+    {
+        let body = update.map(Into::into);
+        Self::vpc_firewall_rules_update(rqctx, query_params, body)
+            .await
+            .and_then(|resp| {
+                resp.try_map(TryInto::try_into).map_err(HttpError::from)
+            })
+    }
+
+    // VPC Routers
+
+    /// List routers
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-routers",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::vpc::VpcSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::vpc::VpcRouter>>, HttpError>;
+
+    /// Fetch router
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-routers/{router}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RouterPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+    ) -> Result<HttpResponseOk<latest::vpc::VpcRouter>, HttpError>;
+
+    /// Create VPC router
+    #[endpoint {
+        method = POST,
+        path = "/v1/vpc-routers",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        create_params: TypedBody<latest::vpc::VpcRouterCreate>,
+    ) -> Result<HttpResponseCreated<latest::vpc::VpcRouter>, HttpError>;
+
+    /// Delete router
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/vpc-routers/{router}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RouterPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update router
+    #[endpoint {
+        method = PUT,
+        path = "/v1/vpc-routers/{router}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RouterPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+        router_params: TypedBody<latest::vpc::VpcRouterUpdate>,
+    ) -> Result<HttpResponseOk<latest::vpc::VpcRouter>, HttpError>;
+
+    /// List routes
+    ///
+    /// List the routes associated with a router in a particular VPC.
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-router-routes",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_route_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::vpc::RouterSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError>;
+
+    // Vpc Router Routes
+
+    /// Fetch route
+    #[endpoint {
+        method = GET,
+        path = "/v1/vpc-router-routes/{route}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_route_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RoutePath>,
+        query_params: Query<latest::vpc::OptionalRouterSelector>,
+    ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
+
+    /// Create route
+    #[endpoint {
+        method = POST,
+        path = "/v1/vpc-router-routes",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_route_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::RouterSelector>,
+        create_params: TypedBody<latest::vpc::RouterRouteCreate>,
+    ) -> Result<HttpResponseCreated<RouterRoute>, HttpError>;
+
+    /// Delete route
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/vpc-router-routes/{route}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_route_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RoutePath>,
+        query_params: Query<latest::vpc::OptionalRouterSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update route
+    #[endpoint {
+        method = PUT,
+        path = "/v1/vpc-router-routes/{route}",
+        tags = ["vpcs"],
+    }]
+    async fn vpc_router_route_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RoutePath>,
+        query_params: Query<latest::vpc::OptionalRouterSelector>,
+        router_params: TypedBody<latest::vpc::RouterRouteUpdate>,
+    ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
+
+    // Internet gateways
+
+    /// List internet gateways
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateways",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<latest::vpc::VpcSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::internet_gateway::InternetGateway>>,
+        HttpError,
+    >;
+
+    /// Fetch internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InternetGatewayPath>,
+        query_params: Query<latest::vpc::OptionalVpcSelector>,
+    ) -> Result<
+        HttpResponseOk<latest::internet_gateway::InternetGateway>,
+        HttpError,
+    >;
+
+    /// Create VPC internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateways",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::vpc::VpcSelector>,
+        create_params: TypedBody<
+            latest::internet_gateway::InternetGatewayCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::internet_gateway::InternetGateway>,
+        HttpError,
+    >;
+
+    /// Delete internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InternetGatewayPath>,
+        query_params: Query<
+            latest::internet_gateway::InternetGatewayDeleteSelector,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List IP pools attached to internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateway-ip-pools",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<
+                latest::internet_gateway::InternetGatewaySelector,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::internet_gateway::InternetGatewayIpPool>,
+        >,
+        HttpError,
+    >;
+
+    /// Attach IP pool to internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateway-ip-pools",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::internet_gateway::InternetGatewaySelector>,
+        create_params: TypedBody<
+            latest::internet_gateway::InternetGatewayIpPoolCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::internet_gateway::InternetGatewayIpPool>,
+        HttpError,
+    >;
+
+    /// Detach IP pool from internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateway-ip-pools/{pool}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        query_params: Query<
+            latest::internet_gateway::DeleteInternetGatewayElementSelector,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List IP addresses attached to internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateway-ip-addresses",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<
+                latest::internet_gateway::InternetGatewaySelector,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::internet_gateway::InternetGatewayIpAddress>,
+        >,
+        HttpError,
+    >;
+
+    /// Attach IP address to internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateway-ip-addresses",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::internet_gateway::InternetGatewaySelector>,
+        create_params: TypedBody<
+            latest::internet_gateway::InternetGatewayIpAddressCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::internet_gateway::InternetGatewayIpAddress>,
+        HttpError,
+    >;
+
+    /// Detach IP address from internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateway-ip-addresses/{address}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpAddressPath>,
+        query_params: Query<
+            latest::internet_gateway::DeleteInternetGatewayElementSelector,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Racks
+
+    /// List racks
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks",
+        tags = ["system/hardware"],
+    }]
+    async fn rack_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::rack::Rack>>, HttpError>;
+
+    /// Fetch rack
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}",
+        tags = ["system/hardware"],
+    }]
+    async fn rack_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+    ) -> Result<HttpResponseOk<latest::rack::Rack>, HttpError>;
+
+    /// List uninitialized sleds
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sleds-uninitialized",
+        tags = ["system/hardware"]
+    }]
+    async fn sled_list_uninitialized(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::hardware::UninitializedSled>>,
+        HttpError,
+    >;
+
+    /// Add sled to initialized rack
+    ///
+    // Removed in favor of rack membership operations
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/sleds",
+        tags = ["system/hardware"],
+        versions = ..VERSION_REMOVE_SLED_ADD
+    }]
+    async fn sled_add(
+        rqctx: RequestContext<Self::Context>,
+        sled: TypedBody<latest::hardware::UninitializedSledId>,
+    ) -> Result<HttpResponseCreated<latest::sled::SledId>, HttpError>;
+
+    /// Add new sleds to rack membership
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/add",
+        tags = ["experimental"],
+        versions = VERSION_SLED_ADD_PRECHECK_OVERRIDES..
+    }]
+    async fn rack_membership_add_sleds(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+        req: TypedBody<latest::rack::RackMembershipAddSledsRequest>,
+    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
+    /// Add new sleds to rack membership
+    #[endpoint {
+        operation_id = "rack_membership_add_sleds",
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/add",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..VERSION_SLED_ADD_PRECHECK_OVERRIDES,
+    }]
+    async fn rack_membership_add_sleds_v2026_01_21_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::RackPath>,
+        req: TypedBody<v2026_01_21_00::rack::RackMembershipAddSledsRequest>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_21_00::rack::RackMembershipStatus>,
+        HttpError,
+    > {
+        Self::rack_membership_add_sleds(
+            rqctx,
+            path_params,
+            req.map(latest::rack::RackMembershipAddSledsRequest::from),
+        )
+        .await
+    }
+
+    /// Abort the latest rack membership change
+    ///
+    /// This operation is synchronous. Upon returning from the API call, a
+    /// success response indicates that the prior membership change was aborted.
+    /// An error response indicates that there is no active membership change
+    /// in progress (previous changes have completed) or that the current
+    /// membership change could not be aborted.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..
+    }]
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
+    /// Fetch rack cluster membership status
+    ///
+    /// Returns the status for the most recent change, or a specific version if
+    /// one is specified.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/membership",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+    }]
+    async fn rack_membership_status(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::rack::RackMembershipConfigPathParams>,
+        query_params: Query<latest::rack::RackMembershipVersionParam>,
+    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
+    // Sleds
+
+    /// List sleds
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sleds",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_SLOT..,
+    }]
+    async fn sled_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::sled::Sled>>, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_list",
+        method = GET,
+        path = "/v1/system/hardware/sleds",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SLED_SLOT,
+    }]
+    async fn sled_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::sled::Sled>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::sled_list(rqctx, query_params).await?;
+        let items = items.into_iter().map(Into::into).collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page }))
+    }
+
+    /// Fetch sled
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_SLOT..,
+    }]
+    async fn sled_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+    ) -> Result<HttpResponseOk<latest::sled::Sled>, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_view",
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SLED_SLOT,
+    }]
+    async fn sled_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SledPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::sled::Sled>, HttpError> {
+        Ok(Self::sled_view(rqctx, path_params).await?.map(Into::into))
+    }
+
+    /// Set sled provision policy
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/sleds/{sled_id}/provision-policy",
+        tags = ["system/hardware"],
+    }]
+    async fn sled_set_provision_policy(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+        new_provision_state: TypedBody<latest::sled::SledProvisionPolicyParams>,
+    ) -> Result<
+        HttpResponseOk<latest::sled::SledProvisionPolicyResponse>,
+        HttpError,
+    >;
+
+    /// List instances running on given sled
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}/instances",
+        tags = ["system/hardware"],
+    }]
+    async fn sled_instance_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::sled::SledInstance>>,
+        HttpError,
+    >;
+
+    // Physical disks
+
+    /// List physical disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks",
+        tags = ["system/hardware"],
+    }]
+    async fn physical_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::physical_disk::PhysicalDisk>>,
+        HttpError,
+    >;
+
+    /// Get physical disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks/{disk_id}",
+        tags = ["system/hardware"],
+    }]
+    async fn physical_disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::PhysicalDiskPath>,
+    ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
+
+    /// List physical disks that have not yet been adopted for use
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>,
+        >,
+        HttpError,
+    >;
+
+    /// List physical disk adoption requests
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disk-adoption-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        >,
+        HttpError,
+    >;
+
+    /// Enable adoption of a physical disk for general use
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/disk-adoption-request",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_enable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
+    ) -> Result<
+        HttpResponseCreated<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        HttpError,
+    >;
+
+    /// Disable adoption of a physical disk for general use
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::physical_disk::PhysicalDiskAdoptionRequestPath,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Switches
+
+    /// List switches
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switches",
+        tags = ["system/hardware"],
+    }]
+    async fn switch_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::switch::Switch>>, HttpError>;
+
+    /// Fetch switch
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switches/{switch_id}",
+        tags = ["system/hardware"],
+    }]
+    async fn switch_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SwitchPath>,
+    ) -> Result<HttpResponseOk<latest::switch::Switch>, HttpError>;
+
+    /// List physical disks attached to sleds
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}/disks",
+        tags = ["system/hardware"],
+    }]
+    async fn sled_physical_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::physical_disk::PhysicalDisk>>,
+        HttpError,
+    >;
+
+    // Multirack
+
+    /// List unadopted racks
+    ///
+    /// Lists racks that have joined the underlay network but have not yet been
+    /// adopted into the regional cluster.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_UNADOPTED_RACK_LIST..
+    }]
+    async fn rack_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multirack::UnadoptedRack>>,
+        HttpError,
+    >;
+
+    // Metrics
+
+    /// View metrics
+    ///
+    /// View CPU, memory, or storage utilization metrics at the fleet or silo level.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/metrics/{metric_name}",
+        tags = ["system/metrics"],
+    }]
+    async fn system_metric(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::metrics::SystemMetricsPathParam>,
+        pag_params: Query<
+            PaginationParams<
+                latest::metrics::ResourceMetrics,
+                latest::metrics::ResourceMetrics,
+            >,
+        >,
+        other_params: Query<latest::silo::OptionalSiloSelector>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
+        HttpError,
+    >;
+
+    /// View metrics
+    ///
+    /// View CPU, memory, or storage utilization metrics at the silo or project level.
+    #[endpoint {
+        method = GET,
+        path = "/v1/metrics/{metric_name}",
+        tags = ["metrics"],
+    }]
+    async fn silo_metric(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::metrics::SystemMetricsPathParam>,
+        pag_params: Query<
+            PaginationParams<
+                latest::metrics::ResourceMetrics,
+                latest::metrics::ResourceMetrics,
+            >,
+        >,
+        other_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
+        HttpError,
+    >;
+
+    /// List timeseries schemas
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
+        versions = VERSION_METRICS_ADD_JOULES..
+    }]
+    async fn system_timeseries_schema_list(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<TimeseriesSchemaPaginationParams>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<
+                oximeter_types_versions::latest::schema::TimeseriesSchema,
+            >,
+        >,
+        HttpError,
+    >;
+
+    #[endpoint {
+        operation_id = "system_timeseries_schema_list",
+        method = GET,
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
+        versions = ..VERSION_METRICS_ADD_JOULES
+    }]
+    async fn system_timeseries_schema_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<
+                EmptyScanParams,
+                oximeter_types_versions::v1::schema::TimeseriesName,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::v1::schema::TimeseriesSchema>,
+        >,
+        HttpError,
+    > {
+        use oximeter_types_versions::v1::schema::TimeseriesSchema;
+        use oximeter_types_versions::v2::schema::UnitsConversionJoulesError;
+
+        let page =
+            Self::system_timeseries_schema_list(rqctx, pag_params).await?.0;
+        let items = page
+            .items
+            .into_iter()
+            .map(|item| {
+                TimeseriesSchema::try_from(item).map_err(
+                    |UnitsConversionJoulesError| {
+                        HttpError::for_client_error(
+                            None,
+                            dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                            "client version out of date: schema contains \
+                             new types of units (joules)"
+                                .to_string(),
+                        )
+                    },
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
+
+    // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
+
+    /// Run timeseries query
+    ///
+    /// Queries are written in OxQL.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/timeseries/query",
+        tags = ["system/metrics"],
+    }]
+    async fn system_timeseries_query(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::timeseries::TimeseriesQuery>,
+    ) -> Result<HttpResponseOk<latest::oxql::OxqlQueryResult>, HttpError>;
+
+    // TODO: list endpoint for project-scoped schemas is blocked on
+    // https://github.com/oxidecomputer/omicron/issues/5942: the authz scope for
+    // each schema is not stored in Clickhouse yet.
+
+    /// Run project-scoped timeseries query
+    ///
+    /// Queries are written in OxQL. Project must be specified by name or ID in
+    /// URL query parameter. The OxQL query will only return timeseries data
+    /// from the specified project.
+    #[endpoint {
+        method = POST,
+        path = "/v1/timeseries/query",
+        tags = ["experimental"],
+    }]
+    async fn timeseries_query(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        body: TypedBody<latest::timeseries::TimeseriesQuery>,
+    ) -> Result<HttpResponseOk<latest::oxql::OxqlQueryResult>, HttpError>;
+
+    // Updates
+
+    /// Upload system release repository
+    ///
+    /// System release repositories are verified by the updates trust store.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+        request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn system_update_repository_upload(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<latest::update::UpdatesPutRepositoryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<latest::update::TufRepoUpload>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+        request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn system_update_repository_upload_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<latest::update::UpdatesPutRepositoryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::update::TufRepoUpload>, HttpError>
+    {
+        Self::system_update_repository_upload(rqctx, query, body).await.map(
+            |HttpResponseOk(upload)| {
+                HttpResponseOk(v2025_11_20_00::update::TufRepoUpload::from(
+                    upload,
+                ))
+            },
+        )
+    }
+
+    /// Fetch system release repository by version
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories/{system_version}",
+        tags = ["system/update"],
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn system_update_repository_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::update::UpdatesGetRepositoryParams>,
+    ) -> Result<HttpResponseOk<latest::update::TufRepo>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories/{system_version}",
+        tags = ["system/update"],
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn system_update_repository_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::update::UpdatesGetRepositoryParams>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::update::TufRepo>, HttpError>
+    {
+        Self::system_update_repository_view(rqctx, path_params).await.map(
+            |HttpResponseOk(upload)| {
+                HttpResponseOk(v2025_11_20_00::update::TufRepo::from(upload))
+            },
+        )
+    }
+
+    /// List all TUF repositories
+    ///
+    /// Returns a paginated list of all TUF repositories ordered by system
+    /// version (newest first by default).
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn system_update_repository_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByVersion>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::update::TufRepo>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn system_update_repository_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByVersion>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::update::TufRepo>>,
+        HttpError,
+    > {
+        Self::system_update_repository_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    next_page: page.next_page,
+                    items: page
+                        .items
+                        .into_iter()
+                        .map(v2025_11_20_00::update::TufRepo::from)
+                        .collect(),
+                })
+            },
+        )
+    }
+
+    /// List root roles in the updates trust store
+    ///
+    /// A root role is a JSON document describing the cryptographic keys that
+    /// are trusted to sign system release repositories, as described by The
+    /// Update Framework. Uploading a repository requires its metadata to be
+    /// signed by keys trusted by the trust store.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/trust-roots",
+        tags = ["system/update"],
+    }]
+    async fn system_update_trust_root_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::update::UpdatesTrustRoot>>,
+        HttpError,
+    >;
+
+    /// Add trusted root role to updates trust store
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/update/trust-roots",
+        tags = ["system/update"],
+    }]
+    async fn system_update_trust_root_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::update::TufSignedRootRole>,
+    ) -> Result<HttpResponseCreated<latest::update::UpdatesTrustRoot>, HttpError>;
+
+    /// Fetch trusted root role
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
+        tags = ["system/update"],
+    }]
+    async fn system_update_trust_root_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::TufTrustRootPath>,
+    ) -> Result<HttpResponseOk<latest::update::UpdatesTrustRoot>, HttpError>;
+
+    /// Delete trusted root role
+    ///
+    /// Note that this method does not currently check for any uploaded system
+    /// release repositories that would become untrusted after deleting the
+    /// root role.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
+        tags = ["system/update"],
+    }]
+    async fn system_update_trust_root_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::TufTrustRootPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Set target release
+    ///
+    /// Set the current target release of the rack's system software. The rack
+    /// reconfigurator will treat the software specified here as a goal state
+    /// for the rack's software, and attempt to asynchronously update to that
+    /// release. Use the update status endpoint to view the current target
+    /// release.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/target-release",
+        tags = ["system/update"],
+    }]
+    async fn target_release_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::update::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Clear system recovery status
+    ///
+    /// Instructs the system that a system recovery operation ("mupdate") was
+    /// completed using the software in the specified release.
+    ///
+    /// The system recovery operation is used to bypass the control plane to
+    /// deploy known-working software when the control plane itself is not
+    /// functioning or otherwise unable to update itself.  When the control
+    /// plane detects this, it stops making any changes to deployed software to
+    /// avoid reverting the recovery itself.  This operation puts the control
+    /// plane back in charge of determining what software should be deployed,
+    /// instructing it that the specified software (which is also what's
+    /// currently running) is what's supposed to be deployed.
+    ///
+    /// If the control plane knows the version of all running software (e.g., a
+    /// single sled was recovered to the same version as the rest of the rack),
+    /// requests where the provided version does not match what's currently
+    /// running will fail. If the control plane does not know the version of all
+    /// running software (e.g., the entire rack was mupdated to a new release),
+    /// requests with an incorrect provided version will succeed, but the
+    /// control plane will continue to avoid changing deployed software until
+    /// this operation is invoked with the correct version.
+    ///
+    /// This endpoint should only be called at the direction of Oxide support.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/recovery-finish",
+        tags = ["system/update"],
+        versions = VERSION_SET_TARGET_RELEASE_UPDATE_RECOVERY..
+    }]
+    async fn system_update_recovery_finish(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::update::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+        versions = VERSION_ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS..,
+    }]
+    async fn system_update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::update::UpdateStatus>, HttpError>;
+
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
+    #[endpoint {
+        operation_id = "system_update_status",
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+        versions = ..VERSION_ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS,
+    }]
+    async fn system_update_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::update::UpdateStatus>, HttpError>
+    {
+        Ok(Self::system_update_status(rqctx)
+            .await?
+            .map(v2025_11_20_00::update::UpdateStatus::from))
+    }
+
+    // Silo users
+
+    /// List users
+    #[endpoint {
+        method = GET,
+        path = "/v1/users",
+        tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn user_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
+
+    /// List users
+    #[endpoint {
+        operation_id = "user_list",
+        method = GET,
+        path = "/v1/users",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn user_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>,
+        HttpError,
+    > {
+        Self::user_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
+    /// Fetch user
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}",
+        tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn user_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+    ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
+
+    /// Fetch user
+    #[endpoint {
+        operation_id = "user_view",
+        method = GET,
+        path = "/v1/users/{user_id}",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn user_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::User>, HttpError> {
+        Self::user_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
+
+    /// List user's access tokens
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}/access-tokens",
+        tags = ["silos"],
+    }]
+    async fn user_token_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::device::DeviceAccessToken>>,
+        HttpError,
+    >;
+
+    /// List user's console sessions
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}/sessions",
+        tags = ["silos"],
+    }]
+    async fn user_session_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::device::ConsoleSession>>,
+        HttpError,
+    >;
+
+    /// Log user out
+    ///
+    /// Silo admins can use this endpoint to log the specified user out by
+    /// deleting all of their tokens AND sessions. This cannot be undone.
+    #[endpoint {
+        method = POST,
+        path = "/v1/users/{user_id}/logout",
+        tags = ["silos"],
+    }]
+    async fn user_logout(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Silo groups
+
+    /// List groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/groups",
+        tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::user::Group>>, HttpError>;
+
+    /// List groups
+    #[endpoint {
+        operation_id = "group_list",
+        method = GET,
+        path = "/v1/groups",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn group_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>,
+        HttpError,
+    > {
+        Self::group_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
+    /// Fetch group
+    #[endpoint {
+        method = GET,
+        path = "/v1/groups/{group_id}",
+        tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::GroupPath>,
+    ) -> Result<HttpResponseOk<latest::user::Group>, HttpError>;
+
+    /// Fetch group
+    #[endpoint {
+        operation_id = "group_view",
+        method = GET,
+        path = "/v1/groups/{group_id}",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn group_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::GroupPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::Group>, HttpError> {
+        Self::group_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
+
+    // Built-in (system) users
+
+    /// List built-in users
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/users-builtin",
+        tags = ["system/silos"],
+    }]
+    async fn user_builtin_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByName>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::user::UserBuiltin>>, HttpError>;
+
+    /// Fetch built-in user
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/users-builtin/{user}",
+        tags = ["system/silos"],
+    }]
+    async fn user_builtin_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserBuiltinSelector>,
+    ) -> Result<HttpResponseOk<latest::user::UserBuiltin>, HttpError>;
+
+    // Current user
+
+    /// Fetch user for current session
+    #[endpoint {
+        method = GET,
+        path = "/v1/me",
+        tags = ["current-user"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn current_user_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::user::CurrentUser>, HttpError>;
+
+    /// Fetch user for current session
+    #[endpoint {
+        operation_id = "current_user_view",
+        method = GET,
+        path = "/v1/me",
+        tags = ["current-user"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn current_user_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::CurrentUser>, HttpError>
+    {
+        Self::current_user_view(rqctx)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
+
+    /// Fetch current user's groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/me/groups",
+        tags = ["current-user"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
+    }]
+    async fn current_user_groups(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::user::Group>>, HttpError>;
+
+    /// Fetch current user's groups
+    #[endpoint {
+        operation_id = "current_user_groups",
+        method = GET,
+        path = "/v1/me/groups",
+        tags = ["current-user"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn current_user_groups_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>,
+        HttpError,
+    > {
+        Self::current_user_groups(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
+    // Per-user SSH public keys
+
+    /// List SSH public keys
+    ///
+    /// Lists SSH public keys for the currently authenticated user.
+    #[endpoint {
+        method = GET,
+        path = "/v1/me/ssh-keys",
+        tags = ["current-user"],
+    }]
+    async fn current_user_ssh_key_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::ssh_key::SshKey>>, HttpError>;
+
+    /// Create SSH public key
+    ///
+    /// Create an SSH public key for the currently authenticated user.
+    #[endpoint {
+        method = POST,
+        path = "/v1/me/ssh-keys",
+        tags = ["current-user"],
+    }]
+    async fn current_user_ssh_key_create(
+        rqctx: RequestContext<Self::Context>,
+        new_key: TypedBody<latest::ssh_key::SshKeyCreate>,
+    ) -> Result<HttpResponseCreated<latest::ssh_key::SshKey>, HttpError>;
+
+    /// Fetch SSH public key
+    ///
+    /// Fetch SSH public key associated with the currently authenticated user.
+    #[endpoint {
+        method = GET,
+        path = "/v1/me/ssh-keys/{ssh_key}",
+        tags = ["current-user"],
+    }]
+    async fn current_user_ssh_key_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SshKeyPath>,
+    ) -> Result<HttpResponseOk<latest::ssh_key::SshKey>, HttpError>;
+
+    /// Delete SSH public key
+    ///
+    /// Delete an SSH public key associated with the currently authenticated user.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/me/ssh-keys/{ssh_key}",
+        tags = ["current-user"],
+    }]
+    async fn current_user_ssh_key_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SshKeyPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List access tokens
+    ///
+    /// List device access tokens for the currently authenticated user.
+    #[endpoint {
+        method = GET,
+        path = "/v1/me/access-tokens",
+        tags = ["tokens"],
+    }]
+    async fn current_user_access_token_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::device::DeviceAccessToken>>,
+        HttpError,
+    >;
+
+    /// Delete access token
+    ///
+    /// Delete a device access token for the currently authenticated user.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/me/access-tokens/{token_id}",
+        tags = ["tokens"],
+    }]
+    async fn current_user_access_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::TokenPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Support bundles
+
+    /// List all support bundles
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/support-bundles",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
+    /// List all support bundles
+    #[endpoint {
+        operation_id = "support_bundle_list",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        >,
+        HttpError,
+    > {
+        Self::support_bundle_list(rqctx, query_params).await
+    }
+
+    /// View support bundle
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePath>,
+    ) -> Result<
+        HttpResponseOk<latest::support_bundle::SupportBundleInfo>,
+        HttpError,
+    >;
+
+    /// View support bundle
+    #[endpoint {
+        operation_id = "support_bundle_view",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_view(rqctx, path_params).await
+    }
+
+    /// Download support bundle index
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/support-bundles/{bundle_id}/index",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
+        path_params: Path<latest::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download support bundle index
+    #[endpoint {
+        operation_id = "support_bundle_index",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_index_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_index(rqctx, headers, path_params).await
+    }
+
+    /// Download support bundle contents
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
+        path_params: Path<latest::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download support bundle contents
+    #[endpoint {
+        operation_id = "support_bundle_download",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_download_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_download(rqctx, headers, path_params).await
+    }
+
+    /// Download file from support bundle
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
+        path_params: Path<latest::support_bundle::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download file from support bundle
+    #[endpoint {
+        operation_id = "support_bundle_download_file",
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_download_file_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<
+            v2025_11_20_00::support_bundle::SupportBundleFilePath,
+        >,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_download_file(rqctx, headers, path_params).await
+    }
+
+    /// Download support bundle metadata
+    #[endpoint {
+        method = HEAD,
+        path = "/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
+        path_params: Path<latest::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download support bundle metadata
+    #[endpoint {
+        operation_id = "support_bundle_head",
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_head_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_head(rqctx, headers, path_params).await
+    }
+
+    /// Download metadata of file in support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
+        path_params: Path<latest::support_bundle::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download metadata of file in support bundle
+    #[endpoint {
+        operation_id = "support_bundle_head_file",
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_head_file_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<v2025_11_20_00::headers::RangeRequest>,
+        path_params: Path<
+            v2025_11_20_00::support_bundle::SupportBundleFilePath,
+        >,
+    ) -> Result<Response<Body>, HttpError> {
+        Self::support_bundle_head_file(rqctx, headers, path_params).await
+    }
+
+    /// Create support bundle
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/support-bundles",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::support_bundle::SupportBundleCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::support_bundle::SupportBundleInfo>,
+        HttpError,
+    >;
+
+    /// Create support bundle
+    #[endpoint {
+        operation_id = "support_bundle_create",
+        method = POST,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_create(rqctx, body).await
+    }
+
+    /// Delete support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Delete support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        operation_id = "support_bundle_delete",
+        method = DELETE,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_delete_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Self::support_bundle_delete(rqctx, path_params).await
+    }
+
+    /// Update support bundle
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/support-bundles/{bundle_id}",
+        tags = ["system/support-bundles"],
+        versions = VERSION_SUPPORT_BUNDLES_STABLE..,
+    }]
+    async fn support_bundle_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePath>,
+        body: TypedBody<latest::support_bundle::SupportBundleUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::support_bundle::SupportBundleInfo>,
+        HttpError,
+    >;
+
+    /// Update support bundle
+    #[endpoint {
+        operation_id = "support_bundle_update",
+        method = PUT,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"],
+        versions = ..VERSION_SUPPORT_BUNDLES_STABLE,
+    }]
+    async fn support_bundle_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::support_bundle::SupportBundlePath>,
+        body: TypedBody<v2025_11_20_00::support_bundle::SupportBundleUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::support_bundle::SupportBundleInfo>,
+        HttpError,
+    > {
+        Self::support_bundle_update(rqctx, path_params, body).await
+    }
+
+    // Probes (experimental)
+
+    /// List instrumentation probes
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn probe_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::probe::ProbeInfo>>, HttpError>;
+
+    /// List instrumentation probes
+    #[endpoint {
+        operation_id = "probe_list",
+        method = GET,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn probe_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::probe::ProbeInfo>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::probe_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
+    }
+
+    /// View instrumentation probe
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/probes/{probe}",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn probe_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProbePath>,
+        query_params: Query<latest::project::ProjectSelector>,
+    ) -> Result<HttpResponseOk<latest::probe::ProbeInfo>, HttpError>;
+
+    /// View instrumentation probe
+    #[endpoint {
+        operation_id = "probe_view",
+        method = GET,
+        path = "/experimental/v1/probes/{probe}",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn probe_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::ProbePath>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::probe::ProbeInfo>, HttpError>
+    {
+        let HttpResponseOk(info) =
+            Self::probe_view(rqctx, path_params, query_params).await?;
+        info.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    /// Create instrumentation probe
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_POOL_SELECTION_ENUMS..,
+    }]
+    async fn probe_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_probe: TypedBody<latest::probe::ProbeCreate>,
+    ) -> Result<HttpResponseCreated<Probe>, HttpError>;
+
+    /// Create instrumentation probe
+    #[endpoint {
+        operation_id = "probe_create",
+        method = POST,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn probe_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_probe: TypedBody<v2025_11_20_00::probe::ProbeCreate>,
+    ) -> Result<HttpResponseCreated<Probe>, HttpError> {
+        Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
+    }
+
+    /// Delete instrumentation probe
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/probes/{probe}",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+    }]
+    async fn probe_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        path_params: Path<latest::path_params::ProbePath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Audit logging
+
+    // See datastore/audit_log.rs for a more detailed explanation of why we sort
+    // by time_completed.
+
+    /// View audit log
+    ///
+    /// A single item in the audit log represents both the beginning and
+    /// end of the logged operation (represented by `time_started` and
+    /// `time_completed`) so that clients do not have to find multiple entries
+    /// and match them up by request ID to get the full picture of an operation.
+    /// Because timestamps may not be unique, entries have also have a unique
+    /// `id` that can be used to deduplicate items fetched from overlapping
+    /// time intervals.
+    ///
+    /// Audit log entries are designed to be immutable: once you see an entry,
+    /// fetching it again will never get you a different result. The list is
+    /// ordered and filtered by `time_completed`, not `time_started`. If
+    /// you fetch the audit log for a time range that is fully in the past,
+    /// the resulting list is guaranteed to be complete, i.e., fetching the
+    /// same timespan again later will always produce the same set of entries.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..,
+    }]
+    async fn audit_log_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::audit::AuditLogEntry>>,
+        HttpError,
+    >;
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_AUTH_METHOD_ENUM..VERSION_AUDIT_LOG_CREDENTIAL_ID,
+    }]
+    async fn audit_log_list_v2026_01_15_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_15_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = ..VERSION_AUDIT_LOG_AUTH_METHOD_ENUM,
+    }]
+    async fn audit_log_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page
+                .items
+                .into_iter()
+                .map(|e| v2026_01_15_00::audit::AuditLogEntry::from(e).into())
+                .collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    // Console API: logins
+
+    /// SAML login console page (just a link to the IdP)
+    #[endpoint {
+        method = GET,
+        path = "/login/{silo_name}/saml/{provider_name}",
+        tags = ["login"],
+        unpublished = true,
+    }]
+    async fn login_saml_begin(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::LoginToProviderPathParam>,
+        query_params: Query<latest::console::LoginUrlQuery>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Get redirect to IdP
+    ///
+    /// Console uses this to avoid having to ask the API anything about the IdP. It
+    /// already knows the IdP name from the path, so it can just link to this path
+    /// and rely on Nexus to redirect to the actual IdP.
+    #[endpoint {
+        method = GET,
+        path = "/login/{silo_name}/saml/{provider_name}/redirect",
+        tags = ["login"],
+        unpublished = true,
+    }]
+    async fn login_saml_redirect(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::LoginToProviderPathParam>,
+        query_params: Query<latest::console::LoginUrlQuery>,
+    ) -> Result<HttpResponseFound, HttpError>;
+
+    /// Authenticate user via SAML
+    #[endpoint {
+        method = POST,
+        path = "/login/{silo_name}/saml/{provider_name}",
+        tags = ["login"],
+    }]
+    async fn login_saml(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::LoginToProviderPathParam>,
+        body_bytes: dropshot::UntypedBody,
+    ) -> Result<HttpResponseSeeOther, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/login/{silo_name}/local",
+        tags = ["login"],
+        unpublished = true,
+    }]
+    async fn login_local_begin(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::LoginPath>,
+        query_params: Query<latest::console::LoginUrlQuery>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Authenticate user via username and password
+    #[endpoint {
+        method = POST,
+        path = "/v1/login/{silo_name}/local",
+        tags = ["login"],
+    }]
+    async fn login_local(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::LoginPath>,
+        credentials: TypedBody<latest::user::UsernamePasswordCredentials>,
+    ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError>;
+
+    /// Log user out of web console by deleting session on client and server
+    #[endpoint {
+        // important for security that this be a POST despite the empty req body
+        method = POST,
+        path = "/v1/logout",
+        tags = ["console-auth"],
+    }]
+    async fn logout(
+        rqctx: RequestContext<Self::Context>,
+        cookies: Cookies,
+    ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError>;
+
+    /// Redirect to a login page for the current Silo (if that can be determined)
+    #[endpoint {
+        method = GET,
+        path = "/login",
+        unpublished = true,
+    }]
+    async fn login_begin(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::console::LoginUrlQuery>,
+    ) -> Result<HttpResponseFound, HttpError>;
+
+    // Console API: Pages
+    //
+    // Dropshot does not have route match ranking and does not allow overlapping
+    // route definitions, so we cannot use a catchall `/*` route for console pages
+    // because it would overlap with the API routes definitions. So instead we have
+    // to manually define more specific routes.
+    #[endpoint {
+        method = GET,
+        path = "/projects/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_projects(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/settings/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_settings_page(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/system/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_system_page(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/lookup/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_lookup(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/",
+        unpublished = true,
+    }]
+    async fn console_root(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/projects-new",
+        unpublished = true,
+    }]
+    async fn console_projects_new(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/images/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_images(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/utilization",
+        unpublished = true,
+    }]
+    async fn console_silo_utilization(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/access",
+        unpublished = true,
+    }]
+    async fn console_silo_access(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/users/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_users(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/groups/{path:.*}",
+        unpublished = true,
+    }]
+    async fn console_silo_groups(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Serve a static asset
+    #[endpoint {
+        method = GET,
+        path = "/assets/{path:.*}",
+        unpublished = true,
+    }]
+    async fn asset(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::console::RestPathParam>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Start an OAuth 2.0 Device Authorization Grant
+    ///
+    /// This endpoint is designed to be accessed from an *unauthenticated*
+    /// API client. It generates and records a `device_code` and `user_code`
+    /// which must be verified and confirmed prior to a token being granted.
+    #[endpoint {
+        method = POST,
+        path = "/device/auth",
+        content_type = "application/x-www-form-urlencoded",
+        tags = ["console-auth"],
+    }]
+    async fn device_auth_request(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::device_params::DeviceAuthRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Verify an OAuth 2.0 Device Authorization Grant
+    ///
+    /// This endpoint should be accessed in a full user agent (e.g.,
+    /// a browser). If the user is not logged in, we redirect them to
+    /// the login page and use the `state` parameter to get them back
+    /// here on completion. If they are logged in, serve up the console
+    /// verification page so they can verify the user code.
+    #[endpoint {
+        method = GET,
+        path = "/device/verify",
+        unpublished = true,
+    }]
+    async fn device_auth_verify(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/device/success",
+        unpublished = true,
+    }]
+    async fn device_auth_success(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Confirm an OAuth 2.0 Device Authorization Grant
+    ///
+    /// This endpoint is designed to be accessed by the user agent (browser),
+    /// not the client requesting the token. So we do not actually return the
+    /// token here; it will be returned in response to the poll on `/device/token`.
+    ///
+    /// Some special logic applies when authenticating this request with an
+    /// existing device token instead of a console session: the requested
+    /// TTL must not produce an expiration time later than the authenticating
+    /// token's expiration. If no TTL was specified in the initial grant
+    /// request, the expiration will be the lesser of the silo max and the
+    /// authenticating token's expiration time. To get the longest allowed
+    /// lifetime, omit the TTL and authenticate with a web console session.
+    #[endpoint {
+        method = POST,
+        path = "/device/confirm",
+        tags = ["console-auth"],
+    }]
+    async fn device_auth_confirm(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::device_params::DeviceAuthVerify>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Request a device access token
+    ///
+    /// This endpoint should be polled by the client until the user code
+    /// is verified and the grant is confirmed.
+    #[endpoint {
+        method = POST,
+        path = "/device/token",
+        content_type = "application/x-www-form-urlencoded",
+        tags = ["console-auth"],
+    }]
+    async fn device_access_token(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::device_params::DeviceAccessTokenRequest>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    // Problems
+
+    /// List problems
+    ///
+    /// Problems are sorted by the time at which they were detected, and may be
+    /// filtered by state.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<latest::problem::ProblemListParams>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::problem::Problem>>, HttpError>;
+
+    /// Fetch problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+    ) -> Result<HttpResponseOk<latest::problem::Problem>, HttpError>;
+
+    /// List causes of problem
+    ///
+    /// Returns any other problems which are the causes of the specified
+    /// problem. If the specified problem has no causes, this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/causes",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List consequences of problem
+    ///
+    /// Returns any other problems which are caused by the specified problem. If
+    /// no other problem is caused by the specified problem, then this list may
+    /// be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/consequences",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List resources impacted by problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/impacts",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ImpactListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::ProblemImpact>>,
+        HttpError,
+    >;
+
+    /// List support bundles attached to problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/support-bundles",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/support-bundles` tag, but only one tag is allowed per
+        // endpoint (why is it an array, then?)...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
+    /// List alerts for problem
+    ///
+    /// Lists alerts associated with the requested problem. Alerts may be
+    /// filtered by alert class or alert class glob and by an inclusive creation
+    /// time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/alerts",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/alerts` tag, but only one tag is allowed per endpoint...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
+
+    // Alerts
+
+    /// List alerts
+    ///
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_PAYLOAD..
+    }]
+    async fn alert_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
+
+    /// List alerts
+    ///
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
+    #[endpoint {
+        operation_id = "alert_list",
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..VERSION_ALERT_PAYLOAD
+    }]
+    async fn alert_list_v2026_08_14_00(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<v2026_08_14_00::alert::AlertListParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_08_14_00::alert::Alert>>,
+        HttpError,
+    > {
+        Self::alert_list(rqctx, pagination).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
+
+    /// Fetch alert
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_PAYLOAD..
+    }]
+    async fn alert_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<latest::alert::Alert>, HttpError>;
+
+    /// Fetch alert
+    #[endpoint {
+        operation_id = "alert_view",
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..VERSION_ALERT_PAYLOAD
+    }]
+    async fn alert_view_v2026_08_14_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<v2026_08_14_00::alert::Alert>, HttpError> {
+        Self::alert_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(alert)| HttpResponseOk(alert.into()))
+    }
+
+    /// List alert classes
+    #[endpoint {
+        method = GET,
+        path = "/v1/alert-classes",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_class_list(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<EmptyScanParams, latest::alert::AlertClassPage>,
+        >,
+        filter: Query<latest::alert::AlertClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::AlertClass>>, HttpError>;
+
+    /// List alert receivers
+    #[endpoint {
+        method = GET,
+        path = "/v1/alert-receivers",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::alert::AlertReceiver>>,
+        HttpError,
+    >;
+
+    /// Fetch alert receiver
+    #[endpoint {
+        method = GET,
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertReceiverSelector>,
+    ) -> Result<HttpResponseOk<latest::alert::AlertReceiver>, HttpError>;
+
+    /// Delete alert receiver
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertReceiverSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Add alert receiver subscription
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/subscriptions",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertReceiverSelector>,
+        params: TypedBody<latest::alert::AlertSubscriptionCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::alert::AlertSubscriptionCreated>,
+        HttpError,
+    >;
+
+    /// Remove alert receiver subscription
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}/subscriptions/{subscription}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_subscription_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertSubscriptionSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List delivery attempts to alert receiver
+    ///
+    /// Optional query parameters to this endpoint may be used to filter
+    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
+    /// query parameters are present, all deliveries are returned. If one or
+    /// more of these parameters are provided, only those which are set to
+    /// "true" are included in the response.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alert-receivers/{receiver}/deliveries",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertReceiverSelector>,
+        state_filter: Query<latest::alert::AlertDeliveryStateFilter>,
+        pagination: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::alert::AlertDelivery>>,
+        HttpError,
+    >;
+
+    /// Send liveness probe to alert receiver
+    ///
+    /// This endpoint synchronously sends a liveness probe to the selected alert
+    /// receiver. The response message describes the outcome of the probe:
+    /// either the successful response (as appropriate), or indication of why
+    /// the probe failed.
+    ///
+    /// The result of the probe is represented as an `AlertDelivery` model.
+    /// Details relating to the status of the probe depend on the alert delivery
+    /// mechanism, and are included in the `AlertDeliveryAttempts` model. For
+    /// example, webhook receiver liveness probes include the HTTP status code
+    /// returned by the receiver endpoint.
+    ///
+    /// Note that the response status is `200 OK` as long as a probe request was
+    /// able to be sent to the receiver endpoint. If an HTTP-based receiver,
+    /// such as a webhook, responds to the another status code, including an
+    /// error, this will be indicated by the response body, *not* the status of
+    /// the response.
+    ///
+    /// The `resend` query parameter can be used to request re-delivery of
+    /// failed events if the liveness probe succeeds. If it is set to true and
+    /// the liveness probe succeeds, any alerts for which delivery to this
+    /// receiver has failed will be queued for re-delivery.
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/probe",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertReceiverSelector>,
+        query_params: Query<latest::alert::AlertReceiverProbe>,
+    ) -> Result<HttpResponseOk<latest::alert::AlertProbeResult>, HttpError>;
+
+    /// Request re-delivery of alert
+    #[endpoint {
+        method = POST,
+        path = "/v1/alerts/{alert_id}/resend",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertSelector>,
+        receiver: Query<latest::alert::AlertReceiverSelector>,
+    ) -> Result<HttpResponseCreated<latest::alert::AlertDeliveryId>, HttpError>;
+
+    // ALERTS: WEBHOOKS
+
+    /// Create webhook receiver
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhook-receivers",
+        tags = ["system/alerts"],
+    }]
+    async fn webhook_receiver_create(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::alert::WebhookCreate>,
+    ) -> Result<HttpResponseCreated<latest::alert::WebhookReceiver>, HttpError>;
+
+    /// Update webhook receiver
+    ///
+    /// Note that receiver secrets are NOT added or removed using this endpoint.
+    /// Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}` endpoint
+    /// to add and remove secrets.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/webhook-receivers/{receiver}",
+        tags = ["system/alerts"],
+    }]
+    async fn webhook_receiver_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertReceiverSelector>,
+        params: TypedBody<latest::alert::WebhookReceiverUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List webhook receiver secret IDs
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
+    }]
+    async fn webhook_secrets_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::alert::AlertReceiverSelector>,
+    ) -> Result<HttpResponseOk<latest::alert::WebhookSecrets>, HttpError>;
+
+    /// Add secret to webhook receiver
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
+    }]
+    async fn webhook_secrets_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::alert::AlertReceiverSelector>,
+        params: TypedBody<latest::alert::WebhookSecretCreate>,
+    ) -> Result<HttpResponseCreated<latest::alert::WebhookSecret>, HttpError>;
+
+    /// Remove secret from webhook receiver
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/webhook-secrets/{secret_id}",
+        tags = ["system/alerts"],
+    }]
+    async fn webhook_secrets_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::WebhookSecretSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+}
+
+/// Perform extra validations on the OpenAPI document, and generate the
+/// nexus_tags.txt file.
+pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
+    let blessed = cx
+        .is_blessed()
+        .expect("this is a versioned API so is_blessed should always be Some");
+
+    // There are two parts to this function:
+    //
+    // 1. Perform validation on the OpenAPI document.
+    // 2. Generate the nexus_tags.txt file.
+    //
+    // Step 1 should only be performed on non-blessed versions. That's because
+    // blessed versions are immutable, and if new checks are added in the
+    // future, we don't want old API versions to be affected.
+    //
+    // nexus_tags.txt is unversioned, so step 2 should only be performed on the
+    // latest version, whether or not it's blessed.
+
+    if !blessed {
+        validate_api_doc(spec, &mut cx);
+    }
+
+    // nexus_tags.txt is unversioned, so only write it out for the latest
+    // version (whether it's blessed or not).
+    if cx.is_latest() {
+        generate_tags_file(spec, &mut cx);
+    }
+}
+
+fn validate_api_doc(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
+    if spec.openapi != "3.0.3" {
+        cx.report_error(anyhow!(
+            "Expected OpenAPI version to be 3.0.3, found {}",
+            spec.openapi,
+        ));
+    }
+    if spec.info.title != "Oxide Region API" {
+        cx.report_error(anyhow!(
+            "Expected OpenAPI version to be 'Oxide Region API', found '{}'",
+            spec.info.title,
+        ));
+    }
+
+    // Spot check a couple of items.
+    if spec.paths.paths.is_empty() {
+        cx.report_error(anyhow!("Expected at least one path in the spec"));
+    }
+    if spec.paths.paths.get("/v1/projects").is_none() {
+        cx.report_error(anyhow!("Expected a path for /v1/projects"));
+    }
+
+    for (_path, _method, op) in spec.operations() {
+        // Make sure each operation has exactly one tag. Note, we intentionally
+        // do this before validating the OpenAPI output as fixing an error here
+        // would necessitate refreshing the spec file again.
+        if op.tags.len() != 1 {
+            cx.report_error(anyhow!(
+                "operation '{}' has {} tags rather than 1",
+                op.operation_id.as_ref().unwrap(),
+                op.tags.len()
+            ));
+        }
+
+        // Every non-hidden endpoint must have a summary
+        if op.tags.contains(&"console-auth".to_string()) && op.summary.is_none()
+        {
+            cx.report_error(anyhow!(
+                "operation '{}' is missing a summary doc comment",
+                op.operation_id.as_ref().unwrap()
+            ));
+        }
+    }
+}
+
+fn generate_tags_file(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
+    // Construct a string that helps us identify the organization of tags and
+    // operations.
+    let mut ops_by_tag =
+        BTreeMap::<String, Vec<(String, String, String)>>::new();
+
+    for (path, method, op) in spec.operations() {
+        // If an operation doesn't have exactly one tag, skip generating the
+        // tags file entirely. (Validation above catches this case).
+        if op.tags.len() != 1 {
+            return;
+        }
+
+        ops_by_tag
+            .entry(op.tags.first().unwrap().to_string())
+            .or_default()
+            .push((
+                op.operation_id.as_ref().unwrap().to_string(),
+                method.to_string().to_uppercase(),
+                path.to_string(),
+            ));
+    }
+
+    let mut tags = String::new();
+    for (tag, mut ops) in ops_by_tag {
+        ops.sort();
+        tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
+        tags.push_str(&format!(
+            "\n{:40} {:8} {}\n",
+            "OPERATION ID", "METHOD", "URL PATH"
+        ));
+        for (operation_id, method, path) in ops {
+            tags.push_str(&format!(
+                "{:40} {:8} {}\n",
+                operation_id, method, path
+            ));
+        }
+        tags.push('\n');
+    }
+
+    // When this fails, verify that operations on which you're adding,
+    // renaming, or changing the tags are what you intend.
+    cx.record_file_contents(
+        "nexus/external-api/output/nexus_tags.txt",
+        tags.into_bytes(),
+    );
+}
+
+pub type IpPoolRangePaginationParams =
+    PaginationParams<EmptyScanParams, IpNetwork>;
+
+pub type SubnetPoolMemberPaginationParams =
+    PaginationParams<EmptyScanParams, oxnet::IpNet>;
+
+/// Type used to paginate request to list timeseries schema
+pub type TimeseriesSchemaPaginationParams = PaginationParams<
+    EmptyScanParams,
+    oximeter_types_versions::latest::schema::TimeseriesName,
+>;

@@ -1,0 +1,33 @@
+[package]
+name = "nexus-external-api"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+api_identity.workspace = true
+dropshot-api-manager-types.workspace = true
+dropshot.workspace = true
+http.workspace = true
+ipnetwork.workspace = true
+itertools.workspace = true
+nexus-types.workspace = true
+nexus-types-versions.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+openapiv3.workspace = true
+oximeter-types-versions.workspace = true
+oxnet.workspace = true
+schemars.workspace = true
+scim2-rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog-error-chain.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

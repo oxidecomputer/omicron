@@ -1,0 +1,5 @@
+multi-line comment:
+  // this comment
+  // spans multiple lines
+  // isn't that cool?
+  * flat_key: flat_value

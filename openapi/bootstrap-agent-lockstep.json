@@ -2138,11 +2138,11 @@
           },
           "trust_quorum_peers": {
             "description": "The peers required to initialize this rack's trust quorum.\n\nUnlike RSS, this is not optional: the bootstrap agent discovers bootstrap addresses and maps them to these `BaseboardId`s.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TrustQuorumMembers"
+              }
+            ]
           }
         },
         "required": [
@@ -2211,11 +2211,7 @@
                 "minimum": 0
               },
               "members": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BaseboardId"
-                },
-                "uniqueItems": true
+                "$ref": "#/components/schemas/TrustQuorumMembers"
               },
               "rack_id": {
                 "$ref": "#/components/schemas/RackUuid"
@@ -2738,10 +2734,11 @@
           "trust_quorum_peers": {
             "nullable": true,
             "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TrustQuorumMembers"
+              }
+            ]
           }
         },
         "required": [
@@ -4125,6 +4122,15 @@
             ]
           }
         ]
+      },
+      "TrustQuorumMembers": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",

@@ -1,0 +1,103 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use db::model::LoopbackAddress;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_types::external_api::networking;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::{
+    CreateResult, DataPageParams, DeleteResult, ListResultVec,
+};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
+use oxnet::IpNet;
+use sled_agent_types::early_networking::SwitchSlot;
+use std::sync::Arc;
+use uuid::Uuid;
+
+impl super::Nexus {
+    pub fn loopback_address_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        rack_id: RackUuid,
+        switch_slot: SwitchSlot,
+        address: IpNet,
+    ) -> LookupResult<lookup::LoopbackAddress<'a>> {
+        Ok(LookupPath::new(opctx, &self.db_datastore).loopback_address(
+            rack_id,
+            switch_slot.into(),
+            address.into(),
+        ))
+    }
+
+    pub(crate) async fn loopback_address_create(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        params: networking::LoopbackAddressCreate,
+    ) -> CreateResult<LoopbackAddress> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        // Just a check to make sure a valid rack id was passed in.
+        self.rack_lookup(&opctx, &RackUuid::from_untyped_uuid(params.rack_id))
+            .await?;
+
+        let address_lot_lookup =
+            self.address_lot_lookup(&opctx, params.address_lot.clone())?;
+
+        let (.., authz_address_lot) =
+            address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        let value = self
+            .db_datastore
+            .loopback_address_create(&opctx, &params, None, &authz_address_lot)
+            .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+
+        Ok(value)
+    }
+
+    pub(crate) async fn loopback_address_delete(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        switch_slot: SwitchSlot,
+        address: IpNet,
+    ) -> DeleteResult {
+        let loopback_address_lookup = self.loopback_address_lookup(
+            &opctx,
+            rack_id,
+            switch_slot,
+            address,
+        )?;
+
+        let (.., authz_loopback_address) =
+            loopback_address_lookup.lookup_for(authz::Action::Delete).await?;
+
+        self.db_datastore
+            .loopback_address_delete(&opctx, &authz_loopback_address)
+            .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+
+        Ok(())
+    }
+
+    pub(crate) async fn loopback_address_list(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<LoopbackAddress> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.db_datastore.loopback_address_list(opctx, pagparams).await
+    }
+}

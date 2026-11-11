@@ -1,0 +1,3422 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Data structures and related facilities for representing resources in the API
+//!
+//! This includes all representations over the wire for both the external and
+//! internal APIs.  The contents here are all HTTP-agnostic.
+
+mod error;
+pub mod http_pagination;
+pub use crate::address::IpVersion;
+pub use crate::api::internal::shared::AllowedSourceIps;
+use api_identity::ObjectIdentity;
+use chrono::DateTime;
+use chrono::Utc;
+use daft::Diffable;
+use dropshot::HttpError;
+pub use dropshot::PaginationOrder;
+pub use error::*;
+use futures::stream::BoxStream;
+use omicron_uuid_kinds::SledUuid;
+use oxnet::IpNet;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
+use parse_display::Display;
+use parse_display::FromStr;
+use rand::Rng;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::convert::TryFrom;
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FormatResult;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::num::ParseIntError;
+use std::num::{NonZeroU16, NonZeroU32};
+use std::ops::Deref;
+use std::ops::RangeInclusive;
+use std::str::FromStr;
+use uuid::Uuid;
+
+// The type aliases below exist primarily to ensure consistency among return
+// types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
+// type argument `T` generally implements `Object`.
+
+/// Result of a create operation for the specified type
+pub type CreateResult<T> = Result<T, Error>;
+/// Result of a delete operation for the specified type
+pub type DeleteResult = Result<(), Error>;
+/// Result of a list operation that returns an ObjectStream
+pub type ListResult<T> = Result<ObjectStream<T>, Error>;
+/// Result of a list operation that returns a vector
+pub type ListResultVec<T> = Result<Vec<T>, Error>;
+/// Result of a lookup operation for the specified type
+pub type LookupResult<T> = Result<T, Error>;
+/// Result of an update operation for the specified type
+pub type UpdateResult<T> = Result<T, Error>;
+/// Result of an optional lookup operation for the specified type
+pub type OptionalLookupResult<T> = Result<Option<T>, Error>;
+
+/// A stream of Results, each potentially representing an object in the API
+pub type ObjectStream<T> = BoxStream<'static, Result<T, Error>>;
+
+// General-purpose types used for client request parameters and return values.
+
+/// Describes an `Object` that has its own identity metadata.  This is
+/// currently used only for pagination.
+pub trait ObjectIdentity {
+    fn identity(&self) -> &IdentityMetadata;
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by id.
+pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentityOrName {
+    fn id(&self) -> Uuid;
+    fn name(&self) -> &Name;
+}
+
+impl<T: ObjectIdentity> SimpleIdentityOrName for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+
+    fn name(&self) -> &Name {
+        &self.identity().name
+    }
+}
+
+/// Parameters used to request a specific page of results when listing a
+/// collection of objects
+///
+/// This is logically analogous to Dropshot's `PageSelector` (plus the limit from
+/// Dropshot's `PaginationParams`).  However, this type is HTTP-agnostic.  More
+/// importantly, by the time this struct is generated, we know the type of the
+/// sort field and we can specialize `DataPageParams` to that type.  This makes
+/// it considerably simpler to implement the backend for most of our paginated
+/// APIs.
+///
+/// `NameType` is the type of the field used to sort the returned values and it's
+/// usually `Name`.
+#[derive(Clone, Debug)]
+pub struct DataPageParams<'a, NameType> {
+    /// If present, this is the value of the sort field for the last object seen
+    pub marker: Option<&'a NameType>,
+
+    /// Whether the sort is in ascending order
+    pub direction: PaginationOrder,
+
+    /// This identifies how many results should be returned on this page.
+    /// Backend implementations must provide this many results unless we're at
+    /// the end of the scan.  Dropshot assumes that if we provide fewer results
+    /// than this number, then we're done with the scan.
+    pub limit: NonZeroU32,
+}
+
+impl<'a, NameType> DataPageParams<'a, NameType> {
+    pub fn max_page() -> Self {
+        Self {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: NonZeroU32::new(u32::MAX).unwrap(),
+        }
+    }
+    /// Maps the marker type to a new type.
+    ///
+    /// Equivalent to [std::option::Option::map], because that's what it calls.
+    pub fn map_name<OtherName, F>(&self, f: F) -> DataPageParams<'a, OtherName>
+    where
+        F: FnOnce(&'a NameType) -> &'a OtherName,
+    {
+        DataPageParams {
+            marker: self.marker.map(f),
+            direction: self.direction,
+            limit: self.limit,
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Name> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Name(name)) => Ok(DataPageParams {
+                marker: Some(name),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
+        }
+    }
+}
+
+impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
+    type Error = HttpError;
+
+    fn try_from(
+        value: &DataPageParams<'a, NameOrId>,
+    ) -> Result<Self, Self::Error> {
+        match value.marker {
+            Some(NameOrId::Id(id)) => Ok(DataPageParams {
+                marker: Some(id),
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            None => Ok(DataPageParams {
+                marker: None,
+                direction: value.direction,
+                limit: value.limit,
+            }),
+            _ => Err(HttpError::for_bad_request(
+                None,
+                String::from("invalid pagination marker"),
+            )),
+        }
+    }
+}
+
+/// A name used in the API
+///
+/// Names are generally user-provided unique identifiers, highly constrained as
+/// described in RFD 4.  An `Name` can only be constructed with a string
+/// that's valid as a name.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+#[display("{0}")]
+#[serde(try_from = "String")]
+#[derive(Diffable)]
+pub struct Name(String);
+
+/// `Name::try_from(String)` is the primary method for constructing an Name
+/// from an input string.  This validates the string according to our
+/// requirements for a name.
+/// TODO-cleanup why shouldn't callers use TryFrom<&str>?
+impl TryFrom<String> for Name {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() > 63 {
+            return Err(String::from("name may contain at most 63 characters"));
+        }
+
+        let mut iter = value.chars();
+
+        let first = iter.next().ok_or_else(|| {
+            String::from("name requires at least one character")
+        })?;
+        if !first.is_ascii_lowercase() {
+            return Err(String::from(
+                "name must begin with an ASCII lowercase character",
+            ));
+        }
+
+        let mut last = first;
+        for c in iter {
+            last = c;
+
+            if !c.is_ascii_lowercase() && !c.is_digit(10) && c != '-' {
+                return Err(format!(
+                    "name contains invalid character: \"{}\" (allowed \
+                     characters are lowercase ASCII, digits, and \"-\")",
+                    c
+                ));
+            }
+        }
+
+        if last == '-' {
+            return Err(String::from("name cannot end with \"-\""));
+        }
+
+        if Uuid::parse_str(&value).is_ok() {
+            return Err(String::from(
+                "name cannot be a UUID to avoid ambiguity with IDs",
+            ));
+        }
+
+        Ok(Name(value))
+    }
+}
+
+impl FromStr for Name {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Name::try_from(String::from(value))
+    }
+}
+
+impl<'a> From<&'a Name> for &'a str {
+    fn from(n: &'a Name) -> Self {
+        n.as_str()
+    }
+}
+
+impl From<Name> for String {
+    fn from(name: Name) -> Self {
+        name.0
+    }
+}
+
+/// `Name` instances are comparable like Strings, primarily so that they can
+/// be used as keys in trees.
+impl<S> PartialEq<S> for Name
+where
+    S: AsRef<str>,
+{
+    fn eq(&self, other: &S) -> bool {
+        self.0 == other.as_ref()
+    }
+}
+
+/// Custom JsonSchema implementation to encode the constraints on Name.
+impl JsonSchema for Name {
+    fn schema_name() -> String {
+        "Name".to_string()
+    }
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        name_schema(schemars::schema::Metadata {
+            title: Some(
+                "A name unique within the parent collection".to_string(),
+            ),
+            description: Some(
+                "Names must begin with a lower case ASCII letter, be \
+                 composed exclusively of lowercase ASCII, uppercase \
+                 ASCII, numbers, and '-', and may not end with a '-'. \
+                 Names cannot be a UUID, but they may contain a UUID. \
+                 They can be at most 63 characters long."
+                    .to_string(),
+            ),
+            ..Default::default()
+        })
+    }
+}
+
+impl Name {
+    /// Parse an `Name`.  This is a convenience wrapper around
+    /// `Name::try_from(String)` that marshals any error into an appropriate
+    /// `Error`.
+    pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
+        value.parse().map_err(|e| Error::invalid_value(label, e))
+    }
+
+    /// Return the `&str` representing the actual name.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Display, Clone, PartialEq)]
+#[display("{0}")]
+#[serde(untagged)]
+pub enum NameOrId {
+    Id(Uuid),
+    Name(Name),
+}
+
+impl TryFrom<String> for NameOrId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(NameOrId::Id(id))
+        } else {
+            Ok(NameOrId::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl FromStr for NameOrId {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        NameOrId::try_from(String::from(value))
+    }
+}
+
+impl From<Name> for NameOrId {
+    fn from(name: Name) -> Self {
+        NameOrId::Name(name)
+    }
+}
+
+impl From<Uuid> for NameOrId {
+    fn from(id: Uuid) -> Self {
+        NameOrId::Id(id)
+    }
+}
+
+impl JsonSchema for NameOrId {
+    fn schema_name() -> String {
+        "NameOrId".to_string()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![
+                    label_schema("id", generator.subschema_for::<Uuid>()),
+                    label_schema("name", generator.subschema_for::<Name>()),
+                ]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// A username for a local-only user.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
+
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
+    fn schema_name() -> String {
+        "UserId".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        name_schema(schemars::schema::Metadata {
+            title: Some("A username for a local-only user".to_string()),
+            description: Some(
+                "Usernames must begin with a lower case ASCII letter, be \
+                 composed exclusively of lowercase ASCII, uppercase ASCII, \
+                 numbers, and '-', and may not end with a '-'. Usernames \
+                 cannot be a UUID, but they may contain a UUID. They can be at \
+                 most 63 characters long."
+                    .to_string(),
+            ),
+            ..Default::default()
+        })
+    }
+}
+
+fn name_schema(
+    metadata: schemars::schema::Metadata,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        metadata: Some(Box::new(metadata)),
+        instance_type: Some(schemars::schema::InstanceType::String.into()),
+        string: Some(Box::new(schemars::schema::StringValidation {
+            max_length: Some(63),
+            min_length: Some(1),
+            pattern: Some(
+                concat!(
+                    r#"^"#,
+                    // Cannot match a UUID
+                    concat!(
+                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"#,
+                        r#"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
+                    ),
+                    r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
+                    r#"$"#,
+                )
+                .to_string(),
+            ),
+        })),
+        ..Default::default()
+    }
+    .into()
+}
+
+/// Byte count to express memory or storage capacity.
+//
+// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+// inconvenient to define constructors: a u32 constructor can be infallible,
+// but an i64 constructor can fail (if the value is negative) and a u64
+// constructor can fail (if the value is larger than i64::MAX).  We provide
+// all of these for consumers' convenience.
+//
+// The maximum byte count of i64::MAX comes from the fact that this is stored
+// in the database as an i64.  Constraining it here ensures that we can't fail
+// to serialize the value.
+//
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Diffable,
+)]
+pub struct ByteCount(u64);
+
+/// Generates byte counts in `0..=i64::MAX`, the range a [`ByteCount`] may
+/// hold.
+///
+/// A uniform distribution over that range would almost never produce a multiple
+/// of a KiB, let alone a TiB, but real byte counts (disk and memory sizes)
+/// almost always are. So, rather than using the derive, we hand-implement a
+/// strategy that has a 1/5ths chance of generating multiples of each unit,
+/// rather than a uniform distribution.
+#[cfg(any(test, feature = "testing"))]
+impl proptest::arbitrary::Arbitrary for ByteCount {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        const MAX: u64 = i64::MAX as u64;
+        proptest::prop_oneof![
+            0..=MAX,
+            (0..=MAX / KiB).prop_map(|n| n * KiB),
+            (0..=MAX / MiB).prop_map(|n| n * MiB),
+            (0..=MAX / GiB).prop_map(|n| n * GiB),
+            (0..=MAX / TiB).prop_map(|n| n * TiB),
+        ]
+        .prop_map(|bytes| {
+            ByteCount::try_from(bytes).expect(
+                "all branches of the `prop_oneof!` should generate at most
+                `i64::MAX` bytes, so this should always be in bounds",
+            )
+        })
+        .boxed()
+    }
+}
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
+
+#[allow(non_upper_case_globals)]
+const KiB: u64 = 1024;
+#[allow(non_upper_case_globals)]
+const MiB: u64 = KiB * 1024;
+#[allow(non_upper_case_globals)]
+const GiB: u64 = MiB * 1024;
+#[allow(non_upper_case_globals)]
+const TiB: u64 = GiB * 1024;
+
+// A mapping of string suffixen to the factor that converts between a suffixed
+// value and a number of bytes. This is used in the `fmt::Display` and `FromStr`
+// implementations for `ByteCount`.
+const BYTE_COUNT_SUFFIXEN: &[(&str, u64)] =
+    &[("TiB", TiB), ("GiB", GiB), ("MiB", MiB), ("KiB", KiB), ("B", 1)];
+
+impl ByteCount {
+    // None of these three constructors can create a value larger than
+    // `i64::MAX`. (Note that a `from_tebibytes_u32` could overflow u64.)
+    pub const fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
+        ByteCount(KiB * kibibytes as u64)
+    }
+    pub const fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
+        ByteCount(MiB * mebibytes as u64)
+    }
+    pub const fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
+        ByteCount(GiB * gibibytes as u64)
+    }
+
+    pub const fn to_bytes(&self) -> u64 {
+        self.0
+    }
+    pub const fn to_whole_kibibytes(&self) -> u64 {
+        self.to_bytes() / KiB
+    }
+    pub const fn to_whole_mebibytes(&self) -> u64 {
+        self.to_bytes() / MiB
+    }
+    pub const fn to_whole_gibibytes(&self) -> u64 {
+        self.to_bytes() / GiB
+    }
+    pub const fn to_whole_tebibytes(&self) -> u64 {
+        self.to_bytes() / TiB
+    }
+}
+
+impl Display for ByteCount {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        for &(suffix, factor) in BYTE_COUNT_SUFFIXEN {
+            if self.to_bytes() >= factor
+                && self.to_bytes().is_multiple_of(factor)
+            {
+                return write!(f, "{} {suffix}", self.to_bytes() / factor);
+            }
+        }
+        // This is trivially unreachable, since the last iteration of the loop
+        // would have hit the ("B", 1) tuple, and we would never fall through to
+        // here. But, it's nicer not to panic even in the unreachable case if we
+        // can just do the correct thing instead.
+        write!(f, "{} B", self.to_bytes())
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ByteCountParseError {
+    #[error(transparent)]
+    OutOfRange(#[from] ByteCountRangeError),
+    #[error(
+        "invalid byte count suffix {0:?} (expected {ex})",
+        ex = ByteCountSuffixenDisplayer
+    )]
+    InvalidSuffix(String),
+    #[error("invalid number {digits:?} in byte count")]
+    InvalidInteger {
+        digits: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+}
+
+struct ByteCountSuffixenDisplayer;
+impl fmt::Display for ByteCountSuffixenDisplayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut suffixen = BYTE_COUNT_SUFFIXEN.iter().peekable();
+        while let Some((suffix, _)) = suffixen.next() {
+            if suffixen.peek().is_some() {
+                write!(f, "{suffix:?}, ")?;
+            } else {
+                write!(f, "or {suffix:?}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for ByteCount {
+    type Err = ByteCountParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Returns the multiplier for `suffix`.
+        fn suffix2factor(suffix: &str) -> Option<u64> {
+            BYTE_COUNT_SUFFIXEN
+                .iter()
+                // We intentionally do not match case-insensitively here to
+                // avoid potentially ambiguous spellings (i.e. where a lowercase
+                // 'b' means "bits" rather than "bytes")
+                .find(|(s, _)| suffix == *s)
+                .map(|&(_, factor)| factor)
+        }
+
+        // First, split the string into any non-digit suffix and the rest of the
+        // string.
+        let s = s.trim();
+        let (digits, factor) = match s.rfind(|c: char| c.is_ascii_digit()) {
+            Some(splitpoint) => {
+                // An ASCII digit is one byte long, so `splitpoint + 1` is a char
+                // boundary.
+                let (digits, suffix) = s.split_at(splitpoint + 1);
+                let suffix = suffix.trim();
+                let factor = if !suffix.is_empty() {
+                    suffix2factor(suffix).ok_or_else(|| {
+                        ByteCountParseError::InvalidSuffix(suffix.to_string())
+                    })?
+                } else {
+                    1
+                };
+                (digits, factor)
+            }
+            // No digits at all. If the input is a valid suffix, the number is
+            // missing; otherwise, the whole input is a malformed number. This
+            // bit only matters so that we can report slightly nicer errors.
+            None => match suffix2factor(s) {
+                Some(factor) => ("", factor),
+                None => (s, 1),
+            },
+        };
+
+        // Parse the digits as an integer and multiply it by the factor
+        // determined based on either the suffix or the lack thereof.
+        let base = digits.parse::<u64>().map_err(|source| {
+            ByteCountParseError::InvalidInteger {
+                digits: digits.to_string(),
+                source,
+            }
+        })?;
+        let bytes = base
+            // If base * factor would overflow, the value is out of range.
+            .checked_mul(factor)
+            .ok_or(ByteCountRangeError::TooLarge)?
+            .try_into()?;
+        return Ok(bytes);
+    }
+}
+
+// TODO-cleanup This could use the experimental std::num::IntErrorKind.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Eq,
+    thiserror::Error,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
+pub enum ByteCountRangeError {
+    #[error("value is too small for a byte count")]
+    TooSmall,
+    #[error("value is too large for a byte count")]
+    TooLarge,
+}
+impl TryFrom<u64> for ByteCount {
+    type Error = ByteCountRangeError;
+
+    fn try_from(bytes: u64) -> Result<Self, Self::Error> {
+        if i64::try_from(bytes).is_err() {
+            Err(ByteCountRangeError::TooLarge)
+        } else {
+            Ok(ByteCount(bytes))
+        }
+    }
+}
+
+impl TryFrom<i64> for ByteCount {
+    type Error = ByteCountRangeError;
+
+    fn try_from(bytes: i64) -> Result<Self, Self::Error> {
+        Ok(ByteCount(
+            u64::try_from(bytes).map_err(|_| ByteCountRangeError::TooSmall)?,
+        ))
+    }
+}
+
+impl From<u32> for ByteCount {
+    fn from(value: u32) -> Self {
+        ByteCount(u64::from(value))
+    }
+}
+
+impl From<ByteCount> for i64 {
+    fn from(b: ByteCount) -> Self {
+        // We have already validated that this value is in range.
+        i64::try_from(b.0).unwrap()
+    }
+}
+
+/// Size of blocks for a disk. Valid values are: 512, 2048, or 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u32")]
+pub struct BlockSize(pub u32);
+
+impl schemars::JsonSchema for BlockSize {
+    fn schema_name() -> String {
+        "BlockSize".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                id: None,
+                description: Some(
+                    "Valid values are: 512, 2048, or 4096.".to_string(),
+                ),
+                title: Some("Block size in bytes".to_string()),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            enum_values: Some(vec![
+                serde_json::json!(512),
+                serde_json::json!(2048),
+                serde_json::json!(4096),
+            ]),
+            ..Default::default()
+        })
+    }
+}
+
+impl BlockSize {
+    pub fn to_bytes(&self) -> u64 {
+        u64::from(self.0)
+    }
+}
+
+impl TryFrom<u32> for BlockSize {
+    type Error = anyhow::Error;
+    fn try_from(x: u32) -> Result<BlockSize, Self::Error> {
+        if ![512, 2048, 4096].contains(&x) {
+            anyhow::bail!("invalid block size {}", x);
+        }
+
+        Ok(BlockSize(x))
+    }
+}
+
+impl From<ByteCount> for BlockSize {
+    fn from(bc: ByteCount) -> BlockSize {
+        BlockSize(bc.to_bytes() as u32)
+    }
+}
+
+impl From<BlockSize> for ByteCount {
+    fn from(bs: BlockSize) -> ByteCount {
+        ByteCount::from(bs.0)
+    }
+}
+
+impl From<BlockSize> for u64 {
+    fn from(bs: BlockSize) -> u64 {
+        u64::from(bs.0)
+    }
+}
+
+/// An RFC-1035-compliant hostname.
+#[derive(
+    Clone, Debug, Deserialize, Display, Eq, PartialEq, SerializeDisplay,
+)]
+#[display("{0}")]
+#[serde(try_from = "String", into = "String")]
+pub struct Hostname(String);
+
+impl Hostname {
+    /// Return the hostname as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+// Regular expression for hostnames.
+//
+// Each name is a dot-separated sequence of labels. Each label is supposed to
+// be an "LDH": letter, dash, or hyphen. Hostnames can consist of one label, or
+// many, separated by a `.`. While _domain_ names are allowed to end in a `.`,
+// making them fully-qualified, hostnames are not.
+//
+// Note that labels are allowed to contain a hyphen, but may not start or end
+// with one. See RFC 952, "Lexical grammar" section.
+//
+// Note that we need to use a regex engine capable of lookbehind to support
+// this, since we need to check that labels don't end with a `-`.
+const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
+
+// Labels need to be encoded on the wire, and prefixed with a signel length
+// octet. They also need to end with a length octet of 0 when encoded. So the
+// longest name is a single label of 253 characters, which will be encoded as
+// `\xfd<the label>\x00`.
+const HOSTNAME_MAX_LEN: u32 = 253;
+
+impl FromStr for Hostname {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        anyhow::ensure!(
+            s.len() <= HOSTNAME_MAX_LEN as usize,
+            "Max hostname length is {HOSTNAME_MAX_LEN}"
+        );
+        let re = regress::Regex::new(HOSTNAME_REGEX).unwrap();
+        if re.find(s).is_some() {
+            Ok(Hostname(s.to_string()))
+        } else {
+            anyhow::bail!("Hostnames must comply with RFC 1035")
+        }
+    }
+}
+
+impl TryFrom<&str> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<String> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
+    }
+}
+
+// Custom implementation of JsonSchema for Hostname to ensure RFC-1035-style
+// validation
+impl JsonSchema for Hostname {
+    fn schema_name() -> String {
+        "Hostname".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An RFC-1035-compliant hostname".to_string()),
+                description: Some(
+                    "A hostname identifies a host on a network, and \
+                    is usually a dot-delimited sequence of labels, \
+                    where each label contains only letters, digits, \
+                    or the hyphen. See RFCs 1035 and 952 for more details."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(HOSTNAME_MAX_LEN),
+                min_length: Some(1),
+                pattern: Some(HOSTNAME_REGEX.to_string()),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+// General types used to implement API resources
+
+/// Identifies a type of API resource
+// NOTE: Please keep this enum in alphabetical order.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    Display,
+    Eq,
+    FromStr,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    SerializeDisplay,
+)]
+#[display(style = "kebab-case")]
+pub enum ResourceType {
+    AddressLot,
+    AddressLotBlock,
+    AffinityGroup,
+    AffinityGroupMember,
+    Alert,
+    AlertReceiver,
+    AllowList,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
+    AuditLogEntry,
+    BackgroundTask,
+    BgpAnnounceSet,
+    BgpConfig,
+    Blueprint,
+    Certificate,
+    ConsoleSession,
+    Dataset,
+    DeviceAccessToken,
+    DeviceAuthRequest,
+    Disk,
+    ExternalSubnet,
+    Fleet,
+    FloatingIp,
+    IdentityProvider,
+    Image,
+    Instance,
+    InstanceNetworkInterface,
+    InternetGateway,
+    InternetGatewayIpAddress,
+    InternetGatewayIpPool,
+    IpPool,
+    IpPoolResource,
+    LldpLinkConfig,
+    LoopbackAddress,
+    MetricProducer,
+    MulticastGroup,
+    MulticastGroupMember,
+    NatEntry,
+    Oximeter,
+    PhysicalDisk,
+    Probe,
+    ProbeNetworkInterface,
+    Problem,
+    Project,
+    ProjectImage,
+    Rack,
+    RoleBuiltin,
+    RouterRoute,
+    SagaDbg,
+    SamlIdentityProvider,
+    ScimClientBearerToken,
+    Service,
+    ServiceNetworkInterface,
+    Silo,
+    SiloAuthSettings,
+    SiloGroup,
+    SiloImage,
+    SiloQuotas,
+    SiloUser,
+    Sled,
+    SledInstance,
+    SledLedger,
+    Snapshot,
+    SshKey,
+    SupportBundle,
+    SubnetPool,
+    SubnetPoolMember,
+    SubnetPoolSiloLink,
+    Switch,
+    SwitchPort,
+    SwitchPortSettings,
+    TufArtifact,
+    TufRepo,
+    TufTrustRoot,
+    UserBuiltin,
+    Vmm,
+    Volume,
+    Vpc,
+    VpcFirewallRule,
+    VpcRouter,
+    VpcSubnet,
+    WebhookSecret,
+    Zpool,
+}
+
+// IDENTITY METADATA
+
+/// Identity-related metadata that's included in nearly all public API objects
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct IdentityMetadata {
+    /// Unique, immutable, system-controlled identifier for each resource
+    pub id: Uuid,
+    /// Unique, mutable, user-controlled identifier for each resource
+    pub name: Name,
+    /// Human-readable free-form text about a resource
+    pub description: String,
+    /// Timestamp when this resource was created
+    pub time_created: DateTime<Utc>,
+    /// Timestamp when this resource was last modified
+    pub time_modified: DateTime<Utc>,
+}
+
+/// Create-time identity-related parameters
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IdentityMetadataCreateParams {
+    pub name: Name,
+    pub description: String,
+}
+
+/// Updateable identity-related parameters
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IdentityMetadataUpdateParams {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+}
+
+// Specific API resources
+
+// INSTANCES -- all instance types have been moved to nexus-types.
+
+// AFFINITY GROUPS -- all affinity types have been moved to nexus-types.
+
+// DISKS
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskType {
+    Distributed,
+    Local,
+}
+
+/// View of a Disk
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Disk {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub project_id: Uuid,
+    /// ID of snapshot from which disk was created, if any
+    pub snapshot_id: Option<Uuid>,
+    /// ID of image from which disk was created, if any
+    pub image_id: Option<Uuid>,
+    pub size: ByteCount,
+    pub block_size: BlockSize,
+    pub state: DiskState,
+    pub device_path: String,
+    pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
+}
+
+/// State of a Disk
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "state", content = "instance", rename_all = "snake_case")]
+pub enum DiskState {
+    /// Disk is being initialized
+    Creating,
+    /// Disk is ready but detached from any Instance
+    Detached,
+    /// Disk is ready to receive blocks from an external source
+    ImportReady,
+    /// Disk is importing blocks from a URL
+    ImportingFromUrl,
+    /// Disk is importing blocks from bulk writes
+    ImportingFromBulkWrites,
+    /// Disk is being finalized to state Detached
+    Finalizing,
+    /// Disk is undergoing maintenance
+    Maintenance,
+    /// Disk is being attached to the given Instance
+    Attaching(Uuid), // attached Instance id
+    /// Disk is attached to the given Instance
+    Attached(Uuid), // attached Instance id
+    /// Disk is being detached from the given Instance
+    Detaching(Uuid), // attached Instance id
+    /// Disk has been destroyed
+    Destroyed,
+    /// Disk is unavailable
+    Faulted,
+}
+
+impl Display for DiskState {
+    fn fmt(&self, f: &mut Formatter) -> FormatResult {
+        write!(f, "{}", self.label())
+    }
+}
+
+impl TryFrom<(&str, Option<Uuid>)> for DiskState {
+    type Error = String;
+
+    fn try_from(
+        (s, maybe_id): (&str, Option<Uuid>),
+    ) -> Result<Self, Self::Error> {
+        match (s, maybe_id) {
+            ("creating", None) => Ok(DiskState::Creating),
+            ("detached", None) => Ok(DiskState::Detached),
+            ("import_ready", None) => Ok(DiskState::ImportReady),
+            ("importing_from_url", None) => Ok(DiskState::ImportingFromUrl),
+            ("importing_from_bulk_writes", None) => {
+                Ok(DiskState::ImportingFromBulkWrites)
+            }
+            ("finalizing", None) => Ok(DiskState::Finalizing),
+            ("maintenance", None) => Ok(DiskState::Maintenance),
+            ("destroyed", None) => Ok(DiskState::Destroyed),
+            ("faulted", None) => Ok(DiskState::Faulted),
+            ("attaching", Some(id)) => Ok(DiskState::Attaching(id)),
+            ("attached", Some(id)) => Ok(DiskState::Attached(id)),
+            ("detaching", Some(id)) => Ok(DiskState::Detaching(id)),
+            _ => Err(format!(
+                "unexpected value for disk state: {:?} with attached id {:?}",
+                s, maybe_id
+            )),
+        }
+    }
+}
+
+impl DiskState {
+    /// Returns the string label for this disk state
+    pub fn label(&self) -> &'static str {
+        match self {
+            DiskState::Creating => "creating",
+            DiskState::Detached => "detached",
+            DiskState::ImportReady => "import_ready",
+            DiskState::ImportingFromUrl => "importing_from_url",
+            DiskState::ImportingFromBulkWrites => "importing_from_bulk_writes",
+            DiskState::Finalizing => "finalizing",
+            DiskState::Maintenance => "maintenance",
+            DiskState::Attaching(_) => "attaching",
+            DiskState::Attached(_) => "attached",
+            DiskState::Detaching(_) => "detaching",
+            DiskState::Destroyed => "destroyed",
+            DiskState::Faulted => "faulted",
+        }
+    }
+
+    /// Returns whether the Disk is currently attached to, being attached to, or
+    /// being detached from any Instance.
+    pub fn is_attached(&self) -> bool {
+        self.attached_instance_id().is_some()
+    }
+
+    /// If the Disk is attached to, being attached to, or being detached from an
+    /// Instance, returns the id for that Instance.  Otherwise returns `None`.
+    pub fn attached_instance_id(&self) -> Option<&Uuid> {
+        match self {
+            DiskState::Attaching(id) => Some(id),
+            DiskState::Attached(id) => Some(id),
+            DiskState::Detaching(id) => Some(id),
+
+            DiskState::Creating => None,
+            DiskState::Detached => None,
+            DiskState::ImportReady => None,
+            DiskState::ImportingFromUrl => None,
+            DiskState::ImportingFromBulkWrites => None,
+            DiskState::Finalizing => None,
+            DiskState::Maintenance => None,
+            DiskState::Destroyed => None,
+            DiskState::Faulted => None,
+        }
+    }
+}
+
+pub trait Ipv6NetExt {
+    /// The length for all VPC IPv6 prefixes
+    const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+
+    /// The prefix length for all VPC Subnets
+    const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
+
+    /// Return `true` if this subnetwork is a valid VPC prefix.
+    ///
+    /// This checks that the subnet is a unique local address, and has the VPC
+    /// prefix length required.
+    fn is_vpc_prefix(&self) -> bool;
+
+    /// Return `true` if this subnetwork is a valid VPC Subnet, given the VPC's
+    /// prefix.
+    fn is_vpc_subnet(&self, vpc_prefix: &Self) -> bool;
+}
+
+impl Ipv6NetExt for oxnet::Ipv6Net {
+    fn is_vpc_prefix(&self) -> bool {
+        self.is_unique_local() && self.width() == Self::VPC_IPV6_PREFIX_LENGTH
+    }
+
+    fn is_vpc_subnet(&self, vpc_prefix: &Self) -> bool {
+        self.is_unique_local()
+            && self.is_subnet_of(vpc_prefix)
+            && self.width() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
+    }
+}
+
+/// Insert another level of schema indirection in order to provide an
+/// additional title for a subschema. This allows generators to infer a better
+/// variant name for an "untagged" enum.
+// TODO-cleanup: We should move IpNet and this to
+// `omicron_nexus::external_api::shared`. It's public now because `IpRange`,
+// which is defined there, uses it.
+pub fn label_schema(
+    label: &str,
+    schema: schemars::schema::Schema,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        metadata: Some(
+            schemars::schema::Metadata {
+                title: Some(label.to_string()),
+                ..Default::default()
+            }
+            .into(),
+        ),
+        subschemas: Some(
+            schemars::schema::SubschemaValidation {
+                all_of: Some(vec![schema]),
+                ..Default::default()
+            }
+            .into(),
+        ),
+        ..Default::default()
+    }
+    .into()
+}
+
+/// A `RouteTarget` describes the possible locations that traffic matching a
+/// route destination can be sent.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
+pub enum RouteTarget {
+    /// Forward traffic to a particular IP address.
+    Ip(IpAddr),
+    /// Forward traffic to a VPC
+    Vpc(Name),
+    /// Forward traffic to a VPC Subnet
+    Subnet(Name),
+    /// Forward traffic to a specific instance
+    Instance(Name),
+    #[display("inetgw:{0}")]
+    /// Forward traffic to an internet gateway
+    InternetGateway(Name),
+    #[display("drop")]
+    /// Drop matching traffic
+    Drop,
+}
+
+/// A `RouteDestination` is used to match traffic with a routing rule based on
+/// the destination of that traffic.
+///
+/// When traffic is to be sent to a destination that is within a given
+/// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
+/// will be forward to the `RouteTarget` for that rule.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
+pub enum RouteDestination {
+    /// Route applies to traffic destined for the specified IP address
+    Ip(IpAddr),
+    /// Route applies to traffic destined for the specified IP subnet
+    IpNet(IpNet),
+    /// Route applies to traffic destined for the specified VPC
+    Vpc(Name),
+    /// Route applies to traffic destined for the specified VPC subnet
+    Subnet(Name),
+}
+
+/// The kind of a `RouterRoute`
+///
+/// The kind determines certain attributes such as if the route is modifiable
+/// and describes how or where the route was created.
+//
+// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+#[derive(
+    Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
+)]
+#[display("{}")]
+#[serde(rename_all = "snake_case")]
+pub enum RouterRouteKind {
+    /// Determines the default destination of traffic, such as whether it goes
+    /// to the internet or not.
+    ///
+    /// `Destination: An Internet Gateway`
+    /// `Modifiable: true`
+    Default,
+    /// Automatically added for each VPC Subnet in the VPC
+    ///
+    /// `Destination: A VPC Subnet`
+    /// `Modifiable: false`
+    VpcSubnet,
+    /// Automatically added when VPC peering is established
+    ///
+    /// `Destination: A different VPC`
+    /// `Modifiable: false`
+    VpcPeering,
+    /// Created by a user; see `RouteTarget`
+    ///
+    /// `Destination: User defined`
+    /// `Modifiable: true`
+    Custom,
+}
+
+/// A route defines a rule that governs where traffic should be sent based on
+/// its destination.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRoute {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the VPC Router to which the route belongs
+    pub vpc_router_id: Uuid,
+    /// Describes the kind of router. Set at creation. `read-only`
+    pub kind: RouterRouteKind,
+    /// The location that matched packets should be forwarded to
+    pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to
+    pub destination: RouteDestination,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP pool entry belongs
+    pub internet_gateway_id: Uuid,
+    /// The ID of the referenced IP pool
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIp {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP belongs
+    pub internet_gateway_id: Uuid,
+    /// The IP address
+    pub address: IpAddr,
+}
+
+/// A single rule in a VPC firewall
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRule {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// Whether this rule is in effect
+    pub status: VpcFirewallRuleStatus,
+    /// Whether this rule is for incoming or outgoing traffic
+    pub direction: VpcFirewallRuleDirection,
+    /// Determine the set of instances that the rule applies to
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    /// Reductions on the scope of the rule
+    pub filters: VpcFirewallRuleFilter,
+    /// Whether traffic matching the rule should be allowed or dropped
+    pub action: VpcFirewallRuleAction,
+    /// The relative priority of this rule
+    pub priority: VpcFirewallRulePriority,
+    /// The VPC to which this rule belongs
+    pub vpc_id: Uuid,
+}
+
+/// Collection of a Vpc's firewall rules
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRules {
+    pub rules: Vec<VpcFirewallRule>,
+}
+
+/// A single rule in a VPC firewall
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleUpdate {
+    /// Name of the rule, unique to this VPC
+    pub name: Name,
+    /// Human-readable free-form text about a resource
+    pub description: String,
+    /// Whether this rule is in effect
+    pub status: VpcFirewallRuleStatus,
+    /// Whether this rule is for incoming or outgoing traffic
+    pub direction: VpcFirewallRuleDirection,
+    /// Determine the set of instances that the rule applies to
+    #[schemars(length(max = 256))]
+    pub targets: Vec<VpcFirewallRuleTarget>,
+    /// Reductions on the scope of the rule
+    pub filters: VpcFirewallRuleFilter,
+    /// Whether traffic matching the rule should be allowed or dropped
+    pub action: VpcFirewallRuleAction,
+    /// The relative priority of this rule
+    pub priority: VpcFirewallRulePriority,
+}
+
+/// Updated list of firewall rules. Will replace all existing rules.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleUpdateParams {
+    #[schemars(length(max = 1024))]
+    #[serde(default)]
+    pub rules: Vec<VpcFirewallRuleUpdate>,
+}
+
+/// Firewall rule priority. This is a value from 0 to 65535, with rules with
+/// lower values taking priority over higher values.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct VpcFirewallRulePriority(pub u16);
+
+/// Maximum number of entries in each filter field of a [`VpcFirewallRuleFilter`].
+pub const VPC_FIREWALL_RULE_MAX_FILTER_LEN: usize = 256;
+
+/// Filters reduce the scope of a firewall rule. Without filters, the rule
+/// applies to all packets to the targets (or from the targets, if it's an
+/// outbound rule). With multiple filters, the rule applies only to packets
+/// matching ALL filters. The maximum number of each type of filter is 256.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallRuleFilter {
+    /// If present, host filters match the "other end" of traffic from the
+    /// target’s perspective: for an inbound rule, they match the source of
+    /// traffic. For an outbound rule, they match the destination.
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
+    pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
+
+    /// If present, the networking protocols this rule applies to.
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
+    pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
+
+    /// If present, the destination ports or port ranges this rule applies to.
+    #[schemars(length(max = "VPC_FIREWALL_RULE_MAX_FILTER_LEN"))]
+    pub ports: Option<Vec<L4PortRange>>,
+}
+
+/// The protocols that may be specified in a firewall rule's filter
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+pub enum VpcFirewallRuleProtocol {
+    Tcp,
+    Udp,
+    Icmp(Option<VpcFirewallIcmpFilter>),
+    Icmp6(Option<VpcFirewallIcmpFilter>),
+    // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
+    // Other(u16),
+}
+
+impl VpcFirewallRuleProtocol {
+    /// Returns a string representation of this protocol filter suitable for
+    /// use as an API string or in the database.
+    ///
+    /// This is the inverse of `from_api_string`.
+    pub fn to_api_string(&self) -> String {
+        match self {
+            VpcFirewallRuleProtocol::Tcp => "tcp".to_string(),
+            VpcFirewallRuleProtocol::Udp => "udp".to_string(),
+            VpcFirewallRuleProtocol::Icmp(None) => "icmp".to_string(),
+            VpcFirewallRuleProtocol::Icmp(Some(v)) => {
+                format!("icmp:{}", v.to_api_string())
+            }
+            VpcFirewallRuleProtocol::Icmp6(None) => "icmp6".to_string(),
+            VpcFirewallRuleProtocol::Icmp6(Some(v)) => {
+                format!("icmp6:{}", v.to_api_string())
+            }
+        }
+    }
+
+    /// Parses a protocol filter from the API string format.
+    ///
+    /// This is the inverse of `to_api_string`.
+    pub fn from_api_string(proto: &str) -> Result<Self, Error> {
+        let (ty_str, content_str) = match proto.split_once(':') {
+            None => (proto, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        match (ty_str, content_str) {
+            (lhs, None) if lhs.eq_ignore_ascii_case("tcp") => Ok(Self::Tcp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("udp") => Ok(Self::Udp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(None))
+            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => Ok(
+                Self::Icmp(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
+            ),
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp6") => {
+                Ok(Self::Icmp6(None))
+            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp6") => Ok(
+                Self::Icmp6(Some(VpcFirewallIcmpFilter::from_api_string(rhs)?)),
+            ),
+            (lhs, None) => Err(Error::invalid_value(
+                "vpc_firewall_rule_protocol",
+                format!("unrecognized protocol: {lhs}"),
+            )),
+            (lhs, Some(rhs)) => Err(Error::invalid_value(
+                "vpc_firewall_rule_protocol",
+                format!(
+                    "cannot specify extra filters ({rhs}) for protocol \"{lhs}\""
+                ),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallIcmpFilter {
+    pub icmp_type: u8,
+    pub code: Option<IcmpParamRange>,
+}
+
+impl VpcFirewallIcmpFilter {
+    /// Returns a string representation of this ICMP filter suitable for use
+    /// as part of an API string or in the database.
+    ///
+    /// This is the inverse of `from_api_string`.
+    pub fn to_api_string(&self) -> String {
+        match self.code {
+            None => self.icmp_type.to_string(),
+            Some(code) => format!("{},{code}", self.icmp_type),
+        }
+    }
+
+    /// Parses an ICMP filter from the API string format.
+    ///
+    /// This is the inverse of `to_api_string`.
+    pub fn from_api_string(filter: &str) -> Result<Self, Error> {
+        let (ty_str, code_str) = match filter.split_once(',') {
+            None => (filter, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        Ok(Self {
+            icmp_type: ty_str.parse::<u8>().map_err(|e| {
+                Error::invalid_value(
+                    "icmp_type",
+                    format!("{ty_str:?} unparsable for type: {e}"),
+                )
+            })?,
+            code: code_str
+                .map(|v| {
+                    v.parse::<IcmpParamRange>().map_err(|e| {
+                        Error::invalid_value("code", e.to_string())
+                    })
+                })
+                .transpose()?,
+        })
+    }
+}
+
+impl From<u8> for IcmpParamRange {
+    fn from(value: u8) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl TryFrom<RangeInclusive<u8>> for IcmpParamRange {
+    type Error = IcmpParamRangeError;
+
+    fn try_from(value: RangeInclusive<u8>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(IcmpParamRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
+    }
+}
+
+impl From<IcmpParamRange> for RangeInclusive<u8> {
+    fn from(value: IcmpParamRange) -> Self {
+        value.first..=value.last
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VpcFirewallRuleStatus {
+    Disabled,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VpcFirewallRuleDirection {
+    Inbound,
+    Outbound,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VpcFirewallRuleAction {
+    Allow,
+    Deny,
+}
+
+/// A `VpcFirewallRuleTarget` is used to specify the set of instances to which
+/// a firewall rule applies. You can target instances directly by name, or
+/// specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to
+/// traffic going to all matching instances. Targets are additive: the rule
+/// applies to instances matching ANY target.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
+pub enum VpcFirewallRuleTarget {
+    /// The rule applies to all instances in the VPC
+    Vpc(Name),
+    /// The rule applies to all instances in the VPC Subnet
+    Subnet(Name),
+    /// The rule applies to this specific instance
+    Instance(Name),
+    /// The rule applies to a specific IP address
+    Ip(IpAddr),
+    /// The rule applies to a specific IP subnet
+    IpNet(oxnet::IpNet),
+    // Tags not yet implemented
+    // Tag(Name),
+}
+
+/// The `VpcFirewallRuleHostFilter` is used to filter traffic on the basis of
+/// its source or destination host.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Display,
+    FromStr,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[display("{}:{0}", style = "lowercase")]
+pub enum VpcFirewallRuleHostFilter {
+    /// The rule applies to traffic from/to all instances in the VPC
+    Vpc(Name),
+    /// The rule applies to traffic from/to all instances in the VPC Subnet
+    Subnet(Name),
+    /// The rule applies to traffic from/to this specific instance
+    Instance(Name),
+    // Tags not yet implemented
+    // Tag(Name),
+    /// The rule applies to traffic from/to a specific IP address
+    Ip(IpAddr),
+    /// The rule applies to traffic from/to a specific IP subnet
+    IpNet(oxnet::IpNet),
+    // TODO: Internet gateways not yet implemented
+    // #[display("inetgw:{0}")]
+    // InternetGateway(Name),
+}
+
+/// Port number used in a transport-layer protocol like TCP or UDP
+/// Note that 0 is an invalid port number.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Display,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct L4Port(pub NonZeroU16);
+
+impl From<NonZeroU16> for L4Port {
+    fn from(port: NonZeroU16) -> L4Port {
+        L4Port(port)
+    }
+}
+
+impl TryFrom<u16> for L4Port {
+    type Error = <NonZeroU16 as TryFrom<u16>>::Error;
+    fn try_from(port: u16) -> Result<L4Port, Self::Error> {
+        NonZeroU16::try_from(port).map(L4Port)
+    }
+}
+
+/// A range of transport layer ports. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
+pub struct L4PortRange {
+    /// The first port in the range
+    pub first: L4Port,
+    /// The last port in the range
+    pub last: L4Port,
+}
+
+impl FromStr for L4PortRange {
+    type Err = L4PortRangeError;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
+        match range.split_once('-') {
+            None => {
+                let port = range
+                    .parse::<NonZeroU16>()
+                    .map_err(|e| L4PortRangeError::Value(range.into(), e))?
+                    .into();
+                Ok(L4PortRange { first: port, last: port })
+            }
+            Some(("", _)) => Err(L4PortRangeError::MissingStart),
+            Some((_, "")) => Err(L4PortRangeError::MissingEnd),
+            Some((left, right)) => {
+                let first = left
+                    .parse::<NonZeroU16>()
+                    .map_err(|e| L4PortRangeError::Value(left.into(), e))?
+                    .into();
+                let last = right
+                    .parse::<NonZeroU16>()
+                    .map_err(|e| L4PortRangeError::Value(right.into(), e))?
+                    .into();
+                Ok(L4PortRange { first, last })
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum L4PortRangeError {
+    #[error("range has no start value")]
+    MissingStart,
+    #[error("range has no end value")]
+    MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
+    #[error("{0:?} unparsable for type: {1}")]
+    Value(String, ParseIntError),
+}
+
+impl From<L4PortRangeError> for Error {
+    fn from(value: L4PortRangeError) -> Self {
+        Error::invalid_value("l4_port_range", value.to_string())
+    }
+}
+
+impl TryFrom<String> for L4PortRange {
+    type Error = <L4PortRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for L4PortRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
+        } else {
+            write!(f, "{}-{}", self.first, self.last)
+        }
+    }
+}
+
+impl JsonSchema for L4PortRange {
+    fn schema_name() -> String {
+        "L4PortRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of IP ports".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of IP ports. The second port \
+                    may be omitted to represent a single port."
+                        .to_string(),
+                ),
+                examples: vec!["22".into(), "6667-7000".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(11),  // 5 digits for each port and the dash
+                min_length: Some(1),
+                pattern: Some(
+                    r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        }.into()
+    }
+}
+
+impl From<L4Port> for L4PortRange {
+    fn from(value: L4Port) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl TryFrom<RangeInclusive<L4Port>> for L4PortRange {
+    type Error = L4PortRangeError;
+
+    fn try_from(value: RangeInclusive<L4Port>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(L4PortRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
+    }
+}
+
+/// A range of ICMP(v6) types or codes. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
+pub struct IcmpParamRange {
+    /// The first number in the range
+    pub first: u8,
+    /// The last number in the range
+    pub last: u8,
+}
+
+impl FromStr for IcmpParamRange {
+    type Err = IcmpParamRangeError;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
+        match range.split_once('-') {
+            None => {
+                let param = range
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(range.into(), e))?;
+                Ok(IcmpParamRange { first: param, last: param })
+            }
+            Some(("", _)) => Err(IcmpParamRangeError::MissingStart),
+            Some((_, "")) => Err(IcmpParamRangeError::MissingEnd),
+            Some((left, right)) => {
+                let first = left
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(left.into(), e))?;
+                let last = right
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
+
+                Ok(IcmpParamRange { first, last })
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum IcmpParamRangeError {
+    #[error("range has no start value")]
+    MissingStart,
+    #[error("range has no end value")]
+    MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
+    #[error("{0:?} unparsable for type: {1}")]
+    Value(String, ParseIntError),
+}
+
+impl TryFrom<String> for IcmpParamRange {
+    type Error = <IcmpParamRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for IcmpParamRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
+        } else {
+            write!(f, "{}-{}", self.first, self.last)
+        }
+    }
+}
+
+impl JsonSchema for IcmpParamRange {
+    fn schema_name() -> String {
+        "IcmpParamRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of ICMP(v6) types or codes".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of ICMP(v6) types or codes. \
+                    The second value may be omitted to represent a single parameter."
+                        .to_string(),
+                ),
+                examples: vec!["3".into(), "20-120".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(7),  // 3 digits for each value and the dash
+                min_length: Some(1),
+                pattern: Some(
+                    r#"^[0-9]{1,3}(-[0-9]{1,3})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        }.into()
+    }
+}
+
+/// The `MacAddr` represents a Media Access Control (MAC) address, used to uniquely identify
+/// hardware devices on a network.
+// NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
+// this crate does not implement `JsonSchema`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    SerializeDisplay,
+    Hash,
+    Diffable,
+)]
+#[daft(leaf)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(any(test, feature = "testing"), map(|x: [u8; 6]| x.into()))]
+    pub macaddr::MacAddr6,
+);
+
+impl MacAddr {
+    // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
+    // address are constrained to be in the virtual address range
+    // A8:40:25:F_:__:__. Even further, the range F0:00:00 - FE:FF:FF is
+    // reserved for customer-visible addresses (FF:00:00-FF:FF:FF is for
+    // system MAC addresses). See RFD 174 for the discussion of the virtual
+    // range, and
+    // https://github.com/oxidecomputer/omicron/pull/955#discussion_r856432498
+    // for an initial discussion of the customer/system address range split.
+    // The system range is further split between FF:00:00-FF:7F:FF for
+    // fixed addresses (e.g., the OPTE virtual gateway MAC) and
+    // FF:80:00-FF:FF:FF for dynamically allocated addresses (e.g., service
+    // vNICs).
+    //
+    // F0:00:00 - FF:FF:FF    Oxide Virtual Address Range
+    //     F0:00:00 - FE:FF:FF    Guest Addresses
+    //     FF:00:00 - FF:FF:FF    System Addresses
+    //         FF:00:00 - FF:7F:FF    Reserved Addresses
+    //         FF:80:00 - FF:FF:FF    Runtime allocatable
+    pub const MIN_GUEST_ADDR: i64 = 0xA8_40_25_F0_00_00;
+    pub const MAX_GUEST_ADDR: i64 = 0xA8_40_25_FE_FF_FF;
+    pub const MIN_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_00_00;
+    pub const MAX_SYSTEM_RESV: i64 = 0xA8_40_25_FF_7F_FF;
+    pub const MAX_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_FF_FF;
+
+    /// Generate a random MAC address for a guest network interface
+    pub fn random_guest() -> Self {
+        let value = rand::rng()
+            .random_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Generate a random MAC address in the system address range
+    pub fn random_system() -> Self {
+        let value = rand::rng()
+            .random_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Iterate the MAC addresses in the system address range
+    /// (used as an allocator in contexts where collisions are not expected and
+    /// determinism is useful, like in the test suite)
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> + Send {
+        ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
+            .map(Self::from_i64)
+    }
+
+    /// Is this a MAC in the Guest Addresses range
+    pub fn is_guest(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_GUEST_ADDR && value <= Self::MAX_GUEST_ADDR
+    }
+
+    /// Is this a MAC in the System Addresses range
+    pub fn is_system(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_SYSTEM_ADDR && value <= Self::MAX_SYSTEM_ADDR
+    }
+
+    /// Construct a MAC address from its i64 big-endian byte representation.
+    // NOTE: This is the representation used in the database.
+    pub fn from_i64(value: i64) -> Self {
+        let bytes = value.to_be_bytes();
+        Self(macaddr::MacAddr6::new(
+            bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ))
+    }
+
+    /// Convert a MAC address to its i64 big-endian byte representation
+    // NOTE: This is the representation used in the database.
+    pub fn to_i64(self) -> i64 {
+        let bytes = self.0.as_bytes();
+        i64::from_be_bytes([
+            0, 0, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+        ])
+    }
+}
+
+impl From<macaddr::MacAddr6> for MacAddr {
+    fn from(mac: macaddr::MacAddr6) -> Self {
+        Self(mac)
+    }
+}
+
+impl FromStr for MacAddr {
+    type Err = macaddr::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.split(':')
+            .map(|b| format!("{:0>2}", b))
+            .collect::<Vec<String>>()
+            .join(":")
+            .parse()
+            .map(MacAddr)
+    }
+}
+
+impl TryFrom<String> for MacAddr {
+    type Error = <Self as FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        MacAddr::from_str(s.as_ref())
+    }
+}
+
+impl std::ops::Deref for MacAddr {
+    type Target = macaddr::MacAddr6;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for MacAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for MacAddr {
+    fn schema_name() -> String {
+        "MacAddr".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A MAC address".to_string()),
+                description: Some(
+                    "A Media Access Control address, in EUI-48 format"
+                        .to_string(),
+                ),
+                examples: vec!["ff:ff:ff:ff:ff:ff".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(17), // 12 hex characters and 5 ":"-separators
+                min_length: Some(5),  // Just 5 ":" separators
+                pattern: Some(
+                    r#"^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// A Geneve Virtual Network Identifier
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    Diffable,
+)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct Vni(
+    #[cfg_attr(any(test, feature = "testing"), strategy(0..=Vni::MAX_VNI))] u32,
+);
+
+impl Vni {
+    /// Virtual Network Identifiers are constrained to be 24-bit values.
+    pub const MAX_VNI: u32 = 0xFF_FFFF;
+
+    /// The VNI for the builtin services VPC.
+    pub const SERVICES_VNI: Self = Self(100);
+
+    /// VNI default if no VPC is provided for a multicast group.
+    ///
+    /// This is a low-numbered VNI to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved range yet.
+    pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
+
+    /// Oxide reserves a slice of initial VNIs for its own use.
+    pub const MIN_GUEST_VNI: u32 = 1024;
+
+    /// Create a new random VNI.
+    pub fn random() -> Self {
+        Self(rand::rng().random_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+    }
+
+    /// Create a new random VNI in the Oxide-reserved space.
+    pub fn random_system() -> Self {
+        Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
+    }
+
+    /// Returns the VNI as a raw u32.
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<Vni> for u32 {
+    fn from(vni: Vni) -> u32 {
+        vni.0
+    }
+}
+
+impl TryFrom<u32> for Vni {
+    type Error = Error;
+
+    fn try_from(x: u32) -> Result<Self, Error> {
+        if x <= Self::MAX_VNI {
+            Ok(Self(x))
+        } else {
+            Err(Error::internal_error(
+                format!("Invalid Geneve VNI: {}", x).as_str(),
+            ))
+        }
+    }
+}
+
+impl TryFrom<i32> for Vni {
+    type Error = Error;
+
+    fn try_from(x: i32) -> Result<Self, Error> {
+        Self::try_from(u32::try_from(x).map_err(|_| {
+            Error::internal_error(format!("Invalid Geneve VNI: {}", x).as_str())
+        })?)
+    }
+}
+
+/// An `InstanceNetworkInterface` represents a virtual network interface device
+/// attached to an instance.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InstanceNetworkInterface {
+    /// common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The Instance to which the interface belongs.
+    pub instance_id: Uuid,
+
+    /// The VPC to which the interface belongs.
+    pub vpc_id: Uuid,
+
+    /// The subnet to which the interface belongs.
+    pub subnet_id: Uuid,
+
+    /// The MAC address assigned to this interface.
+    pub mac: MacAddr,
+
+    /// True if this interface is the primary for the instance to which it's
+    /// attached.
+    pub primary: bool,
+
+    /// The VPC-private IP stack for this interface.
+    pub ip_stack: PrivateIpStack,
+}
+
+/// The VPC-private IP stack for a network interface.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum PrivateIpStack {
+    /// The interface has only an IPv4 stack.
+    V4(PrivateIpv4Stack),
+    /// The interface has only an IPv6 stack.
+    V6(PrivateIpv6Stack),
+    /// The interface is dual-stack IPv4 and IPv6.
+    DualStack { v4: PrivateIpv4Stack, v6: PrivateIpv6Stack },
+}
+
+impl PrivateIpStack {
+    /// Return the IPv4 stack, if it exists.
+    pub fn ipv4_stack(&self) -> Option<&PrivateIpv4Stack> {
+        match self {
+            PrivateIpStack::V4(v4) | PrivateIpStack::DualStack { v4, .. } => {
+                Some(v4)
+            }
+            PrivateIpStack::V6(_) => None,
+        }
+    }
+
+    /// Return the VPC-private IPv4 address, if it exists.
+    pub fn ipv4_addr(&self) -> Option<&Ipv4Addr> {
+        self.ipv4_stack().map(|s| &s.ip)
+    }
+
+    /// Return the IPv6 stack, if it exists.
+    pub fn ipv6_stack(&self) -> Option<&PrivateIpv6Stack> {
+        match self {
+            PrivateIpStack::V6(v6) | PrivateIpStack::DualStack { v6, .. } => {
+                Some(v6)
+            }
+            PrivateIpStack::V4(_) => None,
+        }
+    }
+
+    /// Return the VPC-private IPv6 address, if it exists.
+    pub fn ipv6_addr(&self) -> Option<&Ipv6Addr> {
+        self.ipv6_stack().map(|s| &s.ip)
+    }
+
+    /// Return true if this is an IPv4-only stack, and false otherwise.
+    pub fn is_ipv4_only(&self) -> bool {
+        matches!(self, PrivateIpStack::V4(_))
+    }
+
+    /// Return true if this is an IPv6-only stack, and false otherwise.
+    pub fn is_ipv6_only(&self) -> bool {
+        matches!(self, PrivateIpStack::V6(_))
+    }
+
+    /// Return true if this is dual-stack, and false otherwise.
+    pub fn is_dual_stack(&self) -> bool {
+        matches!(self, PrivateIpStack::DualStack { .. })
+    }
+
+    /// Return the IPv4 transit IPs, if they exist.
+    pub fn ipv4_transit_ips(&self) -> Option<&[Ipv4Net]> {
+        self.ipv4_stack().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return the IPv6 transit IPs, if they exist.
+    pub fn ipv6_transit_ips(&self) -> Option<&[Ipv6Net]> {
+        self.ipv6_stack().map(|c| c.transit_ips.as_slice())
+    }
+
+    /// Return all transit IPs, of any IP version.
+    pub fn all_transit_ips(&self) -> impl Iterator<Item = IpNet> + '_ {
+        let v4 = self
+            .ipv4_transit_ips()
+            .into_iter()
+            .flatten()
+            .copied()
+            .map(Into::into);
+        let v6 = self
+            .ipv6_transit_ips()
+            .into_iter()
+            .flatten()
+            .copied()
+            .map(Into::into);
+        v4.chain(v6)
+    }
+}
+
+/// The VPC-private IPv4 stack for a network interface
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct PrivateIpv4Stack {
+    /// The VPC-private IPv4 address for the interface.
+    pub ip: Ipv4Addr,
+    /// A set of additional IPv4 networks that this interface may send and
+    /// receive traffic on.
+    pub transit_ips: Vec<Ipv4Net>,
+}
+
+/// The VPC-private IPv6 stack for a network interface
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct PrivateIpv6Stack {
+    /// The VPC-private IPv6 address for the interface.
+    pub ip: Ipv6Addr,
+    /// A set of additional IPv6 networks that this interface may send and
+    /// receive traffic on.
+    pub transit_ips: Vec<Ipv6Net>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum Digest {
+    Sha256(String),
+}
+
+impl FromStr for Digest {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.starts_with("sha256:") {
+            let parts: Vec<&str> = s.split(':').collect();
+            if parts.len() != 2 {
+                anyhow::bail!("digest string {} should have two parts", s);
+            }
+
+            if parts[1].len() != 64 {
+                anyhow::bail!("sha256 length must be 64");
+            }
+
+            return Ok(Digest::Sha256(parts[1].to_string()));
+        }
+
+        anyhow::bail!("invalid digest string {}", s);
+    }
+}
+
+impl std::fmt::Display for Digest {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{}",
+            match self {
+                Digest::Sha256(value) => format!("sha256:{}", value),
+            }
+        )
+    }
+}
+
+/// Configuration of inbound ICMP allowed by API services.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+pub struct ServiceIcmpConfig {
+    /// When enabled, Nexus is able to receive ICMP Destination Unreachable
+    /// type 3 (port unreachable) and type 4 (fragmentation needed),
+    /// Redirect, and Time Exceeded messages. These enable Nexus to perform Path
+    /// MTU discovery and better cope with fragmentation issues. Otherwise all
+    /// inbound ICMP traffic will be dropped.
+    pub enabled: bool,
+}
+
+/// A networking probe
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
+)]
+pub struct Probe {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
+}
+
+/// Use instead of Option in API request body structs to get a field that can
+/// be null (parsed as `None`) but is not optional. Unlike Option, Nullable
+/// will fail to parse if the key is not present. The JSON Schema in the
+/// OpenAPI definition will also reflect that the field is required. See
+/// <https://github.com/serde-rs/serde/issues/2753>.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Nullable<T>(pub Option<T>);
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(option: Option<T>) -> Self {
+        Nullable(option)
+    }
+}
+
+impl<T> Deref for Nullable<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// it looks like we're just using Option's impl here, so why not derive instead?
+// For some reason, deriving JsonSchema + #[serde(transparent)] doesn't work --
+// it almost does, but the field does not end up marked required in the schema.
+// There must be some special handling of Option somewhere causing it to be
+// marked optional rather than nullable + required.
+
+impl<T: JsonSchema> JsonSchema for Nullable<T> {
+    fn schema_name() -> String {
+        T::schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Option::<T>::json_schema(generator)
+    }
+
+    fn is_referenceable() -> bool {
+        Option::<T>::is_referenceable()
+    }
+}
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        // This line is required to get a parse error on missing fields.
+        // It seems that when the field is missing in the JSON, struct
+        // deserialization produces an error before this function is even hit,
+        // and that error is passed in here inside `deserializer`. If we don't
+        // do this Value::deserialize to cause that error to be returned as a
+        // missing field error, Option's deserialize will eat it by turning it
+        // into a successful parse as None.
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        use serde::de::Error;
+        Option::<T>::deserialize(value).map_err(D::Error::custom).map(Nullable)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use serde::Deserialize;
+    use serde::Serialize;
+
+    use super::RouteDestination;
+    use super::RouteTarget;
+    use super::VpcFirewallIcmpFilter;
+    use super::VpcFirewallRuleHostFilter;
+    use super::VpcFirewallRuleTarget;
+    use super::{
+        ByteCount, ByteCountParseError, ByteCountRangeError, Digest, L4Port,
+        L4PortRange, Name, VpcFirewallRuleAction, VpcFirewallRuleDirection,
+        VpcFirewallRuleFilter, VpcFirewallRulePriority,
+        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
+        VpcFirewallRuleUpdateParams,
+    };
+    use crate::api::external::Error;
+    use crate::api::external::Hostname;
+    use crate::api::external::ResourceType;
+    use semver::Version;
+    use std::convert::TryFrom;
+    use std::str::FromStr;
+
+    // This test originates from when we had a wrapper struct around
+    // `semver::Version`, but it's probably worth carrying this test that
+    // ensures the behavior we rely on is accurate.
+    #[test]
+    fn test_semver_serialize() {
+        #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+        struct MyStruct {
+            version: Version,
+        }
+
+        let v = MyStruct { version: Version::new(1, 2, 3) };
+        let expected = "{\"version\":\"1.2.3\"}";
+        assert_eq!(serde_json::to_string(&v).unwrap(), expected);
+        assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);
+    }
+
+    #[test]
+    fn test_name_parse() {
+        // Error cases
+        let long_name =
+            "a234567890123456789012345678901234567890123456789012345678901234";
+        assert_eq!(long_name.len(), 64);
+        let error_cases: Vec<(&str, &str)> = vec![
+            ("", "name requires at least one character"),
+            (long_name, "name may contain at most 63 characters"),
+            ("123", "name must begin with an ASCII lowercase character"),
+            ("-abc", "name must begin with an ASCII lowercase character"),
+            ("abc-", "name cannot end with \"-\""),
+            (
+                "aBc",
+                "name contains invalid character: \"B\" (allowed characters \
+                 are lowercase ASCII, digits, and \"-\")",
+            ),
+            (
+                "a_c",
+                "name contains invalid character: \"_\" (allowed characters \
+                 are lowercase ASCII, digits, and \"-\")",
+            ),
+            (
+                "a\u{00e9}cc",
+                "name contains invalid character: \"\u{00e9}\" (allowed \
+                 characters are lowercase ASCII, digits, and \"-\")",
+            ),
+            (
+                "a7e55044-10b1-426f-9247-bb680e5fe0c8",
+                "name cannot be a UUID to avoid ambiguity with IDs",
+            ),
+        ];
+
+        for (input, expected_message) in error_cases {
+            eprintln!("check name \"{}\" (expecting error)", input);
+            assert_eq!(input.parse::<Name>().unwrap_err(), expected_message);
+        }
+
+        // Success cases
+        let valid_names: Vec<&str> = vec![
+            "a",
+            "abc",
+            "abc-123",
+            "a123",
+            "ok-a7e55044-10b1-426f-9247-bb680e5fe0c8",
+            "a7e55044-10b1-426f-9247-bb680e5fe0c8-ok",
+            &long_name[0..63],
+        ];
+
+        for name in valid_names {
+            eprintln!("check name \"{}\" (should be valid)", name);
+            assert_eq!(name, name.parse::<Name>().unwrap().as_str());
+        }
+    }
+
+    #[test]
+    fn test_resource_name_parse() {
+        let bad_inputs = vec![
+            "bogus",
+            "",
+            "Project",
+            "oRgAnIzAtIoN",
+            "organisation",
+            "vpc subnet",
+            "vpc_subnet",
+        ];
+        for input in bad_inputs {
+            eprintln!("check resource type {:?} (expecting error)", input);
+            let result = input
+                .parse::<ResourceType>()
+                .expect_err("unexpectedly succeeded");
+            eprintln!("(expected) error: {:?}", result);
+        }
+
+        assert_eq!(
+            ResourceType::Project,
+            "project".parse::<ResourceType>().unwrap()
+        );
+        assert_eq!(
+            ResourceType::VpcSubnet,
+            "vpc-subnet".parse::<ResourceType>().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_name_parse_from_param() {
+        let result = Name::from_param(String::from("my-name"), "the_name");
+        assert!(result.is_ok());
+        assert_eq!(result, Ok("my-name".parse().unwrap()));
+
+        let result = Name::from_param(String::from(""), "the_name");
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::invalid_value(
+                "the_name",
+                "name requires at least one character"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_bytecount() {
+        // Smallest supported value: all constructors
+        let zero = ByteCount::from(0u32);
+        assert_eq!(0, zero.to_bytes());
+        assert_eq!(0, zero.to_whole_kibibytes());
+        assert_eq!(0, zero.to_whole_mebibytes());
+        assert_eq!(0, zero.to_whole_gibibytes());
+        assert_eq!(0, zero.to_whole_tebibytes());
+        let zero = ByteCount::try_from(0i64).unwrap();
+        assert_eq!(0, zero.to_bytes());
+        let zero = ByteCount::try_from(0u64).unwrap();
+        assert_eq!(0, zero.to_bytes());
+
+        // Largest supported value: both constructors that support it.
+        let max = ByteCount::try_from(i64::MAX).unwrap();
+        assert_eq!(i64::MAX, max.to_bytes() as i64);
+        assert_eq!(i64::MAX, i64::from(max));
+
+        let maxu64 = u64::try_from(i64::MAX).unwrap();
+        let max = ByteCount::try_from(maxu64).unwrap();
+        assert_eq!(i64::MAX, max.to_bytes() as i64);
+        assert_eq!(i64::MAX, i64::from(max));
+        assert_eq!(
+            (i64::MAX / 1024 / 1024 / 1024 / 1024) as u64,
+            max.to_whole_tebibytes()
+        );
+
+        // Value too large (only one constructor can hit this)
+        let bogus = ByteCount::try_from(maxu64 + 1).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too large for a byte count");
+        // Value too small (only one constructor can hit this)
+        let bogus = ByteCount::try_from(-1i64).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too small for a byte count");
+        // For good measure, let's check i64::MIN
+        let bogus = ByteCount::try_from(i64::MIN).unwrap_err();
+        assert_eq!(bogus.to_string(), "value is too small for a byte count");
+
+        // The largest input value to the `from_*_u32` methods do not create
+        // a value larger than i64::MAX.
+        assert!(
+            ByteCount::from_kibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_mebibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_gibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+
+        // We've now exhaustively tested both sides of all boundary conditions
+        // for all three constructors (to the extent that that's possible).
+        // Check non-trivial cases for the various accessor functions.  This
+        // means picking values in the middle of the range.
+        let three_terabytes = 3_000_000_000_000u64;
+        let tb3 = ByteCount::try_from(three_terabytes).unwrap();
+        assert_eq!(three_terabytes, tb3.to_bytes());
+        assert_eq!(2929687500, tb3.to_whole_kibibytes());
+        assert_eq!(2861022, tb3.to_whole_mebibytes());
+        assert_eq!(2793, tb3.to_whole_gibibytes());
+        assert_eq!(2, tb3.to_whole_tebibytes());
+
+        let three_tebibytes = 3u64 * 1024 * 1024 * 1024 * 1024;
+        let tib3 = ByteCount::try_from(three_tebibytes).unwrap();
+        assert_eq!(three_tebibytes, tib3.to_bytes());
+        assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());
+        assert_eq!(3 * 1024 * 1024, tib3.to_whole_mebibytes());
+        assert_eq!(3 * 1024, tib3.to_whole_gibibytes());
+        assert_eq!(3, tib3.to_whole_tebibytes());
+    }
+
+    #[test]
+    fn test_bytecount_display() {
+        assert_eq!(format!("{}", ByteCount::from(0u32)), "0 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1023)), "1023 B".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1024)), "1 KiB".to_string());
+        assert_eq!(format!("{}", ByteCount::from(1025)), "1025 B".to_string());
+        assert_eq!(
+            format!("{}", ByteCount::from(1024 * 100)),
+            "100 KiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_mebibytes_u32(1)),
+            "1 MiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_gibibytes_u32(1)),
+            "1 GiB".to_string()
+        );
+        assert_eq!(
+            format!("{}", ByteCount::from_gibibytes_u32(1024)),
+            "1 TiB".to_string()
+        );
+    }
+
+    #[test]
+    fn test_bytecount_parse() {
+        const KIB: u64 = 1024;
+        const MIB: u64 = KIB * 1024;
+        const GIB: u64 = MIB * 1024;
+        const TIB: u64 = GIB * 1024;
+        let cases: &[(&str, u64)] = &[
+            // Bare integers are interpreted as bytes.
+            ("0", 0),
+            ("1", 1),
+            ("12", 12),
+            ("1025", 1025),
+            // Every suffix.
+            ("0B", 0),
+            ("1B", 1),
+            ("1025B", 1025),
+            ("1KiB", KIB),
+            ("100KiB", 100 * KIB),
+            ("2MiB", 2 * MIB),
+            ("3GiB", 3 * GIB),
+            ("4TiB", 4 * TIB),
+            // Whitespace between the number and the suffix, and around the
+            // whole input, is ignored.
+            ("1 KiB", KIB),
+            ("1   KiB", KIB),
+            ("  10 GiB  ", 10 * GIB),
+            ("\t5 B\n", 5),
+            ("  42  ", 42),
+            // Largest representable value, as bytes and as a multiple.
+            ("9223372036854775807", i64::MAX as u64),
+            ("9223372036854775807 B", i64::MAX as u64),
+            ("8388607 TiB", 8388607 * TIB),
+        ];
+        for &(input, expected) in cases {
+            let parsed = input
+                .parse::<ByteCount>()
+                .unwrap_or_else(|e| panic!("failed to parse {input:?}: {e}"));
+            assert_eq!(parsed.to_bytes(), expected, "input: {input:?}");
+        }
+    }
+
+    #[test_strategy::proptest]
+    fn test_bytecount_parse_roundtrips_display(value: ByteCount) {
+        let displayed = value.to_string();
+        let parsed = displayed
+            .parse::<ByteCount>()
+            .unwrap_or_else(|e| panic!("failed to parse {displayed:?}: {e}"));
+        assert_eq!(parsed, value, "displayed: {displayed:?}");
+    }
+
+    #[test]
+    fn test_bytecount_parse_errors() {
+        // Unrecognized suffixes.
+        for (input, suffix) in [
+            ("1 kb", "kb"),
+            ("10x", "x"),
+            ("12 bytes", "bytes"),
+            ("100 PiB", "PiB"),
+            ("5 x", "x"),
+            // Near-misses that include a valid suffix as a substring of an
+            // invalid one.
+            ("1 EiB", "EiB"),
+            ("1 iB", "iB"),
+            ("1 KKiB", "KKiB"),
+            ("1 BB", "BB"),
+            ("1 TiBB", "TiBB"),
+            // Single-letter abbreviations are ambiguous between binary and
+            // decimal units, so they're rejected.
+            ("1 K", "K"),
+            ("1 M", "M"),
+            ("1 G", "G"),
+            ("1 T", "T"),
+            // Suffixes are case-sensitive, since a lowercase "b" commonly
+            // means bits rather than bytes.
+            ("1 b", "b"),
+            ("1 kib", "kib"),
+            ("1 KIB", "KIB"),
+            ("1 gib", "gib"),
+            ("1 Mib", "Mib"),
+        ] {
+            match input.parse::<ByteCount>() {
+                Err(ByteCountParseError::InvalidSuffix(s)) => {
+                    assert_eq!(s, suffix, "input: {input:?}")
+                }
+                other => panic!(
+                    "expected InvalidSuffix({suffix:?}) for {input:?}, got \
+                     {other:?}"
+                ),
+            }
+        }
+
+        // Inputs whose numeric part is not a non-negative integer. The numeric
+        // part runs up to and including the last ASCII digit. If there are no
+        // digits, then a valid suffix alone has an empty numeric part, and
+        // anything else is entirely numeric part.
+        for (input, expected_digits) in [
+            ("-1", "-1"),
+            ("-1 KiB", "-1"),
+            ("1.5 GiB", "1.5"),
+            ("x1 KiB", "x1"),
+            ("1 2 KiB", "1 2"),
+            ("", ""),
+            ("   ", ""),
+            ("B", ""),
+            (" KiB ", ""),
+            ("abc", "abc"),
+            (" -KiB ", "-KiB"),
+            ("PiB", "PiB"),
+            // Rejected suffixes alone are not valid suffixes, so the whole
+            // input is treated as the numeric part.
+            ("K", "K"),
+            ("kib", "kib"),
+        ] {
+            match input.parse::<ByteCount>() {
+                Err(ByteCountParseError::InvalidInteger { digits, .. }) => {
+                    assert_eq!(digits, expected_digits, "input: {input:?}")
+                }
+                other => panic!(
+                    "expected InvalidInteger {{ digits: \
+                     {expected_digits:?} }} for {input:?}, got {other:?}"
+                ),
+            }
+        }
+
+        // Values that don't fit in a `ByteCount`, either because the
+        // multiplication overflows `u64`, or the result exceeds `i64::MAX`.
+        for input in [
+            "9223372036854775808",
+            "9223372036854775808 B",
+            "8388608 TiB",
+            "18446744073709551615 KiB",
+        ] {
+            match input.parse::<ByteCount>() {
+                Err(ByteCountParseError::OutOfRange(
+                    ByteCountRangeError::TooLarge,
+                )) => {}
+                other => panic!(
+                    "expected OutOfRange(TooLarge) for {input:?}, got \
+                     {other:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn test_bytecount_parse_error_display() {
+        use std::fmt::Write;
+
+        let inputs = [
+            // InvalidSuffix
+            "10 PiB",
+            "10 G",
+            "1 K B",
+            // InvalidInteger
+            "",
+            "KiB",
+            "abc",
+            "-1 KiB",
+            "1.5 GiB",
+            "99999999999999999999 B",
+            // OutOfRange
+            "9223372036854775808",
+            "8388608 TiB",
+        ];
+
+        let mut found_output = String::new();
+        for input in inputs {
+            let err = input.parse::<ByteCount>().expect_err(input);
+            let err = slog_error_chain::InlineErrorChain::new(&err);
+            writeln!(found_output, "input: {input:?}\nerror: {err}\n").unwrap();
+        }
+
+        expectorate::assert_contents(
+            "tests/output/bytecount-parse-errors.txt",
+            &found_output,
+        );
+    }
+
+    #[test]
+    fn test_ip_port_range_from_str() {
+        assert_eq!(
+            L4PortRange::try_from("65532".to_string()),
+            Ok(L4PortRange {
+                first: L4Port::try_from(65532).unwrap(),
+                last: L4Port::try_from(65532).unwrap()
+            })
+        );
+        assert_eq!(
+            L4PortRange::try_from("22-53".to_string()),
+            Ok(L4PortRange {
+                first: L4Port::try_from(22).unwrap(),
+                last: L4Port::try_from(53).unwrap()
+            })
+        );
+
+        assert_eq!(
+            L4PortRange::try_from("".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            L4PortRange::try_from("65536".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"65536\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            L4PortRange::try_from("65535-65536".to_string())
+                .map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"65536\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            L4PortRange::try_from("0x23".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0x23\" unparsable for type: invalid digit found in string"
+            ))
+        );
+        assert_eq!(
+            L4PortRange::try_from("0".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0\" unparsable for type: number would be zero for non-zero type"
+            ))
+        );
+        assert_eq!(
+            L4PortRange::try_from("0-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0\" unparsable for type: number would be zero for non-zero type"
+            ))
+        );
+        assert_eq!(
+            L4PortRange::try_from("-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "range has no start value"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_ip_port_range_into_str() {
+        let range = L4PortRange {
+            first: L4Port::try_from(12345).unwrap(),
+            last: L4Port::try_from(12345).unwrap(),
+        }
+        .to_string();
+        assert_eq!(range, "12345");
+
+        let range: String = L4PortRange {
+            first: L4Port::try_from(1).unwrap(),
+            last: L4Port::try_from(1024).unwrap(),
+        }
+        .to_string();
+        assert_eq!(range, "1-1024");
+    }
+
+    #[test]
+    fn test_firewall_deserialization() {
+        let json = r#"{
+            "rules": [
+              {
+                "name": "allow-internal-inbound",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": {"hosts": [ { "type": "vpc", "value": "default" } ]},
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic between instances"
+              },
+              {
+                "name": "rule2",
+                "status": "disabled",
+                "direction": "outbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": {"ports": [ "22-25", "27" ], "protocols": [ { "type": "udp" } ]},
+                "action": "deny",
+                "priority": 65533,
+                "description": "second rule"
+              }
+            ]
+          }"#;
+        let params =
+            serde_json::from_str::<VpcFirewallRuleUpdateParams>(json).unwrap();
+        assert_eq!(params.rules.len(), 2);
+        assert_eq!(
+            params.rules[0],
+            VpcFirewallRuleUpdate {
+                name: Name::try_from("allow-internal-inbound".to_string())
+                    .unwrap(),
+                status: VpcFirewallRuleStatus::Enabled,
+                direction: VpcFirewallRuleDirection::Inbound,
+                targets: vec![VpcFirewallRuleTarget::Vpc(
+                    "default".parse().unwrap()
+                )],
+                filters: VpcFirewallRuleFilter {
+                    hosts: Some(vec![VpcFirewallRuleHostFilter::Vpc(
+                        "default".parse().unwrap()
+                    )]),
+                    ports: None,
+                    protocols: None,
+                },
+                action: VpcFirewallRuleAction::Allow,
+                priority: VpcFirewallRulePriority(65534),
+                description: "allow inbound traffic between instances"
+                    .to_string(),
+            }
+        );
+        assert_eq!(
+            params.rules[1],
+            VpcFirewallRuleUpdate {
+                name: Name::try_from("rule2".to_string()).unwrap(),
+                status: VpcFirewallRuleStatus::Disabled,
+                direction: VpcFirewallRuleDirection::Outbound,
+                targets: vec![VpcFirewallRuleTarget::Vpc(
+                    "default".parse().unwrap()
+                )],
+                filters: VpcFirewallRuleFilter {
+                    hosts: None,
+                    ports: Some(vec![
+                        L4PortRange {
+                            first: L4Port::try_from(22).unwrap(),
+                            last: L4Port::try_from(25).unwrap()
+                        },
+                        L4PortRange {
+                            first: L4Port::try_from(27).unwrap(),
+                            last: L4Port::try_from(27).unwrap()
+                        }
+                    ]),
+                    protocols: Some(vec![VpcFirewallRuleProtocol::Udp]),
+                },
+                action: VpcFirewallRuleAction::Deny,
+                priority: VpcFirewallRulePriority(65533),
+                description: "second rule".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_ipv6_net_operations() {
+        use super::Ipv6NetExt;
+        use oxnet::Ipv6Net;
+
+        assert!("fd00::/8".parse::<Ipv6Net>().unwrap().is_unique_local());
+        assert!(!"fe00::/8".parse::<Ipv6Net>().unwrap().is_unique_local());
+
+        assert!("fd00::/48".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+        assert!(!"fe00::/48".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+        assert!(!"fd00::/40".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+
+        let vpc_prefix = "fd00::/48".parse::<Ipv6Net>().unwrap();
+        assert!(
+            "fd00::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd10::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd00::/63".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+    }
+
+    #[test]
+    fn test_route_target_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        assert_eq!(RouteTarget::Vpc(name.clone()), "vpc:foo".parse().unwrap());
+        assert_eq!(
+            RouteTarget::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteTarget::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteTarget::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<RouteTarget>().is_err());
+        assert!("foo".parse::<RouteTarget>().is_err());
+    }
+
+    #[test]
+    fn test_route_destination_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            RouteDestination::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::Subnet(name),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            RouteDestination::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<RouteDestination>().is_err());
+        assert!("foo".parse::<RouteDestination>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_target_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            VpcFirewallRuleTarget::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleTarget::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<VpcFirewallRuleTarget>().is_err());
+        assert!("foo".parse::<VpcFirewallRuleTarget>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_host_filter_parse() {
+        let name: Name = "foo".parse().unwrap();
+        let address = "192.168.0.10".parse().unwrap();
+        let network = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Vpc(name.clone()),
+            "vpc:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Subnet(name.clone()),
+            "subnet:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Instance(name),
+            "instance:foo".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::Ip(address),
+            "ip:192.168.0.10".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleHostFilter::IpNet(network),
+            "ipnet:fd00::/64".parse().unwrap()
+        );
+        assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_proto_filter_from_api_string() {
+        assert_eq!(
+            VpcFirewallRuleProtocol::Tcp,
+            VpcFirewallRuleProtocol::from_api_string("tcp").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Udp,
+            VpcFirewallRuleProtocol::from_api_string("udp").unwrap()
+        );
+
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(None),
+            VpcFirewallRuleProtocol::from_api_string("icmp").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 4,
+                code: None
+            })),
+            VpcFirewallRuleProtocol::from_api_string("icmp:4").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some(0.into())
+            })),
+            VpcFirewallRuleProtocol::from_api_string("icmp:60,0").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some((0..=10).try_into().unwrap())
+            })),
+            VpcFirewallRuleProtocol::from_api_string("icmp:60,0-10").unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::from_api_string("icmp:"),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::from_api_string("icmp:20-30"),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"20-30\" unparsable for type: invalid digit found in string"
+            ))
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::from_api_string("icmp:10,"),
+            Err(Error::invalid_value(
+                "code",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::from_api_string("icmp:257,"),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"257\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::from_api_string("icmp:0,1000-1001"),
+            Err(Error::invalid_value(
+                "code",
+                "\"1000\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::from_api_string("icmp:0,30-"),
+            Err(Error::invalid_value("code", "range has no end value"))
+        );
+    }
+
+    #[test]
+    fn test_digest() {
+        // No prefix
+        assert!(
+            "5cc9d1620911c280b0b1dad1413603702baccf340a1e74ade9d0521bcd826acf"
+                .parse::<Digest>()
+                .is_err()
+        );
+
+        // Valid sha256
+        let actual: Digest =
+            "sha256:5cc9d1620911c280b0b1dad1413603702baccf340a1e74ade9d0521bcd826acf".to_string().parse().unwrap();
+        assert_eq!(
+            actual,
+            Digest::Sha256("5cc9d1620911c280b0b1dad1413603702baccf340a1e74ade9d0521bcd826acf".to_string()),
+        );
+
+        // Too short for sha256
+        assert!("sha256:5cc9d1620911c280b".parse::<Digest>().is_err());
+
+        // Bad prefix
+        assert!("hash:super_random".parse::<Digest>().is_err());
+    }
+
+    #[test]
+    fn test_macaddr() {
+        use super::MacAddr;
+        let _ = MacAddr::from_str(":::::").unwrap();
+        let _ = MacAddr::from_str("f:f:f:f:f:f").unwrap();
+        let _ = MacAddr::from_str("ff:ff:ff:ff:ff:ff").unwrap();
+
+        // Empty
+        let _ = MacAddr::from_str("").unwrap_err();
+        // Too few
+        let _ = MacAddr::from_str("::::").unwrap_err();
+        // Too many
+        let _ = MacAddr::from_str("::::::").unwrap_err();
+        // Not hex
+        let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
+        // Too many characters
+        let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
+    }
+
+    #[test]
+    fn test_mac_system_iterator() {
+        use super::MacAddr;
+
+        let mut count = 0;
+        for m in MacAddr::iter_system() {
+            assert!(m.is_system());
+            assert!(m.to_i64() > MacAddr::MAX_SYSTEM_RESV);
+            count += 1;
+        }
+        assert_eq!(count, MacAddr::MAX_SYSTEM_ADDR - MacAddr::MAX_SYSTEM_RESV);
+    }
+
+    #[test]
+    fn test_mac_to_int_conversions() {
+        use super::MacAddr;
+        let original: i64 = 0xa8_40_25_ff_00_01;
+        let mac = MacAddr::from_i64(original);
+        assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
+        let conv = mac.to_i64();
+        assert_eq!(original, conv);
+    }
+
+    #[test]
+    fn test_hostname_from_str() {
+        assert!(Hostname::from_str("name").is_ok());
+        assert!(Hostname::from_str("a.good.name").is_ok());
+        assert!(Hostname::from_str("another.very-good.name").is_ok());
+        assert!(Hostname::from_str("0name").is_ok());
+        assert!(Hostname::from_str("name0").is_ok());
+        assert!(Hostname::from_str("0name0").is_ok());
+
+        assert!(Hostname::from_str("").is_err());
+        assert!(Hostname::from_str("no_no").is_err());
+        assert!(Hostname::from_str("no.fqdns.").is_err());
+        assert!(Hostname::from_str("empty..label").is_err());
+        assert!(Hostname::from_str("-hypen.cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.-cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.cannot.end-").is_err());
+        assert!(Hostname::from_str("hyphen-cannot-end-").is_err());
+        assert!(Hostname::from_str(&"too-long".repeat(100)).is_err());
+    }
+}

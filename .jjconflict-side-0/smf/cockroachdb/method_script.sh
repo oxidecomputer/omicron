@@ -1,0 +1,41 @@
+#!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+
+set -x
+set -o errexit
+set -o pipefail
+
+. /lib/svc/share/smf_include.sh
+
+LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
+DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
+
+# We need to tell CockroachDB the DNS names or IP addresses of the other nodes
+# in the cluster.  Look these up in internal DNS.  Per the recommendations in
+# the CockroachDB docs, we choose at most five addresses.  Providing more
+# addresses just increases the time for the cluster to stabilize.
+JOIN_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait cockroach \
+    | head -n 5 \
+    | tr '\n' ,)"
+
+if [[ -z "$JOIN_ADDRS" ]]; then
+    printf 'ERROR: found no addresses for other CockroachDB nodes\n' >&2
+    exit "$SMF_EXIT_ERR_CONFIG"
+fi
+
+args=(
+  '--insecure'
+  '--listen-addr' "$LISTEN_ADDR"
+  '--http-addr' '127.0.0.1:8080'
+  '--store' "$DATASTORE"
+  '--join' "$JOIN_ADDRS"
+  # The value of --max-sql-memory matches
+  # CockroachStarterBuilder::DEFAULT_MAX_SQL_MEMORY_MIB in
+  # test-utils/src/dev/db.rs.
+  '--max-sql-memory' '256MiB'
+)
+
+exec /opt/oxide/cockroachdb/bin/cockroach start "${args[@]}" &

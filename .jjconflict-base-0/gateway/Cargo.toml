@@ -1,0 +1,66 @@
+[package]
+name = "omicron-gateway"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+camino.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dropshot.workspace = true
+ereport-types.workspace = true
+futures.workspace = true
+gateway-api.workspace = true
+gateway-messages.workspace = true
+gateway-sp-comms.workspace = true
+gateway-types.workspace = true
+gateway-types-versions.workspace = true
+hex.workspace = true
+http.workspace = true
+hyper.workspace = true
+iddqd.workspace = true
+illumos-utils.workspace = true
+ipcc.workspace = true
+omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+signal-hook.workspace = true
+signal-hook-tokio.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+tokio-tungstenite.workspace = true
+toml.workspace = true
+tufaceous-artifact.workspace = true
+uuid.workspace = true
+omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
+oximeter.workspace = true
+oximeter-producer.workspace = true
+oximeter-instruments = { workspace = true, features = ["http-instruments"] }
+zip.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+gateway-client.workspace = true
+gateway-test-utils.workspace = true
+omicron-test-utils.workspace = true
+serde_json.workspace = true
+sp-sim.workspace = true
+subprocess.workspace = true
+pretty_assertions.workspace = true
+
+[[bin]]
+name = "mgs"
+doc = false

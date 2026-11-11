@@ -1,0 +1,2163 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Manager for all OPTE ports on a Helios system
+
+use crate::dladm::OPTE_LINK_PREFIX;
+use crate::opte::AttachedSubnet;
+use crate::opte::EnsureAttachedSubnetResult;
+use crate::opte::Error;
+use crate::opte::Gateway;
+use crate::opte::Handle;
+use crate::opte::Port;
+use crate::opte::Vni;
+use crate::opte::opte_firewall_rules;
+use crate::opte::port::PortData;
+use crate::opte::port::delete_xde_device;
+use ipnetwork::Ipv4Network;
+use ipnetwork::Ipv6Network;
+use macaddr::MacAddr6;
+use omicron_common::address::IPV4_MULTICAST_RANGE;
+use omicron_common::address::IPV6_MULTICAST_RANGE;
+use omicron_common::api::external;
+use omicron_common::api::internal::shared::ExternalIpGatewayMap;
+use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
+use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
+use omicron_common::api::internal::shared::ResolvedVpcRouteState;
+use omicron_common::api::internal::shared::RouterId;
+use omicron_common::api::internal::shared::RouterKind;
+use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
+use omicron_common::api::internal::shared::RouterVersion;
+use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
+use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::AttachedSubnetConfig;
+use oxide_vpc::api::DelRouterEntryReq;
+use oxide_vpc::api::DetachSubnetResp;
+use oxide_vpc::api::DhcpCfg;
+use oxide_vpc::api::ExternalIpCfg;
+use oxide_vpc::api::IpCfg;
+use oxide_vpc::api::IpCidr;
+use oxide_vpc::api::Ipv4Cfg;
+use oxide_vpc::api::Ipv4Cidr;
+use oxide_vpc::api::Ipv6Cfg;
+use oxide_vpc::api::Ipv6Cidr;
+use oxide_vpc::api::MacAddr;
+use oxide_vpc::api::RouterClass;
+use oxide_vpc::api::SNat4Cfg;
+use oxide_vpc::api::SNat6Cfg;
+use oxide_vpc::api::SetExternalIpsReq;
+use oxide_vpc::api::TransitIpConfig;
+use oxide_vpc::api::VpcCfg;
+use oxnet::IpNet;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
+use sled_agent_types::instance::ExternalIpConfig;
+use sled_agent_types::instance::ExternalIpv4Config;
+use sled_agent_types::instance::ExternalIpv6Config;
+use sled_agent_types::instance::ResolvedVpcFirewallRule;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
+use slog::Logger;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::btree_map::Entry;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use uuid::Uuid;
+
+use super::AttachedSubnetKind;
+
+/// Stored routes (and applicable port names) for a given VPC/subnet.
+#[derive(Debug, Default, Clone)]
+struct RouteSet {
+    version: Option<RouterVersion>,
+    routes: HashSet<ResolvedVpcRoute>,
+    active_ports: HashSet<String>,
+}
+
+/// Configuration for multicast groups on an OPTE port.
+///
+/// TODO: This type should be moved to [oxide_vpc::api] when OPTE dependencies
+/// are updated, following the same pattern as other VPC configuration types
+/// like [ExternalIpCfg], [IpCfg], etc.
+///
+/// TODO: Eventually remove.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MulticastGroupCfg {
+    /// The multicast group IP address (IPv4 or IPv6).
+    pub group_ip: IpAddr,
+    /// Source addresses for source-filtered multicast (optional for ASM,
+    /// required for SSM).
+    pub sources: Vec<IpAddr>,
+}
+
+/// Key for each OPTE port in the manager.
+pub type PortKey = (Uuid, NetworkInterfaceKind);
+
+#[derive(Debug)]
+struct PortManagerInner {
+    log: Logger,
+
+    /// Sequential identifier for each port on the system.
+    next_port_id: AtomicU64,
+
+    /// IP address of the hosting sled on the underlay.
+    underlay_ip: Ipv6Addr,
+
+    /// Map of all ports, keyed on the interface Uuid and its kind
+    /// (which includes the Uuid of the parent instance or service)
+    ports: Mutex<BTreeMap<PortKey, PortData>>,
+
+    /// Map of all current resolved routes.
+    routes: Mutex<HashMap<RouterId, RouteSet>>,
+
+    /// Mappings of associated Internet Gateways for all External IPs
+    /// attached to each NIC.
+    ///
+    /// IGW IDs are specific to the VPC of each NIC.
+    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
+}
+
+impl PortManagerInner {
+    fn next_port_name(&self) -> String {
+        format!(
+            "{}{}",
+            OPTE_LINK_PREFIX,
+            self.next_port_id.fetch_add(1, Ordering::SeqCst)
+        )
+    }
+}
+
+#[derive(Debug)]
+/// Parameters needed to create and configure an OPTE port.
+pub struct PortCreateParams<'a> {
+    pub nic: &'a NetworkInterface,
+    pub external_ips: &'a ExternalIpConfig,
+    pub firewall_rules: &'a [ResolvedVpcFirewallRule],
+    pub dhcp_config: DhcpCfg,
+    pub attached_subnets: Vec<AttachedSubnet>,
+    /// MTU to set on the xde device, in bytes. If `None`, OPTE applies its
+    /// default (1500). Used by jumbo-frame opt-in.
+    pub mtu: Option<u32>,
+}
+
+impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
+    type Error = Error;
+
+    fn try_from(params: &PortCreateParams) -> Result<IpCfg, Error> {
+        omicron_to_opte_ip_config(
+            &params.nic.ip_config,
+            params.external_ips,
+            &params.attached_subnets,
+        )
+    }
+}
+
+fn omicron_to_opte_ip_config(
+    private_ips: &PrivateIpConfig,
+    external_ips: &ExternalIpConfig,
+    attached_subnets: &[AttachedSubnet],
+) -> Result<IpCfg, Error> {
+    let cfg = match private_ips {
+        PrivateIpConfig::V4(private_v4) => {
+            if external_ips.v6.is_some() {
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "No private IPv6 stack for external IPv6 IP config",
+                )));
+            }
+            IpCfg::Ipv4(build_opte_ipv4_config(
+                private_v4,
+                external_ips.v4.as_ref(),
+                attached_subnets,
+            ))
+        }
+        PrivateIpConfig::V6(private_v6) => {
+            if external_ips.v4.is_some() {
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "No private IPv4 stack for external IPv4 IP config",
+                )));
+            }
+            IpCfg::Ipv6(build_opte_ipv6_config(
+                private_v6,
+                external_ips.v6.as_ref(),
+                attached_subnets,
+            ))
+        }
+        PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 } => {
+            let ipv4 = build_opte_ipv4_config(
+                private_v4,
+                external_ips.v4.as_ref(),
+                attached_subnets,
+            );
+            let ipv6 = build_opte_ipv6_config(
+                private_v6,
+                external_ips.v6.as_ref(),
+                attached_subnets,
+            );
+            IpCfg::DualStack { ipv4, ipv6 }
+        }
+    };
+    Ok(cfg)
+}
+
+fn build_opte_ipv4_config(
+    private_v4: &PrivateIpv4Config,
+    external_v4: Option<&ExternalIpv4Config>,
+    attached_subnets: &[AttachedSubnet],
+) -> Ipv4Cfg {
+    let gateway_ip = private_v4.opte_gateway().into();
+    let vpc_subnet = Ipv4Cidr::from(Ipv4Network::from(*private_v4.subnet()));
+    let private_ip = (*private_v4.ip()).into();
+    let external_ips = build_external_ipv4_config(external_v4);
+    let transit_ips = private_v4
+        .transit_ips
+        .iter()
+        .map(|ip| {
+            let cidr =
+                Ipv4Cidr::new(ip.addr().into(), ip.width().try_into().unwrap());
+            let cfg = TransitIpConfig { allow_in: true, allow_out: true };
+            (cidr, cfg)
+        })
+        .collect();
+    let attached_subnets = attached_subnets
+        .iter()
+        .filter_map(|subnet| match subnet.cidr {
+            IpCidr::Ip4(ipv4) => {
+                let is_external = match subnet.kind {
+                    AttachedSubnetKind::Vpc => false,
+                    AttachedSubnetKind::External => true,
+                };
+                Some((ipv4, AttachedSubnetConfig { is_external }))
+            }
+            IpCidr::Ip6(_) => None,
+        })
+        .collect();
+    Ipv4Cfg {
+        vpc_subnet,
+        private_ip,
+        gateway_ip,
+        external_ips,
+        attached_subnets,
+        transit_ips,
+    }
+}
+
+fn build_opte_ipv6_config(
+    private_v6: &PrivateIpv6Config,
+    external_v6: Option<&ExternalIpv6Config>,
+    attached_subnets: &[AttachedSubnet],
+) -> Ipv6Cfg {
+    let gateway_ip = private_v6.opte_gateway().into();
+    let vpc_subnet = Ipv6Cidr::from(Ipv6Network::from(*private_v6.subnet()));
+    let private_ip = (*private_v6.ip()).into();
+    let external_ips = build_external_ipv6_config(external_v6);
+    let transit_ips = private_v6
+        .transit_ips
+        .iter()
+        .map(|ip| {
+            let cidr =
+                Ipv6Cidr::new(ip.addr().into(), ip.width().try_into().unwrap());
+            let cfg = TransitIpConfig { allow_in: true, allow_out: true };
+            (cidr, cfg)
+        })
+        .collect();
+    let attached_subnets = attached_subnets
+        .iter()
+        .filter_map(|subnet| match subnet.cidr {
+            IpCidr::Ip4(_) => None,
+            IpCidr::Ip6(ipv6) => {
+                let is_external = match subnet.kind {
+                    AttachedSubnetKind::Vpc => false,
+                    AttachedSubnetKind::External => true,
+                };
+                Some((ipv6, AttachedSubnetConfig { is_external }))
+            }
+        })
+        .collect();
+    Ipv6Cfg {
+        vpc_subnet,
+        private_ip,
+        gateway_ip,
+        external_ips,
+        attached_subnets,
+        transit_ips,
+    }
+}
+
+// Build an ExternalIpCfg from parameters.
+fn build_external_ipv4_config(
+    external_v4: Option<&ExternalIpv4Config>,
+) -> ExternalIpCfg<oxide_vpc::api::Ipv4Addr> {
+    let Some(v4) = external_v4 else {
+        return ExternalIpCfg {
+            snat: None,
+            ephemeral_ip: None,
+            floating_ips: vec![],
+        };
+    };
+    let snat = v4.source_nat.map(|snat| SNat4Cfg {
+        external_ip: snat.ip.into(),
+        ports: snat.port_range(),
+    });
+    let ephemeral_ip = v4.ephemeral_ip.map(Into::into);
+    let floating_ips =
+        v4.floating_ips.iter().copied().map(Into::into).collect();
+    ExternalIpCfg { snat, ephemeral_ip, floating_ips }
+}
+
+// Build an OPTE External IPv6 configuration from parameters.
+fn build_external_ipv6_config(
+    external_v6: Option<&ExternalIpv6Config>,
+) -> ExternalIpCfg<oxide_vpc::api::Ipv6Addr> {
+    let Some(v6) = external_v6 else {
+        return ExternalIpCfg {
+            snat: None,
+            ephemeral_ip: None,
+            floating_ips: vec![],
+        };
+    };
+    let snat = v6.source_nat.map(|snat| SNat6Cfg {
+        external_ip: snat.ip.into(),
+        ports: snat.port_range(),
+    });
+    let ephemeral_ip = v6.ephemeral_ip.map(Into::into);
+    let floating_ips =
+        v6.floating_ips.iter().copied().map(Into::into).collect();
+    ExternalIpCfg { snat, ephemeral_ip, floating_ips }
+}
+
+/// The port manager controls all OPTE ports on a single host.
+#[derive(Debug, Clone)]
+pub struct PortManager {
+    inner: Arc<PortManagerInner>,
+}
+
+impl PortManager {
+    /// Create a new manager, for creating OPTE ports
+    pub fn new(log: Logger, underlay_ip: Ipv6Addr) -> Self {
+        let inner = Arc::new(PortManagerInner {
+            log,
+            next_port_id: AtomicU64::new(0),
+            underlay_ip,
+            ports: Mutex::new(BTreeMap::new()),
+            routes: Mutex::new(Default::default()),
+            eip_gateways: Mutex::new(Default::default()),
+        });
+
+        Self { inner }
+    }
+
+    /// Return the logger used by the manager.
+    pub(super) fn log(&self) -> &Logger {
+        &self.inner.log
+    }
+
+    pub fn underlay_ip(&self) -> &Ipv6Addr {
+        &self.inner.underlay_ip
+    }
+
+    /// Create an OPTE port
+    pub fn create_port(&self, params: PortCreateParams) -> Result<Port, Error> {
+        let ip_cfg = IpCfg::try_from(&params)?;
+        let PortCreateParams {
+            nic,
+            external_ips,
+            firewall_rules,
+            dhcp_config,
+            attached_subnets: _,
+            mtu,
+        } = params;
+        let is_service =
+            matches!(nic.kind, NetworkInterfaceKind::Service { .. });
+        let is_instance =
+            matches!(nic.kind, NetworkInterfaceKind::Instance { .. });
+        let mac = *nic.mac;
+        let vni = Vni::new(nic.vni).unwrap();
+        let gateway = Gateway::from_ip_config(&nic.ip_config);
+        let vpc_cfg = VpcCfg {
+            ip_cfg,
+            guest_mac: MacAddr::from(nic.mac.into_array()),
+            gateway_mac: MacAddr::from(gateway.mac.into_array()),
+            vni,
+            phys_ip: self.inner.underlay_ip.into(),
+            dhcp: dhcp_config,
+        };
+
+        // Create the xde device.
+        //
+        // The sequencing here is important. We'd like to make sure things are
+        // cleaned up properly, while having a sequence of fallible operations.
+        // So we:
+        //
+        // - create the xde device
+        // - create the port
+        // - add the port data to the PortManager's map
+        //
+        // The Port object's drop implementation will clean up everything, if
+        // any of the remaining fallible operations fail.
+        let port_name = self.inner.next_port_name();
+        debug!(
+            self.inner.log,
+            "Creating xde device";
+            "port_name" => &port_name,
+            "vpc_cfg" => ?&vpc_cfg,
+        );
+        let hdl = {
+            let hdl = Handle::new()?;
+            hdl.create_xde(&port_name, vpc_cfg, mtu)?;
+            hdl
+        };
+
+        // Check for space in the port manager, and then create the port.
+        //
+        // There are a couple of important notes here. First, we're taking the
+        // lock on the ports here, which we need to do for as short a time as
+        // possible. If any of the fallible operations below fail, we'll drop
+        // the port on the way out of this method, which removes it from the
+        // manager's map. So we have to make sure we don't hold the lock on that
+        // as we exit -- hold it for _only_ the insertion, and that's it.
+        //
+        // Second, if we _do_ find a duplicate port, we have the actual XDE
+        // device we made above. Normally, that's destroyed in `Port::drop`. But
+        // we don't call that in the "occupied" arm below. In addition to
+        // destroying the XDE device, `Port::drop` also removes the port from
+        // the map. But if we have a dupe, we don't want to do that! So that
+        // match arm needs to be sure to destroy the XDE device on the way out
+        // too.
+        let port =
+            match self.inner.ports.lock().unwrap().entry((nic.id, nic.kind)) {
+                Entry::Vacant(entry) => {
+                    let port = Port::new(
+                        port_name.clone(),
+                        nic.id,
+                        nic.kind,
+                        nic.ip_config.clone(),
+                        mac,
+                        nic.slot,
+                        vni,
+                        self.clone(),
+                    );
+                    entry.insert(port.data().clone());
+                    port
+                }
+                Entry::Occupied(occupied) => {
+                    error!(
+                        self.inner.log,
+                        "duplicate OPTE port detected";
+                        "interface_id" => %nic.id,
+                        "kind" => ?nic.kind,
+                        "existing_port_data" => ?occupied.get(),
+                    );
+                    delete_xde_device(&self.inner.log, &port_name);
+                    return Err(Error::DuplicateOptePort {
+                        id: nic.id,
+                        kind: nic.kind,
+                    });
+                }
+            };
+
+        // Ports for Probes/Services cannot have EIP<->IGW mappings filled
+        // in dynamically today, so to keep use of their EIPs working we
+        // leave them untagged at both the `nat` and `router` layer.
+        if is_instance {
+            // This is effectively re-asserting the external IP config in order to
+            // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
+            // this currently needs to happen here to prevent a case where an old
+            // mapping is not yet removed (and so no 'change' happens to trigger
+            // `Instance::refresh_external_ips_inner`), and to prevent updates
+            // racing with nexus before an instance/port are reachable from their
+            // respective managers.
+            self.external_ips_ensure_port(&port, nic.id, external_ips)?;
+        }
+
+        // Initialize firewall rules for the new port.
+        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        debug!(
+            self.inner.log,
+            "Setting firewall rules";
+            "port_name" => &port_name,
+            "rules" => ?&rules,
+        );
+        hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
+            port_name: port_name.clone(),
+            rules,
+        })?;
+
+        // Create the default set of routes for a new port.
+        //
+        // This creates an empty route set for instance ports, but adds a rule
+        // targeting the System VPC Internet Gateway for service ports.
+        //
+        // We need this during bootstrapping NTP or other very early services,
+        // before the control plane database has started.
+        let default_route_set = |is_service: bool| {
+            let mut route_set = RouteSet {
+                version: None,
+                routes: HashSet::new(),
+                active_ports: HashSet::new(),
+            };
+            if !is_service {
+                return route_set;
+            }
+            let target = ApiRouterTarget::InternetGateway(
+                InternetGatewayRouterTarget::System,
+            );
+            route_set.routes.insert(ResolvedVpcRoute {
+                dest: IpNet::V4(
+                    Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
+                ),
+                target,
+            });
+            route_set.routes.insert(ResolvedVpcRoute {
+                dest: IpNet::V6(
+                    Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap(),
+                ),
+                target,
+            });
+            route_set
+        };
+
+        // Add routes to a new port and the shared set of all routes in this
+        // port manager.
+        //
+        // As new ports are created, they need both System router entries, but
+        // also Custom entries targeting things like the VPC Subnet or another
+        // instance. These are added to the port, but after updating the shared
+        // set of all routes maintained by this manager.
+        let add_routes = |route_map: &mut HashMap<RouterId, RouteSet>,
+                          key: RouterId,
+                          port_name: String|
+         -> Result<(), Error> {
+            let route_set = route_map
+                .entry(key)
+                .or_insert_with(|| default_route_set(is_service));
+            let class = match key.kind {
+                RouterKind::System => RouterClass::System,
+                RouterKind::Custom(_) => RouterClass::Custom,
+            };
+            for route in &route_set.routes {
+                let request = AddRouterEntryReq {
+                    class,
+                    port_name: port_name.clone(),
+                    dest: super::net_to_cidr(route.dest),
+                    target: super::router_target_opte(&route.target),
+                };
+                hdl.add_router_entry(&request)?;
+                debug!(
+                    self.inner.log,
+                    "Added router entry";
+                    "port_name" => &port_name,
+                    "route" => ?request,
+                );
+            }
+            route_set.active_ports.insert(port_name);
+            Ok(())
+        };
+
+        // Actually add all system and custom router entries relevant for this
+        // new port.
+        let mut route_map = self.inner.routes.lock().unwrap();
+        add_routes(
+            &mut route_map,
+            port.system_router_key(),
+            port.name().to_string(),
+        )?;
+        if let Some(key) = port.custom_ipv4_router_key() {
+            add_routes(&mut route_map, key, port.name().to_string())?;
+        }
+        if let Some(key) = port.custom_ipv6_router_key() {
+            add_routes(&mut route_map, key, port.name().to_string())?;
+        }
+        drop(route_map);
+
+        info!(
+            self.inner.log,
+            "Created OPTE port";
+            "port" => ?port.data(),
+        );
+        Ok(port)
+    }
+
+    /// Ensure a port no longer exists in the manager.
+    ///
+    /// This always succeeds, even if the port doesn't exist.
+    ///
+    /// # Important
+    ///
+    /// This does not delete the underlying OPTE port from the system. That is
+    /// done by `Port::drop()`.
+    pub(super) fn remove_port(&self, id: Uuid, kind: NetworkInterfaceKind) {
+        let Some(port) = self.inner.ports.lock().unwrap().remove(&(id, kind))
+        else {
+            debug!(
+                self.inner.log,
+                "Tried to release non-existent port";
+                "id" => ?&id,
+                "kind" => ?&kind,
+            );
+            return;
+        };
+
+        // Cleanup the set of subnets we want to receive routes for.
+        let remove_key = |routes: &mut HashMap<RouterId, RouteSet>,
+                          key: RouterId,
+                          port_name: &str| {
+            let should_remove = routes
+                .get_mut(&key)
+                .map(|route_set| {
+                    route_set.active_ports.remove(port_name);
+                    route_set.active_ports.is_empty()
+                })
+                .unwrap_or(false);
+
+            if should_remove {
+                routes.remove(&key);
+                info!(
+                    self.inner.log,
+                    "Removed route set for subnet";
+                    "id" => ?&key,
+                );
+            }
+        };
+        let mut routes = self.inner.routes.lock().unwrap();
+        remove_key(&mut routes, port.system_router_key(), port.name());
+        if let Some(key) = port.custom_ipv4_router_key() {
+            remove_key(&mut routes, key, port.name());
+        }
+        if let Some(key) = port.custom_ipv6_router_key() {
+            remove_key(&mut routes, key, port.name());
+        }
+        drop(routes);
+        debug!(
+            self.inner.log,
+            "Removed OPTE port from manager";
+            "id" => ?&id,
+            "kind" => ?&kind,
+            "port_name" => ?&port.name(),
+        );
+    }
+
+    pub fn vpc_routes_list(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.inner.routes.lock().unwrap();
+        routes
+            .iter()
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
+            .collect()
+    }
+
+    pub fn vpc_routes_ensure(
+        &self,
+        new_routes: Vec<ResolvedVpcRouteSet>,
+    ) -> Result<(), Error> {
+        let mut routes = self.inner.routes.lock().unwrap();
+        let mut deltas = HashMap::new();
+        slog::debug!(self.inner.log, "new routes: {new_routes:#?}");
+        for new in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(existing) = routes.get_mut(&new.id) else {
+                slog::warn!(self.inner.log, "ignoring route {new:#?}");
+                continue;
+            };
+
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            let (to_add, to_delete): (HashSet<_>, HashSet<_>) =
+                match (existing.version, new.version) {
+                    (Some(old_vers), Some(new_vers))
+                        if !old_vers.is_replaced_by(&new_vers) =>
+                    {
+                        slog::info!(
+                            self.inner.log,
+                            "skipping delta compute for subnet";
+                            "subnet" => ?new.id,
+                            "old_vers" => ?old_vers,
+                            "new_vers" => ?new_vers,
+                        );
+                        continue;
+                    }
+                    _ => (
+                        new.routes
+                            .difference(&existing.routes)
+                            .copied()
+                            .collect(),
+                        existing
+                            .routes
+                            .difference(&new.routes)
+                            .copied()
+                            .collect(),
+                    ),
+                };
+            deltas.insert(new.id, (to_add, to_delete));
+
+            // Update the version and actual routes in this route set.
+            //
+            // Note that this cannot change the port names that are active for
+            // this route set. The key here is based on the router ID, which is
+            // a combination of the VNI and router kind, neither of which change
+            // over the lifetime of the port.
+            existing.version = new.version;
+            existing.routes = new.routes;
+        }
+
+        // Note: We're deliberately holding both locks here
+        // to prevent several nexuses computng and applying deltas
+        // out of order.
+        let ports = self.inner.ports.lock().unwrap();
+        let hdl = Handle::new()?;
+
+        // Propagate deltas out to all ports.
+        for port in ports.values() {
+            // Fetch deltas for all router keys: system, IPv4 subnet, and IPv6
+            // subnet.
+            let system_delta = deltas.get(&port.system_router_key());
+            let custom_ipv4_delta =
+                port.custom_ipv4_router_key().and_then(|k| deltas.get(&k));
+            let custom_ipv6_delta =
+                port.custom_ipv6_router_key().and_then(|k| deltas.get(&k));
+
+            for (class, delta) in [
+                (RouterClass::System, system_delta),
+                (RouterClass::Custom, custom_ipv4_delta),
+                (RouterClass::Custom, custom_ipv6_delta),
+            ] {
+                let Some((to_add, to_delete)) = delta else {
+                    debug!(self.inner.log, "vpc route ensure: no delta");
+                    continue;
+                };
+
+                debug!(self.inner.log, "vpc route ensure to_add: {to_add:#?}");
+                debug!(
+                    self.inner.log,
+                    "vpc router ensure to_delete: {to_delete:#?}"
+                );
+
+                for route in to_delete {
+                    let route = DelRouterEntryReq {
+                        class,
+                        port_name: port.name().into(),
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                    };
+
+                    hdl.del_router_entry(&route)?;
+
+                    debug!(
+                        self.inner.log,
+                        "Removed router entry";
+                        "port_name" => &port.name(),
+                        "route" => ?route,
+                    );
+                }
+
+                for route in to_add {
+                    let route = AddRouterEntryReq {
+                        class,
+                        port_name: port.name().into(),
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                    };
+
+                    hdl.add_router_entry(&route)?;
+
+                    debug!(
+                        self.inner.log,
+                        "Added router entry";
+                        "port_name" => &port.name(),
+                        "route" => ?route,
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set Internet Gateway mappings for all external IPs in use
+    /// by attached [NetworkInterface]s.
+    ///
+    /// Returns whether the internal mappings were changed.
+    pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
+        let mut gateways = self.inner.eip_gateways.lock().unwrap();
+
+        let changed = &*gateways != &mappings.mappings;
+
+        *gateways = mappings.mappings;
+
+        changed
+    }
+
+    /// Lookup an OPTE port, and ensure its external IP config is up to date.
+    pub fn external_ips_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        external_ips: &ExternalIpConfig,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
+        })?;
+
+        self.external_ips_ensure_port(port, nic_id, external_ips)
+    }
+
+    /// Ensure external IPs for an OPTE port are up to date.
+    pub fn external_ips_ensure_port(
+        &self,
+        port: &PortData,
+        nic_id: Uuid,
+        external_ips: &ExternalIpConfig,
+    ) -> Result<(), Error> {
+        let egw_lock = self.inner.eip_gateways.lock().unwrap();
+        let inet_gw_map = egw_lock.get(&nic_id).cloned();
+        drop(egw_lock);
+
+        // NOTE: The Option::map() call here is a bit confusing.
+        //
+        // The `SetExternalIpsReq` type uses an `Option` around the IP
+        // configuration. However, `build_external_ipv{4,6}_config` accept an
+        // option and "push" that into the returned configuration type, i.e.,
+        // its fields are optional rather than returning an option.
+        //
+        // We map the option so we can get the `None` we need for the
+        // `SetExternalIpsReq`. But that does mean we always call
+        // `build_external_ipv{4,6}_config` with `Some(_)`.
+        let external_ips_v4 = external_ips
+            .v4
+            .as_ref()
+            .map(|v4| build_external_ipv4_config(Some(v4)));
+        let external_ips_v6 = external_ips
+            .v6
+            .as_ref()
+            .map(|v6| build_external_ipv6_config(Some(v6)));
+        let inet_gw_map = if let Some(map) = inet_gw_map {
+            Some(
+                map.into_iter()
+                    .map(|(k, v)| (k.into(), v.into_iter().collect()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
+        let req = SetExternalIpsReq {
+            port_name: port.name().into(),
+            external_ips_v4,
+            external_ips_v6,
+            inet_gw_map,
+        };
+        let hdl = Handle::new()?;
+        hdl.set_external_ips(&req)?;
+
+        Ok(())
+    }
+
+    /// Validate multicast group memberships for an OPTE port.
+    ///
+    /// This method validates multicast group configurations but does not yet
+    /// configure OPTE port-level multicast group membership. The actual
+    /// multicast forwarding is currently handled by the reconciler + DPD
+    /// at the dataplane switch level.
+    ///
+    /// TODO: Once OPTE kernel module supports multicast group APIs, this
+    /// method should be updated to configure OPTE port-level multicast
+    /// group membership. Note: multicast groups are fleet-scoped and can span
+    /// across VPCs.
+    pub fn multicast_groups_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        multicast_groups: &[MulticastGroupCfg],
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::MulticastUpdateMissingPort(nic_id, nic_kind)
+        })?;
+
+        debug!(
+            self.inner.log,
+            "Validating multicast group configuration for OPTE port";
+            "port_name" => port.name(),
+            "nic_id" => ?nic_id,
+            "groups" => ?multicast_groups,
+        );
+
+        // Validate multicast group configurations
+        for group in multicast_groups {
+            if !group.group_ip.is_multicast() {
+                error!(
+                    self.inner.log,
+                    "Invalid multicast IP address";
+                    "group_ip" => %group.group_ip,
+                    "port_name" => port.name(),
+                );
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "invalid multicast IP address",
+                )));
+            }
+        }
+
+        // TODO: Configure firewall rules to allow multicast traffic.
+        // Add exceptions in source/dest MAC/L3 addr checking for multicast
+        // addresses matching known groups, only doing cidr-checking on the
+        // multicasst destination side.
+
+        info!(
+            self.inner.log,
+            "OPTE port configured for multicast traffic";
+            "port_name" => port.name(),
+            "ipv4_range" => %IPV4_MULTICAST_RANGE,
+            "ipv6_range" => %IPV6_MULTICAST_RANGE,
+            "multicast_groups" => multicast_groups.len(),
+        );
+
+        // TODO: Configure OPTE port for specific multicast group membership
+        // once OPTE kernel module APIs are available. This is distinct from
+        // zone vNIC underlay configuration (see instance.rs
+        // `join_multicast_group_inner`).
+
+        Ok(())
+    }
+
+    pub fn firewall_rules_ensure(
+        &self,
+        vni: external::Vni,
+        rules: &[ResolvedVpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules";
+            "vni" => ?vni,
+            "rules" => ?&rules,
+        );
+
+        let hdl = Handle::new()?;
+        let ports = self.inner.ports.lock().unwrap();
+
+        // We update VPC rules as a set so grab only
+        // the relevant ports using the VPC's VNI.
+        let vpc_ports = ports
+            .iter()
+            .filter(|((_, _), port)| u32::from(vni) == u32::from(*port.vni()));
+        for ((_, _), port) in vpc_ports {
+            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
+            let port_name = port.name().to_string();
+            info!(
+                self.inner.log,
+                "Setting OPTE firewall rules";
+                "port" => ?&port_name,
+                "rules" => ?&rules,
+            );
+            hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
+                port_name,
+                rules,
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        let hdl = Handle::new()?;
+        let v2p = hdl.dump_v2p()?;
+        let mut mappings: Vec<_> = vec![];
+
+        for mapping in v2p.mappings {
+            let vni = mapping
+                .vni
+                .as_u32()
+                .try_into()
+                .expect("opte VNI should be 24 bits");
+
+            for entry in mapping.ip4 {
+                mappings.push(VirtualNetworkInterfaceHost {
+                    virtual_ip: IpAddr::V4(entry.0.into()),
+                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
+                    physical_host_ip: entry.1.ip.into(),
+                    vni,
+                });
+            }
+
+            for entry in mapping.ip6 {
+                mappings.push(VirtualNetworkInterfaceHost {
+                    virtual_ip: IpAddr::V6(entry.0.into()),
+                    virtual_mac: MacAddr6::from(entry.1.ether.bytes()).into(),
+                    physical_host_ip: entry.1.ip.into(),
+                    vni,
+                });
+            }
+        }
+
+        Ok(mappings)
+    }
+
+    pub fn set_virtual_nic_host(
+        &self,
+        mapping: &VirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+        let hdl = Handle::new()?;
+        hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
+            vip: mapping.virtual_ip.into(),
+            phys: oxide_vpc::api::PhysNet {
+                ether: oxide_vpc::api::MacAddr::from(
+                    (*mapping.virtual_mac).into_array(),
+                ),
+                ip: mapping.physical_host_ip.into(),
+                vni: Vni::new(mapping.vni).unwrap(),
+            },
+        })?;
+
+        Ok(())
+    }
+
+    pub fn unset_virtual_nic_host(
+        &self,
+        mapping: &VirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Clearing mapping of virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+
+        let hdl = Handle::new()?;
+        hdl.clear_v2p(&oxide_vpc::api::ClearVirt2PhysReq {
+            vip: mapping.virtual_ip.into(),
+            phys: oxide_vpc::api::PhysNet {
+                ether: oxide_vpc::api::MacAddr::from(
+                    (*mapping.virtual_mac).into_array(),
+                ),
+                ip: mapping.physical_host_ip.into(),
+                vni: Vni::new(mapping.vni).unwrap(),
+            },
+        })?;
+
+        Ok(())
+    }
+
+    pub fn attached_subnets_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        ensure_removed: Vec<IpCidr>,
+        ensure_added: Vec<AttachedSubnet>,
+    ) -> EnsureAttachedSubnetResult {
+        let ports = self.inner.ports.lock().unwrap();
+        let Some(port) = ports.get(&(nic_id, nic_kind)) else {
+            return EnsureAttachedSubnetResult {
+                diff: Default::default(),
+                error: Some(Error::AttachedSubnetUpdateMissingPort(
+                    nic_id, nic_kind,
+                )),
+            };
+        };
+        self.attached_subnets_ensure_port(port, ensure_removed, ensure_added)
+    }
+
+    fn attached_subnets_ensure_port(
+        &self,
+        port: &PortData,
+        ensure_removed: Vec<IpCidr>,
+        ensure_added: Vec<AttachedSubnet>,
+    ) -> EnsureAttachedSubnetResult {
+        debug!(
+            self.inner.log,
+            "ensuring attached subnets for port";
+            "port_name" => %port.name(),
+        );
+        let hdl = match Handle::new() {
+            Ok(h) => h,
+            Err(e) => {
+                return EnsureAttachedSubnetResult {
+                    diff: Default::default(),
+                    error: Some(e.into()),
+                };
+            }
+        };
+        let mut result = EnsureAttachedSubnetResult::default();
+        for cidr in ensure_removed.into_iter() {
+            match hdl.detach_subnet(port.name(), cidr) {
+                Ok(_) => result.diff.detached.push(cidr),
+                Err(e) => {
+                    assert!(result.error.replace(e.into()).is_none());
+                    return result;
+                }
+            }
+        }
+        for subnet in ensure_added.into_iter() {
+            match self.attach_subnet_port(port, subnet) {
+                Ok(_) => result.diff.attached.push(subnet),
+                Err(e) => {
+                    assert!(result.error.replace(e).is_none());
+                    return result;
+                }
+            }
+        }
+        result
+    }
+
+    pub fn attach_subnet(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.attach_subnet_port(port, subnet)
+    }
+
+    fn attach_subnet_port(
+        &self,
+        port: &PortData,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let hdl = Handle::new()?;
+        let AttachedSubnet { cidr, kind } = subnet;
+        let is_external = match kind {
+            AttachedSubnetKind::Vpc => false,
+            AttachedSubnetKind::External => true,
+        };
+        match hdl.attach_subnet(port.name(), cidr, is_external) {
+            Ok(_) => {
+                debug!(
+                    self.inner.log,
+                    "attached subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "kind" => ?kind,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    self.inner.log,
+                    "failed to attach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "kind" => ?kind,
+                    InlineErrorChain::new(&e),
+                );
+                Err(Error::from(e))
+            }
+        }
+    }
+
+    pub fn detach_subnet(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        subnet: IpCidr,
+    ) -> Result<(), Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
+        })?;
+        self.detach_subnet_port(port, subnet)
+    }
+
+    fn detach_subnet_port(
+        &self,
+        port: &PortData,
+        subnet: IpCidr,
+    ) -> Result<(), Error> {
+        let hdl = Handle::new()?;
+        // This returns an Error if the actual request failed. The
+        // `DetachSubnetResp` it returns in the Ok(_) variant is either
+        // `NotFound` or `Ok(IpCidr)`, so in both cases we've "detached" it. We
+        // return success either way.
+        match hdl.detach_subnet(port.name(), subnet) {
+            Ok(DetachSubnetResp::Ok(_)) => {
+                debug!(
+                    self.inner.log,
+                    "detached subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                );
+                Ok(())
+            }
+            Ok(DetachSubnetResp::NotFound) => {
+                warn!(
+                    self.inner.log,
+                    "subnet is already detached";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                );
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    self.inner.log,
+                    "failed to detach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                    InlineErrorChain::new(&e),
+                );
+                Err(Error::from(e))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn contains_key(&self, key: &(Uuid, NetworkInterfaceKind)) -> bool {
+        self.inner.ports.lock().unwrap().contains_key(key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PortCreateParams;
+    use super::PortManager;
+    use crate::opte::Error;
+    use crate::opte::Handle;
+    use crate::opte::Port;
+    use macaddr::MacAddr6;
+    use omicron_common::api::external::{MacAddr, Vni};
+    use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_common::api::internal::shared::ResolvedVpcRoute;
+    use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
+    use omicron_common::api::internal::shared::RouterTarget;
+    use omicron_common::api::internal::shared::RouterVersion;
+    use omicron_test_utils::dev::test_setup_log;
+    use oxide_vpc::api::DhcpCfg;
+    use oxide_vpc::api::IpCfg;
+    use oxide_vpc::api::Ipv4Cidr;
+    use oxide_vpc::api::Ipv6Cidr;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
+    use sled_agent_types::instance::ExternalIpConfig;
+    use sled_agent_types::instance::ExternalIpv4Config;
+    use sled_agent_types::instance::ExternalIpv6Config;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::SourceNatConfigV4;
+    use sled_agent_types::inventory::SourceNatConfigV6;
+    use std::collections::HashSet;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::num::NonZeroU8;
+    use uuid::Uuid;
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
+    #[test]
+    fn multiple_ports_does_not_destroy_default_route() {
+        let logctx =
+            test_setup_log("multiple_ports_does_not_destroy_default_route");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let default_ipv4_route =
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
+        let default_ipv6_route =
+            IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap());
+
+        // Information about our builtin services VPC System Router.
+        //
+        // This comes from nexus/db-fixed-data/src/vpc.rs. It _should_ stay in
+        // sync with that for clarity, but the correctness of this test does not
+        // rely on it.
+        const SERVICES_INTERNET_GATEWAY_ID: Uuid =
+            uuid::uuid!("001de000-074c-4000-8000-000000000002");
+        const SERVICES_VPC_VNI: Vni = Vni::SERVICES_VNI;
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("foo0", "foo1").unwrap();
+
+        // First, create a port for a service.
+        //
+        // At this point, we'll insert a single default route, because this is a
+        // service point, from `0.0.0.0/0 -> InternetGateway(None)`, and then
+        // add this route to OPTE.
+        let private_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
+        let private_ipv4_addr0 = Ipv4Addr::new(172, 20, 0, 4);
+        let ip_config0 =
+            PrivateIpConfig::new_ipv4(private_ipv4_addr0, private_subnet)
+                .unwrap();
+        let private_ipv4_addr1 = Ipv4Addr::new(172, 20, 0, 5);
+        let ip_config1 =
+            PrivateIpConfig::new_ipv4(private_ipv4_addr1, private_subnet)
+                .unwrap();
+        let public_ipv4_addr0 = Ipv4Addr::new(10, 0, 0, 4);
+        let public_ipv4_addr1 = Ipv4Addr::new(10, 0, 0, 5);
+        let external_ip_config0 = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(
+                    SourceNatConfigV4::new(public_ipv4_addr0, 0, MAX_PORT)
+                        .unwrap(),
+                ),
+                ..Default::default()
+            }),
+            v6: None,
+        };
+        const MAX_PORT: u16 = (1 << 14) - 1;
+        let port0 = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: Uuid::new_v4(),
+                    kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+                    name: "opte0".parse().unwrap(),
+                    ip_config: ip_config0,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x00, 0x00, 0x01,
+                    )),
+                    vni: SERVICES_VPC_VNI,
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &external_ip_config0,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+                attached_subnets: vec![],
+                mtu: None,
+            })
+            .unwrap();
+
+        // At this point, we should have inserted a single default route. That
+        // is because the port is for an Oxide service, and so we automatically
+        // add a default route to the IGW. This doesn't have an ID for the IGW,
+        // since we haven't launched Nexus or the database -- until that time,
+        // we don't know that IGW's ID.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port0.system_router_key())
+            .unwrap()
+            .clone();
+
+        // We actually have two route-sets, one for the system and one for the
+        // custom router. We're only interested in the former though.
+        assert_eq!(
+            system_routes.routes.len(),
+            2,
+            "We should have two default routes in the VPC's System Router"
+        );
+        for route in system_routes.routes.iter() {
+            assert!(
+                route.dest == default_ipv4_route
+                    || route.dest == default_ipv6_route,
+                "VPC System Router should have a default route"
+            );
+            assert_eq!(
+                route.target,
+                RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::System
+                ),
+                "VPC System Router default route should target the \
+                System Internet Gateway"
+            );
+        }
+
+        // In OPTE, we should have one route, also squished down to this
+        // default route.
+        //
+        // NOTE: When we're doing these assertions, we hold a lock on the OPTE
+        // port state, so we need to do it in a scope before we do other
+        // operations.
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 1);
+            let rt = state
+                .ports
+                .get("opte0")
+                .unwrap()
+                .routes
+                .iter()
+                .filter(|rt| rt.is_system_default_ipv4_route())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                rt.len(),
+                1,
+                "OPTE should have exactly one default system route for \
+                the first port on creation"
+            );
+        }
+
+        // PUT some routes.
+        //
+        // Simulate a PUT /vpc-routes from Nexus. Now that Nexus has launched
+        // and loaded builtin data to the database, it knows the ID of our the
+        // IGW of the System Router in the builtin services VPC. This ID is
+        // included in the list of routes. Because that set does _not_ contain
+        // the implicit route added above, that one is _removed_ from the one
+        // existing port. An equivalent one is added though, since the IGW is
+        // ignored at this point when setting the route in OPTE.
+        let mut new_routes = vec![ResolvedVpcRouteSet {
+            id: port0.system_router_key(),
+            version: Some(RouterVersion {
+                router_id: SERVICES_INTERNET_GATEWAY_ID,
+                version: 1,
+            }),
+            routes: HashSet::from([ResolvedVpcRoute {
+                dest: default_ipv4_route,
+                target: RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::System,
+                ),
+            }]),
+        }];
+        manager.vpc_routes_ensure(new_routes.clone()).unwrap();
+
+        // At this point, the in-memory state of the manager should have one
+        // route, for the _explicit_ IGW of the services VPC; and our OPTE state
+        // should have just one for the IGW with _no_ ID, because we always
+        // throw away the UUID when we apply the rule there.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port0.system_router_key())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            system_routes.routes.len(),
+            1,
+            "We should have only a single route in the VPC's System Router"
+        );
+        let route = system_routes.routes.iter().next().unwrap();
+        assert_eq!(
+            route.dest, default_ipv4_route,
+            "VPC System Router should have a default route"
+        );
+        assert_eq!(
+            route.target,
+            RouterTarget::InternetGateway(InternetGatewayRouterTarget::System),
+            "VPC System Router default route should target the explicit \
+            services Internet Gateway after vpc_routes_ensure"
+        );
+
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 1);
+            let rt = state
+                .ports
+                .get("opte0")
+                .unwrap()
+                .routes
+                .iter()
+                .filter(|rt| rt.is_system_default_ipv4_route())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                rt.len(),
+                1,
+                "OPTE should have exactly one default system route for \
+                the first port on creation"
+            );
+        }
+
+        // Create a new port.
+        //
+        // Now, when we create this new port, we'll again implicitly create that
+        // default route. Since we _also_ have the route in the previous step
+        // pointing to an explicit IGW, we'll call add_router_entry twice for
+        // this point on creation, but not the other port since we don't modify
+        // it when we create this second port. That happens when we call
+        // `vpc_routes_ensure` below.
+        let external_ip_config1 = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(
+                    SourceNatConfigV4::new(public_ipv4_addr1, 0, MAX_PORT)
+                        .unwrap(),
+                ),
+                ..Default::default()
+            }),
+            v6: None,
+        };
+        let port1 = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: Uuid::new_v4(),
+                    kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+                    name: "opte1".parse().unwrap(),
+                    ip_config: ip_config1,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x00, 0x00, 0x02,
+                    )),
+                    vni: SERVICES_VPC_VNI,
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &external_ip_config1,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+                attached_subnets: vec![],
+                mtu: None,
+            })
+            .unwrap();
+
+        // When creating the system port, we automatically added a default route
+        // pointing to IGW(None). In the previous behavior, this was considered
+        // different from IGW(ID) -- that's incorrect, because we throw away the
+        // ID when we set route in OPTE itself.
+        //
+        // We should have exactly one default route here and at OPTE, pointing
+        // to the services VPC System Router's IGW, without an explicit ID.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port1.system_router_key())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            system_routes.routes.len(),
+            1,
+            "We should always have 1 default route, pointing to the services \
+            VPC System Router's IGW, even after adding a new port",
+        );
+        let _ = system_routes
+            .routes
+            .iter()
+            .find(|rt| {
+                rt.dest == default_ipv4_route
+                    && rt.target
+                        == RouterTarget::InternetGateway(
+                            InternetGatewayRouterTarget::System,
+                        )
+            })
+            .expect(
+                "Should have default route targeting the explicit services IGW",
+            );
+
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+            for p in 0..2 {
+                let port_name = format!("opte{p}");
+                let rt = state
+                    .ports
+                    .get(&port_name)
+                    .unwrap()
+                    .routes
+                    .iter()
+                    .filter(|rt| rt.is_system_default_ipv4_route())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rt.len(),
+                    1,
+                    "{port_name} should have exactly one default system route \
+                    pointing to the IGW(None), after creating the second port",
+                );
+            }
+        }
+
+        // Now, PUT /vpc-routes again, but with a higher version so that things
+        // are replaced internally.
+        new_routes[0].version.as_mut().expect("Set above").version = 2;
+        manager.vpc_routes_ensure(new_routes).unwrap();
+
+        // Previously, this is where things blew up. Nexus told us to add a new
+        // route to the explicit IGW, which we already have. That means our set
+        // of routes to add is empty. But our set of routes to delete still has
+        // the _implicit_ route we added when we created the second port, the
+        // one pointing to IGW(None).
+        //
+        // Since Nexus's request didn't include that, we deleted it from both
+        // ports, which destroyed the (only) default route on the first port.
+        // The second port still had a route because we made a distinction
+        // between the implicit and explicit routes.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port0.system_router_key())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            system_routes.routes.len(),
+            1,
+            "We should now have only 1 default route, since Nexus sent \
+            us a request with an explicit IGW. We should have deleted \
+            the one pointing to IGW(None)."
+        );
+        let _ = system_routes
+            .routes
+            .iter()
+            .find(|rt| {
+                rt.dest == default_ipv4_route
+                    && rt.target
+                        == RouterTarget::InternetGateway(
+                            InternetGatewayRouterTarget::System,
+                        )
+            })
+            .expect(
+                "Should have default route targeting the explicit services IGW",
+            );
+
+        // As before, we should still have a default route pointing to IGW(None)
+        // for both OPTE ports. We shouldn't delete the default route on the
+        // first.
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+            for p in 0..2 {
+                let port_name = format!("opte{p}");
+                let rt = state
+                    .ports
+                    .get(&port_name)
+                    .unwrap()
+                    .routes
+                    .iter()
+                    .filter(|rt| rt.is_system_default_ipv4_route())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rt.len(),
+                    1,
+                    "{port_name} should have exactly one default system route \
+                    target the services IGW, after creating the second port",
+                );
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ip_cfg_from_ipv4_params() {
+        let priv_ip = Ipv4Addr::new(172, 30, 2, 5);
+        let priv_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv4Addr::new(10, 151, 2, 169);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat = SourceNatConfigV4::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+            v6: None,
+        };
+        let prs = PortCreateParams {
+            nic: &nic,
+            external_ips: &external_ips,
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        };
+        let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
+            vpc_subnet,
+            private_ip,
+            gateway_ip,
+            external_ips:
+                oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
+            attached_subnets,
+            transit_ips,
+        }) = IpCfg::try_from(&prs).unwrap()
+        else {
+            panic!("Expected IPv4 config")
+        };
+
+        assert_eq!(private_ip, priv_ip.into());
+        assert_eq!(
+            vpc_subnet,
+            Ipv4Cidr::new(
+                priv_subnet.network().unwrap().into(),
+                priv_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(gateway_ip, priv_subnet.first_host().into());
+        let oxide_vpc::api::SNatCfg { external_ip, ports } =
+            snat.expect("SNAT config for this port should be Some(_)");
+        assert_eq!(external_ip, ext_ip.into());
+        assert_eq!(ports, source_nat.port_range());
+        assert!(ephemeral_ip.is_none());
+        assert!(floating_ips.is_empty());
+        assert!(attached_subnets.is_empty());
+        assert!(transit_ips.is_empty());
+    }
+
+    #[test]
+    fn ip_cfg_from_ipv6_params() {
+        let priv_ip = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5);
+        let priv_subnet =
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv6(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat = SourceNatConfigV6::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = ExternalIpConfig {
+            v4: None,
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+        };
+        let prs = PortCreateParams {
+            nic: &nic,
+            external_ips: &external_ips,
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        };
+        let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
+            vpc_subnet,
+            private_ip,
+            gateway_ip,
+            external_ips:
+                oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
+            attached_subnets: _,
+            transit_ips: _,
+        }) = IpCfg::try_from(&prs).unwrap()
+        else {
+            panic!("Expected IPv4 config")
+        };
+
+        assert_eq!(private_ip, priv_ip.into());
+        assert_eq!(
+            vpc_subnet,
+            Ipv6Cidr::new(
+                priv_subnet.first_addr().into(),
+                priv_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(gateway_ip, priv_subnet.iter().nth(1).unwrap().into());
+        let oxide_vpc::api::SNatCfg { external_ip, ports } =
+            snat.expect("SNAT config for this port should be Some(_)");
+        assert_eq!(external_ip, ext_ip.into());
+        assert_eq!(ports, source_nat.port_range());
+        assert!(ephemeral_ip.is_none());
+        assert!(floating_ips.is_empty());
+    }
+
+    #[test]
+    fn ip_cfg_from_dual_stack_params() {
+        let priv_ipv4 = Ipv4Addr::new(172, 30, 2, 5);
+        let priv_ipv4_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap();
+        let ipv4_config =
+            PrivateIpv4Config::new(priv_ipv4, priv_ipv4_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ipv4 = Ipv4Addr::new(10, 151, 2, 169);
+        let priv_ipv6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5);
+        let priv_ipv6_subnet =
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap();
+        let ipv6_config =
+            PrivateIpv6Config::new(priv_ipv6, priv_ipv6_subnet).unwrap();
+        let ext_ipv6 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let ip_config =
+            PrivateIpConfig::DualStack { v4: ipv4_config, v6: ipv6_config };
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+
+        // Ipv4 source NAT, Ipv6 ephemeral
+        let source_nat = SourceNatConfigV4::new(ext_ipv4, 0, 16383).unwrap();
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+            v6: Some(ExternalIpv6Config {
+                ephemeral_ip: Some(ext_ipv6),
+                ..Default::default()
+            }),
+        };
+        let prs = PortCreateParams {
+            nic: &nic,
+            external_ips: &external_ips,
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        };
+        let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
+        else {
+            panic!("Expected DualStack config")
+        };
+
+        // Check IPv4 configuration
+        assert_eq!(ipv4.private_ip, priv_ipv4.into());
+        assert_eq!(
+            ipv4.vpc_subnet,
+            Ipv4Cidr::new(
+                priv_ipv4_subnet.network().unwrap().into(),
+                priv_ipv4_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(ipv4.gateway_ip, priv_ipv4_subnet.first_host().into());
+        let oxide_vpc::api::SNatCfg { external_ip, ports } = ipv4
+            .external_ips
+            .snat
+            .expect("SNAT config for this port should be Some(_)");
+        assert_eq!(external_ip, ext_ipv4.into());
+        assert_eq!(ports, source_nat.port_range());
+        assert!(ipv4.external_ips.ephemeral_ip.is_none());
+        assert!(ipv4.external_ips.floating_ips.is_empty());
+
+        // Check IPv6 configuration
+        assert_eq!(ipv6.private_ip, priv_ipv6.into());
+        assert_eq!(
+            ipv6.vpc_subnet,
+            Ipv6Cidr::new(
+                priv_ipv6_subnet.first_addr().into(),
+                priv_ipv6_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(
+            ipv6.gateway_ip,
+            priv_ipv6_subnet.iter().nth(1).unwrap().into()
+        );
+        assert!(
+            ipv6.external_ips.snat.is_none(),
+            "Should not have SNAT config for the IPv6 stack"
+        );
+        assert_eq!(
+            ipv6.external_ips
+                .ephemeral_ip
+                .expect("Should have IPv6 ephemeral address"),
+            ext_ipv6.into(),
+        );
+        assert!(ipv6.external_ips.floating_ips.is_empty());
+    }
+
+    #[test]
+    fn ip_cfg_from_port_params_fails_with_private_ipv4_and_public_ipv6() {
+        let priv_ip = Ipv4Addr::new(172, 30, 2, 5);
+        let priv_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat = SourceNatConfigV6::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = ExternalIpConfig {
+            v4: None,
+            v6: Some(ExternalIpv6Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+        };
+        let prs = PortCreateParams {
+            nic: &nic,
+            external_ips: &external_ips,
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        };
+        let _ = IpCfg::try_from(&prs).expect_err(
+            "Should fail to convert with public IPv6 and private IPv4",
+        );
+    }
+
+    #[test]
+    fn ip_cfg_from_port_params_fails_with_private_ipv6_and_public_ipv4() {
+        let priv_ip = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5);
+        let priv_subnet =
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv6(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv4Addr::new(1, 1, 1, 1);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat = SourceNatConfigV4::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                source_nat: Some(source_nat),
+                ..Default::default()
+            }),
+            v6: None,
+        };
+        let prs = PortCreateParams {
+            nic: &nic,
+            external_ips: &external_ips,
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        };
+        let _ = IpCfg::try_from(&prs).expect_err(
+            "Should fail to convert with public IPv4 and private IPv6",
+        );
+    }
+
+    fn mac(index: NonZeroU8) -> MacAddr {
+        MacAddr(MacAddr6::new(0xa8, 0x40, 0x25, 0x00, 0x00, index.get()))
+    }
+
+    fn create_service_nic(index: NonZeroU8) -> NetworkInterface {
+        let ip = Ipv4Addr::new(172, 20, 0, index.get());
+        let subnet = Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
+        NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config: PrivateIpConfig::new_ipv4(ip, subnet).unwrap(),
+            mac: mac(index),
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        }
+    }
+
+    fn create_port(
+        manager: &PortManager,
+        nic: &NetworkInterface,
+    ) -> Result<Port, Error> {
+        manager.create_port(PortCreateParams {
+            nic,
+            external_ips: &ExternalIpConfig { v4: None, v6: None },
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+            attached_subnets: vec![],
+            mtu: None,
+        })
+    }
+
+    /// Return the names of the ports that OPTE knows about.
+    fn opte_ports() -> HashSet<String> {
+        Handle::new()
+            .unwrap()
+            .state()
+            .lock()
+            .unwrap()
+            .ports
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn duplicate_port_does_not_delete_original_port() {
+        let logctx =
+            test_setup_log("duplicate_port_does_not_delete_original_port");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        Handle::new().unwrap().set_xde_underlay("net0", "net1").unwrap();
+
+        let nic = create_service_nic(1.try_into().unwrap());
+        let key = (nic.id, nic.kind);
+        let original =
+            create_port(&manager, &nic).expect("create original port");
+
+        // Now make a port with the same key in the manager, but a different
+        // MAC. OPTE would normally reject this.
+        let dup =
+            NetworkInterface { mac: mac(2.try_into().unwrap()), ..nic.clone() };
+        let err = create_port(&manager, &dup)
+            .expect_err("Failure creating duplicate port");
+        std::assert_matches!(
+            err,
+            Error::DuplicateOptePort { id, kind } if id == nic.id && kind == nic.kind,
+            "Should have failed with a dupe error, found {err:#?}",
+        );
+
+        // But we should still have the OPTE port we made in the first call.
+        assert!(
+            manager.contains_key(&key),
+            "Should not have removed existing entry"
+        );
+        assert_eq!(
+            opte_ports(),
+            HashSet::from([original.name().to_string()]),
+            "XDE should have only the first port created"
+        );
+
+        // But if we drop the port, we _should_ delete the device and the port
+        // in the map.
+        drop(original);
+        assert!(!manager.contains_key(&key));
+        assert!(opte_ports().is_empty());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn route_set_only_removed_when_last_port_is_deleted() {
+        let logctx =
+            test_setup_log("route_set_only_removed_when_last_port_is_deleted");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        Handle::new().unwrap().set_xde_underlay("net0", "net1").unwrap();
+
+        // Create two ports with the same router keys.
+        let first =
+            create_port(&manager, &create_service_nic(1.try_into().unwrap()))
+                .unwrap();
+        let second =
+            create_port(&manager, &create_service_nic(2.try_into().unwrap()))
+                .unwrap();
+        let system_key = first.system_router_key();
+        let ipv4_key = first.custom_ipv4_router_key().unwrap();
+        assert_eq!(system_key, second.system_router_key());
+        assert_eq!(Some(ipv4_key), second.custom_ipv4_router_key());
+
+        // Check that they're both in the route set's set of associated ports.
+        let first_name = first.name().to_string();
+        let second_name = second.name().to_string();
+        let find_active_ports = |key| {
+            manager
+                .inner
+                .routes
+                .lock()
+                .unwrap()
+                .get(&key)
+                .map(|set| set.active_ports.clone())
+        };
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                Some(HashSet::from([first_name.clone(), second_name.clone()])),
+                "Route set should be associated with both ports",
+            );
+        }
+
+        // If we drop the first port, only that one is removed from the set of
+        // active ports.
+        drop(first);
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                Some(HashSet::from([second.name().to_string()])),
+                "Should have removed the first port from the route set \
+                associated ports, but not the second"
+            );
+        }
+
+        // Now when we drop the second one, we've removed the route set
+        // entirely.
+        drop(second);
+        for key in [system_key, ipv4_key] {
+            assert_eq!(
+                find_active_ports(key),
+                None,
+                "Should have completely removed set of associated ports, \
+                after dropping the second port"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+}

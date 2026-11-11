@@ -1,0 +1,1772 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Collection of inventory from Omicron components
+
+use crate::SledAgentEnumerator;
+use crate::builder::CollectionBuilder;
+use crate::builder::InventoryError;
+use crate::builder::now_db_precision;
+use anyhow::Context;
+use anyhow::anyhow;
+use clickhouse_admin_keeper_client::ClientInfo as _;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use gateway_client::types::GetCfpaParams;
+use gateway_client::types::RotCfpaSlot;
+use gateway_messages::SpComponent;
+use itertools::Itertools;
+use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::Psu;
+use nexus_types::inventory::PsuState;
+use nexus_types::inventory::PsuStatus;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::SpType;
+use nexus_types::inventory::TimeSync;
+use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::address::NTP_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use parallel_task_set::ParallelTaskSet;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::inventory::Inventory;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::ZoneKind;
+use sled_hardware_types::BaseboardId;
+use slog::Logger;
+use slog::o;
+use slog::{debug, error};
+use slog_error_chain::InlineErrorChain;
+use std::net::SocketAddrV6;
+use std::sync::Arc;
+use std::time::Duration;
+use strum::IntoEnumIterator;
+use tufaceous_artifact::ArtifactHash;
+
+/// connection and request timeout used for Sled Agent HTTP client
+const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// maximum number of concurrent outgoing requests within a collection phase
+const MAX_CONCURRENT_INVENTORY_REQUESTS: usize = 8;
+
+/// Collect all inventory data from an Oxide system
+pub struct Collector<'a> {
+    log: slog::Logger,
+    mgs_clients: Vec<gateway_client::Client>,
+    keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
+    cockroach_admin_client: &'a CockroachClusterAdminClient,
+    sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
+    in_progress: CollectionBuilder,
+}
+
+impl<'a> Collector<'a> {
+    pub fn new(
+        creator: &str,
+        mgs_clients: Vec<gateway_client::Client>,
+        keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
+        cockroach_admin_client: &'a CockroachClusterAdminClient,
+        sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
+        log: slog::Logger,
+    ) -> Self {
+        Collector {
+            log,
+            mgs_clients,
+            keeper_admin_clients,
+            cockroach_admin_client,
+            sled_agent_lister,
+            in_progress: CollectionBuilder::new(creator),
+        }
+    }
+
+    /// Begin the process of collecting a complete hardware/software inventory
+    /// of the rack
+    ///
+    /// The collection process makes a bunch of requests to a bunch of
+    /// components.  This can take a while and produce any number of errors.
+    /// Such errors generally don't cause this function to fail.  Rather, the
+    /// returned `Collection` keeps track of these errors.
+    pub async fn collect_all(mut self) -> Result<Collection, anyhow::Error> {
+        // Most of the phases below fan requests out to their targets with
+        // bounded concurrency (MAX_CONCURRENT_INVENTORY_REQUESTS) and then
+        // merge the results into the in-progress collection on this task.
+        // The phases themselves run one at a time: some depend on data
+        // gathered by earlier phases (timesync and DNS collection derive
+        // their target lists from sled agent inventory), and the bound
+        // keeps us from overloading downstream services.
+        //
+        // MGS collection is the exception: it queries targets serially
+        // because it deduplicates work across MGS clients as it goes,
+        // which assumes ordered processing.
+
+        debug!(&self.log, "begin collection");
+
+        self.collect_all_mgs().await;
+        self.collect_all_sled_agents().await;
+        self.collect_all_keepers().await;
+        self.collect_all_cockroach().await;
+
+        // The following must be called after "collect_all_sled_agents",
+        // or they'll see an empty set of services.
+        self.collect_all_timesync().await;
+        self.collect_all_dns_generations().await;
+
+        debug!(&self.log, "finished collection");
+
+        Ok(self.in_progress.build())
+    }
+
+    /// Collect inventory from all MGS instances
+    async fn collect_all_mgs(&mut self) {
+        for client in &self.mgs_clients {
+            Self::collect_one_mgs(client, &self.log, &mut self.in_progress)
+                .await;
+        }
+    }
+
+    async fn collect_one_mgs(
+        client: &gateway_client::Client,
+        log: &Logger,
+        in_progress: &mut CollectionBuilder,
+    ) {
+        debug!(log, "begin collection from MGS";
+            "mgs_url" => client.baseurl()
+        );
+
+        // First, determine the gateway's rack ID.
+        let rack_id = client.rack_id_get().await.with_context(|| {
+            format!("MGS {:?}: determining gateway's rack ID", client.baseurl())
+        });
+        let rack_id = match rack_id {
+            Ok(id) => id.into_inner().rack_id,
+            Err(e) => {
+                in_progress.found_error(InventoryError::from(e));
+                return;
+            }
+        };
+
+        let log = log.new(o!("rack_id" => rack_id.to_string()));
+
+        // Next, see which SPs MGS can see via Ignition.
+        let ignition_result = client.ignition_list().await.with_context(|| {
+            format!(
+                "MGS {:?} (rack {rack_id}): listing ignition targets",
+                client.baseurl()
+            )
+        });
+
+        // Select only the SPs that appear powered on.
+        //
+        // This choice is debatable.  It's conceivable that an SP could be
+        // functioning but not visible to ignition.  In that case, we'd be
+        // better off trying to ask MGS about it even though ignition reports it
+        // powered off.  But in practice, if ignition can't see it, it's much
+        // more likely that there's just nothing plugged in.  And in that case,
+        // if we try to ask MGS about it, we have to wait for MGS to time out
+        // its attempt to reach it (currently several seconds).  This choice
+        // enables inventory to complete much faster, at the expense of not
+        // being able to identify this particular condition.
+        let sps = match ignition_result {
+            Err(error) => {
+                in_progress.found_error(InventoryError::from(error));
+                return;
+            }
+
+            Ok(targets) => {
+                targets.into_inner().into_iter().filter_map(|sp_ignition| {
+                    if sp_ignition.details.is_sp_running() {
+                        Some(sp_ignition.id)
+                    } else {
+                        None
+                    }
+                })
+            }
+        };
+
+        // For each SP that ignition reports up, fetch the state and caboose
+        // information.
+        for sp in sps {
+            // First, fetch the state of the SP.  If that fails, report the
+            // error but continue.
+            let result =
+                client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
+                    format!(
+                        "MGS {:?} (rack {rack_id}): fetching state of SP {:?}",
+                        client.baseurl(),
+                        sp
+                    )
+                });
+            let sp_state = match result {
+                Err(error) => {
+                    in_progress.found_error(InventoryError::from(error));
+                    continue;
+                }
+                Ok(response) => response.into_inner(),
+            };
+
+            // Record the state that we found.
+            let Some(baseboard_id) = in_progress.found_sp_state(
+                client.baseurl(),
+                rack_id,
+                sp.typ,
+                sp.slot,
+                sp_state,
+            ) else {
+                // We failed to parse this SP for some reason.  The error was
+                // reported already.  Move on.
+                continue;
+            };
+
+            // For sled SPs, collect the currently-active phase 1 slot and the
+            // hash of the contents of both slots, if they haven't been
+            // collected already. Generally, we'd only get here for the first
+            // MGS client.  Assuming that one succeeds, the other(s) will skip
+            // this loop.
+            if matches!(sp.typ, SpType::Sled) {
+                if !in_progress
+                    .found_host_phase_1_active_slot_already(&baseboard_id)
+                {
+                    let result = client
+                        .sp_component_active_slot_get(
+                            &sp.typ,
+                            sp.slot,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "MGS {:?} (rack {rack_id}): SP {sp:?}: phase 1 \
+                                 active slot",
+                                client.baseurl(),
+                            )
+                        })
+                        .and_then(|response| {
+                            M2Slot::from_mgs_firmware_slot(response.slot)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "MGS {:?} (rack {rack_id}): SP {sp:?}: \
+                                         invalid host phase 1 slot {}",
+                                        client.baseurl(),
+                                        response.slot
+                                    )
+                                })
+                        });
+                    match result {
+                        Ok(phase_1_slot) => {
+                            if let Err(error) = in_progress
+                                .found_host_phase_1_active_slot(
+                                    &baseboard_id,
+                                    client.baseurl(),
+                                    phase_1_slot,
+                                )
+                            {
+                                error!(
+                                    log,
+                                    "error reporting host phase 1 active slot: \
+                                     {baseboard_id:?} {phase_1_slot:?} \
+                                     {:?}: {error:#}",
+                                    client.baseurl(),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            in_progress.found_error(InventoryError::from(err));
+                        }
+                    }
+                }
+
+                for slot in M2Slot::iter() {
+                    const PHASE1_HASH_TIMEOUT: Duration =
+                        Duration::from_secs(30);
+
+                    if in_progress.found_host_phase_1_flash_hash_already(
+                        &baseboard_id,
+                        slot,
+                    ) {
+                        continue;
+                    }
+
+                    let phase1_slot = match slot {
+                        M2Slot::A => 0,
+                        M2Slot::B => 1,
+                    };
+
+                    let result = client
+                        .host_phase_1_flash_hash_calculate_with_timeout(
+                            sp.typ,
+                            sp.slot,
+                            phase1_slot,
+                            PHASE1_HASH_TIMEOUT,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "MGS {:?} (rack {rack_id}): SP {sp:?}: phase 1 \
+                                 slot {slot:?}",
+                                client.baseurl(),
+                            )
+                        });
+                    let hash = match result {
+                        Err(error) => {
+                            in_progress
+                                .found_error(InventoryError::from(error));
+                            continue;
+                        }
+                        Ok(hash) => hash,
+                    };
+                    if let Err(error) = in_progress
+                        .found_host_phase_1_flash_hash(
+                            &baseboard_id,
+                            slot,
+                            client.baseurl(),
+                            ArtifactHash(hash),
+                        )
+                    {
+                        error!(
+                            log,
+                            "error reporting host phase 1 flash hash: \
+                             {baseboard_id:?} {slot:?} {:?}: {error:#}",
+                            client.baseurl(),
+                        );
+                    }
+                }
+            }
+
+            // For power shelf controller SPs, collect an inventory of PSUs in
+            // the power shelf.
+            if matches!(sp.typ, SpType::Power)
+                // Skip collecting this SP's PSUs if we have already collected
+                // them. In general, this will be true for the second MGS, but
+                // if there were transient errors, this gives us a second try.
+                && !in_progress.found_all_psus_already(&baseboard_id)
+            {
+                if let Err(e) = collect_one_psc(
+                    &log,
+                    &client,
+                    in_progress,
+                    &baseboard_id,
+                    &sp,
+                )
+                .await
+                {
+                    in_progress.found_error(InventoryError::from(e));
+                }
+            }
+
+            // For each kind of caboose that we care about, if it hasn't been
+            // fetched already, fetch it and record it.  Generally, we'd only
+            // get here for the first MGS client.  Assuming that one succeeds,
+            // the other(s) will skip this loop.
+            for which in CabooseWhich::iter() {
+                if in_progress.found_caboose_already(&baseboard_id, which) {
+                    continue;
+                }
+
+                let (component, slot) = match which {
+                    CabooseWhich::SpSlot0 => ("sp", 0),
+                    CabooseWhich::SpSlot1 => ("sp", 1),
+                    CabooseWhich::RotSlotA => ("rot", 0),
+                    CabooseWhich::RotSlotB => ("rot", 1),
+                    CabooseWhich::Stage0 => ("stage0", 0),
+                    CabooseWhich::Stage0Next => ("stage0", 1),
+                };
+
+                let result = client
+                    .sp_component_caboose_get(&sp.typ, sp.slot, component, slot)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MGS {:?} (rack {rack_id}): SP {:?}: caboose {:?}",
+                            client.baseurl(),
+                            sp,
+                            which
+                        )
+                    });
+                let caboose = match result {
+                    Err(error) => {
+                        in_progress.found_error(InventoryError::from(error));
+                        continue;
+                    }
+                    Ok(response) => response.into_inner(),
+                };
+                if let Err(error) = in_progress.found_caboose(
+                    &baseboard_id,
+                    which,
+                    client.baseurl(),
+                    caboose,
+                ) {
+                    error!(
+                        log,
+                        "error reporting caboose: {:?} {:?} {:?}: {:#}",
+                        baseboard_id,
+                        which,
+                        client.baseurl(),
+                        error
+                    );
+                }
+            }
+
+            // For each kind of RoT page that we care about, if it hasn't been
+            // fetched already, fetch it and record it.  Generally, we'd only
+            // get here for the first MGS client.  Assuming that one succeeds,
+            // the other(s) will skip this loop.
+            for which in RotPageWhich::iter() {
+                if in_progress.found_rot_page_already(&baseboard_id, which) {
+                    continue;
+                }
+
+                let component = SpComponent::ROT.const_as_str();
+
+                let result = match which {
+                    RotPageWhich::Cmpa => client
+                        .sp_rot_cmpa_get(&sp.typ, sp.slot, component)
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaActive => client
+                        .sp_rot_cfpa_get(
+                            &sp.typ,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Active },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaInactive => client
+                        .sp_rot_cfpa_get(
+                            &sp.typ,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Inactive },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaScratch => client
+                        .sp_rot_cfpa_get(
+                            &sp.typ,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Scratch },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                }
+                .with_context(|| {
+                    format!(
+                        "MGS {:?} (rack {rack_id}): SP {:?}: rot page {:?}",
+                        client.baseurl(),
+                        sp,
+                        which
+                    )
+                });
+
+                let page = match result {
+                    Err(error) => {
+                        in_progress.found_error(InventoryError::from(error));
+                        continue;
+                    }
+                    Ok(data_base64) => RotPage { data_base64 },
+                };
+                if let Err(error) = in_progress.found_rot_page(
+                    &baseboard_id,
+                    which,
+                    client.baseurl(),
+                    page,
+                ) {
+                    error!(
+                        log,
+                        "error reporting rot page: {:?} {:?} {:?}: {:#}",
+                        baseboard_id,
+                        which,
+                        client.baseurl(),
+                        error
+                    );
+                }
+            }
+        }
+    }
+
+    /// Collect inventory from all sled agent instances
+    async fn collect_all_sled_agents(&mut self) {
+        let urls = match self.sled_agent_lister.list_sled_agents().await {
+            Err(error) => {
+                self.in_progress.found_error(error);
+                return;
+            }
+            Ok(clients) => clients,
+        };
+
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::with_capacity(urls.len());
+        for (idx, url) in urls.into_iter().enumerate() {
+            let log = self.log.new(o!("SledAgent" => url.clone()));
+            let task = async move {
+                let result = collect_one_sled_agent(&url, log).await;
+                (idx, url, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        // Merge results in the order we enumerated the sleds, so that the
+        // collection's contents (in particular the order of its errors) do
+        // not depend on request completion order.
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, url, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(inventory) => {
+                    if let Err(error) =
+                        self.in_progress.found_sled_inventory(&url, inventory)
+                    {
+                        error!(&self.log, "sled agent {:?}: {:#}", url, error);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Collect timesync status from all sleds
+    async fn collect_all_timesync(&mut self) {
+        let ntp_admin_clients: Vec<_> = self
+            .in_progress
+            .ledgered_zones_of_kind(ZoneKind::InternalNtp)
+            .chain(
+                self.in_progress.ledgered_zones_of_kind(ZoneKind::BoundaryNtp),
+            )
+            // Also observe (and "union") the results from the reconciler, just
+            // in case it's lagging behind the last stored ledger. If these
+            // services are still up, we'll try to contact them.
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::BoundaryNtp),
+            )
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::InternalNtp),
+            )
+            .unique_by(|z| z.id)
+            .map(|cfg| {
+                let ip = cfg.zone_type.underlay_ip();
+                let addr = SocketAddrV6::new(ip, NTP_ADMIN_PORT, 0, 0);
+                let url = format!("http://{addr}");
+                let log = self.log.new(o!("ntp_admin_url" => url.clone()));
+
+                (
+                    cfg.id,
+                    ntp_admin_client::Client::new_with_client(
+                        &url,
+                        internal_http_client(),
+                        log,
+                    ),
+                )
+            })
+            .collect();
+
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::with_capacity(ntp_admin_clients.len());
+        for (idx, (zone_id, client)) in
+            ntp_admin_clients.into_iter().enumerate()
+        {
+            let log = self.log.clone();
+            let task = async move {
+                let result = collect_one_timesync(&log, zone_id, &client).await;
+                (idx, zone_id, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, zone_id, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(timesync) => {
+                    if let Err(err) =
+                        self.in_progress.found_ntp_timesync(timesync)
+                    {
+                        error!(
+                            &self.log,
+                            "timesync collection error";
+                            "zone_id" => ?zone_id,
+                            slog_error_chain::InlineErrorChain::new(
+                                err.as_ref()
+                            )
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
+    /// clients
+    async fn collect_all_keepers(&mut self) {
+        debug!(self.log, "begin collecting all keepers";
+            "nkeeper_admin_clients" => self.keeper_admin_clients.len());
+
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::with_capacity(self.keeper_admin_clients.len());
+        for (idx, client) in self.keeper_admin_clients.iter().enumerate() {
+            let client = client.clone();
+            let log = self.log.clone();
+            let task = async move {
+                let result = collect_one_keeper(&client, &log).await;
+                (idx, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        results.sort_by_key(|(idx, _)| *idx);
+        for (_, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(membership) => self
+                    .in_progress
+                    .found_clickhouse_keeper_cluster_membership(membership),
+            }
+        }
+
+        debug!(self.log, "end collecting all keepers";
+            "nkeeper_admin_clients" => self.keeper_admin_clients.len());
+    }
+
+    /// Collect inventory from CockroachDB nodes
+    async fn collect_all_cockroach(&mut self) {
+        debug!(&self.log, "begin collection from CockroachDB nodes");
+
+        // Fetch metrics from all nodes
+        let metrics_results = self
+            .cockroach_admin_client
+            .fetch_prometheus_metrics_from_all_nodes()
+            .await;
+
+        if metrics_results.is_empty() {
+            self.in_progress.found_error(InventoryError::from(
+                anyhow::anyhow!("No CockroachDB nodes returned metrics"),
+            ));
+            return;
+        }
+
+        // Store results for each successful node using the node ID returned by each node
+        for (node_id, metrics) in metrics_results {
+            self.in_progress.found_cockroach_metrics(node_id, metrics);
+        }
+    }
+
+    /// Collect DNS generation status from all internal DNS servers
+    async fn collect_all_dns_generations(&mut self) {
+        debug!(&self.log, "begin collection from internal DNS servers");
+        let internal_dns_clients: Vec<_> = self
+            .in_progress
+            .ledgered_zones_of_kind(ZoneKind::InternalDns)
+            // Also observe (and "union") the results from the reconciler, just
+            // in case it's lagging behind the last stored ledger. If these
+            // services are still up, we'll try to contact them.
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::InternalDns),
+            )
+            .unique_by(|z| z.id)
+            .map(|cfg| {
+                let OmicronZoneType::InternalDns { http_address, .. } =
+                    cfg.zone_type
+                else {
+                    // Panic safety: This would be a bug in "ledgered_zones_of_kind";
+                    // we just asked for Internal DNS zones exclusively.
+                    panic!("Unexpected zone type returned");
+                };
+                let url = format!("http://{http_address}");
+                let log = self.log.new(o!("internal_dns_url" => url.clone()));
+
+                (
+                    cfg.id,
+                    dns_service_client::Client::new_with_client(
+                        &url,
+                        internal_http_client(),
+                        log,
+                    ),
+                )
+            })
+            .collect();
+
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::with_capacity(internal_dns_clients.len());
+        for (idx, (zone_id, client)) in
+            internal_dns_clients.into_iter().enumerate()
+        {
+            let log = self.log.clone();
+            let task = async move {
+                let result =
+                    collect_one_dns_generation(&log, zone_id, &client).await;
+                (idx, zone_id, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, zone_id, result) in results {
+            let result = result.and_then(|generation_status| {
+                self.in_progress
+                    .found_internal_dns_generation_status(generation_status)
+            });
+            if let Err(err) = result {
+                error!(
+                    &self.log,
+                    "DNS generation collection error";
+                    "zone_id" => ?zone_id,
+                    "error" => ?err,
+                );
+            }
+        }
+
+        debug!(&self.log, "finished collection from internal DNS servers");
+    }
+}
+
+/// Collect inventory from a single sled agent
+async fn collect_one_sled_agent(
+    url: &str,
+    log: Logger,
+) -> Result<Inventory, InventoryError> {
+    debug!(&log, "begin collection from Sled Agent";
+        "sled_agent_url" => url
+    );
+
+    let reqwest_client = internal_http_client_builder()
+        .connect_timeout(SLED_AGENT_TIMEOUT)
+        .timeout(SLED_AGENT_TIMEOUT)
+        .build()
+        .unwrap();
+    let client =
+        sled_agent_client::Client::new_with_client(url, reqwest_client, log);
+
+    let inventory = client
+        .inventory()
+        .await
+        .with_context(|| format!("Sled Agent {:?}: inventory", url))?;
+    Ok(inventory.into_inner())
+}
+
+/// Collect timesync status from a single NTP admin server
+async fn collect_one_timesync(
+    log: &slog::Logger,
+    zone_id: OmicronZoneUuid,
+    client: &ntp_admin_client::Client,
+) -> Result<TimeSync, InventoryError> {
+    let sled_agent_url = client.baseurl();
+    debug!(&log, "begin collection from NTP admin (timesync)";
+        "sled_agent_url" => client.baseurl(),
+        "zone_id" => ?zone_id
+    );
+
+    let timesync = client.timesync().await.with_context(|| {
+        format!("Sled Agent {:?}: timesync", sled_agent_url)
+    })?;
+    Ok(TimeSync { zone_id, synced: timesync.into_inner().sync })
+}
+
+/// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
+async fn collect_one_keeper(
+    client: &clickhouse_admin_keeper_client::Client,
+    log: &slog::Logger,
+) -> Result<ClickhouseKeeperClusterMembership, InventoryError> {
+    debug!(log, "begin collection from clickhouse-admin-keeper";
+        "keeper_admin_url" => client.baseurl()
+    );
+
+    let membership = client
+        .keeper_cluster_membership()
+        .await
+        .with_context(|| {
+            format!("Clickhouse Keeper {:?}: inventory", client.baseurl())
+        })?
+        .into_inner();
+
+    debug!(log, "found keeper membership";
+        "keeper_admin_url" => client.baseurl(),
+        "leader_committed_log_index" =>
+        membership.leader_committed_log_index
+    );
+    Ok(membership)
+}
+
+/// Collect the DNS generation from a single internal DNS server
+async fn collect_one_dns_generation(
+    log: &slog::Logger,
+    zone_id: OmicronZoneUuid,
+    client: &dns_service_client::Client,
+) -> Result<InternalDnsGenerationStatus, anyhow::Error> {
+    debug!(&log, "begin collection from DNS server";
+        "zone_id" => ?zone_id
+    );
+
+    let config = client.dns_config_get().await.with_context(|| {
+        format!("DNS server {:?}: dns_config_get", client.baseurl())
+    })?;
+
+    debug!(&log, "finished collection from DNS server"; "zone_id" => ?zone_id);
+
+    Ok(InternalDnsGenerationStatus {
+        zone_id,
+        generation: config.into_inner().generation,
+    })
+}
+
+/// Collect inventory from one power shelf controller.
+async fn collect_one_psc(
+    log: &slog::Logger,
+    client: &gateway_client::Client,
+    in_progress: &mut CollectionBuilder,
+    psc_baseboard_id: &Arc<BaseboardId>,
+    sp: &gateway_types::component::SpIdentifier,
+) -> Result<(), anyhow::Error> {
+    use gateway_types::component_vpd::ComponentVpd;
+    use gateway_types::component_vpd::PmbusDevice;
+    use nexus_types::inventory::PsuIdentity;
+    use nexus_types::inventory::PsuSlot;
+
+    fn convert_psu_vpd(
+        ctx: impl Fn() -> String,
+        in_progress: &mut CollectionBuilder,
+        vpd: PmbusDevice,
+    ) -> PsuIdentity {
+        let mut expect_string =
+            |command: &'static str, value: Option<Vec<u8>>| {
+                let bytes = match value {
+                    Some(bytes) => bytes,
+                    None => {
+                        let err = anyhow!(
+                            "expected the PSU to implement PMBus command \
+                             {command}"
+                        )
+                        .context(ctx());
+                        in_progress.found_error(InventoryError::from(err));
+                        return String::from("<command not implemented>");
+                    }
+                };
+                // Ultimately, we will convert the received bytes to a string
+                // using `String::from_utf8_lossy`. However, we expect that the
+                // string value *should* be valid UTF-8, so first check whether
+                // the conversion will be lossy or not
+                let s = str::from_utf8(&bytes[..])
+                    .map_err(|e| {
+                        anyhow!(
+                            "PMBus {command} should return ASCII bytes: {e}"
+                        )
+                    })
+                    .with_context(&ctx);
+                match s {
+                    Ok(s) => s.to_owned(),
+                    Err(e) => {
+                        in_progress.found_error(InventoryError::from(e));
+                        String::from_utf8_lossy(&bytes[..]).into_owned()
+                    }
+                }
+            };
+
+        let PmbusDevice {
+            mfr_id,
+            mfr_model,
+            mfr_revision,
+            mfr_location,
+            mfr_date,
+            mfr_serial,
+            // muRata PSUs do not implement the IC_DEVICE_ID or IC_DEVICE_REV
+            // PMbus commands, and Hubris will not try to read them, but if
+            // we encounter them unexpectedly, just ignore them.
+            ic_device_id: _,
+            ic_device_rev: _,
+        } = vpd;
+
+        PsuIdentity {
+            mfr_id: expect_string("MFR_ID", mfr_id),
+            mfr_model: expect_string("MFR_MODEL", mfr_model),
+            // muRata uses the PMBus `MFR_REVISION` command to represent the
+            // PSU's *firmware* revisions, rather than a hardware revision. See
+            // `PsuIdentity::firmware_revs`.
+            mfr_revision: expect_string("MFR_REVISION", mfr_revision),
+            mfr_location: expect_string("MFR_LOCATION", mfr_location),
+            mfr_date: expect_string("MFR_DATE", mfr_date),
+            mfr_serial: expect_string("MFR_SERIAL", mfr_serial),
+        }
+    }
+
+    let components = client
+        .sp_component_list(&sp.typ, sp.slot)
+        .await
+        .with_context(|| {
+            format!(
+                "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component list",
+                client.baseurl()
+            )
+        })?
+        .into_inner()
+        .components;
+    let mut changed_psus = 0;
+    let mut total_psus = 0;
+    for component in components {
+        let id = &component.component;
+        let dev_type = component.device.as_str();
+
+        // Don't type this out every time we might construct an error...
+        let ctx = || {
+            format!(
+                "MGS {:?}: SP {sp:?} ({psc_baseboard_id:?}): component {id:?}",
+                client.baseurl()
+            )
+        };
+
+        let slot = match id.parse::<PsuSlot>() {
+            Ok(slot) => slot,
+
+            // well, huh! this thing is one of the hubris device driver types we
+            // believe represent PSUs, but its component ID doesn't match any of
+            // the ones we expect the PSUs to have! report an error and
+            // continue.
+            Err(_) if matches!(dev_type, "mwocp68" | "mwocp67") => {
+                let err = anyhow!(
+                    "device type {dev_type:?} seems to be a PSU, but this is \
+                     not a component ID we expect a PSU to have",
+                );
+                in_progress
+                    .found_error(InventoryError::from(err.context(ctx())));
+                continue;
+            }
+
+            // if neither the component ID nor the device type strings look
+            // PSU-ish, this is definitely not a PSU and we can quietly skip it.
+            Err(_) => continue,
+        };
+
+        total_psus += 1;
+
+        // Okay, have we already inventoried this thing?
+        if in_progress.found_psu_already(&psc_baseboard_id, slot) {
+            continue;
+        }
+
+        // If the PSU is present (or might be present), try to read its
+        // identity.
+        let presence = component.presence;
+        let state =
+            if let Some(status) = PsuStatus::from_presence(presence) {
+                let identity = client
+                .sp_component_vpd_get(&sp.typ, sp.slot, &id)
+                .await
+                .with_context(|| {
+                    format!(
+                        "reading VPD for PSU component {id:?} (component is \
+                        {presence:?})",
+                    )
+                })
+                .and_then(|response| {
+                    let vpd = match response.into_inner() {
+                        ComponentVpd::Pmbus(vpd) => vpd,
+                        other => return Err(anyhow!(
+                            "expected a PSU to report PMBus VPD, but got \
+                            {other:?} instead",
+                        )),
+                    };
+                    Ok(convert_psu_vpd(&ctx, in_progress, vpd))
+                })
+                .map_err(|error| {
+                    let error = InlineErrorChain::new(&*error);
+                    slog::warn!(
+                        log,
+                        "failed to read VPD identity for PSC component {id:?}";
+                        "error" => &error,
+                        "psc_baseboard_id" => ?psc_baseboard_id,
+                        "psc_slot" => %sp.slot,
+                        "psu_slot" => %slot,
+                        "psu_hubris_device_type" => ?dev_type,
+                        "psu_presence" => ?presence,
+                        "mgs_url" => client.baseurl(),
+                    );
+                    error.to_string()
+                });
+                Some(PsuState { status, identity })
+            } else {
+                None
+            };
+
+        let psu = Psu {
+            time_collected: now_db_precision(),
+            source: client.baseurl().to_owned(),
+            slot,
+            hubris_device_type: dev_type.to_string(),
+            state,
+        };
+        match in_progress.found_psu(&psc_baseboard_id, sp.slot, psu) {
+            Ok(true) => changed_psus += 1,
+            Ok(false) => (), // unchanged after retrying VPD
+            Err(error) => {
+                error!(
+                    log,
+                    "error reporting power shelf PSU";
+                    "error" => InlineErrorChain::new(&error),
+                    "psc_baseboard_id" => ?psc_baseboard_id,
+                    "psc_slot" => %sp.slot,
+                    "psu_slot" => %slot,
+                    "psu_hubris_device_type" => ?dev_type,
+                    "psu_presence" => ?presence,
+                    "mgs_url" => client.baseurl(),
+                );
+            }
+        }
+    }
+
+    debug!(
+        log,
+        "found {total_psus} PSUs from power shelf controller \
+         ({changed_psus} new or updated)";
+        "psc_baseboard_id" => ?psc_baseboard_id,
+        "psc_slot" => %sp.slot,
+        "mgs_url" => client.baseurl(),
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::Collector;
+    use crate::StaticSledAgentEnumerator;
+    use crate::examples::RACK_UUID;
+    use gateway_messages::SpPort;
+    use iddqd::IdOrdMap;
+    use iddqd::id_ord_map;
+    use nexus_types::inventory::Collection;
+    use nexus_types::inventory::PowerShelf;
+    use nexus_types::inventory::PsuFirmwareRevisions;
+    use nexus_types::inventory::PsuIdentity;
+    use nexus_types::inventory::PsuIdentityResult;
+    use omicron_cockroach_metrics::CockroachClusterAdminClient;
+    use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::SledConfigGeneration;
+    use omicron_sled_agent::sim;
+    use omicron_test_utils::dev::test_cmds::Redactor;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::OmicronZoneType;
+    use slog::o;
+    use std::collections::BTreeSet;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use swrite::SWrite as _;
+    use swrite::swrite;
+    use swrite::swriteln;
+
+    fn dump_sled_config(s: &mut String, config: &OmicronSledConfig) {
+        let OmicronSledConfig {
+            generation,
+            disks,
+            datasets,
+            zones,
+            remove_mupdate_override,
+            host_phase_2,
+            measurements,
+            update_disposition,
+        } = config;
+
+        swriteln!(s, "        generation: {generation}");
+        swriteln!(
+            s,
+            "        remove_mupdate_override: {remove_mupdate_override:?}"
+        );
+        swriteln!(s, "        update_disposition: {update_disposition:?}");
+        {
+            let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
+            swriteln!(s, "        host_phase_2.slot_a: {slot_a:?}");
+            swriteln!(s, "        host_phase_2.slot_b: {slot_b:?}");
+        }
+        for disk in disks {
+            swriteln!(
+                s,
+                "        disk {}: {} / {} / {}",
+                disk.id,
+                disk.identity.vendor,
+                disk.identity.model,
+                disk.identity.serial
+            );
+        }
+        for dataset in datasets {
+            swriteln!(
+                s,
+                "        dataset {}: {}",
+                dataset.id,
+                dataset.name.full_name()
+            );
+        }
+        for zone in zones {
+            swriteln!(
+                s,
+                "        zone {} type {}",
+                zone.id,
+                zone.zone_type.kind().report_str(),
+            );
+        }
+
+        swriteln!(s, "        measurements:");
+        for h in measurements {
+            swriteln!(s, "            artifact: {}", h.hash);
+        }
+        if measurements.is_empty() {
+            swriteln!(s, "            (empty)");
+        }
+    }
+
+    fn dump_collection(collection: &Collection) -> String {
+        // Construct a stable, human-readable summary of the Collection
+        // contents.  We could use a `Debug` impl for this, but that's not quite
+        // right: when debugging, for example, we want fields like the ids, but
+        // these change each time and we don't want to include them here.
+        // `Serialize` has the same problem -- the set of fields to include
+        // depends on what the serialization is for.  It's easy enough to just
+        // print what we want here.
+        let mut s = String::new();
+        swrite!(s, "baseboards:\n");
+        for b in &collection.baseboards {
+            swrite!(
+                s,
+                "    part {:?} serial {:?}\n",
+                b.part_number,
+                b.serial_number
+            );
+        }
+
+        swrite!(s, "\ncabooses:\n");
+        for c in &collection.cabooses {
+            swrite!(
+                s,
+                "    board {:?} name {:?} version {:?} git_commit {:?} sign {:?}\n",
+                c.board,
+                c.name,
+                c.version,
+                c.git_commit,
+                c.sign,
+            );
+        }
+
+        swrite!(s, "\nrot pages:\n");
+        for p in &collection.rot_pages {
+            swrite!(s, "    data_base64 {:?}\n", p.data_base64);
+        }
+
+        // All we really need to check here is that we're reporting the right
+        // SPs, RoTs, and cabooses. The component data comes straight from MGS,
+        // and proper handling of that data is tested in the builder.
+        swrite!(s, "\nSPs:\n");
+        for (bb, sp) in &collection.sps {
+            swrite!(
+                s,
+                "    baseboard part {:?} serial {:?} rack {}\n",
+                bb.part_number,
+                bb.serial_number,
+                sp.rack_id,
+            );
+        }
+
+        swrite!(s, "\nRoTs:\n");
+        for (bb, _) in &collection.rots {
+            swrite!(
+                s,
+                "    baseboard part {:?} serial {:?}\n",
+                bb.part_number,
+                bb.serial_number,
+            );
+        }
+
+        swrite!(s, "\ncabooses found:\n");
+        for (kind, bb_to_found) in &collection.cabooses_found {
+            for (bb, found) in bb_to_found {
+                swrite!(
+                    s,
+                    "    {:?} baseboard part {:?} serial {:?}: board {:?}\n",
+                    kind,
+                    bb.part_number,
+                    bb.serial_number,
+                    found.caboose.board,
+                );
+            }
+        }
+
+        swrite!(s, "\nrot pages found:\n");
+        for (kind, bb_to_found) in &collection.rot_pages_found {
+            for (bb, found) in bb_to_found {
+                swrite!(
+                    s,
+                    "    {:?} baseboard part {:?} serial {:?}: \
+                              data_base64 {:?}\n",
+                    kind,
+                    bb.part_number,
+                    bb.serial_number,
+                    found.page.data_base64
+                );
+            }
+        }
+
+        swrite!(s, "\nsled agents found:\n");
+        for sled_info in &collection.sled_agents {
+            swrite!(
+                s,
+                "  sled {} ({:?}) rack: {}\n",
+                sled_info.sled_id,
+                sled_info.sled_role,
+                sled_info.rack_id,
+            );
+            swrite!(s, "    baseboard {:?}\n", sled_info.baseboard_id);
+
+            if let Some(config) = &sled_info.ledgered_sled_config {
+                swriteln!(s, "    ledgered sled config:");
+                dump_sled_config(&mut s, config);
+            } else {
+                swriteln!(s, "    no ledgered sled config");
+            }
+
+            if let Some(last_reconciliation) = &sled_info.last_reconciliation {
+                swriteln!(s, "    last reconciled config:");
+                dump_sled_config(
+                    &mut s,
+                    &last_reconciliation.last_reconciled_config,
+                );
+                for (id, result) in &last_reconciliation.external_disks {
+                    swriteln!(s, "    result for disk {id}: {result:?}");
+                }
+                for (id, result) in &last_reconciliation.datasets {
+                    swriteln!(s, "    result for dataset {id}: {result:?}");
+                }
+                for (id, result) in &last_reconciliation.zones {
+                    swriteln!(s, "    result for zone {id}: {result:?}");
+                }
+            } else {
+                swriteln!(s, "    no completed reconciliation");
+            }
+
+            match &sled_info.reconciler_status {
+                ConfigReconcilerInventoryStatus::NotYetRun => {
+                    swriteln!(s, "    reconciler task not yet run");
+                }
+                ConfigReconcilerInventoryStatus::Running { config, .. } => {
+                    swriteln!(s, "    reconciler task running with config:");
+                    dump_sled_config(&mut s, config);
+                }
+                ConfigReconcilerInventoryStatus::Idle { .. } => {
+                    swriteln!(s, "    reconciler task idle");
+                }
+            }
+        }
+
+        swrite!(s, "\npower shelves found:\n");
+        // When the simulated SP simulates a VPD read error, MGS returns it to
+        // Nexus as an HTTP error, which gets formatted with timestamps, IP
+        // addresses, and UUIDs in its formatted representation, so don't let
+        // those make it into the snapshot file.
+        let error_redactor = {
+            let mut r = Redactor::noop();
+            r.basic(true).uuids(true);
+            r
+        };
+        for PowerShelf { rack_id, slot, psc_baseboard_id, psus } in
+            &collection.power_shelves
+        {
+            swriteln!(
+                s,
+                "    rack {rack_id} shelf {slot}, PSC baseboard part {:?} \
+                 serial {:?}",
+                psc_baseboard_id.part_number,
+                psc_baseboard_id.serial_number,
+            );
+            for psu in psus {
+                swriteln!(
+                    s,
+                    "        {}: presence {:?} hubris_device {}",
+                    psu.slot,
+                    psu.presence(),
+                    psu.hubris_device_type,
+                );
+                match psu.identity() {
+                    PsuIdentityResult::Present(
+                        identity @ PsuIdentity {
+                            mfr_id,
+                            mfr_model,
+                            mfr_revision,
+                            mfr_location,
+                            mfr_date,
+                            mfr_serial,
+                        },
+                    ) => {
+                        swriteln!(
+                            s,
+                            "            VPD: mfr_model {mfr_model:?} \
+                              mfr_serial {mfr_serial:?} \
+                              mfr_revision {mfr_revision:?} \
+                              mfr_id {mfr_id:?} \
+                              mfr_location {mfr_location:?} \
+                              mfr_date {mfr_date:?}"
+                        );
+                        match identity.firmware_revs() {
+                            Ok(PsuFirmwareRevisions { primary, secondary }) => {
+                                swriteln!(
+                                    s,
+                                    "            firmware: primary \
+                                     {primary:?} secondary {secondary:?}"
+                                );
+                            }
+                            Err(error) => {
+                                swriteln!(
+                                    s,
+                                    "            firmware: error: {error:#}"
+                                );
+                            }
+                        }
+                    }
+                    PsuIdentityResult::Error(error) => {
+                        let error = error_redactor.do_redact(error);
+                        swriteln!(s, "            VPD: error: {error}");
+                    }
+                    PsuIdentityResult::NotPresent => {}
+                }
+            }
+        }
+
+        swrite!(s, "\nerrors:\n");
+        let os_error_re = regex::Regex::new(r"os error \d+").unwrap();
+        let comm_error_re =
+            regex::Regex::new(r"Communication Error.*").unwrap();
+        for e in &collection.errors {
+            // Some error strings have OS error numbers in them.  We want to
+            // ignore those, particularly for CI, which runs these tests on
+            // multiple OSes.
+            let message = os_error_re.replace_all(&e, "os error <<redacted>>");
+            // Communication errors differ based on the configuration of the
+            // machine running the test. For example whether or not the machine
+            // has IPv6 configured will determine if an error is network
+            // unreachable or a timeout due to sending a packet to a known
+            // discard prefix. So just key in on the communication error in a
+            // general sense.
+            let message = comm_error_re
+                .replace_all(&message, "Communication Error <<redacted>>");
+            swrite!(s, "error: {}\n", message);
+        }
+
+        s
+    }
+
+    async fn sim_sled_agent(
+        log: slog::Logger,
+        sled_id: SledUuid,
+        rack_id: RackUuid,
+        zone_id: OmicronZoneUuid,
+        simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+    ) -> sim::Server {
+        // Start a simulated sled agent.
+        let config = sim::Config::for_testing(
+            sled_id,
+            rack_id,
+            sim::SimMode::Auto,
+            None,
+            sim::ZpoolConfig::None,
+            sim::SledCpuFamily::AmdMilan,
+        );
+
+        let agent = sim::Server::start(
+            &config,
+            &log,
+            sim::NexusRegistration::Background,
+            &simulated_upstairs,
+            0,
+        )
+        .await
+        .unwrap();
+
+        // Pretend to put some zones onto this sled.  We don't need to test this
+        // exhaustively here because there are builder tests that exercise a
+        // variety of different data.  We just want to make sure that if the
+        // sled agent reports something specific (some non-degenerate case),
+        // then it shows up in the resulting collection.
+        let sled_url = format!("http://{}/", agent.http_server.local_addr());
+        let client = sled_agent_client::Client::new(&sled_url, log);
+
+        let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
+        let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
+        client
+            .omicron_config_put(&OmicronSledConfig {
+                generation: SledConfigGeneration::from_u32(3),
+                disks: IdOrdMap::default(),
+                datasets: IdOrdMap::default(),
+                zones: id_ord_map! {
+                    OmicronZoneConfig {
+                        id: zone_id,
+                        zone_type: OmicronZoneType::Oximeter {
+                            address: zone_address,
+                        },
+                        filesystem_pool: Some(filesystem_pool),
+                        image_source: OmicronZoneImageSource::InstallDataset,
+                    }
+                },
+                remove_mupdate_override: None,
+                host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                measurements: BTreeSet::new(),
+                update_disposition: OmicronSledUpdateDisposition::Available,
+            })
+            .await
+            .expect("failed to write initial zone version to fake sled agent");
+
+        agent
+    }
+
+    // Set up httpmock server for CockroachDB admin endpoints
+    fn mock_crdb_admin_server() -> httpmock::MockServer {
+        let mock_server = httpmock::MockServer::start();
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/proxy/status/vars");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body("\"# Basic CockroachDB metrics\\nliveness_livenodes 1\\nranges_underreplicated 0\\n\"");
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/proxy/status/nodes");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(
+                    &serde_json::json!({
+                        "nodes": [{
+                            "desc": {
+                                "nodeId": "1",
+                                "address": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:26257"
+                                },
+                                "sqlAddress": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:26257"
+                                },
+                                "httpAddress": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:8080"
+                                },
+                                "buildTag": "v21.1.0",
+                                "startedAt": "1640995200000000000",
+                                "clusterName": "test-cluster"
+                            },
+                            "buildInfo": {
+                                "goVersion": "go1.17",
+                                "tag": "v21.1.0"
+                            },
+                            "startedAt": "1640995200000000000",
+                            "updatedAt": "1640995200000000000",
+                            "totalSystemMemory": "8589934592",
+                            "numCpus": 4
+                        }],
+                        "livenessByNodeId": {
+                            "1": 3
+                        }
+                    })
+                    .to_string(),
+                )
+                .unwrap(),
+            );
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/node/id");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(&serde_json::json!({
+                    "zone_id": "12345678-1234-1234-1234-123456789012",
+                    "node_id": "1"
+                }))
+                .unwrap(),
+            );
+        });
+        mock_server
+    }
+
+    #[tokio::test]
+    async fn test_basic() {
+        // Set up the stock MGS test setup (which includes a couple of fake SPs)
+        // and a simulated sled agent.  Then run a collection against these.
+        let gwtestctx =
+            gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
+                .await;
+        let log = &gwtestctx.logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
+        let mgs_client = gwtestctx.client.clone();
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
+        // Configure the mock server as a backend for the CockroachDB client
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
+        let collector = Collector::new(
+            "test-suite",
+            vec![mgs_client],
+            keeper_clients,
+            &crdb_cluster,
+            &sled_enum,
+            log.clone(),
+        );
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(
+            collection.errors.is_empty(),
+            "Collection errors: {:#?}",
+            collection.errors
+        );
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents("tests/output/collector_basic.txt", &s);
+
+        sled1.http_server.close().await.unwrap();
+        gwtestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_multi_mgs() {
+        // This is the same as the basic test, but we set up two different MGS
+        // instances and point the collector at both.  We should get the same
+        // result.
+        let gwtestctx1 = gateway_test_utils::setup::test_setup(
+            "test_multi_mgs_1",
+            SpPort::One,
+        )
+        .await;
+        let gwtestctx2 = gateway_test_utils::setup::test_setup(
+            "test_multi_mgs_2",
+            SpPort::Two,
+        )
+        .await;
+        let log = &gwtestctx1.logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            RACK_UUID,
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
+        let mgs_clients = [&gwtestctx1, &gwtestctx2]
+            .into_iter()
+            .map(|g| &g.client)
+            .cloned()
+            .collect::<Vec<_>>();
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
+        let collector = Collector::new(
+            "test-suite",
+            mgs_clients,
+            keeper_clients,
+            &crdb_cluster,
+            &sled_enum,
+            log.clone(),
+        );
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(collection.errors.is_empty());
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents("tests/output/collector_basic.txt", &s);
+
+        sled1.http_server.close().await.unwrap();
+        gwtestctx1.teardown().await;
+        gwtestctx2.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_multi_mgs_failure() {
+        // This is similar to the multi-MGS test, but we don't actually set up
+        // the second MGS.  To the collector, it should look offline or
+        // otherwise non-functional.
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_multi_mgs_2",
+            SpPort::Two,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let real_client = gwtestctx.client.clone();
+        let bad_client = {
+            // This IP range is guaranteed by RFC 6666 to discard traffic.
+            let url = "http://[100::1]:12345";
+            gateway_client::Client::new(url, log.clone())
+        };
+        let mgs_clients = vec![bad_client, real_client];
+        let sled_enum = StaticSledAgentEnumerator::empty();
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
+        let collector = Collector::new(
+            "test-suite",
+            mgs_clients,
+            keeper_clients,
+            &crdb_cluster,
+            &sled_enum,
+            log.clone(),
+        );
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents("tests/output/collector_errors.txt", &s);
+
+        gwtestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_sled_agent_failure() {
+        // Similar to the basic test, but use multiple sled agents, one of which
+        // is non-functional.
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sled_agent_failure",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            RACK_UUID,
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
+        )
+        .await;
+
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sledbogus_url = String::from("http://[100::1]:45678");
+        let mgs_client = gwtestctx.client.clone();
+        let sled_enum =
+            StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
+        let collector = Collector::new(
+            "test-suite",
+            vec![mgs_client],
+            keeper_clients,
+            &crdb_cluster,
+            &sled_enum,
+            log.clone(),
+        );
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(!collection.errors.is_empty());
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents(
+            "tests/output/collector_sled_agent_errors.txt",
+            &s,
+        );
+
+        sled1.http_server.close().await.unwrap();
+        gwtestctx.teardown().await;
+    }
+}

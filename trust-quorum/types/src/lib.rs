@@ -8,5 +8,4 @@
 //! providing a stable interface for consumers who want the latest versions
 //! of all types. It also provides non-versioned types.
 
-pub mod membership;
 pub use trust_quorum_types_versions::latest::*;

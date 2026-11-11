@@ -1,0 +1,10 @@
+{
+  "column_names": [
+    "total"
+  ],
+  "rows": [
+    [
+      2
+    ]
+  ]
+}

@@ -1,0 +1,170 @@
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 0
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  0
+
+----------------------
+command: dnsadm --address REDACTED add-aaaa z1.oxide.test host1 fe80::2:1
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 1
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  1
+
+zone "z1.oxide.test"
+    key "host1":
+        AAAA: fe80::2:1
+
+----------------------
+command: dnsadm --address REDACTED add-aaaa z1.oxide.test host1 fe80::2:2
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 2
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  1
+
+zone "z1.oxide.test"
+    key "host1":
+        AAAA: fe80::2:1
+        AAAA: fe80::2:2
+
+----------------------
+command: dnsadm --address REDACTED add-aaaa z1.oxide.test host2 fe80::2:3
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED add-aaaa z2.oxide.test host1 fe80::3:1
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 4
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  2
+
+zone "z1.oxide.test"
+    key "host1":
+        AAAA: fe80::2:1
+        AAAA: fe80::2:2
+    key "host2":
+        AAAA: fe80::2:3
+
+zone "z2.oxide.test"
+    key "host1":
+        AAAA: fe80::3:1
+
+----------------------
+command: dnsadm --address REDACTED add-srv z1.oxide.test s1.services 0 0 12345 host1.z1.oxide.test
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED add-srv z1.oxide.test s1.services 0 0 12345 host2.z1.oxide.test
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 6
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  2
+
+zone "z2.oxide.test"
+    key "host1":
+        AAAA: fe80::3:1
+
+zone "z1.oxide.test"
+    key "host1":
+        AAAA: fe80::2:1
+        AAAA: fe80::2:2
+    key "host2":
+        AAAA: fe80::2:3
+    key "s1.services":
+        SRV:  host1.z1.oxide.test
+              port     12345
+              priority 0
+              weight   0
+        SRV:  host2.z1.oxide.test
+              port     12345
+              priority 0
+              weight   0
+
+----------------------
+command: dnsadm --address REDACTED delete-record z1.oxide.test host1
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 7
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  2
+
+zone "z2.oxide.test"
+    key "host1":
+        AAAA: fe80::3:1
+
+zone "z1.oxide.test"
+    key "host2":
+        AAAA: fe80::2:3
+    key "s1.services":
+        SRV:  host1.z1.oxide.test
+              port     12345
+              priority 0
+              weight   0
+        SRV:  host2.z1.oxide.test
+              port     12345
+              priority 0
+              weight   0
+
+----------------------
+command: dnsadm --address REDACTED delete-record z1.oxide.test host1
+----------------------
+
+
+----------------------
+command: dnsadm --address REDACTED list-records
+----------------------
+generation 8
+    created <REDACTED>
+    applied <REDACTED>
+    zones:  2
+
+zone "z2.oxide.test"
+    key "host1":
+        AAAA: fe80::3:1
+
+zone "z1.oxide.test"
+    key "host2":
+        AAAA: fe80::2:3
+    key "s1.services":
+        SRV:  host1.z1.oxide.test
+              port     12345
+              priority 0
+              weight   0
+        SRV:  host2.z1.oxide.test
+              port     12345
+              priority 0
+              weight   0
+

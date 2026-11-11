@@ -1,0 +1,90 @@
+= Omicron live tests
+
+The `omicron-live-tests` package contains automated tests that operate in the context of an already-deployed "real" Oxide system (e.g., `a4x2` or our `london` or `madrid` test environments).  This is a home for automated tests for all kinds of Reconfigurator behavior (e.g., add/expunge of all zones, add/expunge sled, upgrades, etc.).  It can probably be used for non-Reconfigurator behavior, too.
+
+This package is not built or tested by default because the tests generally can't work in a dev environment and there's no way to have `cargo` build and check them but not run the tests by default.
+
+== Why a separate test suite?
+
+What makes these tests different from the rest of the test suite is that they require connectivity to the underlay network of the deployed system and they make API calls to various components in that system and they assume that this will behave like a real production system.  By contrast, the normal tests instead _set up_ a bunch of components using simulated sled agents and localhost networking, which is great for starting from a predictable state and running tests in parallel, but the simulated sled agents and networking make it impossible to exercise quite a lot of Reconfigurator's functionality.  
+
+There are also the `end-to-end-tests`.  That environment is more realistic than the main test suite, but not faithful enough for many Reconfigurator tests.
+
+== Production systems
+
+There are some safeguards so that these tests won't run on production systems: they refuse to run if they find any Oxide-hardware sleds in the system whose serial numbers don't correspond to known test environments.
+
+== Usage
+
+These tests are not currently run automatically (though they are _built_ in CI). You can run them yourself.
+
+First, deploy Omicron using `a4x2` or one of the hardware test rigs.
+
+Ensure the system's target blueprint is enabled. The live tests require this to avoid a case where the live tests generate blueprints based on a target blueprint that is not current, and then make a bunch of changes to the system unrelated to the tests.
+
+On a fresh system, you will have to enable the target blueprint yourself:
+
+```
+omdb --destructive nexus blueprints target enable current
+```
+
+This essentially enables reconfigurator, causing it to constantly try to make the system match its target blueprint. You only need to do this once in the lifetime of the system, not every time you re-run the live tests.
+
+At this point the system is prepared for testing. In your Omicron workspace, run `cargo xtask live-tests` to build an archive and then follow the instructions:
+
+```
+$ cargo xtask live-tests
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.96s
+     Running `target/debug/xtask live-tests`
+using temporary directory: /dangerzone/omicron_tmp/.tmp0ItZUD
+will create archive file:  /dangerzone/omicron_tmp/.tmp0ItZUD/live-tests-archive/omicron-live-tests.tar.zst
+output tarball:            /home/dap/omicron-work/target/live-tests-archive.tgz
+
+running: /home/dap/.rustup/toolchains/1.80.1-x86_64-unknown-illumos/bin/cargo "nextest" "archive" "--package" "omicron-live-tests" "--archive-file" "/dangerzone/omicron_tmp/.tmp0ItZUD/live-tests-archive/omicron-live-tests.tar.zst"
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.89s
+info: experimental features enabled: setup-scripts
+   Archiving 1 binary, 1 build script output directory, and 1 linked path to /dangerzone/omicron_tmp/.tmp0ItZUD/live-tests-archive/omicron-live-tests.tar.zst
+    Archived 35 files to /dangerzone/omicron_tmp/.tmp0ItZUD/live-tests-archive/omicron-live-tests.tar.zst in 0.31s
+running: bash "-c" "tar cf - Cargo.toml .config/nextest.toml live-tests | tar xf - -C \"/dangerzone/omicron_tmp/.tmp0ItZUD/live-tests-archive\""
+running: tar "cf" "/home/dap/omicron-work/target/live-tests-archive.tgz" "-C" "/dangerzone/omicron_tmp/.tmp0ItZUD" "live-tests-archive"
+created: /home/dap/omicron-work/target/live-tests-archive.tgz
+
+To use this:
+
+1. Copy the tarball to the switch zone in a deployed Omicron system.
+
+     e.g., scp \
+              /home/dap/omicron-work/target/live-tests-archive.tgz \
+              root@YOUR_SCRIMLET_GZ_IP:/zone/oxz_switch/root/root
+
+2. Copy the `cargo-nextest` binary to the same place.
+
+     e.g., scp \
+              $(which cargo-nextest) \
+              root@YOUR_SCRIMLET_GZ_IP:/zone/oxz_switch/root/root
+
+3. From the switch zone on that system, unpack the tarball with:
+
+     tar xzf live-tests-archive.tgz
+
+4. From the switch zone on that system, run tests with:
+
+     TMPDIR=/var/tmp ./cargo-nextest nextest run --profile=live-tests \
+         --archive-file live-tests-archive/omicron-live-tests.tar.zst \
+         --workspace-remap live-tests-archive
+```
+
+Follow the instructions, run the tests, and you'll see the usual `nextest`-style output:
+
+```
+root@oxz_switch:~# TMPDIR=/var/tmp ./cargo-nextest nextest run          --archive-file live-tests-archive/omicron-live-tests.tar.zst          --workspace-remap live-tests-archive
+  Extracting 1 binary, 1 build script output directory, and 1 linked path to /var/tmp/nextest-archive-Lqx9VZ
+   Extracted 35 files to /var/tmp/nextest-archive-Lqx9VZ in 1.01s
+info: experimental features enabled: setup-scripts
+    Starting 1 test across 1 binary (run ID: a5fc9163-9dd5-4b23-b89f-55f8f39ebbbc, nextest profile: default)
+        SLOW [> 60.000s] omicron-live-tests::test_nexus_add_remove test_nexus_add_remove
+        PASS [  61.975s] omicron-live-tests::test_nexus_add_remove test_nexus_add_remove
+------------
+     Summary [  61.983s] 1 test run: 1 passed (1 slow), 0 skipped
+root@oxz_switch:~# 
+```

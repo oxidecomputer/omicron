@@ -1,0 +1,380 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! OAuth 2.0 Device Authorization Grant
+//!
+//! This is an OAuth 2.0 "flow" that allows devices or clients with
+//! restricted internet access or that lack a full-featured browser to
+//! obtain an access token. For our use-case, the client will usually
+//! be the Oxide CLI or an API client library. Such a client will not
+//! typically be able to complete e.g., a SAML login flow directly.
+//!
+//! The protocol is completely described in RFC 8628, which augments
+//! the general OAuth 2.0 framework specified in RFC 6749. Slightly
+//! simplified, the overall flow looks like this:
+//!
+//! 1. The client contacts the server to request a token. The client
+//!    provides a globally unique `client_id` to identify itself, but
+//!    *not* a user identification; at this point, the server does not
+//!    know *who* (which actor or user) is requesting a token.
+//! 2. The server responds with a short, simple URL to a login page
+//!    and a short, fresh `user_code` to enter or verify on login.
+//!    It also generates and sends a globally unique `device_code`,
+//!    which the user never sees or uses directly.
+//! 3. The client starts polling the server for a token, supplying
+//!    its `client_id` and the `device_code` the server sent in step 2.
+//! 4. The user visits the login page in their browser, either manually
+//!    or by having the client open a browser window if possible. In the
+//!    automatic case, it may supply the `user_code` as a query parameter.
+//! 5. The user logs in using their configured IdP, then enters or verifies
+//!    the `user_code`.
+//! 6. On successful login, the server responds to the poll started
+//!    in step 3 with a freshly granted access token.
+//!
+//! Note that in this flow, there are actually two distinct sets of
+//! connections made to the server: by the client itself, and by the
+//! browser on behalf of the client. It is important to keep this distinction
+//! in mind when working on this code.
+//!
+//! Also note that the kind of token granted at the end of a successful
+//! flow is not specified by the standard. It may be a long-lived token,
+//! or a refresh token which may in turn be used to request a short-lived
+//! access token; it may also be structured (like a JWT) or random.
+//! In the current implementation, we use long-lived random tokens,
+//! but that may change in the future.
+
+use dropshot::{Body, HttpError};
+use http::{Response, StatusCode, header};
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::authn::{Actor, Reason};
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
+use omicron_uuid_kinds::{GenericUuid, SiloUserUuid};
+
+use anyhow::anyhow;
+use nexus_types::external_api::device;
+use omicron_common::api::external::{
+    CreateResult, DataPageParams, Error, ListResultVec,
+};
+
+use chrono::{Duration, Utc};
+use serde::Serialize;
+use uuid::Uuid;
+
+#[derive(Debug)]
+pub enum DeviceAccessTokenResponse {
+    Granted(DeviceAccessToken),
+    Pending,
+    #[allow(dead_code)]
+    Denied,
+}
+
+impl super::Nexus {
+    /// Start a device authorization grant flow.
+    /// Corresponds to steps 1 & 2 in the flow description above.
+    pub(crate) async fn device_auth_request_create(
+        &self,
+        opctx: &OpContext,
+        params: device::DeviceAuthRequest,
+    ) -> CreateResult<DeviceAuthRequest> {
+        // TODO-correctness: the `user_code` generated for a new request
+        // is used as a primary key, but may potentially collide with an
+        // existing outstanding request. So we should retry some (small)
+        // number of times if inserting the new request fails.
+
+        // Note that we cannot validate the TTL here against the silo max
+        // because we do not know what silo we're talking about until verify
+        let auth_request =
+            DeviceAuthRequest::new(params.client_id, params.ttl_seconds);
+        self.db_datastore.device_auth_request_create(opctx, auth_request).await
+    }
+
+    /// Verify a device authorization grant, and delete the authorization
+    /// request so that at most one token will be granted per request.
+    /// Invoked in response to a request from the browser, not the client.
+    /// Corresponds to step 5 in the flow description above.
+    pub(crate) async fn device_auth_request_verify(
+        &self,
+        opctx: &OpContext,
+        user_code: String,
+        silo_user_id: SiloUserUuid,
+    ) -> CreateResult<DeviceAccessToken> {
+        let (.., authz_request, db_request) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .device_auth_request(&user_code)
+                .fetch()
+                .await?;
+
+        let (authz_silo, authz_user) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_user_id(silo_user_id)
+                .lookup_for(authz::Action::CreateChild)
+                .await?;
+        assert_eq!(authz_user.id(), silo_user_id);
+
+        let silo_auth_settings = self
+            .db_datastore
+            .silo_auth_settings_view(opctx, &authz_silo)
+            .await?;
+
+        let silo_max_ttl = silo_auth_settings.device_token_max_ttl_seconds;
+        let requested_ttl = db_request.token_ttl_seconds;
+
+        // This logic is a bit gnarly, but we landed on it as the least bad
+        // option. Error out if the user requests a token TTL that is longer
+        // than allowed, i.e., either
+        //
+        //   a) it is longer than the silo max TTL, or
+        //   b) this request was authenticated with a device token and the TTL
+        //      would produce an expiration later than the current token's.
+        //
+        // If the user does not request a specific TTL, we do not error out.
+        // We calculate the token TTL as min(silo max TTL, current token TTL
+        // if present). Token confirm requests authenticated with a console
+        // session can get device tokens with TTLs up to the silo max.
+
+        let time_expires = if let Some(requested_ttl) = requested_ttl {
+            // If the user requested a TTL, validate it against the silo max
+            // TTL as well as the expiration time of the token being used (if a
+            // token is being used)
+
+            // Validate the requested TTL against the silo's max TTL
+            if let Some(max) = silo_max_ttl
+                && requested_ttl > max.0.into()
+            {
+                return Err(Error::invalid_request(&format!(
+                    "Requested TTL {} seconds exceeds maximum allowed \
+                     TTL for this silo of {} seconds",
+                    requested_ttl, max
+                )));
+            };
+
+            let requested_exp =
+                Utc::now() + Duration::seconds(requested_ttl.0.into());
+
+            // If currently authenticated via token, error if requested exceeds it
+            if let Some(auth_exp) = opctx.authn.device_token_expiration()
+                && requested_exp > auth_exp
+            {
+                return Err(Error::invalid_request(
+                    "Requested token TTL would exceed the expiration time \
+                     of the token being used to authenticate the confirm \
+                     request. To get the full requested TTL, confirm \
+                     this token using a web console session. Alternatively, \
+                     omit requested TTL to get a token with the longest \
+                     allowed lifetime, determined by the lesser of the silo \
+                     max and the current token's expiration time.",
+                ));
+            }
+
+            Some(requested_exp)
+        } else {
+            // No explicit TTL requested. Rather than erroring out if silo max
+            // exceeds TTL exceeds expiration time of current token, just clamp.
+            let silo_max_exp = silo_max_ttl
+                .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
+            // a.min(b) doesn't do it because None is always less than Some(_)
+            match (silo_max_exp, opctx.authn.device_token_expiration()) {
+                (Some(silo_exp), Some(token_exp)) => {
+                    Some(silo_exp.min(token_exp))
+                }
+                (a, b) => a.or(b),
+            }
+        };
+
+        let token = DeviceAccessToken::new(
+            db_request.client_id,
+            db_request.device_code,
+            db_request.time_created,
+            silo_user_id,
+            time_expires,
+        );
+
+        if db_request.time_expires < Utc::now() {
+            // Store the expired token anyway so that the client
+            // can get a proper "denied" message on its next poll.
+            let token = token.expires(db_request.time_expires);
+            self.db_datastore
+                .device_access_token_create(
+                    opctx,
+                    &authz_request,
+                    &authz_user,
+                    token,
+                )
+                .await?;
+            Err(Error::invalid_request("device authorization request expired"))
+        } else {
+            self.db_datastore
+                .device_access_token_create(
+                    opctx,
+                    &authz_request,
+                    &authz_user,
+                    token,
+                )
+                .await
+        }
+    }
+
+    /// Look up a possibly-not-yet-granted device access token.
+    /// Corresponds to steps 3 & 6 in the flow description above.
+    pub(crate) async fn device_access_token_fetch(
+        &self,
+        opctx: &OpContext,
+        client_id: Uuid,
+        device_code: String,
+    ) -> CreateResult<DeviceAccessTokenResponse> {
+        use DeviceAccessTokenResponse::*;
+        match self
+            .db_datastore
+            .device_access_token_fetch(opctx, client_id, device_code)
+            .await
+        {
+            Ok(token) => Ok(Granted(token)),
+            Err(_) => Ok(Pending),
+            // TODO: TokenResponse::Denied
+        }
+    }
+
+    /// Look up the actor for which a token was granted.
+    /// Corresponds to a request *after* completing the flow above.
+    /// Returns the actor, the token's expiration time (if any), and the token ID.
+    pub(crate) async fn authenticate_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>, Uuid), Reason> {
+        let (.., db_access_token) = self
+            .db_datastore
+            .device_token_lookup_by_token(opctx, token)
+            .await
+            .map_err(|e| match e {
+                Error::ObjectNotFound { .. } => Reason::UnknownActor {
+                    actor: "from device access token".to_string(),
+                },
+                e => Reason::UnknownError { source: e },
+            })?;
+
+        let silo_user_id = db_access_token.silo_user_id();
+        let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await
+            .map_err(|e| match e {
+                Error::ObjectNotFound { .. } => {
+                    Reason::UnknownActor { actor: silo_user_id.to_string() }
+                }
+                e => Reason::UnknownError { source: e },
+            })?;
+        let silo_id = db_silo_user.silo_id();
+
+        let expiration = db_access_token.time_expires;
+        let token_id = db_access_token.id().into_untyped_uuid();
+
+        if let Some(time_expires) = expiration {
+            let now = Utc::now();
+            if time_expires < now {
+                return Err(Reason::BadCredentials {
+                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    source: anyhow!(
+                        "token expired at {} (current time: {})",
+                        time_expires,
+                        now
+                    ),
+                });
+            }
+        }
+
+        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration, token_id))
+    }
+
+    pub(crate) async fn device_access_token(
+        &self,
+        opctx: &OpContext,
+        params: device::DeviceAccessTokenRequest,
+    ) -> Result<Response<Body>, HttpError> {
+        // RFC 8628 §3.4
+        if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {
+            return self.build_oauth_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({
+                    "error": "unsupported_grant_type"
+                }),
+            );
+        }
+
+        // RFC 8628 §3.5
+        use DeviceAccessTokenResponse::*;
+        match self
+            .device_access_token_fetch(
+                &opctx,
+                params.client_id,
+                params.device_code,
+            )
+            .await
+        {
+            Ok(response) => match response {
+                Granted(token) => self.build_oauth_response(
+                    StatusCode::OK,
+                    &device::DeviceAccessTokenGrant::from(token),
+                ),
+                Pending => self.build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "authorization_pending"
+                    }),
+                ),
+                Denied => self.build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "access_denied"
+                    }),
+                ),
+            },
+            Err(error) => self.build_oauth_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": format!("{}", error),
+                }),
+            ),
+        }
+    }
+
+    /// OAuth 2.0 error responses use 400 (Bad Request) with specific `error`
+    /// parameter values to indicate protocol errors (see RFC 6749 §5.2).
+    /// This is different from Dropshot's error `message` parameter, so we
+    /// need a custom response builder.
+    pub(crate) fn build_oauth_response<T>(
+        &self,
+        status: StatusCode,
+        body: &T,
+    ) -> Result<Response<Body>, HttpError>
+    where
+        T: ?Sized + Serialize,
+    {
+        let body = serde_json::to_string(body)
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.into())?)
+    }
+
+    pub(crate) async fn current_user_token_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        self.db_datastore.current_user_token_list(opctx, pagparams).await
+    }
+
+    pub(crate) async fn current_user_token_delete(
+        &self,
+        opctx: &OpContext,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        self.db_datastore.current_user_token_delete(opctx, token_id).await
+    }
+}

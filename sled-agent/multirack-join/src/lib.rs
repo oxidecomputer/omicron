@@ -53,9 +53,7 @@ use tokio::{
     task::{JoinError, JoinSet},
 };
 use trust_quorum::{NodeApiError, ProxyError};
-use trust_quorum_types::membership::{
-    TRUST_QUORUM_MAX_MEMBERS, TRUST_QUORUM_MIN_MEMBERS,
-};
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::{
     messages::ReconfigureMsg as TqReconfigureMsg, types::Epoch,
 };
@@ -115,17 +113,14 @@ impl From<RunRssError> for MultirackJoinServiceError {
 // The value returned from `MultirackJoinServiceTask::tq_prepare`
 enum TqPrepareResult {
     Prepared,
-    ReconfigurationNeeded {
-        new_members: BTreeSet<BaseboardId>,
-        new_epoch: Epoch,
-    },
+    ReconfigurationNeeded { new_members: TrustQuorumMembers, new_epoch: Epoch },
 }
 
 // The value returned from `MultirackJoinServiceTask::tq_commit`
 enum TqCommitResult {
     Committed,
     ReconfigurationNeeded {
-        new_members: BTreeSet<BaseboardId>,
+        new_members: TrustQuorumMembers,
         new_epoch: Epoch,
         just_committed_epoch: Epoch,
     },
@@ -480,7 +475,7 @@ impl MultirackJoinServiceTask {
         );
 
         let mut missing_sleds = BTreeSet::new();
-        for baseboard_id in tq_members {
+        for baseboard_id in tq_members.into_set() {
             if !bootstrap_ips.contains_key(&baseboard_id) {
                 missing_sleds.insert(baseboard_id);
             }
@@ -632,46 +627,11 @@ impl MultirackJoinServiceTask {
     async fn tq_run(
         &mut self,
         rack_id: RackUuid,
-        mut members: BTreeSet<BaseboardId>,
+        mut members: TrustQuorumMembers,
         mut epoch: Epoch,
         mut last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
         loop {
-            // We put the check inside this loop, rather than in
-            // `init_trust_quorum` because the operator can change the
-            // membership at any time.
-            if members.len() < TRUST_QUORUM_MIN_MEMBERS
-                || members.len() > TRUST_QUORUM_MAX_MEMBERS
-            {
-                let msg = format!(
-                    "Rack membership must be between \
-                    {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} \
-                    sleds (inclusive). Received {} sleds.",
-                    members.len()
-                );
-                error!(self.log, "{msg}");
-
-                // Inform the operator about the mess they've made
-                self.output_tx.send_modify(|state| {
-                    *state = MultirackJoinServiceState::InvalidMembershipSize {
-                        message: msg,
-                    }
-                });
-
-                // Wait for the operator to clean up said mess.
-                self.input_rx.changed().await?;
-                members = self
-                    .input_rx
-                    .borrow_and_update()
-                    .request
-                    .trust_quorum_peers
-                    .clone();
-
-                // We don't need to bump the epoch because we never attempted a
-                // reconfiguration with the invalid membership.
-                continue;
-            }
-
             self.tq_reconfigure(
                 rack_id,
                 members.clone(),
@@ -717,12 +677,11 @@ impl MultirackJoinServiceTask {
     async fn tq_reconfigure(
         &mut self,
         rack_id: RackUuid,
-        members: BTreeSet<BaseboardId>,
+        members: TrustQuorumMembers,
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
-        let threshold =
-            TrustQuorumConfig::threshold(members.len().try_into().unwrap());
+        let threshold = TrustQuorumConfig::threshold(members.num_members());
 
         info!(
             self.log,
@@ -761,7 +720,7 @@ impl MultirackJoinServiceTask {
 
     async fn tq_prepare(
         &mut self,
-        members: BTreeSet<BaseboardId>,
+        members: TrustQuorumMembers,
         epoch: Epoch,
     ) -> Result<TqPrepareResult, MultirackJoinServiceError> {
         // Read unconditionally from `input_rx` so that we can ensure we are up
@@ -789,9 +748,9 @@ impl MultirackJoinServiceTask {
                 .await?
                 .ok_or(MultirackJoinServiceError::TqBadCoordinator)?;
 
-            let all_nodes_prepared = status.acked_prepares == members;
+            let all_nodes_prepared = status.acked_prepares == *members.as_set();
             let still_waiting = itertools::join(
-                members.difference(&status.acked_prepares),
+                members.as_set().difference(&status.acked_prepares),
                 ",",
             );
 
@@ -862,7 +821,7 @@ impl MultirackJoinServiceTask {
     async fn tq_commit(
         &mut self,
         rack_id: RackUuid,
-        members: BTreeSet<BaseboardId>,
+        members: TrustQuorumMembers,
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
     ) -> Result<TqCommitResult, MultirackJoinServiceError> {
@@ -881,16 +840,14 @@ impl MultirackJoinServiceTask {
         self.ctx.trust_quorum_handle.commit(rack_id, epoch).await?;
 
         // Peers that must proxy commit over sprockets
-        let mut remote_peers = members.clone();
+        let mut remote_peers = members.as_set().clone();
         let this_sled = self.ctx.trust_quorum_handle.baseboard_id().clone();
         remote_peers.remove(&this_sled);
         let mut set = JoinSet::new();
 
-        let threshold =
-            TrustQuorumConfig::threshold(members.len().try_into().unwrap());
-        let commit_crash_tolerance = TrustQuorumConfig::commit_crash_tolerance(
-            members.len().try_into().unwrap(),
-        );
+        let threshold = TrustQuorumConfig::threshold(members.num_members());
+        let commit_crash_tolerance =
+            TrustQuorumConfig::commit_crash_tolerance(members.num_members());
         let min_acks_to_commit =
             (threshold.0 + commit_crash_tolerance) as usize;
 
@@ -901,7 +858,7 @@ impl MultirackJoinServiceTask {
         // Update our state as we start
         let mut commit_state = CommitState {
             rack_id,
-            members: members.clone(),
+            members: members.as_set().clone(),
             epoch,
             last_committed_epoch,
             threshold,
@@ -1007,7 +964,7 @@ impl MultirackJoinServiceTask {
                             commit_state.clone(),
                         )
                     });
-                    if commit_state.acked == members {
+                    if commit_state.acked == *members.as_set() {
                         info!(
                             self.log,
                             "Trust quorum committed at all nodes";
@@ -1114,8 +1071,8 @@ impl MultirackJoinServiceTask {
     // Return an error if checking for the update fails.
     async fn has_membership_changed(
         &mut self,
-        members: &BTreeSet<BaseboardId>,
-    ) -> Result<Option<BTreeSet<BaseboardId>>, MultirackJoinServiceError> {
+        members: &TrustQuorumMembers,
+    ) -> Result<Option<TrustQuorumMembers>, MultirackJoinServiceError> {
         if self.input_rx.has_changed()? {
             let new_members = self
                 .input_rx
@@ -1160,6 +1117,7 @@ fn assign_ids_and_subnets(
     })
     .chain(
         req.trust_quorum_peers
+            .into_set()
             .into_iter()
             .filter(|baseboard_id| baseboard_id != this_nodes_baseboard_id)
             .enumerate()
@@ -1233,22 +1191,26 @@ mod tests {
     #[test]
     fn new_start_sled_agent_status() {
         let req = MultirackJoinRequest {
-            trust_quorum_peers: trust_quorum_peers(),
+            trust_quorum_peers: TrustQuorumMembers::new(trust_quorum_peers())
+                .expect("test membership is within the size bounds"),
             rack_network_config: rack_network_config(),
         };
 
-        let coordinator = req.trust_quorum_peers.first().unwrap();
+        let coordinator = req.trust_quorum_peers.iter().next().unwrap();
         let status = assign_ids_and_subnets(
             coordinator,
             RackUuid::new_v4(),
             req.clone(),
         );
-        assert_eq!(status.sleds.len(), req.trust_quorum_peers.len());
+        assert_eq!(
+            status.sleds.len(),
+            usize::from(req.trust_quorum_peers.num_members())
+        );
 
         let actual_sled_subnets: BTreeSet<_> =
             status.sleds.iter().map(|s| s.sled_subnet.to_string()).collect();
         let expected_sled_subnets: BTreeSet<_> =
-            (0..req.trust_quorum_peers.len())
+            (0..usize::from(req.trust_quorum_peers.num_members()))
                 .into_iter()
                 .map(|i| format!("fd00:abcd:ffff:1{:02x}::/64", i + 1))
                 .collect();
@@ -1259,7 +1221,8 @@ mod tests {
     #[test]
     fn first_subnet_assigned_to_this_node() {
         let req = MultirackJoinRequest {
-            trust_quorum_peers: trust_quorum_peers(),
+            trust_quorum_peers: TrustQuorumMembers::new(trust_quorum_peers())
+                .expect("test membership is within the size bounds"),
             rack_network_config: rack_network_config(),
         };
 

@@ -1,0 +1,202 @@
+#!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+
+set -o errexit
+set -o pipefail
+set -o xtrace
+
+#
+# Set up a custom temporary directory within whatever one we were given so that
+# we can check later whether we left detritus around.
+#
+TEST_TMPDIR='/var/tmp/omicron_tmp'
+echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
+mkdir "$TEST_TMPDIR"
+
+#
+# Set up our PATH for the test suite.
+#
+
+# shellcheck source=/dev/null
+source ./env.sh
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
+
+target_os=$1
+
+# NOTE: This version should be in sync with the recommended version in
+# .config/nextest.toml. (Maybe build an automated way to pull the recommended
+# version in the future.)
+NEXTEST_VERSION='0.9.150'
+
+cargo --version
+rustc --version
+curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
+
+
+OUTPUT_DIR='/work'
+echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
+mkdir -p "$OUTPUT_DIR"
+
+
+
+banner prerequisites
+ptime -m bash ./tools/install_builder_prerequisites.sh -y
+
+#
+# Write a machine-readable file with information about our build environment for
+# later analysis of test results.
+#
+jq --null-input > "$OUTPUT_DIR/environment.json" \
+    --arg bmat_factory_name "$(bmat factory name)" \
+    --arg bmat_factory_private "$(bmat factory private)" \
+    '{
+        buildomat: {
+            factory: {
+                name: $bmat_factory_name,
+                private: $bmat_factory_private,
+            },
+        },
+    }'
+
+# Do some test runs of the `ls-apis` command.
+#
+# This may require cloning some dependent private repos.  We do this before the
+# main battery of tests because the GitHub tokens required for this only last
+# for an hour so we want to get this done early.
+#
+# (TODO: This makes the build timings we record inaccurate.)
+banner ls-apis
+(
+    source ./tools/include/force-git-over-https.sh;
+    ptime -m cargo xtask ls-apis apis &&
+        ptime -m cargo xtask ls-apis deployment-units &&
+        ptime -m cargo xtask ls-apis servers &&
+        ptime -m cargo xtask ls-apis check && \
+	ptime -m cargo xtask ls-apis adoc > /dev/null
+)
+
+#
+# We build with:
+#
+# - RUSTFLAGS="-D warnings" RUSTDOCFLAGS="-D warnings": disallow warnings
+#   in CI builds.  This can result in breakage when the toolchain is
+#   updated, but that should only happen with a change to the repo, which
+#   gives us an opportunity to find and fix any newly-introduced warnings.
+#
+# - `--locked`: do not update Cargo.lock when building.  Checking in
+#   Cargo.lock ensures that everyone is using the same dependencies and
+#   also gives us a record of which dependencies were used for each CI
+#   run.  Building with `--locked` ensures that the checked-in Cargo.lock
+#   is up to date.
+#
+# We don't use `--workspace` here because we're not prepared to run tests
+# from end-to-end-tests.
+#
+banner build
+export RUSTFLAGS="--cfg tokio_unstable -D warnings"
+export RUSTDOCFLAGS="--document-private-items -D warnings"
+# When running on illumos we need to pass an additional runpath that is
+# usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
+# takes precedence. This path contains oxide specific libraries such as
+# libipcc.
+if [[ $target_os == "illumos" ]]; then
+    RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64"
+fi
+export TMPDIR="$TEST_TMPDIR"
+export RUST_BACKTRACE=1
+# We're building once, so there's no need to incur the overhead of an incremental build.
+export CARGO_INCREMENTAL=0
+# This allows us to use -Zbuild-analysis to collect per-crate build timing
+# data in JSONL format.
+export RUSTC_BOOTSTRAP=1
+
+# Build all the packages and tests, and keep track of how long each took to build.
+ptime -m cargo --config 'build.analysis.enabled=true' build -Zbuild-analysis \
+    --workspace --tests --locked --verbose
+cp "$(ls -t "${CARGO_HOME:-$HOME/.cargo}/log/"*.jsonl | head -1)" \
+    "$OUTPUT_DIR/cargo-build-analysis.jsonl"
+
+#
+# We apply our own timeout to ensure that we get a normal failure on timeout
+# rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
+# To avoid too many tests running at the same time, we choose a test threads
+# 2 less (negative 2) than the default.  This avoids many test flakes where
+# the test would have worked but the system was too overloaded and tests
+# take longer than their default timeouts.
+
+# Create a user config file that enables test recording.
+RECORDING_CONFIG_DIR="/tmp/nextest-recording-config"
+RECORDING_CONFIG="$RECORDING_CONFIG_DIR/config.toml"
+NEXTEST_STATE_DIR="$(mktemp -d /tmp/nextest-state.XXXXXX)"
+ARCHIVE_PATH="/tmp/nextest-run-archive.zip"
+CHROME_TRACE_PATH="/tmp/nextest-chrome-trace.json"
+
+mkdir -p "$RECORDING_CONFIG_DIR"
+printf '[experimental]\nrecord = true\n\n[record]\nenabled = true\n' \
+    > "$RECORDING_CONFIG"
+
+export NEXTEST_STATE_DIR
+
+banner test
+
+# Export an archive even on test failure.
+NEXTEST_EXIT=0
+ptime -m timeout 2h cargo nextest run --profile ci --locked \
+    --test-threads -2 \
+    --user-config-file "$RECORDING_CONFIG" \
+    || NEXTEST_EXIT=$?
+
+if ! ptime -m cargo nextest store export latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --archive-file "$ARCHIVE_PATH"; then
+    echo "warning: failed to export recording archive" >&2
+fi
+
+if ! ptime -m cargo nextest store export-chrome-trace latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --output "$CHROME_TRACE_PATH"; then
+    echo "warning: failed to export Chrome trace" >&2
+fi
+
+if [[ "$NEXTEST_EXIT" -ne 0 ]]; then
+    echo "error: cargo nextest run failed with exit code $NEXTEST_EXIT" >&2
+    exit "$NEXTEST_EXIT"
+fi
+
+#
+# https://github.com/nextest-rs/nextest/issues/16
+#
+banner doctest
+ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
+
+# Verify that old migrations have been removed.
+#
+# We do this after the main build, so the dependencies of "cargo xtask schema"
+# have already been built, which makes this cheap(er).
+banner "check schema migration cleanup"
+ptime -m cargo xtask schema old-migrations
+
+# Build the live-tests.  This is only supported on illumos.
+# We also can't actually run them here.  See the README for more details.
+if [[ $target_os == "illumos" ]]; then
+    banner "live-test"
+    ptime -m cargo xtask live-tests
+fi
+
+# We expect the seed CRDB to be placed here, so we explicitly remove it so the
+# rmdir check below doesn't get triggered. Nextest doesn't have support for
+# teardown scripts so this is the best we've got.
+rm -rf "$TEST_TMPDIR/crdb-base"*
+
+#
+# Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way
+# to check is to try to remove it with `rmdir`.
+#
+unset TMPDIR
+echo "files in $TEST_TMPDIR (none expected on success):" >&2
+find "$TEST_TMPDIR" -ls
+rmdir "$TEST_TMPDIR"
