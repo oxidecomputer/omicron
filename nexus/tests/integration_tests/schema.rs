@@ -551,10 +551,6 @@ async fn update_since_base_has_idempotent_up() {
     logctx.cleanup_successful();
 }
 
-// "data_type" omits precision, length, and array element types (e.g.
-// "INTERVAL(0)" is "interval", and all arrays are "ARRAY"), so we also compare
-// the CockroachDB-specific "crdb_sql_type", which includes them. See:
-// https://www.cockroachlabs.com/docs/v23.1/information-schema#columns
 const COLUMNS: [&'static str; 8] = [
     "table_catalog",
     "table_schema",
@@ -563,6 +559,10 @@ const COLUMNS: [&'static str; 8] = [
     "column_default",
     "is_nullable",
     "data_type",
+    // "data_type" omits precision, length, and array element types (e.g.
+    // "INTERVAL(0)" is "interval", and all arrays are "ARRAY"). This
+    // CockroachDB-specific column includes them. See:
+    // https://www.cockroachlabs.com/docs/v23.1/information-schema#columns
     "crdb_sql_type",
 ];
 
