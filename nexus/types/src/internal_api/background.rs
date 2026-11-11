@@ -10,11 +10,13 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::api::external::ByteCount;
 use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -27,6 +29,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
@@ -35,6 +38,15 @@ use swrite::SWrite;
 use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+/// The status of a `capacity_metrics` background task activation.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CapacityMetricsStatus {
+    /// Number of silo quota samples retrieved.
+    pub silo_samples: usize,
+    /// Number of project quota samples retrieved.
+    pub project_samples: usize,
+}
 
 /// The status of a `region_replacement` background task activation
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -104,6 +116,47 @@ pub struct AbandonedVmmReaperStatus {
     pub vmms_deleted: usize,
     pub vmms_already_deleted: usize,
     pub errors: Vec<String>,
+}
+
+/// VMMs on a single sled
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmsBySled {
+    pub sled_id: SledUuid,
+    pub vmm_ids: BTreeSet<PropolisUuid>,
+}
+
+impl IdOrdItem for VmmsBySled {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+/// The status of a `vmm_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VmmStopForUpdateStatus {
+    /// Disabled by configuration (`vmm_stop_for_update.disable`). The task did
+    /// nothing.
+    Disabled,
+    /// The task was enabled and ran, with the details of what it did provided.
+    Enabled(VmmStopForUpdateDetails),
+}
+
+/// Details of an enabled `vmm_stop_for_update` activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmStopForUpdateDetails {
+    /// Number of VMMs stopped in this activation, keyed by the sled they were
+    /// running on.
+    pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
+    /// Number of VMMs that failed to stop in this activation, keyed by the sled
+    /// they are running on.
+    pub vmms_failed_to_stop_by_sled: IdOrdMap<VmmsBySled>,
+    /// Errors encountered during this activation, if any.
+    pub error_messages: Vec<String>,
 }
 
 /// The status of an `instance_updater` background task activation.
@@ -229,6 +282,8 @@ pub enum ReincarnationReason {
     Failed,
     /// A previous instance-start saga for this instance has failed.
     SagaUnwound,
+    /// A sled has been evacuated and its instances need to be started again.
+    SledEvacuation,
 }
 
 impl std::fmt::Display for ReincarnationReason {
@@ -236,6 +291,7 @@ impl std::fmt::Display for ReincarnationReason {
         f.write_str(match self {
             Self::Failed => "instance failed",
             Self::SagaUnwound => "start saga failed",
+            Self::SledEvacuation => "sled evacuated",
         })
     }
 }
@@ -284,6 +340,29 @@ pub struct SupportBundleCollectionReport {
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+
+    /// Set if collection stopped at the bundle's size limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_limit_exceeded: Option<SupportBundleSizeLimitExceeded>,
+}
+
+/// Describes a support bundle collection that stopped early because the
+/// bundle reached its size limit.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleSizeLimitExceeded {
+    /// The bundle's size limit.
+    pub limit_bytes: ByteCount,
+    /// The number of bytes collected into the bundle.
+    pub used_bytes: u64,
+    /// When the limit was first reached.
+    pub exceeded_at: DateTime<Utc>,
+    /// Files refused because they would exceed the limit, relative to the
+    /// bundle's root, in the order refused.
+    pub refused_paths: Vec<String>,
+    /// Steps which stopped before finishing.
+    pub incomplete_steps: BTreeSet<String>,
+    /// Steps which never started because the limit was reached.
+    pub skipped_steps: BTreeSet<String>,
 }
 
 /// Pairs a [`SupportBundleCollectionReport`] with facts known only after
@@ -335,6 +414,9 @@ impl SupportBundleCollectionStep {
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
+    /// The step stopped before finishing, because the bundle reached its
+    /// size limit or was cancelled.
+    Stopped,
     Failed(String),
 }
 
@@ -344,6 +426,7 @@ impl std::fmt::Display for SupportBundleCollectionStepStatus {
         match self {
             Ok => write!(f, "ok"),
             Skipped => write!(f, "skipped"),
+            Stopped => write!(f, "stopped"),
             Failed(why) => write!(f, "failed: {why}"),
         }
     }
@@ -367,7 +450,7 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self { bundle, steps: vec![] }
+        Self { bundle, steps: vec![], size_limit_exceeded: None }
     }
 }
 
@@ -1274,13 +1357,87 @@ pub struct FmAnalysisStatus {
 pub mod fm_analysis {
     use super::*;
     use crate::fm::FmConfigSource;
+    use iddqd::{IdOrdItem, IdOrdMap};
     use std::num::{NonZeroU32, NonZeroU64};
+    use std::time::Duration;
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
+        /// The total duration of this preparation phase.
+        pub total_duration: Duration,
+        /// The status of each preparation step that ran during this preparation
+        /// phase.
+        #[serde(default)]
+        pub steps: IdOrdMap<PreparationStepStatus>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    pub struct PreparationStepStatus {
+        pub name: String,
+        /// How long each input-loading step took to complete, whether it
+        /// succeeded or failed.
+        ///
+        /// Steps run concurrently, so these durations overlap, and their sum
+        /// may exceed the wall-clock time spent preparing inputs.
+        pub duration: Duration,
         /// Errors encountered during the preparation step which did *not*
-        /// prevent the analysis step from completing.
+        /// prevent preparation from completing successfully.
         pub warnings: Vec<String>,
+    }
+
+    impl IdOrdItem for PreparationStepStatus {
+        type Key<'a> = &'a str;
+
+        fn key(&self) -> Self::Key<'_> {
+            &self.name
+        }
+
+        iddqd::id_upcast!();
+    }
+
+    impl std::fmt::Display for PreparationStatus {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Self { total_duration, steps } = self;
+            let name_width =
+                steps.iter().map(|step| step.name.len()).max().unwrap_or(0);
+            if steps.iter().any(|step| !step.warnings.is_empty()) {
+                writeln!(
+                    f,
+                    "/!\\ non-fatal errors preparing analysis inputs:"
+                )?;
+                for step in steps {
+                    for warning in &step.warnings {
+                        writeln!(f, "      > {}: {warning}", step.name)?;
+                    }
+                }
+            }
+            writeln!(
+                f,
+                "    input preparation took {}ms",
+                total_duration.as_millis()
+            )?;
+            for PreparationStepStatus { name, duration, warnings: _ } in steps {
+                writeln!(
+                    f,
+                    "      {name}:{:pad$}{}ms",
+                    "",
+                    duration.as_millis(),
+                    pad = name_width - name.len() + 1,
+                )?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Describes why preparing analysis inputs failed.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum PreparationFailure {
+        /// One or more input-loading steps failed. Each failed step is
+        /// recorded with its error; steps which succeeded are absent.
+        StepsFailed(BTreeMap<String, String>),
+        /// Every input-loading step succeeded, but the loaded inputs could
+        /// not be assembled into analysis inputs.
+        InvalidInputs(String),
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1301,14 +1458,14 @@ pub mod fm_analysis {
         /// Fault management analysis was not performed, as the currently-loaded
         /// inventory collection was collected prior to the earliest newer start
         /// time indicated by the current sitrep.
-        WaitingForNewerInventory {
-            parent_inv_id: CollectionUuid,
-            next_inv_min_time_started: DateTime<Utc>,
-            input_inv_time_started: DateTime<Utc>,
-        },
+        WaitingForNewerInventory(crate::fm::InventoryStale),
 
         /// Preparing analysis input failed.
-        PreparationError(String),
+        PreparationError {
+            /// Warnings and timings from any input-loading steps which ran.
+            prep_status: PreparationStatus,
+            failure: PreparationFailure,
+        },
 
         /// Preparation succeeded and analysis was performed.
         RanAnalysis {
@@ -1516,14 +1673,28 @@ pub enum TrustQuorumManagerStatus {
     Error(String),
 }
 
-#[derive(Default, Deserialize, Serialize)]
-pub struct AttachedSubnetManagerStatus {
-    /// Error reaching the database to fetch attached subnets.
-    pub db_error: Option<String>,
-    /// Details about attached subnets sent to Dendrite instances.
-    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
-    /// Details about attached subnets sent to sleds.
-    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AttachedSubnetManagerStatus {
+    /// An error occurred while querying the database to fetch attached subnets,
+    /// so nothing was sent to Dendrite or Sled Agents.
+    DatabaseError {
+        /// The error that occurred.
+        error: String,
+    },
+    /// Querying the database the fetch attached subnets succeeded, and the task
+    /// then attempted to make requests to Dendrite and Sled Agents.
+    Listed {
+        /// Details about attached subnets sent to Dendrite instances, or an
+        /// error if dpd clients could not be looked up.
+        ///
+        /// Even in the `Ok` case, there could be errors; see
+        /// [`DendriteSubnetDetails::errors`].
+        #[serde(with = "omicron_common::snake_case_result")]
+        dendrite: Result<HashMap<SwitchSlot, DendriteSubnetDetails>, String>,
+        /// Details about attached subnets sent to sleds.
+        sled: HashMap<SledUuid, SledSubnetDetails>,
+    },
 }
 
 /// Details about attached subnets sent to a single Dendrite instance.
@@ -1577,7 +1748,18 @@ pub struct AuditLogCleanupStatus {
 
 /// The status of a `vmm_mark_stop_for_update` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct VmmMarkStopForUpdateStatus {
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VmmMarkStopForUpdateStatus {
+    /// Disabled by configuration (`vmm_mark_stop_for_update.disable`). The task
+    /// did nothing, and in particular did not trigger `vmm_stop_for_update`.
+    Disabled,
+    /// The task was enabled and ran, with the details of what it did provided.
+    Enabled(VmmMarkStopForUpdateDetails),
+}
+
+/// Details of an enabled `vmm_mark_stop_for_update` activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmMarkStopForUpdateDetails {
     /// Number of VMMs that were marked as needing to be stopped for update in
     /// this activation.
     pub vmms_marked: usize,
@@ -1667,8 +1849,11 @@ mod test {
     use crate::internal_api::background::BlueprintPrunerDetails;
     use crate::internal_api::background::BlueprintPrunerStatus;
     use crate::internal_api::background::DeletedBlueprint;
+    use crate::internal_api::background::fm_analysis::PreparationStatus;
+    use crate::internal_api::background::fm_analysis::PreparationStepStatus;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
+    use std::time::Duration;
 
     #[test]
     fn test_display_tuf_repo_pruner_status_enabled() {
@@ -1749,6 +1934,61 @@ mod test {
 
         assert_contents(
             "output/blueprint_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    fn fm_preparation_step(
+        name: impl ToString,
+        millis: u64,
+        warnings: &[&str],
+    ) -> PreparationStepStatus {
+        PreparationStepStatus {
+            name: name.to_string(),
+            duration: Duration::from_millis(millis),
+            warnings: warnings.iter().map(|w| w.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_display_fm_preparation_status_with_warnings() {
+        let status = PreparationStatus {
+            total_duration: Duration::from_millis(125),
+            steps: [
+                fm_preparation_step(
+                    "ereports",
+                    120,
+                    &["ereport 1 is invalid", "ereport 2 is also invalid"],
+                ),
+                fm_preparation_step("in_service_disks", 8, &[]),
+                fm_preparation_step(
+                    "silo_certificates",
+                    3,
+                    &["certificate 1 cannot be served"],
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_contents(
+            "output/fm_preparation_status_with_warnings.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_fm_preparation_status_no_warnings() {
+        let status = PreparationStatus {
+            total_duration: Duration::from_millis(42),
+            steps: ["ereports", "in_service_disks", "silo_certificates"]
+                .iter()
+                .map(|step| fm_preparation_step(step, 5, &[]))
+                .collect(),
+        };
+
+        assert_contents(
+            "output/fm_preparation_status_no_warnings.out",
             &status.to_string(),
         );
     }

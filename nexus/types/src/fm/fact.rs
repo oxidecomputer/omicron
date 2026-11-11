@@ -16,6 +16,7 @@ use crate::fm::DiagnosisEngineKind;
 use crate::inventory::ZpoolHealth;
 use crate::observed_saga::{OrphanedReason, SagaProgressState};
 use chrono::{DateTime, Utc};
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
     CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
@@ -241,7 +242,7 @@ pub enum CertificateFact {
 impl CertificateFact {
     /// The silo this fact (and its parent case) is about. Common to every
     /// kind of certificate fact.
-    pub fn silo_id(&self) -> Uuid {
+    pub fn silo_id(&self) -> SiloUuid {
         match self {
             CertificateFact::BestCertificateExpiring(p) => p.silo_id,
             CertificateFact::BestCertificateExpired(p) => p.silo_id,
@@ -266,7 +267,7 @@ impl CertificateFact {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CertificateExpiryFactPayload {
     /// The silo this fact (and its parent case) is about.
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
     /// The silo's best certificate at the time the fact was recorded. If a
     /// different certificate becomes the best one, the fact is replaced.
     pub certificate_id: Uuid,

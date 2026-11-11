@@ -30,6 +30,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ArtifactHash;
 use nexus_db_model::HwM2Slot;
 use nexus_db_model::InvClickhouseKeeperMembership;
@@ -39,6 +40,8 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvDiscoveredRack;
+use nexus_db_model::InvDiscoveredSled;
 use nexus_db_model::InvFmdHostCase;
 use nexus_db_model::InvFmdResource;
 use nexus_db_model::InvFmdStatus;
@@ -115,13 +118,13 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::{CollectionUuid, RackUuid};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents;
@@ -156,21 +159,35 @@ use uuid::Uuid;
 const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 impl DataStore {
+    /// Inserts `hw_baseboard_id` rows for any of `baseboards` not already
+    /// present.
+    ///
+    /// These rows can be inserted by RSS NexusHandoff for initial TQ members
+    /// or from the inventory process, in no particular order, hence the insert
+    /// ignoring conflicts.
+    ///
+    /// RETURNING would only return rows this statement inserted, so callers
+    /// that need UUIDs will look them up by part and serial number.
+    pub(crate) async fn hw_baseboard_ids_insert_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        baseboards: Vec<HwBaseboardId>,
+    ) -> Result<(), diesel::result::Error> {
+        use nexus_db_schema::schema::hw_baseboard_id::dsl;
+        diesel::insert_into(dsl::hw_baseboard_id)
+            .values(baseboards)
+            .on_conflict_do_nothing()
+            .execute_async(conn)
+            .await
+            .map(|_| ())
+    }
+
     /// Store a complete inventory collection into the database
     pub async fn inventory_insert_collection(
         &self,
         opctx: &OpContext,
         collection: &Collection,
-        rack_id: RackUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::INVENTORY).await?;
-
-        // TODO-multirack: this value (and the corresponding plumbing) should no
-        // longer be needed once we have a way to actually find the specific
-        // rack of each record we're inserting. For now, though, we still live
-        // in a single rack world where we can assume everything belongs to the
-        // local rack:
-        let rack_id = to_db_typed_uuid(rack_id);
 
         // In the database, the collection is represented essentially as a tree
         // rooted at an `inv_collection` row.  Other nodes in the tree point
@@ -582,7 +599,7 @@ impl DataStore {
                     ledgered_sled_config,
                     reconciler_status,
                     file_source_resolver,
-                    rack_id,
+                    to_db_typed_uuid(sled_agent.rack_id),
                 )
                 .map_err(|e| Error::internal_error(&e.to_string()))
             })
@@ -608,6 +625,22 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
+
+        let (inv_discovered_racks, inv_discovered_sleds) =
+            collection.discovered_racks.iter().fold(
+                (Vec::new(), Vec::new()),
+                |(mut rack_acc, mut sled_acc), rack| {
+                    rack_acc.push(InvDiscoveredRack::new(collection_id, rack));
+                    sled_acc.extend(rack.discovered_sleds.iter().map(|sled| {
+                        InvDiscoveredSled::new(
+                            collection_id,
+                            rack.rack_id,
+                            sled,
+                        )
+                    }));
+                    (rack_acc, sled_acc)
+                },
+            );
 
         let mut inv_clickhouse_keeper_memberships = Vec::new();
         for membership in &collection.clickhouse_keeper_cluster_membership {
@@ -665,19 +698,8 @@ impl DataStore {
         self.transaction_non_retry_wrapper("inventory_insert_collection")
             .transaction(&conn, |conn| async move {
             // Insert records (and generate ids) for any baseboards that do not
-            // already exist in the database.  These rows are not scoped to a
-            // particular collection.  They contain only immutable data --
-            // they're just a mapping between hardware-provided baseboard
-            // identifiers (part number and model number) and an
-            // Omicron-specific primary key (a UUID).
-            {
-                use nexus_db_schema::schema::hw_baseboard_id::dsl;
-                let _ = diesel::insert_into(dsl::hw_baseboard_id)
-                    .values(baseboards)
-                    .on_conflict_do_nothing()
-                    .execute_async(&conn)
-                    .await?;
-            }
+            // already exist in the database.
+            Self::hw_baseboard_ids_insert_conn(&conn, baseboards).await?;
 
             // Insert records (and generate ids) for each distinct caboose that
             // we've found.  Like baseboards, these might already be present and
@@ -2095,7 +2117,7 @@ impl DataStore {
                                 .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
                             instance_manager_num_registered_vmms
                                 .into_sql::<diesel::sql_types::Int8>(),
-                            rack_id
+                            sled_agent.rack_id.into_untyped_uuid()
                                 .into_sql::<diesel::sql_types::Uuid>(),
                         ))
                         .filter(
@@ -2192,6 +2214,24 @@ impl DataStore {
                 // can insert all of them in one statement.
                 let _ = diesel::insert_into(nexus_db_schema::schema::inv_sled_agent::table)
                     .values(sled_agents_no_baseboards)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the racks we've discovered
+            if !inv_discovered_racks.is_empty() {
+                use nexus_db_schema::schema::inv_discovered_rack::dsl;
+                diesel::insert_into(dsl::inv_discovered_rack)
+                    .values(inv_discovered_racks)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the sleds we've discovered
+            if !inv_discovered_sleds.is_empty() {
+                use nexus_db_schema::schema::inv_discovered_sled::dsl;
+                diesel::insert_into(dsl::inv_discovered_sled)
+                    .values(inv_discovered_sleds)
                     .execute_async(&conn)
                     .await?;
             }
@@ -2537,6 +2577,8 @@ impl DataStore {
             ncockroach_status: usize,
             nntp_timesync: usize,
             ninternal_dns: usize,
+            ndiscovered_racks: usize,
+            ndiscovered_sleds: usize,
         }
 
         let NumRowsDeleted {
@@ -2582,6 +2624,8 @@ impl DataStore {
             ncockroach_status,
             nntp_timesync,
             ninternal_dns,
+            ndiscovered_racks,
+            ndiscovered_sleds,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -2979,6 +3023,30 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows for discovered racks
+                    let ndiscovered_racks = {
+                        use nexus_db_schema::schema::inv_discovered_rack::dsl;
+                        diesel::delete(
+                            dsl::inv_discovered_rack.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for discovered sleds
+                    let ndiscovered_sleds = {
+                        use nexus_db_schema::schema::inv_discovered_sled::dsl;
+                        diesel::delete(
+                            dsl::inv_discovered_sled.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
@@ -3022,6 +3090,8 @@ impl DataStore {
                         ncockroach_status,
                         nntp_timesync,
                         ninternal_dns,
+                        ndiscovered_racks,
+                        ndiscovered_sleds,
                     })
                 })
                 .await
@@ -3079,6 +3149,8 @@ impl DataStore {
             "ncockroach_status" => ncockroach_status,
             "nntp_timesync" => nntp_timesync,
             "ninternal_dns" => ninternal_dns,
+            "ndiscovered_racks" => ndiscovered_racks,
+            "ndiscovered_sleds" => ndiscovered_sleds,
         );
 
         Ok(())
@@ -4254,7 +4326,7 @@ impl DataStore {
                 })
                 .transpose()?;
             let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id)
+                .get_mut(z.sled_config_id.into())
                 .ok_or_else(|| {
                     // This error means that we found a row in
                     // inv_omicron_sled_config_zone with no associated record in
@@ -4315,7 +4387,7 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
+                        .get_mut(row.sled_config_id.into())
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
@@ -4356,7 +4428,7 @@ impl DataStore {
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
+                        .get_mut(row.sled_config_id.into())
                         .ok_or_else(|| {
                             Error::internal_error(&format!(
                                 "disk config {:?}: unknown config ID: {:?}",
@@ -5262,6 +5334,7 @@ impl DataStore {
                 source: s.source,
                 sled_id,
                 baseboard_id,
+                rack_id: s.rack_id.into(),
                 sled_agent_address: std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::from(s.sled_agent_ip),
                     u16::from(s.sled_agent_port),
@@ -5325,6 +5398,110 @@ impl DataStore {
                 .insert_unique(sled_agent)
                 .expect("database ensures sled_agent_rows has unique sled_id");
         }
+
+        let discovered_rack_rows: Vec<_> = {
+            use nexus_db_schema::schema::inv_discovered_rack::dsl;
+
+            let mut rows = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_discovered_rack,
+                    dsl::rack_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDiscoveredRack::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.rack_id);
+                rows.extend(batch);
+            }
+
+            rows
+        };
+
+        let discovered_sled_rows: Vec<_> = {
+            use nexus_db_schema::schema::inv_discovered_sled::dsl;
+
+            let mut rows = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_discovered_sled,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDiscoveredSled::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
+                rows.extend(batch);
+            }
+
+            rows
+        };
+
+        let mut discovered_sleds_by_rack_id: BTreeMap<_, IdOrdMap<_>> =
+            BTreeMap::new();
+
+        for sled_row in discovered_sled_rows.into_iter() {
+            discovered_sleds_by_rack_id
+                .entry(sled_row.rack_id)
+                .or_default()
+                .insert_unique(sled_row.try_into().map_err(
+                    |e: anyhow::Error| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    },
+                )?)
+                .expect("database ensures the row has a unique sled_id");
+        }
+
+        let mut discovered_racks = IdOrdMap::new();
+
+        for rack_row in discovered_rack_rows.into_iter() {
+            let sleds = discovered_sleds_by_rack_id
+                .remove(&rack_row.rack_id)
+                .unwrap_or_default();
+            let rack = rack_row.into_inventory(sleds).map_err(
+                |e: anyhow::Error| {
+                    Error::internal_error(
+                        &InlineErrorChain::new(&*e).to_string(),
+                    )
+                },
+            )?;
+            discovered_racks
+                .insert_unique(rack)
+                .expect("database ensures the row has a unique rack_id");
+        }
+
+        // Check that every discovered sled belonged to a discovered rack in
+        // this collection. (This shouldn't be possible unless there's a bug on
+        // the insert side or something very weird is going on.)
+        bail_unless!(
+            discovered_sleds_by_rack_id.is_empty(),
+            "found discovered sleds for nonexistent racks: {:?}",
+            discovered_sleds_by_rack_id.keys(),
+        );
 
         // Check that we consumed all the reconciliation results we found in
         // this collection.
@@ -5447,6 +5624,7 @@ impl DataStore {
             rot_pages_found,
             power_shelves,
             sled_agents,
+            discovered_racks,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
             ntp_timesync,
@@ -5871,7 +6049,7 @@ mod test {
     use omicron_uuid_kinds::OmicronSledConfigUuid;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
-        RackUuid, ZpoolUuid,
+        ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
     use sled_agent_types::disk::M2Slot;
@@ -5976,7 +6154,7 @@ mod test {
         let builder = nexus_inventory::CollectionBuilder::new("test");
         let collection1 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection1, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection1)
             .await
             .expect("failed to insert collection");
 
@@ -6003,7 +6181,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection2 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection2, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection2)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6047,7 +6225,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection3 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection3, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection3)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6103,7 +6281,7 @@ mod test {
             .unwrap();
         let collection4 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection4, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection4)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6132,7 +6310,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection5 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection5, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6153,7 +6331,7 @@ mod test {
 
         // Try to insert the same collection again and make sure it fails.
         let error = datastore
-            .inventory_insert_collection(&opctx, &collection5, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect_err("unexpectedly succeeded in inserting collection");
         assert!(
@@ -6248,7 +6426,7 @@ mod test {
             collection6.id, collection6.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection6, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection6)
             .await
             .expect("failed to insert collection");
         assert_eq!(
@@ -6300,7 +6478,7 @@ mod test {
             collection7.id, collection7.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection7, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection7)
             .await
             .expect("failed to insert collection");
         datastore
@@ -6628,7 +6806,7 @@ mod test {
 
         // Write it and read it back.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let read = datastore
@@ -6713,7 +6891,7 @@ mod test {
 
         // Write and read back; the shared IP must round-trip.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("collection with a shared SNAT IP inserts");
         let collection_read = datastore
@@ -6758,7 +6936,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -6805,7 +6983,7 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 
@@ -6855,7 +7033,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -6993,7 +7171,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -7059,7 +7237,7 @@ mod test {
 
         // Write it to the db; read it back and check it survived.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
@@ -7101,7 +7279,7 @@ mod test {
         let collection_id = collection.id;
 
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert collection");
 

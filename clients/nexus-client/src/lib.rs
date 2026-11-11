@@ -13,6 +13,7 @@ progenitor::generate_api!(
     hooks = Expected,
     crates = {
         "iddqd" = "*",
+        "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
@@ -20,9 +21,14 @@ progenitor::generate_api!(
         Generation = omicron_generation_kinds::Generation,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        NetworkInterface = sled_agent_types::inventory::NetworkInterface,
-        NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,
-        SledRole = sled_agent_types::inventory::SledRole,
+        // These `replace`s are against the `v1` fixed identifier, *not* the
+        // floating `latest` identifiers, because nexus-internal is
+        // client-side-versioned. Do not use floating identifiers here!
+        NetworkInterface =
+            sled_agent_types_versions::v1::inventory::NetworkInterface,
+        NetworkInterfaceKind =
+            sled_agent_types_versions::v1::inventory::NetworkInterfaceKind,
+        SledRole = sled_agent_types_versions::v1::inventory::SledRole,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },

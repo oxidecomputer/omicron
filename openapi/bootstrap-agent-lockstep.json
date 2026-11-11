@@ -2343,6 +2343,14 @@
           {
             "type": "object",
             "properties": {
+              "start_sled_agent_status": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StartSledAgentsStatus"
+                  }
+                ]
+              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -2357,6 +2365,9 @@
           {
             "type": "object",
             "properties": {
+              "rack_id": {
+                "$ref": "#/components/schemas/RackUuid"
+              },
               "sleds": {
                 "title": "BiHashMap",
                 "x-rust-type": {
@@ -2380,25 +2391,57 @@
                 "enum": [
                   "start_sled_agents"
                 ]
+              },
+              "this_nodes_sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
               }
             },
             "required": [
+              "rack_id",
               "sleds",
-              "state"
+              "state",
+              "this_nodes_sled_id"
             ]
           },
           {
             "type": "object",
             "properties": {
+              "rack_id": {
+                "$ref": "#/components/schemas/RackUuid"
+              },
+              "sleds": {
+                "title": "BiHashMap",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/SledAgentInfo"
+                    }
+                  ],
+                  "path": "iddqd::BiHashMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                },
+                "uniqueItems": true
+              },
               "state": {
                 "type": "string",
                 "enum": [
                   "wait_for_completion"
                 ]
+              },
+              "this_nodes_sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
               }
             },
             "required": [
-              "state"
+              "rack_id",
+              "sleds",
+              "state",
+              "this_nodes_sled_id"
             ]
           },
           {
@@ -4018,24 +4061,6 @@
             "required": [
               "type"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              }
-            },
-            "required": [
-              "reason",
-              "type"
-            ]
           }
         ]
       },
@@ -4047,6 +4072,40 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "StartSledAgentsStatus": {
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "sleds": {
+            "title": "BiHashMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                }
+              ],
+              "path": "iddqd::BiHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentInfo"
+            },
+            "uniqueItems": true
+          },
+          "this_nodes_sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          }
+        },
+        "required": [
+          "rack_id",
+          "sleds",
+          "this_nodes_sled_id"
+        ]
       },
       "SwitchSlot": {
         "description": "Identifies switch physical location",

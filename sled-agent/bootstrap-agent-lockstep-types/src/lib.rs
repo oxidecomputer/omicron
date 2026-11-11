@@ -19,6 +19,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
@@ -30,6 +31,9 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::multirack::{
+    MultirackJoinServiceStatus, SledAgentStartState,
+};
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -446,15 +450,6 @@ pub struct CommitState {
     pub transient_errors: BTreeMap<BaseboardId, String>,
 }
 
-// Information about the state of a sled agent start request
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum SledAgentStartState {
-    InProgress { last_error: Option<String> },
-    Started,
-    Failed { reason: String },
-}
-
 /// Status information for a given sled agent
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct SledAgentInfo {
@@ -481,36 +476,42 @@ impl BiHashItem for SledAgentInfo {
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct StartSledAgentsStatus {
+    pub this_nodes_sled_id: SledUuid,
+    pub rack_id: RackUuid,
     pub sleds: BiHashMap<SledAgentInfo>,
 }
 
-impl StartSledAgentsStatus {
-    // Create the allocations necessary to start a sled-agent and return a
-    // preliminary state.
-    //
-    // This should only be called once.
-    pub fn assign_ids_and_subnets(req: MultirackJoinRequest) -> Self {
+impl From<StartSledAgentsStatus> for MultirackJoinServiceStatus {
+    fn from(value: StartSledAgentsStatus) -> Self {
+        let sled_id = value.this_nodes_sled_id;
+        let rack_id = value.rack_id;
         let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
-            req.rack_network_config.rack_subnet.addr(),
+            value
+                .sleds
+                .iter()
+                .next()
+                .expect("at least one sled")
+                .sled_subnet
+                .net()
+                .addr(),
         );
-        let sleds = req
-            .trust_quorum_peers
+        let sled_agents = value
+            .sleds
             .into_iter()
-            .enumerate()
-            .map(|(idx, baseboard_id)| SledAgentInfo {
-                baseboard_id,
-                sled_id: SledUuid::new_v4(),
-                sled_subnet: get_64_subnet(
-                    rack_subnet,
-                    u8::try_from(idx + 1).expect("too many sleds"),
-                ),
-                start_state: SledAgentStartState::InProgress {
-                    last_error: None,
-                },
+            .map(|s| sled_agent_types::multirack::SledAgentInfo {
+                baseboard_id: s.baseboard_id,
+                sled_id: s.sled_id,
+                address: *get_sled_address(s.sled_subnet).ip(),
+                start_state: s.start_state,
             })
             .collect();
 
-        StartSledAgentsStatus { sleds }
+        MultirackJoinServiceStatus {
+            sled_id,
+            rack_id,
+            rack_subnet,
+            sled_agents,
+        }
     }
 }
 
@@ -525,11 +526,17 @@ pub enum MultirackJoinServiceState {
     TrustQuorumReconfigure(TqReconfigureMsg),
     TrustQuorumPreparing(CoordinatorStatus),
     TrustQuorumCommitting(CommitState),
-    ConfigureNetworking,
+    ConfigureNetworking {
+        start_sled_agent_status: Option<StartSledAgentsStatus>,
+    },
     StartSledAgents(StartSledAgentsStatus),
-    WaitForCompletion,
+    WaitForCompletion(StartSledAgentsStatus),
     Completed,
-    Failed { message: String },
-    InvalidMembershipSize { message: String },
+    Failed {
+        message: String,
+    },
+    InvalidMembershipSize {
+        message: String,
+    },
     TaskPanicked,
 }

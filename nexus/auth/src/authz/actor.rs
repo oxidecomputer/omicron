@@ -152,7 +152,7 @@ impl oso::PolarClass for AuthenticatedActor {
                     | authn::Actor::Scim { silo_id } => Some(super::Silo::new(
                         super::FLEET,
                         silo_id,
-                        LookupType::ById(silo_id),
+                        LookupType::by_id(silo_id),
                     )),
 
                     authn::Actor::UserBuiltin { .. } => None,

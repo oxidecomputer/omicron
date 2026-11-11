@@ -231,7 +231,7 @@ impl ApiResourceWithRoles for Fleet {
         Ok(if silo_authn_policy.mapped_fleet_roles().is_empty() {
             None
         } else {
-            Some((ResourceType::Silo, silo_id))
+            Some((ResourceType::Silo, silo_id.into_untyped_uuid()))
         })
     }
 }
@@ -1442,7 +1442,7 @@ impl AuthorizedResource for SubnetPoolList {
 authz_resource! {
     name = "Project",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = ProjectKind },
     roles_allowed = true,
     polar_snippet = Custom,
 }
@@ -1754,7 +1754,7 @@ authz_resource! {
 authz_resource! {
     name = "Silo",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SiloKind },
     roles_allowed = true,
     polar_snippet = Custom,
 }
@@ -1920,6 +1920,14 @@ authz_resource! {
     name = "Alert",
     parent = "Fleet",
     primary_key = { uuid_kind = AlertKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Problem",
+    parent = "Fleet",
+    primary_key = { uuid_kind = ProblemKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

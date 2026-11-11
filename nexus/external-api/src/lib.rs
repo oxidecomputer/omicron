@@ -31,6 +31,7 @@ use nexus_types_versions::v2026_01_08_00;
 use nexus_types_versions::v2026_01_15_00;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
+use nexus_types_versions::v2026_01_21_00;
 use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
@@ -88,6 +89,12 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    //
+    (2026_11_05_00, PROBLEMS),
+    (2026_11_04_00, UNADOPTED_RACK_LIST),
+    (2026_11_02_00, LAST_CERTIFICATE_DOCS),
+    (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
+    (2026_10_21_00, BYTE_WRAPPER_0_2_BUMP),
     (2026_10_15_00, SYSTEM_CERTIFICATES),
     (2026_10_13_00, ARTIFACT_HASH_SCHEMA),
     (2026_09_15_00, REMOVE_SILO_DISCOVERABLE),
@@ -337,6 +344,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/problems" = {
+                description = "Problems detected by the fault management \
+                 subsystem.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/problems"
                 }
             },
             "system/alerts" = {
@@ -5119,6 +5133,9 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::certificate::Certificate>, HttpError>;
 
     /// Delete TLS certificate in current silo
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
     #[endpoint {
         method = DELETE,
         path = "/v1/certificates/{certificate}",
@@ -5180,6 +5197,9 @@ pub trait NexusExternalApi {
     ///
     /// The silo must be specified if the certificate is specified by name, and
     /// must not be specified if the certificate is specified by ID.
+    ///
+    /// The silo's last certificate cannot be deleted. Create another
+    /// certificate first.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/certificates/{certificate}",
@@ -7692,13 +7712,37 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/add",
         tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..
+        versions = VERSION_SLED_ADD_PRECHECK_OVERRIDES..
     }]
     async fn rack_membership_add_sleds(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::RackPath>,
         req: TypedBody<latest::rack::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
+    /// Add new sleds to rack membership
+    #[endpoint {
+        operation_id = "rack_membership_add_sleds",
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/add",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG..VERSION_SLED_ADD_PRECHECK_OVERRIDES,
+    }]
+    async fn rack_membership_add_sleds_v2026_01_21_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::RackPath>,
+        req: TypedBody<v2026_01_21_00::rack::RackMembershipAddSledsRequest>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_21_00::rack::RackMembershipStatus>,
+        HttpError,
+    > {
+        Self::rack_membership_add_sleds(
+            rqctx,
+            path_params,
+            req.map(latest::rack::RackMembershipAddSledsRequest::from),
+        )
+        .await
+    }
 
     /// Abort the latest rack membership change
     ///
@@ -7950,6 +7994,26 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::physical_disk::PhysicalDisk>>,
+        HttpError,
+    >;
+
+    // Multirack
+
+    /// List unadopted racks
+    ///
+    /// Lists racks that have joined the underlay network but have not yet been
+    /// adopted into the regional cluster.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_UNADOPTED_RACK_LIST..
+    }]
+    async fn rack_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multirack::UnadoptedRack>>,
         HttpError,
     >;
 
@@ -9531,6 +9595,130 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::device_params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Problems
+
+    /// List problems
+    ///
+    /// Problems are sorted by the time at which they were detected, and may be
+    /// filtered by state.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<latest::problem::ProblemListParams>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::problem::Problem>>, HttpError>;
+
+    /// Fetch problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+    ) -> Result<HttpResponseOk<latest::problem::Problem>, HttpError>;
+
+    /// List causes of problem
+    ///
+    /// Returns any other problems which are the causes of the specified
+    /// problem. If the specified problem has no causes, this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/causes",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List consequences of problem
+    ///
+    /// Returns any other problems which are caused by the specified problem. If
+    /// no other problem is caused by the specified problem, then this list may
+    /// be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/consequences",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List resources impacted by problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/impacts",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ImpactListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::ProblemImpact>>,
+        HttpError,
+    >;
+
+    /// List support bundles attached to problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/support-bundles",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/support-bundles` tag, but only one tag is allowed per
+        // endpoint (why is it an array, then?)...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
+    /// List alerts for problem
+    ///
+    /// Lists alerts associated with the requested problem. Alerts may be
+    /// filtered by alert class or alert class glob and by an inclusive creation
+    /// time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/alerts",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/alerts` tag, but only one tag is allowed per endpoint...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
     // Alerts
 

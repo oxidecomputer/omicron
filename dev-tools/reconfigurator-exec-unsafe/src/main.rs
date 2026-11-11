@@ -106,8 +106,15 @@ impl ReconfiguratorExec {
             &qorb_resolver,
             db::ClaimBacktraceSetting::Capture,
         ));
+        // Passing in omicron_git_version::current is probably not necessary
+        // since the types that depend on the Git version will probably not be
+        // constructed by this binary. But we do it anyway, because this is a
+        // leaf node, so recompiling it if the commit changes is not a huge
+        // deal. If this becomes a problem in the future, we could pass in a
+        // dummy version, at the cost of making this code path that much harder
+        // to reason about.
         let datastore = Arc::new(
-            DataStore::new_failfast(&log, pool)
+            DataStore::new_failfast(&log, pool, omicron_git_version::current())
                 .await
                 .context("creating datastore")?,
         );

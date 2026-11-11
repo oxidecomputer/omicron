@@ -13,9 +13,11 @@ use omicron_uuid_kinds::BuiltInUserKind;
 use omicron_uuid_kinds::ConsoleSessionKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oso::PolarClass;
@@ -69,7 +71,7 @@ use uuid::Uuid;
 //   to create.
 pub async fn make_resources(
     mut builder: ResourceBuilder<'_>,
-    main_silo_id: Uuid,
+    main_silo_id: SiloUuid,
 ) -> ResourceSet {
     // Global resources
     builder.new_resource(authz::DATABASE);
@@ -91,7 +93,7 @@ pub async fn make_resources(
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
-    make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
+    make_silo(&mut builder, "silo2", SiloUuid::new_v4(), false).await;
 
     // Rack hierarchy
     make_rack(&mut builder);
@@ -213,6 +215,13 @@ pub async fn make_resources(
         LookupType::by_id(webhook_alert_id),
     ));
 
+    let problem_id = "5b2e9e47-6a1c-4f0d-9d3e-7c8a1f2b4e60".parse().unwrap();
+    builder.new_resource(authz::Problem::new(
+        authz::FLEET,
+        problem_id,
+        LookupType::by_id(problem_id),
+    ));
+
     make_webhook_rx(&mut builder).await;
 
     let subnet_pool_id =
@@ -285,7 +294,7 @@ fn make_rack(builder: &mut ResourceBuilder<'_>) {
 async fn make_silo(
     builder: &mut ResourceBuilder<'_>,
     silo_name: &str,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
     first_branch: bool,
 ) {
     let silo = authz::Silo::new(
@@ -395,7 +404,7 @@ async fn make_project(
 ) {
     let project = authz::Project::new(
         silo.clone(),
-        Uuid::new_v4(),
+        ProjectUuid::new_v4(),
         LookupType::ByName(project_name.to_string()),
     );
     if first_branch {

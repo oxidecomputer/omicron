@@ -6,13 +6,16 @@
 
 use crate::cache::Cache;
 use crate::collection::BundleCollection;
+use crate::output::BundleOutput;
 use crate::step::CollectionStep;
 use crate::step::CollectionStepOutput;
+use crate::step::StepError;
+use crate::step::StepResultExt;
 use crate::steps;
 
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
-use camino::Utf8Path;
 use futures::FutureExt;
 use gateway_client::Client as MgsClient;
 use gateway_client::types::SpComponentDetails;
@@ -24,8 +27,8 @@ use slog_error_chain::InlineErrorChain;
 pub async fn spawn_collection_steps(
     collection: &BundleCollection,
     cache: &Cache,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
+    output: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
     if !collection.data_selection().contains_sp_components() {
         return Ok(CollectionStepOutput::Skipped);
     }
@@ -40,14 +43,12 @@ pub async fn spawn_collection_steps(
         Ok::<_, anyhow::Error>((mgs_client, sps))
     };
     let (mgs_client, available_sps) = tokio::select! {
-        _ = collection.cancelled() => return Ok(CollectionStepOutput::None),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = init_future => result?,
     };
 
-    let sp_components_dir = dir.join("sp_components");
-    tokio::fs::create_dir_all(&sp_components_dir).await.with_context(|| {
-        format!("Failed to create SP components directory {sp_components_dir}")
-    })?;
+    let sp_components_dir = output.join("sp_components");
+    sp_components_dir.create_dir_all().await?;
 
     let mut extra_steps: Vec<CollectionStep> = vec![];
     for sp in available_sps {
@@ -55,7 +56,7 @@ pub async fn spawn_collection_steps(
         let sp_components_dir = sp_components_dir.clone();
         extra_steps.push(CollectionStep::new(
             format!("SP components for {:?}", sp),
-            Box::new(move |collection, _dir| {
+            Box::new(move |collection, _output| {
                 async move {
                     collect_sp_components(
                         collection,
@@ -77,8 +78,8 @@ async fn collect_sp_components(
     collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
-    dir: &Utf8Path,
-) -> anyhow::Result<CollectionStepOutput> {
+    dir: &BundleOutput,
+) -> Result<CollectionStepOutput, StepError> {
     save_sp_components(collection, mgs_client, sp, dir).await.with_context(
         || format!("failed to save SP components from: {} {}", sp.typ, sp.slot),
     )?;
@@ -104,14 +105,14 @@ struct SpComponentEntry {
 //
 // # Cancel safety
 //
-// Cancel-**unsafe**: writes to the filesystem via `tokio::fs`.
+// Cancel-**unsafe**: writes to the bundle.
 // HTTP requests to MGS are eagerly cancelled via `select!`.
 async fn save_sp_components(
     collection: &BundleCollection,
     mgs_client: &MgsClient,
     sp: SpIdentifier,
-    sp_components_dir: &Utf8Path,
-) -> anyhow::Result<()> {
+    sp_components_dir: &BundleOutput,
+) -> Result<(), StepError> {
     let file_stem = format!("{}_{}", sp.typ, sp.slot);
     let fetch_components = async {
         let components = mgs_client
@@ -161,7 +162,7 @@ async fn save_sp_components(
         ))
     };
     let result = tokio::select! {
-        _ = collection.cancelled() => return Ok(()),
+        _ = collection.stopped() => return Err(StepError::Stopped),
         result = fetch_components => result,
     };
     let (components, sp_error) = match result {
@@ -171,23 +172,30 @@ async fn save_sp_components(
                 "failed to list SP components: {}",
                 InlineErrorChain::new(&e)
             );
-            let error_path = sp_components_dir.join(format!("{file_stem}.err"));
-            tokio::fs::write(&error_path, &error).await.with_context(|| {
-                format!("failed to write SP component error to {error_path}")
-            })?;
-            bail!(error);
+            let error_file = format!("{file_stem}.err");
+            sp_components_dir.write(&error_file, &error).await.with_context(
+                || {
+                    format!(
+                        "failed to write SP component error to {error_file}"
+                    )
+                },
+            )?;
+            return Err(anyhow!(error).into());
         }
     };
 
     let json = serde_json::to_string_pretty(&components)
         .context("failed to serialize SP component details to JSON")?;
-    let output_path = sp_components_dir.join(format!("{file_stem}.json"));
-    tokio::fs::write(&output_path, json).await.with_context(|| {
-        format!("failed to write SP component details to {output_path}")
+    let file_name = format!("{file_stem}.json");
+    sp_components_dir.write(&file_name, json).await.with_context(|| {
+        format!("failed to write SP component details to {file_name}")
     })?;
 
     if let Some(sp_error) = sp_error {
-        bail!("stopped querying components after SP failure: {sp_error}");
+        return Err(anyhow!(
+            "stopped querying components after SP failure: {sp_error}"
+        )
+        .into());
     }
     Ok(())
 }

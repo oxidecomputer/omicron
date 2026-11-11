@@ -21,6 +21,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::MessagePair;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 
 type AllColumnsOfVirtualResource =
     AllColumnsOf<virtual_provisioning_resource::table>;
@@ -105,20 +106,20 @@ impl VirtualProvisioningCollectionUpdate {
     // - Fleet
     fn apply_update(
         update_kind: UpdateKind,
-        project_id: uuid::Uuid,
+        project_id: ProjectUuid,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         let mut query = QueryBuilder::new();
 
         query.sql("
 WITH
   parent_silo AS (SELECT project.silo_id AS id FROM project WHERE project.id = ").param().sql("),")
-            .bind::<sql_types::Uuid, _>(project_id).sql("
+            .bind::<sql_types::Uuid, _>(project_id.into_untyped_uuid()).sql("
   all_collections
     AS (
       ((SELECT ").param().sql(" AS id) UNION (SELECT parent_silo.id AS id FROM parent_silo))
       UNION (SELECT ").param().sql(" AS id)
     ),")
-            .bind::<sql_types::Uuid, _>(project_id)
+            .bind::<sql_types::Uuid, _>(project_id.into_untyped_uuid())
             .bind::<sql_types::Uuid, _>(*nexus_db_fixed_data::FLEET_ID)
             .sql("
   quotas
@@ -426,7 +427,7 @@ FROM
     pub fn new_insert_storage(
         id: uuid::Uuid,
         disk_byte_diff: ByteCount,
-        project_id: uuid::Uuid,
+        project_id: ProjectUuid,
         storage_type: crate::db::datastore::StorageType,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         let mut provision =
@@ -439,7 +440,7 @@ FROM
     pub fn new_delete_storage(
         id: uuid::Uuid,
         disk_byte_diff: ByteCount,
-        project_id: uuid::Uuid,
+        project_id: ProjectUuid,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         Self::apply_update(
             UpdateKind::DeleteStorage { id, disk_byte_diff },
@@ -451,7 +452,7 @@ FROM
         id: InstanceUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
-        project_id: uuid::Uuid,
+        project_id: ProjectUuid,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         let mut provision = VirtualProvisioningResource::new(
             id.into_untyped_uuid(),
@@ -467,7 +468,7 @@ FROM
         id: InstanceUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
-        project_id: uuid::Uuid,
+        project_id: ProjectUuid,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         Self::apply_update(
             UpdateKind::DeleteInstance {
@@ -487,6 +488,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ProjectUuid;
     use uuid::Uuid;
 
     // These tests are a bit of a "change detector", but they're here to help
@@ -496,7 +498,7 @@ mod test {
     #[tokio::test]
     async fn expectorate_query_insert_storage() {
         let id = Uuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let disk_byte_diff = 2048.try_into().unwrap();
         let storage_type = crate::db::datastore::StorageType::Disk;
 
@@ -515,7 +517,7 @@ mod test {
     #[tokio::test]
     async fn expectorate_query_delete_storage() {
         let id = Uuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let disk_byte_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
@@ -533,7 +535,7 @@ mod test {
     #[tokio::test]
     async fn expectorate_query_insert_instance() {
         let id = InstanceUuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
 
@@ -550,7 +552,7 @@ mod test {
     #[tokio::test]
     async fn expectorate_query_delete_instance() {
         let id = InstanceUuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
 
@@ -575,7 +577,7 @@ mod test {
         let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let disk_byte_diff = 2048.try_into().unwrap();
         let storage_type = crate::db::datastore::StorageType::Disk;
 
@@ -602,7 +604,7 @@ mod test {
         let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let disk_byte_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
@@ -627,7 +629,7 @@ mod test {
         let conn = pool.claim().await.unwrap();
 
         let id = InstanceUuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
 
@@ -651,7 +653,7 @@ mod test {
         let conn = pool.claim().await.unwrap();
 
         let id = InstanceUuid::nil();
-        let project_id = Uuid::nil();
+        let project_id = ProjectUuid::nil();
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
 

@@ -59,7 +59,12 @@ use sled_agent_types::instance::{
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo,
+};
+use sled_agent_types::multirack::{
+    MultirackJoinCompleteResponse, MultirackJoinServiceStatus,
+};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -72,7 +77,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    TrustQuorumCoordinatorStatusResponse, TrustQuorumNetworkConfig,
+    TrustQuorumNetworkConfigResponse,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -95,7 +102,6 @@ use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
 use trust_quorum_types::status::CommitStatus;
-use trust_quorum_types::status::CoordinatorStatus;
 use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
@@ -139,7 +145,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_unregister(id).await?))
+        Ok(HttpResponseOk(sa.handle_vmm_unregister_request(id).await?))
     }
 
     async fn vmm_put_state(
@@ -1034,7 +1040,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn trust_quorum_coordinator_status(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
+    {
         method_unimplemented()
     }
 
@@ -1074,7 +1081,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn trust_quorum_network_config_get(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
     {
         method_unimplemented()
     }
@@ -1163,8 +1170,20 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn multirack_join_complete(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError> {
         method_unimplemented()
+    }
+
+    async fn multirack_join_service_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
+        Ok(HttpResponseOk(request_context.context().sled_registration_info()))
     }
 }
 

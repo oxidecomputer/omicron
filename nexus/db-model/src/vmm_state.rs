@@ -107,16 +107,17 @@ impl VmmState {
         self.to_nexus_state().exists_on_sled()
     }
 
-    /// The states in which a VMM should be stopped during sled evacuation.
+    /// The states in which a VMM should be marked to stop and stopped during
+    /// sled evacuation.
     pub const SHOULD_STOP_FOR_EVACUATION: &'static [Self] = &[
         // A VMM in one of these states is on its way, or is already running,
-        // and can be stopped.
-        VmmState::Creating,
+        // is registered with a sled agent, and can be marked/stopped.
         VmmState::Starting,
         VmmState::Running,
         VmmState::Rebooting,
         // If it is not in one of these states, it is already stopping/stopped,
-        // migrating, or has terminated, so it does not need to be stopped.
+        // migrating, is not registered with a sled agent yet, or has
+        // terminated, so it does not need to be stopped.
     ];
 }
 
@@ -350,6 +351,11 @@ impl<'s> InstanceStateComputer<'s> {
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, None) => instance::InstanceState::Stopped,
+            // - An instance with no VMM because it was on a sled that is being
+            //   evacuated is always "rebooting"
+            (InstanceState::SledEvacuating, None) => {
+                instance::InstanceState::Rebooting
+            }
             // - The instance should not be in `InstanceState::Vmm` if there is
             //   no active VMM record, this is probably a bug, but return
             //   `InstanceState::Stopped`, because that's basically true
@@ -369,6 +375,14 @@ impl<'s> InstanceStateComputer<'s> {
                      should be no VMM state"
                 );
                 instance::InstanceState::Stopped
+            }
+            (InstanceState::SledEvacuating, _vmm_state) => {
+                debug_assert_eq!(
+                    _vmm_state, None,
+                    "if the instance is in `InstanceState::SledEvacuating`, \
+                     there should be no VMM state"
+                );
+                instance::InstanceState::Rebooting
             }
             // - If there's no VMM state, use the instance's state.
             (instance_state, None) => instance_state.into(),
@@ -453,28 +467,29 @@ mod tests {
     #[test]
     fn test_should_stop_for_update_states_consistent() {
         // This test exists to make sure that when a new state is added, we
-        // consider whether it is a state where reconfigurator should mark the
-        // VMM to be stopped for sled evacuation. More detailed information about
-        // the process of restarting instances during a live update can be found
-        // in RFD 739.
+        // consider whether it is a state where reconfigurator should mark/stop
+        // a VMM for sled evacuation. More detailed information about the
+        // process of restarting instances during a live update can be found in
+        // RFD 739.
         //
         // The use of an exhaustive `match state` here ensures that the addition
         // of a new `VmmState` variant will result in a compiler error until it
         // is added to this test. If you have added a new variant to VmmState,
         // consider whether or not that state should be added to the list of
-        // states in which VMMs are marked to stop. Do *not* change the match
+        // states in which VMMs are marked/stopped. Do *not* change the match
         // here to be non-exhaustive!
         for state in VmmState::ALL_STATES.iter() {
             match state {
-                VmmState::Creating
-                | VmmState::Starting
+                VmmState::Starting
                 | VmmState::Running
                 | VmmState::Rebooting => {
                     assert!(
                         VmmState::SHOULD_STOP_FOR_EVACUATION.contains(state)
                     );
                 }
+
                 VmmState::Failed
+                | VmmState::Creating
                 | VmmState::Stopping
                 | VmmState::Stopped
                 | VmmState::Migrating

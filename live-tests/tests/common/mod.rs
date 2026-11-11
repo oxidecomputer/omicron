@@ -140,7 +140,7 @@ async fn create_datastore(
         &db_config,
         db::ClaimBacktraceSetting::Capture,
     ));
-    DataStore::new_failfast(log, pool)
+    DataStore::new_failfast(log, pool, omicron_git_version::current())
         .await
         .context("creating DataStore")
         .map(Arc::new)

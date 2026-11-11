@@ -9,6 +9,8 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::multirack::UnadoptedRack;
+use crate::external_api::multirack::UnadoptedSled;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
@@ -22,6 +24,8 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
@@ -52,13 +56,18 @@ use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_agent_types_versions::latest::inventory::SvcsEnabledNotOnlineResult;
 pub use sled_agent_types_versions::latest::inventory::ZpoolHealth;
+use sled_agent_types_versions::latest::multirack::SledAgentStartState;
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
 
 mod display;
 
@@ -159,6 +168,15 @@ pub struct Collection {
     /// Sled Agent information, by *sled* id
     pub sled_agents: IdOrdMap<SledAgent>,
 
+    /// Other racks we've discovered via DDM that are not *necessarily* part of
+    /// the multirack cluster yet.
+    ///
+    /// This field includes info on both racks and sleds in those racks. Entries
+    /// are not immediately cleared when the racks and sleds are adopted into
+    /// the cluster, so code that makes use of this data must also consult the
+    /// `rack` and `sled` tables to find out what has already been adopted.
+    pub discovered_racks: IdOrdMap<DiscoveredRack>,
+
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
     /// the `ClickhouseKeeper` zone
@@ -237,6 +255,66 @@ impl Collection {
         self.rot_pages_found
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
+    /// Returns the SP on `baseboard_id`
+    pub fn sp_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<&ServiceProcessor, NotInInventory> {
+        self.sps.get(baseboard_id).ok_or(NotInInventory(InventoryItem::Sp))
+    }
+
+    /// Returns caboose `which` on `baseboard_id`, along with the version that
+    /// it contains
+    pub fn caboose_with_version_for(
+        &self,
+        which: CabooseWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        let Some(found) = self.caboose_for(which, baseboard_id) else {
+            return Err(CabooseVersionError::NotInInventory(which));
+        };
+        let version = found.caboose.version.parse().map_err(|err| {
+            CabooseVersionError::Parse {
+                caboose: which,
+                err: InlineErrorChain::new(&err).to_string(),
+            }
+        })?;
+        Ok(CabooseWithVersion { caboose: &found.caboose, version })
+    }
+
+    /// Returns the caboose for the active SP image (slot 0) on
+    /// `baseboard_id`, along with the version that it contains
+    pub fn active_sp_caboose_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        self.caboose_with_version_for(CabooseWhich::SpSlot0, baseboard_id)
+    }
+
+    /// Returns the caboose for the active RoT bootloader image (stage0) on
+    /// `baseboard_id`, along with the version that it contains
+    pub fn active_rot_bootloader_caboose_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
+        self.caboose_with_version_for(CabooseWhich::Stage0, baseboard_id)
+    }
+
+    /// Returns the hash of the active host phase 1 image on `baseboard_id`
+    pub fn active_host_phase_1_hash_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactHash, NotInInventory> {
+        let Some(active_slot) =
+            self.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
+        else {
+            return Err(NotInInventory(InventoryItem::HostPhase1ActiveSlot));
+        };
+        self.host_phase_1_flash_hash_for(active_slot, baseboard_id)
+            .map(|h| h.hash)
+            .ok_or(NotInInventory(InventoryItem::HostPhase1Hash(active_slot)))
     }
 
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
@@ -356,6 +434,89 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+/// An item about a particular baseboard that was not found in an inventory
+/// collection
+///
+/// This does not identify the baseboard.  Callers generally report it in the
+/// context of a particular baseboard already.
+///
+/// This type is not used in the planner's failure reasons (e.g.,
+/// `FailedSpUpdateReason`).  Those are part of the planning report's
+/// serialized format, and they have their own variant for each kind of
+/// missing item (e.g., `SpNotInInventory`).  A missing caboose is reported
+/// with `CabooseVersionError::NotInInventory` instead.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("{0} is not in inventory")]
+pub struct NotInInventory(pub InventoryItem);
+
+/// Describes an item that inventory collects about a baseboard
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InventoryItem {
+    /// the baseboard's SP
+    Sp,
+    /// the active host phase 1 slot of a sled
+    HostPhase1ActiveSlot,
+    /// the hash of the contents of a sled's host phase 1 slot
+    HostPhase1Hash(M2Slot),
+}
+
+impl std::fmt::Display for InventoryItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InventoryItem::Sp => write!(f, "SP"),
+            InventoryItem::HostPhase1ActiveSlot => {
+                write!(f, "active host phase 1 slot")
+            }
+            InventoryItem::HostPhase1Hash(slot) => {
+                write!(f, "host phase 1 hash for slot {slot:?}")
+            }
+        }
+    }
+}
+
+/// A caboose found in inventory, along with the version parsed from it
+#[derive(Clone, Debug)]
+pub struct CabooseWithVersion<'a> {
+    /// the caboose
+    pub caboose: &'a Caboose,
+    /// the version in the caboose
+    pub version: ArtifactVersion,
+}
+
+/// Reasons that a version could not be determined from a caboose in
+/// inventory
+#[derive(
+    Clone,
+    Debug,
+    Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum CabooseVersionError {
+    /// the caboose was not in inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    NotInInventory(CabooseWhich),
+    /// the version in the caboose could not be parsed
+    // The parse error is stored as a string so that this type can be
+    // serialized as part of a planning report.  That is why the message
+    // includes it.
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    Parse {
+        /// the caboose whose version could not be parsed
+        caboose: CabooseWhich,
+        /// description of the parse error
+        err: String,
+    },
 }
 
 impl IdOrdItem for Collection {
@@ -1059,6 +1220,7 @@ pub struct SledAgent {
     pub source: String,
     pub sled_id: SledUuid,
     pub baseboard_id: Option<Arc<BaseboardId>>,
+    pub rack_id: RackUuid,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
@@ -1128,6 +1290,81 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiscoveredRack {
+    /// ID of the rack, which will be the same ID used in the `rack` table
+    /// if/when the discovered rack is adopted into the cluster.
+    pub rack_id: RackUuid,
+    /// Rack subnet prefix on the underlay network.
+    pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    /// Underlay address of the sled running the multirack join service.
+    pub join_service_ip: Ipv6Addr,
+    /// Sleds on this rack that we've discovered via the join service.
+    pub discovered_sleds: IdOrdMap<DiscoveredSled>,
+}
+
+impl IdOrdItem for DiscoveredRack {
+    type Key<'a> = RackUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.rack_id
+    }
+    id_upcast!();
+}
+
+impl From<DiscoveredRack> for UnadoptedRack {
+    fn from(value: DiscoveredRack) -> Self {
+        Self {
+            rack_id: value.rack_id,
+            rack_subnet: value.rack_subnet.net(),
+            unadopted_sleds: value
+                .discovered_sleds
+                .into_iter()
+                .map(UnadoptedSled::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiscoveredSled {
+    /// ID of the sled, which will be the same ID used by the sled-agent to
+    /// upsert itself into the `sled` table if/when the sled is adopted:
+    pub sled_id: SledUuid,
+    /// Baseboard ID reported by the join service:
+    pub baseboard_id: BaseboardId,
+    /// Underlay subnet prefix of the sled:
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    /// Status field indicating whether the sled-agent has started, including
+    /// the most recent error seen, if any:
+    pub sled_agent_start_state: SledAgentStartState,
+}
+
+impl IdOrdItem for DiscoveredSled {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
+}
+
+impl From<DiscoveredSled> for UnadoptedSled {
+    fn from(value: DiscoveredSled) -> Self {
+        let (sled_agent_started, last_start_err) =
+            match value.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error)
+                }
+            };
+        Self {
+            sled_id: value.sled_id,
+            baseboard_id: value.baseboard_id,
+            sled_agent_started,
+            last_start_err,
+        }
+    }
 }
 
 #[cfg(test)]

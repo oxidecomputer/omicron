@@ -20,7 +20,6 @@
 #: access_repos = [
 #:	"oxidecomputer/amd-firmware",
 #:	"oxidecomputer/chelsio-t6-roms",
-#:	"oxidecomputer/dmar-report",
 #:	"oxidecomputer/pilot",
 #: ]
 #:

@@ -344,6 +344,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
     use nexus_db_queries::db::datastore::IdentityCheckPolicy;
+    use nexus_db_queries::db::pub_test_utils::TEST_GIT_VERSION;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -378,6 +379,7 @@ mod test {
                 pool,
                 None,
                 IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
             )
             .await
             .unwrap(),
@@ -436,6 +438,7 @@ mod test {
                 pool,
                 None,
                 IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
             )
             .await
             .unwrap(),

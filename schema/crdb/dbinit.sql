@@ -1294,6 +1294,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
 ) WHERE
     time_deleted IS NULL;
 
+/**
+ * A view of the amount of provisioned resources on a given project.
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.project_utilization
+AS SELECT
+    p.id AS project_id,
+    s.silo_id AS silo_id,
+    c.cpus_provisioned AS cpus_provisioned,
+    c.ram_provisioned AS memory_provisioned,
+    c.virtual_disk_bytes_provisioned AS storage_provisioned
+FROM
+    omicron.public.virtual_provisioning_collection AS c
+    INNER JOIN omicron.public.project AS p
+    ON c.id = p.id
+    INNER JOIN omicron.public.silo_utilization AS s
+    ON p.silo_id = s.silo_id
+WHERE
+    c.collection_type = 'Project'
+    AND (
+        s.silo_discoverable IS TRUE
+            OR s.cpus_allocated > 0
+            OR s.memory_allocated > 0
+            OR s.storage_allocated > 0
+    )
+    AND p.time_deleted IS NULL;
+
 /*
  * Instances
  */
@@ -1315,7 +1341,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     'failed',
 
     /* The instance has been destroyed. */
-    'destroyed'
+    'destroyed',
+
+    /*
+     * The instance has no active VMM due to a sled being evacutated.
+     * Corresponds to the "rebooting" external state.
+     */
+    'sled_evacuating'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
@@ -5689,6 +5721,78 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
     PRIMARY KEY (inv_collection_id, psc_baseboard_id, location)
 );
 
+-- Inventory of other racks discovered via DDM that are not necessarily part of
+-- the multirack cluster yet.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_discovered_rack (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- This is the same id that gets used in the `rack` table if/when the rack
+    -- is adopted:
+    rack_id UUID NOT NULL,
+
+    -- The IPv6 underlay /56 prefix for the rack:
+    rack_subnet INET NOT NULL,
+
+    -- Underlay address of the sled running the multirack join service:
+    join_service_ip INET NOT NULL,
+
+    -- Only allow IPv6 INET values for rack_subnet:
+    CONSTRAINT rack_subnet_family CHECK (
+        family(rack_subnet) = 6
+    ),
+    -- Enforce the correct length of the rack subnet:
+    CONSTRAINT rack_subnet_prefix CHECK (
+        masklen(rack_subnet) = 56
+    ),
+
+    PRIMARY KEY (inv_collection_id, rack_id)
+);
+
+-- Inventory of sleds on other racks discovered via the multirack join service.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_discovered_sled (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- This is the same id the sled-agent uses to upsert itself into the `sled`
+    -- table if/when the sled is adopted:
+    sled_id UUID NOT NULL,
+
+    -- Foreign key into `inv_discovered_rack` for the same collection:
+    rack_id UUID NOT NULL,
+
+    -- Baseboard info about the sled:
+    part_number STRING(63) NOT NULL,
+    serial_number STRING(63) NOT NULL,
+
+    -- The IPv6 underlay /64 prefix for the sled:
+    sled_subnet INET NOT NULL,
+
+    -- Whether the join service reports the sled-agent as started:
+    sled_agent_started BOOL NOT NULL,
+    -- The most recent error seen starting the sled-agent, if any:
+    last_start_error_seen TEXT,
+
+    -- Only allow IPv6 INET values for sled_subnet:
+    CONSTRAINT sled_subnet_family CHECK (
+        family(sled_subnet) = 6
+    ),
+    -- Enforce the correct length of the sled subnet:
+    CONSTRAINT sled_subnet_prefix CHECK (
+        masklen(sled_subnet) = 64
+    ),
+
+    -- Once the sled-agent starts successfully, we no longer want to track the
+    -- last error seen:
+    CONSTRAINT start_error_is_null_if_started CHECK (
+        (NOT sled_agent_started) OR (last_start_error_seen IS NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
     'terminate',
     'migrate_or_terminate',
@@ -5845,7 +5949,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
 
     -- The generation of the collective set of all external networking config
     -- described by the blueprint
-    external_networking_generation INT8 NOT NULL
+    external_networking_generation INT8 NOT NULL,
+
+    -- These columns describe the inventory collection that this blueprint
+    -- reflects.  They are currently used for debugging, but they may be used
+    -- for other purposes in the future.  They are either all NULL (if it's not
+    -- known which collection the blueprint reflects) or all non-NULL.
+    -- Like `parent_blueprint_id`, `reflects_collection_id` is not a real
+    -- foreign key because the collection may have since been deleted.
+    reflects_collection_id UUID,
+    reflects_collection_time_started TIMESTAMPTZ,
+    reflects_collection_time_done TIMESTAMPTZ,
+
+    CONSTRAINT reflects_collection_all_or_none CHECK (
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_started IS NULL) AND
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_done IS NULL)
+    )
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -9732,6 +9853,151 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     )
 );
 
+-- Tracks other racks that have joined the underlay network but haven't been
+-- adopted into the multirack cluster.
+--
+-- If/when a rack is adopted, its row in this table should be marked deleted,
+-- and a corresponding row should be inserted into the `rack` table.
+CREATE TABLE IF NOT EXISTS omicron.public.unadopted_rack (
+    -- This should be the same id that gets used for the `rack` table, as well
+    -- as the `rack_id` column in `unadopted_sled`:
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The IPv6 underlay /56 prefix for the rack:
+    rack_subnet INET NOT NULL,
+
+    -- Underlay address of the particular sled-agent instance on the unadopted
+    -- rack that's running the multirack join service:
+    join_service_ip INET NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_rack_by_id ON omicron.public.unadopted_rack (
+    id
+) WHERE time_deleted IS NULL;
+
+-- Tracks sleds from other racks that have joined the underlay network but
+-- haven't been adopted into the multirack cluster.
+--
+-- If/when these sleds are adopted, these rows should be marked deleted, and
+-- there will subsequently be corresponding rows created in the `sled` and
+-- `inv_sled_agent` tables via the normal mechanisms.
+CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
+    id UUID PRIMARY KEY,
+    -- Foreign key into the `unadopted_rack` table (though, also, the rack ID
+    -- that gets used in the `rack` table should be the same if/when the rack
+    -- is adopted)
+    rack_id UUID NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- Baseboard information about the sled
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+
+    sled_agent_ip INET NOT NULL,
+
+    -- This tracks whether this particular sled's sled-agent has been
+    -- successfully started by the multirack join service:
+    sled_agent_started BOOL NOT NULL,
+    -- This nullable column should be set to the last error we've seen for this
+    -- particular sled's sled-agent startup process, if any:
+    last_start_error_seen TEXT,
+
+    CONSTRAINT start_error_is_null_if_started CHECK (
+        (NOT sled_agent_started) OR (last_start_error_seen IS NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_sled_by_id ON omicron.public.unadopted_sled (
+    id
+) WHERE time_deleted IS NULL;
+
+-- A problem detected by the fault management subsystem (see RFD 699).
+--
+-- This table contains relatively little data, because most of the data
+-- associated with a problem exists at a given revision. In order to allow
+-- exporting the historical revisions of a problem, we store all revisions of
+-- the problem since it was created. Therefore, this table basically just stores
+-- the unique ID of the problem and the latest revision number, and can be
+-- JOINed with `problem_revision` and other tables to fetch the latest revision.
+--
+-- Everything which may be changed across revisions lives instead in the
+-- `problem_revision` table and its friends.
+CREATE TABLE IF NOT EXISTS omicron.public.problem (
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The latest revision number of this problem. This can be used to
+    -- select the current revision from the `problem_revision` table.
+    current_revision INT8 NOT NULL,
+
+    CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_problem_by_time_created
+ON
+    omicron.public.problem (time_created)
+WHERE
+    time_deleted IS NULL;
+
+-- A revision of a problem (see RFD 699). This table allows us to store the
+-- revision history of a given problem, along with the current revision.
+-- Querying the current version is done by looking up the problem from the
+-- `problem` table and then selecting the entry from *this* table as of the
+-- `current_revision` revision.
+CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `problem` table.
+    revision INT8 NOT NULL,
+
+    -- The time at which *this revision* was created. This is **not** the time
+    -- the problem itself was created, and will correspond to the `time_modified`
+    -- at which this revision was made current.
+    --
+    -- This column is used primarily when exporting the complete revision
+    -- history of a problem.
+    time_created TIMESTAMPTZ NOT NULL,
+
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
+    time_resolved TIMESTAMPTZ,
+
+    -- The problem's problem code as of this revision.
+    --
+    -- This determines the problem class, as well as the problem's
+    -- documentation.
+    code INT8 NOT NULL,
+
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (problem_id, revision)
+);
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
@@ -9742,7 +10008,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '310.0.0', NULL)
+    (TRUE, NOW(), NOW(), '316.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::sled_agent::SledAgent;
+use crate::bootstrap::RssAccessError;
 use crate::sled_agent::Error as SledAgentError;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
@@ -48,7 +49,12 @@ use sled_agent_types::instance::{
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo,
+};
+use sled_agent_types::multirack::{
+    MultirackJoinCompleteResponse, MultirackJoinServiceStatus,
+};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -61,7 +67,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    TrustQuorumCoordinatorStatusResponse, TrustQuorumNetworkConfig,
+    TrustQuorumNetworkConfigResponse,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -70,10 +78,11 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use trust_quorum::CoordinatorStatusSnapshot;
 use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
-use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::status::{CommitStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::{v20, v25, v26, v30, v33, v39, v42, v47, v48};
@@ -1548,19 +1557,35 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
+    {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                let status =
-                    sa.trust_quorum().coordinator_status().await.map_err(
-                        |e| {
-                            HttpError::for_internal_error(
-                                InlineErrorChain::new(&e).to_string(),
-                            )
-                        },
-                    )?;
-                Ok(HttpResponseOk(status))
+                let snapshot = sa
+                    .trust_quorum()
+                    .coordinator_status_snapshot()
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                let response = match snapshot {
+                    CoordinatorStatusSnapshot::Coordinating { status } => {
+                        TrustQuorumCoordinatorStatusResponse::Coordinating {
+                            status,
+                        }
+                    }
+                    CoordinatorStatusSnapshot::NotCoordinating {
+                        latest_config_epoch,
+                    } => {
+                        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                            latest_config_epoch,
+                        }
+                    }
+                };
+                Ok(HttpResponseOk(response))
             })
             .await
     }
@@ -1687,7 +1712,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_network_config_get(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
     {
         let sa = request_context.context();
         sa.latencies()
@@ -1698,7 +1723,9 @@ impl SledAgentApi for SledAgentImpl {
                             InlineErrorChain::new(&e).to_string(),
                         )
                     })?;
-                Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+                Ok(HttpResponseOk(TrustQuorumNetworkConfigResponse {
+                    config: config.map(TrustQuorumNetworkConfig::from),
+                }))
             })
             .await
     }
@@ -1844,12 +1871,85 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn multirack_join_complete(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError> {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                sa.complete_multirack_join()?;
-                Ok(HttpResponseUpdatedNoContent())
+                let bootstore_generation = sa.complete_multirack_join().await?;
+                Ok(HttpResponseOk(MultirackJoinCompleteResponse {
+                    bootstore_generation,
+                }))
+            })
+            .await
+    }
+
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.multirack_join_service_status();
+                let status = res.map_err(|err| match err {
+                    // Errors returned from multirack join should be a 500.
+                    RssAccessError::MultirackJoinTaskExitedUnexpectedly
+                    | RssAccessError::MultirackJoinFailed { .. }
+                    | RssAccessError::MultirackJoinPanicked => {
+                        HttpError::for_internal_error(err.to_string())
+                    }
+
+                    // RSS running/having run or Multirack join not started
+                    // should return a 404.
+                    //
+                    // We also return a 404 if the multirack join service has
+                    // completed. In this case Nexus will have already recorded
+                    // the results to CRDB, and so there is no real error here.
+                    // We no longer have the status to report anyway, and it
+                    // seems overly complicated to keep track of it and map it
+                    // to an option which the consumer would have to match on.
+                    // This is especially true since we expect the consumer to
+                    // be a background task that next time through will see the
+                    // value in the DB and not make another request.
+                    RssAccessError::MultirackJoinNotYetStarted
+                    | RssAccessError::StillInitializing
+                    | RssAccessError::InitializationFailed { .. }
+                    | RssAccessError::InitializationPanicked
+                    | RssAccessError::AlreadyInitialized
+                    | RssAccessError::MultirackJoinCompleted => {
+                        HttpError::for_not_found(
+                            None,
+                            "No multirack join service running".to_string(),
+                        )
+                    }
+
+                    // If we don't yet have the status available, but we will
+                    // soon we should return a 409.
+                    RssAccessError::MultirackJoinInProgress
+                    | RssAccessError::MembershipChangeNoLongerAllowed
+                    | RssAccessError::RackSubnetChangeNotAllowed
+                    | RssAccessError::MultirackJoinStatusNotYetAvailable
+                    | RssAccessError::MultirackJoinGenerationUnavailable
+                    | RssAccessError::MultirackJoinPendingConfigUpdate => {
+                        HttpError::for_client_error(
+                            Some(err.error_code().to_string()),
+                            dropshot::ClientErrorStatusCode::CONFLICT,
+                            err.to_string(),
+                        )
+                    }
+                })?;
+
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.sled_registration_info()))
             })
             .await
     }

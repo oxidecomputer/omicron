@@ -5,7 +5,8 @@ edition.workspace = true
 
 [dependencies]
 chrono.workspace = true
-clickhouse-admin-types.workspace = true
+clickhouse-admin-types-versions.workspace = true
+iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
 progenitor-extras = { workspace = true, features = ["slog"] }

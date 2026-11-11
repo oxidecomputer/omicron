@@ -8,12 +8,17 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 chrono.workspace = true
 display-error-chain.workspace = true
 foreign-types.workspace = true
+hex.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true
+rustls.workspace = true
+serde.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true

@@ -36,6 +36,7 @@ use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::HwBaseboardId;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
@@ -207,6 +208,23 @@ pub enum SledUnderlayAllocationResult {
 }
 
 impl DataStore {
+    pub async fn rack_id_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<RackUuid> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(dsl::id)
+            .load_async::<Uuid>(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|vec| {
+                vec.into_iter().map(RackUuid::from_untyped_uuid).collect()
+            })
+    }
+
     pub async fn rack_list(
         &self,
         opctx: &OpContext,
@@ -519,7 +537,7 @@ impl DataStore {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             db_silo.id(),
-            LookupType::ById(db_silo.id()),
+            LookupType::by_id(db_silo.id()),
         );
         let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,
@@ -791,6 +809,7 @@ impl DataStore {
                     }
 
                     // Otherwise, insert:
+                    // - Trust quorum member baseboards
                     // - IP Pools and ranges
                     // - Services
                     // - PhysicalDisks
@@ -800,6 +819,35 @@ impl DataStore {
                     // - Nexus database access records
                     //
                     // Which RSS has already allocated during bootstrapping.
+
+                    // Baseboard IDs have been embedded in certs via sprockets
+                    // handshake and sent to Nexus. Record them here rather
+                    // than wait for inventory, whose first collection writes
+                    // the same rows and may land before or after this
+                    // handoff. The trust quorum configuration written later
+                    // in this transaction depends on these rows.
+                    if let Some(tq_config) =
+                        &rack_init.initial_trust_quorum_configuration
+                    {
+                        let baseboards = tq_config
+                            .members
+                            .iter()
+                            .cloned()
+                            .map(HwBaseboardId::from)
+                            .collect();
+                        Self::hw_baseboard_ids_insert_conn(&conn, baseboards)
+                            .await
+                            .map_err(|e| {
+                                error!(
+                                    log,
+                                    "Initializing Rack: Failed to insert \
+                                     trust quorum member baseboards";
+                                    InlineErrorChain::new(&e),
+                                );
+                                err.set(RackInitError::Database(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
+                    }
 
                     // Add the service IP Pools and ranges for each.
                     for pool_config in rack_init.service_ip_pools {
@@ -1128,6 +1176,7 @@ mod test {
     use crate::db::model::Sled;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use async_bb8_diesel::AsyncSimpleConnection;
     use iddqd::id_ord_map;
     use internal_dns_types::names::DNS_ZONE;
@@ -1148,6 +1197,7 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::UpstreamNtpConfig;
     use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
@@ -1192,6 +1242,7 @@ mod test {
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
+                    reflects_collection: ReflectsCollection::Indeterminate,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
                     target_release_minimum_generation:
@@ -1287,6 +1338,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &EMPTY_BLUEPRINT,
+            ReflectsCollection::Indeterminate,
             test_name,
             PlannerRng::from_entropy(),
         )
@@ -1433,11 +1485,7 @@ mod test {
             .sled_id(sled_id)
             .rack_id(nexus_test_utils::RACK_UUID)
             .build();
-        let (sled, _) = db
-            .sled_upsert(sled_update)
-            .await
-            .expect("Could not upsert sled during test prep");
-        sled
+        sled_upsert_expect_written(db, sled_update).await
     }
 
     // Build a single service IP pool config from a built-in pool name and a set

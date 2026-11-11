@@ -508,6 +508,29 @@ pub async fn no_sled_resource_vmm_records_exist(
         .unwrap()
 }
 
+/// Fetches a VMM record, whether or not it has been soft-deleted.
+///
+/// # Panics
+///
+/// Panics if no record with the given ID was ever created.
+pub(crate) async fn vmm_fetch_including_deleted(
+    cptestctx: &ControlPlaneTestContext,
+    vmm_id: PropolisUuid,
+) -> nexus_db_model::Vmm {
+    use nexus_db_schema::schema::vmm::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+    dsl::vmm
+        .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+        .select(nexus_db_model::Vmm::as_select())
+        .get_result_async(&*conn)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("VMM {vmm_id} should have a record, deleted or not: {e}")
+        })
+}
+
 pub async fn sled_resource_vmms_exist_for_vmm(
     cptestctx: &ControlPlaneTestContext,
     vmm_id: PropolisUuid,

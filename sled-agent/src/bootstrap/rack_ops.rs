@@ -4,19 +4,23 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
+use crate::bootstrap::RssAccessError::MultirackJoinNotYetStarted;
 use crate::bootstrap::rss_handle::run_rss;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use bootstrap_agent_lockstep_types::MultirackJoinServiceState;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
-use dropshot::HttpError;
+use futures::FutureExt;
+use futures::future::Shared;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_bootstrap_common::RssContext;
+use sled_agent_multirack_join::MultirackJoinInput;
 use sled_agent_multirack_join::MultirackJoinServiceError;
 use sled_agent_multirack_join::MultirackJoinServiceHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use slog_error_chain::InlineErrorChain;
 use std::mem;
 use std::sync::Arc;
@@ -26,6 +30,7 @@ use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RssAccessError {
@@ -51,8 +56,17 @@ pub enum RssAccessError {
     RackSubnetChangeNotAllowed,
     #[error("Multirack join has not yet started")]
     MultirackJoinNotYetStarted,
+    #[error("Multirack join service status is not yet available")]
+    MultirackJoinStatusNotYetAvailable,
     #[error("Multirack join task exited unexpectedly")]
     MultirackJoinTaskExitedUnexpectedly,
+    #[error("Multirack join bootstore generation is not available")]
+    MultirackJoinGenerationUnavailable,
+    #[error(
+        "Multirack join network configuration is not yet written to the \
+        bootstore"
+    )]
+    MultirackJoinPendingConfigUpdate,
 }
 
 impl RssAccessError {
@@ -81,97 +95,45 @@ impl RssAccessError {
             RssAccessError::MultirackJoinNotYetStarted => {
                 "MultirackJoinNotYetStarted"
             }
+            RssAccessError::MultirackJoinStatusNotYetAvailable => {
+                "MultirackJoinStatusNotYetAvailable"
+            }
             RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
                 "MultirackJoinTaskExitedUnexpectedly"
             }
-        }
-    }
-}
-
-impl From<RssAccessError> for HttpError {
-    fn from(err: RssAccessError) -> Self {
-        // Most variants of RssAccessError report states that conflict with the
-        // requested rack operation in some fashion:
-        //
-        // * `StillInitializing`/`MultirackJoinInProgress` mean that an
-        //   operation is in progress.
-        // * `AlreadyInitialized`/`MultirackJoinCompleted` mean that we're
-        //   already at the requested end state. (Note that we don't try and
-        //   be idempotent here -- to do so we'd have to ensure the actual RSS
-        //   config is the same, which is tricky. Instead, clients should look
-        //   at the error code to determine what to do.)
-        // * `MultirackJoinNotYetStarted` means it can't complete when signalled.
-        // * The other states are terminal states that need operator intervention.
-        //
-        // We map all of these states to 409 Conflict errors, and (since this is
-        // an internal API) expose the error text to the client.
-        match err {
-            RssAccessError::MultirackJoinTaskExitedUnexpectedly => {
-                HttpError::for_internal_error(err.to_string())
+            RssAccessError::MultirackJoinGenerationUnavailable => {
+                "MultirackJoinGenerationUnavailable"
             }
-            RssAccessError::StillInitializing
-            | RssAccessError::InitializationFailed { .. }
-            | RssAccessError::InitializationPanicked
-            | RssAccessError::AlreadyInitialized
-            | RssAccessError::MultirackJoinInProgress
-            | RssAccessError::MultirackJoinFailed { .. }
-            | RssAccessError::MultirackJoinPanicked
-            | RssAccessError::MultirackJoinCompleted
-            | RssAccessError::MembershipChangeNoLongerAllowed
-            | RssAccessError::RackSubnetChangeNotAllowed
-            | RssAccessError::MultirackJoinNotYetStarted => {
-                HttpError::for_client_error(
-                    Some(err.error_code().to_string()),
-                    dropshot::ClientErrorStatusCode::CONFLICT,
-                    err.to_string(),
-                )
+            RssAccessError::MultirackJoinPendingConfigUpdate => {
+                "MultirackJoinPendingConfigUpdate"
             }
         }
     }
 }
 
-/// A mechanism for sled-agent to complete a multirack join request.
-///
-/// When a sled-agent that performed a multirack join becomes visible on the
-/// underlay network to an existing Nexus via inventory, it will receive a
-/// request telling it to complete the multirack join. We provide a newtype
-/// wrapper that allows triggering that completion without providing full access
-/// to `RssAccess`, which could be used to start initialization or multirack
-/// join requests outside of the official path.
+/// A mechanism for sled-agent to access its local multirack join service task.
 #[derive(Clone)]
-pub(crate) struct MultirackJoinCompleter(RssAccess);
+pub(crate) struct MultirackJoinAccessor(RssAccess);
 
-impl MultirackJoinCompleter {
-    pub fn new(rss_access: RssAccess) -> MultirackJoinCompleter {
+impl MultirackJoinAccessor {
+    pub fn new(rss_access: RssAccess) -> MultirackJoinAccessor {
         Self(rss_access)
     }
 
-    /// Complete the multirack join.
+    /// Complete the multirack join and wait for the multirack join task to
+    /// exit.
     ///
     /// This is triggered on a request from Nexus to sled-agent.
-    pub fn complete_multirack_join(&self) -> Result<(), RssAccessError> {
-        self.0.complete_multirack_join()
+    pub async fn complete_multirack_join(&self) -> Result<u64, RssAccessError> {
+        self.0.complete_multirack_join().await
     }
 
-    /// Used to provide inventory with information about the particular
-    /// sled-agent that is performing the multirack join. This prevents Nexus
-    /// from having to guess or try all sled-agents.
-    //
-    // TODO: Remove this `unused` annotation when we add this functionality
-    // to inventory.
-    #[expect(unused)]
-    pub fn is_multirack_join_in_progress(&self) -> bool {
-        match &*self.0.status.lock().unwrap() {
-            RssStatus::MultirackJoinInProgress { .. } => true,
-            RssStatus::Uninitialized
-            | RssStatus::Initialized { .. }
-            | RssStatus::Initializing { .. }
-            | RssStatus::InitializationFailed { .. }
-            | RssStatus::InitializationPanicked { .. }
-            | RssStatus::MultirackJoinCompleted { .. }
-            | RssStatus::MultirackJoinFailed { .. }
-            | RssStatus::MultirackJoinPanicked { .. } => false,
-        }
+    /// Return the current status of the multirack join service if it is
+    /// running.
+    pub fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        self.0.multirack_join_service_status()
     }
 }
 
@@ -243,8 +205,8 @@ impl RssAccess {
             RssStatus::MultirackJoinInProgress { id, .. } => {
                 RackOperationStatus::MultirackJoinInProgress { id: *id }
             }
-            RssStatus::MultirackJoinCompleted { id } => {
-                RackOperationStatus::MultirackJoinCompleted { id: *id }
+            RssStatus::MultirackJoinCompleted { id, .. } => {
+                RackOperationStatus::MultirackJoinCompleted { id: Some(*id) }
             }
             RssStatus::MultirackJoinFailed { id, err } => {
                 RackOperationStatus::MultirackJoinFailed {
@@ -325,10 +287,14 @@ impl RssAccess {
     /// This should only occur once this sled is successfully on the underlay
     /// network and discoverable by Nexus.
     ///
-    /// If the join has already completed succcessfully we treat this as idempotent.
-    pub(crate) fn complete_multirack_join(&self) -> Result<(), RssAccessError> {
-        let mut status = self.status.lock().unwrap();
-        match &mut *status {
+    /// Waits for the multirack join task to exit and returns the final
+    /// bootstore generation it wrote. If the join has already completed
+    /// successfully we treat this as idempotent.
+    pub(crate) async fn complete_multirack_join(
+        &self,
+    ) -> Result<u64, RssAccessError> {
+        // The guard is dropped at the end of this statement
+        let result_rx = match &mut *self.status.lock().unwrap() {
             RssStatus::Uninitialized => {
                 Err(RssAccessError::MultirackJoinNotYetStarted)
             }
@@ -339,27 +305,17 @@ impl RssAccess {
                 // After cold boot Nexus may still be trying to get a
                 // response for whether multirack join has completed. If the
                 // `StartSledAgentRequest` was recorded to the ledger, the sled
-                // agent itself will start with this status.
+                // agent itself will start with this status. The final
+                // bootstore generation was only kept in memory, so we can't
+                // return it.
                 //
-                // Since Nexus should only be sending the completion signals
-                // to sled-agents it knows were joining, we figure it's correct
-                // to idempotently return `Ok(())` here rather than an error.
-                // This ensures Nexus gets a valid response.
-                //
-                // The whole point of sending this signal from Nexus is to
-                // ensure that the sled-agent is on the underlay network before
-                // we conclude the join. Therefore if we are already up and
-                // running and receive messages from Nexus we know we are on the
-                // underlay network, and may as well reply in the affirmative
-                // to Nexus.
-                //
-                // We'll also return `OK(())` in the case that Nexus initialized
-                // a rack via RSS, but that seems harmless, and would only occur
-                // if Nexus sent the completion request to an RSS'd sled-agent,
-                // which it really should not do.
+                // The same applies in the case that Nexus initialized a rack
+                // via RSS, which would only occur if Nexus sent the completion
+                // request to an RSS'd sled-agent, which it really should not
+                // do.
                 //
                 // See https://github.com/oxidecomputer/omicron/issues/11477
-                Ok(())
+                Err(RssAccessError::MultirackJoinGenerationUnavailable)
             }
             RssStatus::InitializationFailed { err, .. } => {
                 Err(RssAccessError::InitializationFailed {
@@ -370,8 +326,11 @@ impl RssAccess {
                 Err(RssAccessError::InitializationPanicked)
             }
             RssStatus::MultirackJoinInProgress {
+                input_tx,
                 membership_change_still_possible,
+                written_bootstore_generation_rx,
                 rack_join_successful_tx,
+                result_rx,
                 ..
             } => {
                 // We can't successfully complete the join if we haven't
@@ -380,21 +339,31 @@ impl RssAccess {
                     return Err(RssAccessError::MultirackJoinInProgress);
                 }
 
+                // Only complete the join once the multirack join task has
+                // written the latest accepted input to the bootstore.
+                if *written_bootstore_generation_rx.borrow()
+                    != input_tx.borrow().bootstore_generation
+                {
+                    return Err(
+                        RssAccessError::MultirackJoinPendingConfigUpdate,
+                    );
+                }
+
                 // We haven't sent the completion signal yet.
                 if let Some(tx) = rack_join_successful_tx.take() {
-                    tx.send(()).map_err(|_| {
-                        RssAccessError::MultirackJoinTaskExitedUnexpectedly
-                    })?;
+                    // If the task already exited, this fails and we return
+                    // its result below.
+                    _ = tx.send(());
                 }
 
                 // We've either sent the completion signal this time, or we did
                 // previously. This can happen due to a lost reply to Nexus and
-                // a retry. We treat both as success, even though it's highly
-                // unlikely given the timespan differences between task receipt
-                // and HTTP retry and resend.
-                Ok(())
+                // a retry. Either way, we wait for the task's result.
+                Ok(result_rx.clone())
             }
-            RssStatus::MultirackJoinCompleted { .. } => Ok(()),
+            RssStatus::MultirackJoinCompleted {
+                bootstore_generation, ..
+            } => return Ok(*bootstore_generation),
             RssStatus::MultirackJoinFailed { err, .. } => {
                 Err(RssAccessError::MultirackJoinFailed {
                     message: InlineErrorChain::new(err).to_string(),
@@ -403,7 +372,9 @@ impl RssAccess {
             RssStatus::MultirackJoinPanicked { .. } => {
                 Err(RssAccessError::MultirackJoinPanicked)
             }
-        }
+        }?;
+
+        wait_for_multirack_join_result(result_rx).await
     }
 
     pub(crate) fn start_multirack_join(
@@ -421,31 +392,26 @@ impl RssAccess {
                     input_tx,
                     output_rx,
                     membership_change_still_possible,
+                    written_bootstore_generation_rx,
                     rack_join_successful_tx,
                 } = MultirackJoinServiceHandle::spawn(ctx, request);
+                let (result_tx, result_rx) = oneshot::channel();
                 *status = RssStatus::MultirackJoinInProgress {
                     id,
                     input_tx,
                     output_rx,
                     membership_change_still_possible,
+                    written_bootstore_generation_rx,
                     rack_join_successful_tx: Some(rack_join_successful_tx),
+                    result_rx: result_rx.shared(),
                 };
                 mem::drop(status);
-                let status = Arc::clone(&self.status);
 
-                // Spawn a task that waits for the multirack join service task to exit
-                tokio::spawn(async move {
-                    let new_status = match join_handle.await {
-                        Ok(Ok(())) => {
-                            RssStatus::MultirackJoinCompleted { id: Some(id) }
-                        }
-                        Ok(Err(err)) => {
-                            RssStatus::MultirackJoinFailed { id, err }
-                        }
-                        Err(_) => RssStatus::MultirackJoinPanicked { id },
-                    };
-                    *status.lock().unwrap() = new_status;
-                });
+                self.spawn_multirack_join_supervisor(
+                    id,
+                    join_handle,
+                    result_tx,
+                );
 
                 Ok(id)
             }
@@ -478,7 +444,7 @@ impl RssAccess {
                 let mut invalid_rack_subnet_change = false;
                 let mut multirack_join_completed = false;
                 input_tx.send_if_modified(|saved| {
-                    if &request != saved {
+                    if request != saved.request {
                         // After trust quorum initializes we no longer allow
                         // membership changes. Check for that here so we can
                         // error out early.
@@ -488,13 +454,13 @@ impl RssAccess {
                         if !membership_change_still_possible
                             .load(Ordering::Relaxed)
                         {
-                            if saved.trust_quorum_peers
+                            if saved.request.trust_quorum_peers
                                 != request.trust_quorum_peers
                             {
                                 invalid_membership_change = true;
                                 return false;
                             }
-                            if saved.rack_network_config.rack_subnet
+                            if saved.request.rack_network_config.rack_subnet
                                 != request.rack_network_config.rack_subnet
                             {
                                 invalid_rack_subnet_change = true;
@@ -506,10 +472,13 @@ impl RssAccess {
                             // called, but we haven't witnessed the multirack
                             // join task exit yet. It's racy to accept changes
                             // after this point and so we reject them.
+                            // `complete_multirack_join` relies on this, since
+                            // the task writes nothing more once it gets the
+                            // signal.
                             multirack_join_completed = true;
                             return false;
                         }
-                        *saved = request;
+                        saved.update(request);
                         true
                     } else {
                         false
@@ -535,6 +504,117 @@ impl RssAccess {
             }
             RssStatus::MultirackJoinPanicked { .. } => {
                 Err(RssAccessError::MultirackJoinPanicked)
+            }
+        }
+    }
+
+    /// Spawn a task that waits for the multirack join service task to exit,
+    /// then records its result in the status and publishes it on `result_tx`
+    fn spawn_multirack_join_supervisor(
+        &self,
+        id: MultirackJoinUuid,
+        join_handle: JoinHandle<Result<u64, MultirackJoinServiceError>>,
+        result_tx: oneshot::Sender<Result<u64, RssAccessError>>,
+    ) {
+        let status = Arc::clone(&self.status);
+        tokio::spawn(async move {
+            let (new_status, result) = match join_handle.await {
+                Ok(Ok(bootstore_generation)) => (
+                    RssStatus::MultirackJoinCompleted {
+                        id,
+                        bootstore_generation,
+                    },
+                    Ok(bootstore_generation),
+                ),
+                Ok(Err(err)) => {
+                    let message = InlineErrorChain::new(&err).to_string();
+                    (
+                        RssStatus::MultirackJoinFailed { id, err },
+                        Err(RssAccessError::MultirackJoinFailed { message }),
+                    )
+                }
+                Err(_) => (
+                    RssStatus::MultirackJoinPanicked { id },
+                    Err(RssAccessError::MultirackJoinPanicked),
+                ),
+            };
+
+            // Update status before sending the result, so that callers see the
+            // latest.
+            *status.lock().unwrap() = new_status;
+
+            // There may be no receivers left so we ignore the `send` result.
+            let _ = result_tx.send(result);
+        });
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        match &*self.status.lock().unwrap() {
+            RssStatus::MultirackJoinInProgress { output_rx, .. } => {
+                match output_rx.borrow().clone() {
+                    MultirackJoinServiceState::StartSledAgents(status) => {
+                        Ok(status.into())
+                    }
+                    MultirackJoinServiceState::ConfigureNetworking {
+                        start_sled_agent_status: Some(status),
+                    } => Ok(status.into()),
+                    MultirackJoinServiceState::WaitForCompletion(status) => {
+                        Ok(status.into())
+                    }
+                    MultirackJoinServiceState::ConfigureNetworking {
+                        start_sled_agent_status: None,
+                    }
+                    | MultirackJoinServiceState::Requested
+                    | MultirackJoinServiceState::Starting
+                    | MultirackJoinServiceState::TrustQuorumReconfigure(_)
+                    | MultirackJoinServiceState::TrustQuorumPreparing(_)
+                    | MultirackJoinServiceState::TrustQuorumCommitting(_) => {
+                        Err(RssAccessError::MultirackJoinStatusNotYetAvailable)
+                    }
+                    MultirackJoinServiceState::Uninitialized => {
+                        Err(RssAccessError::MultirackJoinNotYetStarted)
+                    }
+                    MultirackJoinServiceState::Completed => {
+                        Err(RssAccessError::MultirackJoinCompleted)
+                    }
+                    MultirackJoinServiceState::Failed { message } => {
+                        Err(RssAccessError::MultirackJoinFailed { message })
+                    }
+                    MultirackJoinServiceState::InvalidMembershipSize {
+                        message,
+                    } => Err(RssAccessError::MultirackJoinFailed { message }),
+                    MultirackJoinServiceState::TaskPanicked => {
+                        Err(RssAccessError::MultirackJoinPanicked)
+                    }
+                }
+            }
+            RssStatus::Uninitialized => Err(MultirackJoinNotYetStarted),
+            RssStatus::Initialized { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+            RssStatus::Initializing { .. } => {
+                Err(RssAccessError::StillInitializing)
+            }
+            RssStatus::InitializationFailed { err, .. } => {
+                Err(RssAccessError::InitializationFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::InitializationPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Err(RssAccessError::MultirackJoinCompleted)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
             }
         }
     }
@@ -576,6 +656,21 @@ impl RssAccess {
 // RSS was run, and not the multirack join service
 pub struct RssConflictError;
 
+// The result of the multirack join task, published by its supervisor once the
+// task exits.
+type MultirackJoinResultRx =
+    Shared<oneshot::Receiver<Result<u64, RssAccessError>>>;
+
+/// Wait for the multirack join result published by the supervisor
+async fn wait_for_multirack_join_result(
+    result_rx: MultirackJoinResultRx,
+) -> Result<u64, RssAccessError> {
+    result_rx
+        .await
+        // The supervisor exited without publishing a result
+        .unwrap_or(Err(RssAccessError::MultirackJoinTaskExitedUnexpectedly))
+}
+
 enum RssStatus {
     // Our two main primary states.
     Uninitialized,
@@ -609,16 +704,22 @@ enum RssStatus {
     // scales, but should eventually leave).
     MultirackJoinInProgress {
         id: MultirackJoinUuid,
-        input_tx: watch::Sender<MultirackJoinRequest>,
+        input_tx: watch::Sender<MultirackJoinInput>,
         output_rx: watch::Receiver<MultirackJoinServiceState>,
         membership_change_still_possible: Arc<AtomicBool>,
+        written_bootstore_generation_rx: watch::Receiver<u64>,
         rack_join_successful_tx: Option<oneshot::Sender<()>>,
+        // Holds the result of the multirack join task once it exits and the
+        // status has been updated.
+        result_rx: MultirackJoinResultRx,
     },
 
     MultirackJoinCompleted {
-        // We can either be joined on startup (in which case `id` is None) or
-        // because join has completed (in which case `id` is Some).
-        id: Option<MultirackJoinUuid>,
+        id: MultirackJoinUuid,
+        // The final bootstore generation written by the multirack join task.
+        // This is only kept in memory, so it's unavailable after sled-agent
+        // restarts.
+        bootstore_generation: u64,
     },
 
     // Terminal failure states; these require support intervention.
@@ -634,41 +735,218 @@ enum RssStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
+    use dropshot::ErrorStatusCode;
+    use dropshot::HttpError;
+    use sled_agent_types::early_networking::{
+        LinkSpeed, PortConfig, RackNetworkConfig, SwitchSlot, UplinkPorts,
+    };
+    use std::collections::BTreeSet;
+    use std::time::Duration;
 
-    #[test]
-    fn rss_access_error_to_http_error() {
-        let cases = [
-            RssAccessError::StillInitializing,
-            RssAccessError::InitializationFailed {
-                message: "boom".to_string(),
+    const TEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+    async fn with_timeout<F: Future>(fut: F) -> F::Output {
+        tokio::time::timeout(TEST_TIMEOUT, fut).await.expect("timed out")
+    }
+
+    fn request() -> MultirackJoinRequest {
+        // RackNetworkConfig's ports must be nonempty.
+        let ports = vec![PortConfig {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: SwitchSlot::Switch1,
+            port: "qsfp0".to_owned(),
+            uplink_port_speed: LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+            allow_ddm_traffic: false,
+        }];
+        MultirackJoinRequest {
+            trust_quorum_peers: BTreeSet::new(),
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: "fd00:abcd:ffff::/56".parse().unwrap(),
+                infra_ip_first: "10.0.0.1".parse().unwrap(),
+                infra_ip_last: "10.0.0.100".parse().unwrap(),
+                ports: UplinkPorts::new(ports).unwrap(),
+                bgp: Vec::new(),
+                bfd: Vec::new(),
             },
-            RssAccessError::InitializationPanicked,
-            RssAccessError::AlreadyInitialized,
-        ];
-        for err in cases {
-            let error_code = err.error_code();
-            let display = err.to_string();
-            let http_error = HttpError::from(err);
-            assert_eq!(
-                http_error.status_code.as_u16(),
-                409,
-                "{error_code}: expected 409 Conflict"
-            );
-            assert_eq!(
-                http_error.error_code.as_deref(),
-                Some(error_code),
-                "{error_code}: error_code should be the variant name"
-            );
-            assert_eq!(
-                http_error.external_message, display,
-                "{error_code}: full error text should be exposed to the \
-                 client"
-            );
-            assert_eq!(
-                http_error.internal_message, display,
-                "{error_code}: internal message should match the error \
-                 text"
-            );
         }
+    }
+
+    #[derive(Debug)]
+    enum FakeTaskExit {
+        Success(u64),
+        Failure,
+    }
+
+    /// The test's side of a fake multirack join task
+    struct FakeTask {
+        rack_join_successful_rx: oneshot::Receiver<()>,
+        written_bootstore_generation_tx: watch::Sender<u64>,
+        exit_tx: oneshot::Sender<FakeTaskExit>,
+        _input_rx: watch::Receiver<MultirackJoinInput>,
+        _output_tx: watch::Sender<MultirackJoinServiceState>,
+    }
+
+    impl FakeTask {
+        fn exit(self, exit: FakeTaskExit) {
+            self.exit_tx.send(exit).unwrap();
+        }
+    }
+
+    /// Put `rss` into the `MultirackJoinInProgress` state, after trust quorum
+    /// has committed, with a supervised task that exits when the test says.
+    fn start_fake_multirack_join(rss: &RssAccess) -> FakeTask {
+        // One change to the request has been accepted
+        let (input_tx, input_rx) = watch::channel(MultirackJoinInput {
+            request: request(),
+            bootstore_generation: 2,
+        });
+        let (output_tx, output_rx) =
+            watch::channel(MultirackJoinServiceState::Requested);
+        let (rack_join_successful_tx, rack_join_successful_rx) =
+            oneshot::channel();
+        // The task has written it
+        let (written_bootstore_generation_tx, written_bootstore_generation_rx) =
+            watch::channel(2);
+        let (exit_tx, exit_rx) = oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            match exit_rx.await.unwrap() {
+                FakeTaskExit::Success(generation) => Ok(generation),
+                FakeTaskExit::Failure => {
+                    Err(MultirackJoinServiceError::TqBadCoordinator)
+                }
+            }
+        });
+
+        let id = MultirackJoinUuid::new_v4();
+        let (result_tx, result_rx) = oneshot::channel();
+        *rss.status.lock().unwrap() = RssStatus::MultirackJoinInProgress {
+            id,
+            input_tx,
+            output_rx,
+            membership_change_still_possible: Arc::new(AtomicBool::new(false)),
+            written_bootstore_generation_rx,
+            rack_join_successful_tx: Some(rack_join_successful_tx),
+            result_rx: result_rx.shared(),
+        };
+        rss.spawn_multirack_join_supervisor(id, join_handle, result_tx);
+
+        FakeTask {
+            rack_join_successful_rx,
+            written_bootstore_generation_tx,
+            exit_tx,
+            _input_rx: input_rx,
+            _output_tx: output_tx,
+        }
+    }
+
+    #[tokio::test]
+    async fn completion_rejected_until_latest_input_written() {
+        let rss = RssAccess::new(false);
+        let mut task = start_fake_multirack_join(&rss);
+
+        // The task has only written an earlier generation. Its request is
+        // the same, as when an update is reverted.
+        task.written_bootstore_generation_tx.send(1).unwrap();
+        assert_matches!(
+            rss.complete_multirack_join().now_or_never(),
+            Some(Err(RssAccessError::MultirackJoinPendingConfigUpdate))
+        );
+        assert_matches!(
+            task.rack_join_successful_rx.try_recv(),
+            Err(TryRecvError::Empty)
+        );
+
+        // The task hasn't written anything yet
+        task.written_bootstore_generation_tx.send(0).unwrap();
+        assert_matches!(
+            rss.complete_multirack_join().now_or_never(),
+            Some(Err(RssAccessError::MultirackJoinPendingConfigUpdate))
+        );
+        assert_matches!(
+            task.rack_join_successful_rx.try_recv(),
+            Err(TryRecvError::Empty)
+        );
+
+        // Once the latest generation is written, the join can complete
+        task.written_bootstore_generation_tx.send(2).unwrap();
+        let mut caller = Box::pin(rss.complete_multirack_join());
+        assert!(caller.as_mut().now_or_never().is_none());
+        task.rack_join_successful_rx.try_recv().unwrap();
+
+        task.exit(FakeTaskExit::Success(2));
+        assert_eq!(with_timeout(caller).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn completion_is_idempotent() {
+        let rss = RssAccess::new(false);
+        let mut task = start_fake_multirack_join(&rss);
+
+        // Concurrent callers all wait for the task
+        let mut callers: Vec<_> =
+            (0..3).map(|_| Box::pin(rss.complete_multirack_join())).collect();
+        for caller in &mut callers {
+            assert!(caller.as_mut().now_or_never().is_none());
+        }
+        task.rack_join_successful_rx.try_recv().unwrap();
+
+        task.exit(FakeTaskExit::Success(7));
+        for caller in callers {
+            assert_eq!(with_timeout(caller).await.unwrap(), 7);
+        }
+
+        // Later callers get the same generation right away
+        assert_matches!(
+            rss.complete_multirack_join().now_or_never(),
+            Some(Ok(7))
+        );
+    }
+
+    #[tokio::test]
+    async fn failure_wakes_waiters() {
+        let rss = RssAccess::new(false);
+        let task = start_fake_multirack_join(&rss);
+
+        let mut caller = Box::pin(rss.complete_multirack_join());
+        assert!(caller.as_mut().now_or_never().is_none());
+
+        task.exit(FakeTaskExit::Failure);
+        let message = assert_matches!(
+            with_timeout(caller).await,
+            Err(RssAccessError::MultirackJoinFailed { message }) => message
+        );
+
+        // Later callers read the status and get the same message
+        assert_matches!(
+            rss.complete_multirack_join().now_or_never(),
+            Some(Err(RssAccessError::MultirackJoinFailed { message: later }))
+                if later == message
+        );
+    }
+
+    #[tokio::test]
+    async fn generation_unavailable_when_already_initialized() {
+        let rss = RssAccess::new(true);
+
+        assert_matches!(
+            rss.complete_multirack_join().now_or_never(),
+            Some(Err(RssAccessError::MultirackJoinGenerationUnavailable))
+        );
+
+        let err = HttpError::from(crate::sled_agent::Error::from(
+            RssAccessError::MultirackJoinGenerationUnavailable,
+        ));
+        assert_eq!(err.status_code, ErrorStatusCode::GONE);
+        assert_eq!(
+            err.error_code.as_deref(),
+            Some("MultirackJoinGenerationUnavailable")
+        );
     }
 }

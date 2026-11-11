@@ -43,10 +43,10 @@ use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::{
     affinity, alert, audit, certificate, console, device, disk, external_ip,
     external_subnet, floating_ip, hardware, identity_provider, image, instance,
-    internet_gateway, ip_pool, metrics, multicast, networking, oxql,
-    path_params, policy, probe, project, rack, scim, silo, sled, snapshot,
-    ssh_key, subnet_pool, support_bundle, switch, system, system_networking,
-    timeseries, update, user, vpc,
+    internet_gateway, ip_pool, metrics, multicast, multirack, networking, oxql,
+    path_params, policy, probe, problem, project, rack, scim, silo, sled,
+    snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
+    system_networking, timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
@@ -214,14 +214,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let policy = nexus.silo_fetch_policy(&opctx, &silo_lookup).await?;
             Ok(HttpResponseOk(policy))
         };
@@ -242,13 +235,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let policy = nexus
                 .silo_update_policy(&opctx, &silo_lookup, &new_policy)
                 .await?;
@@ -265,14 +252,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let settings =
                 nexus.silo_fetch_auth_settings(&opctx, &silo_lookup).await?;
             Ok(HttpResponseOk(settings.into()))
@@ -290,13 +270,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseOk<silo::SiloAuthSettings>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let new_settings = new_settings.into_inner();
-            let silo: NameOrId = opctx
-                .authn
-                .silo_required()
-                .internal_context("loading current silo")?
-                .id()
-                .into();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let settings = nexus
                 .silo_update_auth_settings(&opctx, &silo_lookup, &new_settings)
                 .await?;
@@ -6642,13 +6616,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         req: TypedBody<rack::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
-            let req = req.into_inner();
+            let rack::RackMembershipAddSledsRequest {
+                sled_ids,
+                override_prechecks,
+            } = req.into_inner();
             let rack_id = path_params.into_inner().rack_id;
             let authz_tq = authz::TrustQuorumConfig::for_rack_id(
                 RackUuid::from_untyped_uuid(rack_id),
             );
-            let status =
-                nexus.tq_add_sleds(&opctx, authz_tq, req.sled_ids).await?;
+            let status = nexus
+                .tq_add_sleds(&opctx, authz_tq, sled_ids, &override_prechecks)
+                .await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await
@@ -6796,12 +6774,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn sled_add(
         rqctx: RequestContext<ApiContext>,
-        sled: TypedBody<hardware::UninitializedSledId>,
+        _sled: TypedBody<hardware::UninitializedSledId>,
     ) -> Result<HttpResponseCreated<sled::SledId>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let sled = sled.into_inner();
-            let id = nexus.sled_add(&opctx, sled).await?;
-            Ok(HttpResponseCreated(sled::SledId { id }))
+        // This implementation existed for compatibility, but it's not the right
+        // way to add sleds any more.  We should remove this altogether, but
+        // that's a bit more work.  See oxidecomputer/omicron#11641.
+        audit_and_time(&rqctx, |_opctx, _nexus| async move {
+            Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::GONE,
+                String::from(
+                    "this endpoint has been removed; add sleds with \
+                     POST /v1/system/hardware/racks/{rack_id}/membership/add",
+                ),
+            ))
         })
         .await
     }
@@ -7164,6 +7150,39 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 &query,
                 disks,
                 &|_, disk: &PhysicalDisk| disk.identity.id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // Multirack
+
+    async fn rack_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<multirack::UnadoptedRack>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let result_list =
+                nexus.rack_list_unadopted(&opctx, &pagparams).await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                result_list,
+                &|_, rack: &multirack::UnadoptedRack| {
+                    rack.rack_id.into_untyped_uuid()
+                },
             )?))
         };
         apictx
@@ -9013,6 +9032,244 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx = nexus.opctx_external_authn();
             let params = params.into_inner();
             nexus.device_access_token(&opctx, params).await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId<problem::ProblemListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<problem::Problem>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problems = nexus
+                .problem_list(&opctx, &scan_params.selector, &pag_params)
+                .await?
+                .into_iter()
+                .map(problem::Problem::from)
+                .collect();
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                problems,
+                &|_, problem: &problem::Problem| {
+                    (problem.identity.time_created, problem.identity.id)
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<problem::ProblemSelector>,
+    ) -> Result<HttpResponseOk<problem::Problem>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let selector = path_params.into_inner();
+            let problem_lookup = nexus.problem_lookup(&opctx, selector)?;
+            let problem = nexus.problem_view(&opctx, &problem_lookup).await?;
+            Ok(HttpResponseOk(problem.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<problem::ProblemSelector>,
+        query_params: Query<PaginatedById<problem::ProblemListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<problem::RelatedProblem>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let causes = nexus
+                .problem_causes_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                causes,
+                &|_, related: &problem::RelatedProblem| {
+                    related.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<problem::ProblemSelector>,
+        query_params: Query<PaginatedById<problem::ProblemListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<problem::RelatedProblem>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let consequences = nexus
+                .problem_consequences_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                consequences,
+                &|_, related: &problem::RelatedProblem| {
+                    related.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<problem::ProblemSelector>,
+        query_params: Query<PaginatedById<problem::ImpactListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<problem::ProblemImpact>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let impacts = nexus
+                .problem_impact_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                impacts,
+                &|_, impact: &problem::ProblemImpact| impact.resource.id(),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<problem::ProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let bundles = nexus
+                .problem_support_bundles_list(&problem_lookup, &pag_params)
+                .await?;
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                bundles,
+                &|_, bundle: &support_bundle::SupportBundleInfo| {
+                    (bundle.time_created, bundle.id.into_untyped_uuid())
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<problem::ProblemSelector>,
+        pag_params: Query<PaginatedByTimeAndId<alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<alert::Alert>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = pag_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let problem_lookup =
+                nexus.problem_lookup(&opctx, path_params.into_inner())?;
+            let alerts = nexus
+                .problem_alert_list(
+                    &problem_lookup,
+                    &scan_params.selector,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                alerts,
+                &|_, alert: &alert::Alert| {
+                    (alert.identity.time_created, alert.identity.id)
+                },
+            )?))
         };
         apictx
             .context

@@ -26,39 +26,36 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
     vec![
         CollectionStep::new(
             SupportBundleCollectionStep::STEP_BUNDLE_ID,
-            Box::new(|collection, dir| {
-                metadata::collect_bundle_id(collection, dir).boxed()
+            Box::new(|collection, output| {
+                metadata::collect_bundle_id(collection, output).boxed()
             }),
         ),
         CollectionStep::new(
             SupportBundleCollectionStep::STEP_REASON_FOR_CREATION,
-            Box::new(|collection, dir| {
-                metadata::collect_reason_for_creation(collection, dir).boxed()
+            Box::new(|collection, output| {
+                metadata::collect_reason_for_creation(collection, output)
+                    .boxed()
             }),
         ),
         CollectionStep::new(
             SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE,
-            Box::new(|collection, dir| {
-                reconfigurator::collect(collection, dir).boxed()
+            Box::new(|collection, output| {
+                reconfigurator::collect(collection, output).boxed()
             }),
         ),
         CollectionStep::new(
             SupportBundleCollectionStep::STEP_EREPORTS,
-            Box::new(|collection, dir| {
-                ereports::collect(collection, dir).boxed()
+            Box::new(|collection, output| {
+                ereports::collect(collection, output).boxed()
             }),
         ),
         CollectionStep::new(
             SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO,
             Box::new({
                 let cache = cache.clone();
-                move |collection, dir| {
+                move |collection, output| {
                     async move {
-                        sled_cubby::collect(
-                            collection,
-                            &cache,
-                            dir
-                        ).await
+                        sled_cubby::collect(collection, &cache, output).await
                     }
                     .boxed()
                 }
@@ -68,10 +65,10 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
             SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS,
             Box::new({
                 let cache = cache.clone();
-                move |collection, dir| {
+                move |collection, output| {
                     async move {
                         sp_dumps::spawn_collection_steps(
-                            collection, &cache, dir,
+                            collection, &cache, output,
                         )
                         .await
                     }
@@ -83,10 +80,10 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
             SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS,
             Box::new({
                 let cache = cache.clone();
-                move |collection, dir| {
+                move |collection, output| {
                     async move {
                         sp_components::spawn_collection_steps(
-                            collection, &cache, dir,
+                            collection, &cache, output,
                         )
                         .await
                     }

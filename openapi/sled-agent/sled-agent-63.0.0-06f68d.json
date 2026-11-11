@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "56.0.0"
+    "version": "63.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -45,7 +45,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -105,7 +105,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -380,11 +380,43 @@
     "/multirack-join-complete": {
       "put": {
         "summary": "Report that this sled's multirack join is complete.",
-        "description": "Sent by Nexus once it has observed this sled on the underlay network.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network. Returns the final bootstore generation written by the multirack join service. Repeated requests return the same generation.\n\nReturns 409 Conflict if this request arrives while a new networking configuration was accepted but not written. Returns 410 Gone if sled-agent restarted after a completed join.",
         "operationId": "multirack_join_complete",
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinCompleteResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/multirack-join-service-status": {
+      "get": {
+        "summary": "Return the status of this sled's multirack join service.",
+        "description": "Returns a 404 if no multirack join service is running, or a 409 if the service is running but has not yet determined its status.",
+        "operationId": "multirack_join_service_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinServiceStatus"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -601,6 +633,31 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SledIdentifiers"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sled-registration-info": {
+      "get": {
+        "summary": "Return this sled's registration identity.",
+        "description": "Nexus calls this method synchronously while handling this sled's `sled_agent_put`.",
+        "operationId": "sled_registration_info",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledRegistrationInfo"
                 }
               }
             }
@@ -1395,7 +1452,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -1666,7 +1723,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CoordinatorStatus"
+                  "$ref": "#/components/schemas/TrustQuorumCoordinatorStatusResponse"
                 }
               }
             }
@@ -1690,7 +1747,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustQuorumNetworkConfig"
+                  "$ref": "#/components/schemas/TrustQuorumNetworkConfigResponse"
                 }
               }
             }
@@ -3028,7 +3085,7 @@
               "x-rust-type": {
                 "crate": "byte-wrapper",
                 "path": "byte_wrapper::HexArray::<32>",
-                "version": "0.1.0"
+                "version": "0.2.0"
               },
               "type": "string",
               "pattern": "^[0-9a-fA-F]{64}$",
@@ -3820,7 +3877,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",
@@ -5811,7 +5868,7 @@
                 "x-rust-type": {
                   "crate": "byte-wrapper",
                   "path": "byte_wrapper::HexArray::<32>",
-                  "version": "0.1.0"
+                  "version": "0.2.0"
                 },
                 "type": "string",
                 "pattern": "^[0-9a-fA-F]{64}$",
@@ -6137,10 +6194,22 @@
         "type": "object",
         "properties": {
           "attached_subnets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/AttachedSubnet"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AttachedSubnet"
-            }
+            },
+            "uniqueItems": true
           },
           "delegated_zvols": {
             "type": "array",
@@ -6368,6 +6437,9 @@
               }
             ]
           },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
           "reconciler_status": {
             "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
@@ -6427,6 +6499,7 @@
           "file_source_resolver",
           "fmd",
           "instance_manager_status",
+          "rack_id",
           "reconciler_status",
           "reference_measurements",
           "reservoir_size",
@@ -7186,6 +7259,59 @@
           }
         ]
       },
+      "MultirackJoinCompleteResponse": {
+        "description": "The result of completing a multirack join",
+        "type": "object",
+        "properties": {
+          "bootstore_generation": {
+            "description": "The latest bootstore generation when join completes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bootstore_generation"
+        ]
+      },
+      "MultirackJoinServiceStatus": {
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "sled_agents": {
+            "title": "BiHashMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                }
+              ],
+              "path": "iddqd::BiHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledAgentInfo"
+            },
+            "uniqueItems": true
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          }
+        },
+        "required": [
+          "rack_id",
+          "rack_subnet",
+          "sled_agents",
+          "sled_id"
+        ]
+      },
       "MupdateOverrideBootInventory": {
         "description": "Inventory representation of the MUPdate override on the boot disk.",
         "type": "object",
@@ -7702,7 +7828,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",
@@ -7899,7 +8025,7 @@
                 "x-rust-type": {
                   "crate": "byte-wrapper",
                   "path": "byte_wrapper::HexArray::<32>",
-                  "version": "0.1.0"
+                  "version": "0.2.0"
                 },
                 "type": "string",
                 "pattern": "^[0-9a-fA-F]{64}$",
@@ -9586,6 +9712,67 @@
           "result"
         ]
       },
+      "SledAgentInfo": {
+        "description": "Status information for a given sled agent",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "start_state": {
+            "$ref": "#/components/schemas/SledAgentStartState"
+          }
+        },
+        "required": [
+          "address",
+          "baseboard_id",
+          "sled_id",
+          "start_state"
+        ]
+      },
+      "SledAgentStartState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "SledConfigGeneration": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "x-rust-type": {
@@ -9726,6 +9913,32 @@
           "rack_id",
           "revision",
           "serial",
+          "sled_id"
+        ]
+      },
+      "SledRegistrationInfo": {
+        "description": "The sled's registration identity.\n\nThis returns additional information that isn't present in the `sled_upsert` upcall to Nexus.\n\nThe data that can be returned here has important restrictions! See the comment in sled_registration_info for more information.",
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "description": "The rack ID that this sled is registered with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          },
+          "sled_id": {
+            "description": "The ID of this sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rack_id",
           "sled_id"
         ]
       },
@@ -10282,6 +10495,57 @@
           "rack_network_config"
         ]
       },
+      "TrustQuorumCoordinatorStatusResponse": {
+        "description": "Response type for `trust_quorum_coordinator_status`.",
+        "oneOf": [
+          {
+            "description": "The node is currently coordinating a reconfiguration or LRTQ upgrade.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "coordinating"
+                ]
+              },
+              "status": {
+                "description": "The coordinator status.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CoordinatorStatus"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "status"
+            ]
+          },
+          {
+            "description": "The node is not currently coordinating a reconfiguration or LRTQ upgrade.",
+            "type": "object",
+            "properties": {
+              "latest_config_epoch": {
+                "nullable": true,
+                "description": "The latest configuration epoch this node has persisted.\n\nIf this is greater than or equal to the epoch that Nexus is driving, the coordinator started that epoch and then stopped for some reason, and Nexus can abort this configuration. If lower than the Nexus epoch, then reconfiguration has not started yet.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_coordinating"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
       "TrustQuorumNetworkConfig": {
         "description": "Network configuration used to bring up the control plane.\n\nThis type mirrors `bootstore::schemes::v0::NetworkConfig` but adds `JsonSchema` for API compatibility.",
         "type": "object",
@@ -10300,6 +10564,21 @@
           "blob",
           "generation"
         ]
+      },
+      "TrustQuorumNetworkConfigResponse": {
+        "description": "Response type for `trust_quorum_network_config`.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "nullable": true,
+            "description": "The trust quorum network config, or `None` if a config has not been loaded or received since Sled Agent started.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TrustQuorumNetworkConfig"
+              }
+            ]
+          }
+        }
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
@@ -10945,7 +11224,7 @@
             "x-rust-type": {
               "crate": "byte-wrapper",
               "path": "byte_wrapper::HexArray::<32>",
-              "version": "0.1.0"
+              "version": "0.2.0"
             },
             "type": "string",
             "pattern": "^[0-9a-fA-F]{64}$",

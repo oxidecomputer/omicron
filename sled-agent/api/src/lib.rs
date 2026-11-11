@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    Body, FreeformBody, Header, HttpError, HttpResponseAccepted,
-    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    StreamingBody, TypedBody,
+    Body, ClientErrorStatusCode, FreeformBody, Header, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    Query, RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::shared::{
@@ -17,9 +17,9 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use sled_agent_types_versions::{
-    latest, v1, v11, v14, v18, v20, v22, v24, v25, v26, v28, v29, v30, v31,
-    v32, v33, v34, v37, v39, v40, v41, v42, v43, v46, v47, v48, v49, v50, v51,
-    v52, v53,
+    latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
+    v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
+    v50, v51, v52, v53, v55,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,13 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
+    (62, ADD_SLED_REGISTRATION_INFO),
+    (61, TRUST_QUORUM_NULLABLE_RESPONSES),
+    (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
+    (59, INSTANCE_ATTACHED_SUBNETS_MAP),
+    (58, BYTE_WRAPPER_0_2_BUMP),
+    (57, ADD_RACK_ID_TO_INVENTORY),
     (56, ADD_MULTIRACK_JOIN_COMPLETE),
     (55, ARTIFACT_HASH_SCHEMA),
     (54, ADD_LOG_TIME_RANGE),
@@ -442,13 +449,41 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_PROPOLIS_NVME_VWC..
+        versions = VERSION_INSTANCE_ATTACHED_SUBNETS_MAP..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_PROPOLIS_NVME_VWC..VERSION_INSTANCE_ATTACHED_SUBNETS_MAP
+    }]
+    async fn vmm_register_v44(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v44::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(
+            rqctx,
+            path_params,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "duplicate attached subnet in instance sled-local \
+                         configuration: {}",
+                        InlineErrorChain::new(&err),
+                    ),
+                )
+            })?,
+        )
+        .await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -461,7 +496,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v41::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v44(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -1095,11 +1130,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..VERSION_ADD_RACK_ID_TO_INVENTORY,
+    }]
+    async fn inventory_v55(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v55::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v55::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1110,7 +1160,7 @@ pub trait SledAgentApi {
     async fn inventory_v53(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v53::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v55(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v53::inventory::Inventory::from(inv))
         })
     }
@@ -1558,13 +1608,59 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/coordinator-status",
+        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
     }]
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Option<trust_quorum_types::status::CoordinatorStatus>>,
+        HttpResponseOk<
+            latest::trust_quorum::TrustQuorumCoordinatorStatusResponse,
+        >,
         HttpError,
     >;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_coordinator_status",
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = ..VERSION_TRUST_QUORUM_NULLABLE_RESPONSES,
+    }]
+    async fn trust_quorum_coordinator_status_v13(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            trust_quorum_types_versions::v1::status::CoordinatorStatus,
+        >,
+        HttpError,
+    > {
+        // These versions were declared as returning an
+        // Option<CoordinatorStatus>, but their corresponding OpenAPI documents
+        // indicated that the CoordinatorStatus response was non-nullable. (This
+        // is a Dropshot bug; see omicron#11623). We've since changed this API
+        // to return a non-nullable CoordinatorStatus, making the API match the
+        // immutable blessed documents. But that leaves open the question of how
+        // None can be represented on the wire. We return a 404 -- old clients
+        // will receive it as an error and will handle it reasonably well.
+        use latest::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+
+        Self::trust_quorum_coordinator_status(request_context).await?.try_map(
+            |response| match response {
+                TrustQuorumCoordinatorStatusResponse::Coordinating {
+                    status,
+                } => Ok(status),
+                TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                    latest_config_epoch: _,
+                } => Err(HttpError::for_client_error(
+                    None,
+                    ClientErrorStatusCode::NOT_FOUND,
+                    "this node is not currently coordinating a trust \
+                     quorum reconfiguration"
+                        .to_string(),
+                )),
+            },
+        )
+    }
 
     /// Attempt to prepare and commit a trust quorum configuration
     #[endpoint {
@@ -1625,13 +1721,43 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/network-config",
+        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
     }]
     async fn trust_quorum_network_config_get(
         request_context: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Option<latest::trust_quorum::TrustQuorumNetworkConfig>>,
+        HttpResponseOk<latest::trust_quorum::TrustQuorumNetworkConfigResponse>,
         HttpError,
     >;
+
+    /// Get the current network config from trust quorum
+    #[endpoint {
+        operation_id = "trust_quorum_network_config_get",
+        method = GET,
+        path = "/trust-quorum/network-config",
+        versions = ..VERSION_TRUST_QUORUM_NULLABLE_RESPONSES,
+    }]
+    async fn trust_quorum_network_config_get_v15(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v15::trust_quorum::TrustQuorumNetworkConfig>,
+        HttpError,
+    > {
+        // See the comment in trust_quorum_coordinator_status_v13.
+        Self::trust_quorum_network_config_get(request_context).await?.try_map(
+            |response| {
+                response.config.ok_or_else(|| {
+                    HttpError::for_client_error(
+                        None,
+                        ClientErrorStatusCode::NOT_FOUND,
+                        "this node does not have a trust quorum network \
+                         config"
+                            .to_string(),
+                    )
+                })
+            },
+        )
+    }
 
     /// Update the network config in trust quorum
     #[endpoint {
@@ -1719,12 +1845,70 @@ pub trait SledAgentApi {
     /// Report that this sled's multirack join is complete.
     ///
     /// Sent by Nexus once it has observed this sled on the underlay network.
+    /// Returns the final bootstore generation written by the multirack join
+    /// service. Repeated requests return the same generation.
+    ///
+    /// Returns 409 Conflict if this request arrives while a new networking
+    /// configuration was accepted but not written. Returns 410 Gone if
+    /// sled-agent restarted after a completed join.
     #[endpoint {
         method = PUT,
         path = "/multirack-join-complete",
-        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..,
+        versions = VERSION_MULTIRACK_JOIN_COMPLETE_GENERATION..,
     }]
     async fn multirack_join_complete(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinCompleteResponse>,
+        HttpError,
+    >;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    #[endpoint {
+        operation_id = "multirack_join_complete",
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..VERSION_MULTIRACK_JOIN_COMPLETE_GENERATION,
+    }]
+    async fn multirack_join_complete_v56(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::multirack_join_complete(request_context)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
+
+    /// Return the status of this sled's multirack join service.
+    ///
+    /// Returns a 404 if no multirack join service is running, or a 409 if the
+    /// service is running but has not yet determined its status.
+    #[endpoint {
+        method = GET,
+        path = "/multirack-join-service-status",
+        versions = VERSION_ADD_MULTIRACK_JOIN_SERVICE_STATUS..,
+    }]
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinServiceStatus>,
+        HttpError,
+    >;
+
+    /// Return this sled's registration identity.
+    ///
+    /// Nexus calls this method synchronously while handling this sled's
+    /// `sled_agent_put`.
+    #[endpoint {
+        method = GET,
+        path = "/sled-registration-info",
+        versions = VERSION_ADD_SLED_REGISTRATION_INFO..,
+    }]
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::inventory::SledRegistrationInfo>,
+        HttpError,
+    >;
 }

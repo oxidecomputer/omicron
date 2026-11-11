@@ -22,7 +22,7 @@ use nexus_db_queries::db::model;
 use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_git_version::GitVersion;
+use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::fmt;
@@ -581,7 +581,7 @@ fn print_analysis_report(
         analysis_report,
     } = report;
 
-    let our_git_commit = GitVersion::current();
+    let our_git_commit = omicron_git_version::current();
     let git_commit = git_commit.parse::<GitVersion>().expect("infallible");
     if our_git_commit != git_commit {
         eprintln!(

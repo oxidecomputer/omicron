@@ -242,7 +242,7 @@ mod tests {
         let mut collection = test_boards.collection_builder().build();
         collection
             .sled_agents
-            .get_mut(&sled_0_id)
+            .get_mut(sled_0_id)
             .expect("sled 0 in inventory")
             .ledgered_sled_config = None;
         assert_eq!(

@@ -201,6 +201,8 @@ impl ReplicaConfig {
         <!-- See https://github.com/oxidecomputer/omicron/issues/8595 for details. -->
         <replicated_max_ratio_of_wrong_parts>1.0</replicated_max_ratio_of_wrong_parts>
     </merge_tree>
+
+    <remote_url_allow_hosts />
 {macros}
 {remote_servers}
 {keepers}

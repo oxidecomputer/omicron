@@ -171,7 +171,6 @@ mod tests {
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_inventory::CollectionBuilder;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::RackUuid;
 
     #[tokio::test]
     async fn test_inventory_loader() {
@@ -193,7 +192,7 @@ mod tests {
         // Insert a collection and activate; we should load it.
         let coll0 = Arc::new(CollectionBuilder::new("test").build());
         datastore
-            .inventory_insert_collection(opctx, &coll0, RackUuid::nil())
+            .inventory_insert_collection(opctx, &coll0)
             .await
             .expect("inserted collection");
         let status = loader.load_if_needed(opctx).await;
@@ -238,12 +237,12 @@ mod tests {
         // Insert two more collections.
         let coll1 = CollectionBuilder::new("test").build();
         datastore
-            .inventory_insert_collection(opctx, &coll1, RackUuid::nil())
+            .inventory_insert_collection(opctx, &coll1)
             .await
             .expect("inserted collection");
         let coll2 = Arc::new(CollectionBuilder::new("test").build());
         datastore
-            .inventory_insert_collection(opctx, &coll2, RackUuid::nil())
+            .inventory_insert_collection(opctx, &coll2)
             .await
             .expect("inserted collection");
 

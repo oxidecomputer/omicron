@@ -111,3 +111,9 @@ pub mod v2026_09_11_00;
 pub mod v2026_09_15_00;
 #[path = "artifact_hash_schema/mod.rs"]
 pub mod v2026_10_13_00;
+#[path = "sled_add_precheck_overrides/mod.rs"]
+pub mod v2026_10_29_00;
+#[path = "unadopted_rack_list/mod.rs"]
+pub mod v2026_11_04_00;
+#[path = "problems/mod.rs"]
+pub mod v2026_11_05_00;

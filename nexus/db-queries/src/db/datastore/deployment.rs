@@ -148,7 +148,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(blueprints.into_iter().map(BlueprintMetadata::from).collect())
+        blueprints.into_iter().map(BlueprintMetadata::try_from).collect()
     }
 
     /// Store a complete blueprint into the database
@@ -598,6 +598,7 @@ impl DataStore {
                     match DebugLogBlueprintPlanning::new(
                         blueprint_id,
                         report.clone(),
+                        &self.git_version,
                     ) {
                         Ok(debug_log) => {
                             use nexus_db_schema::schema::debug_log_blueprint_planning::dsl;
@@ -1651,6 +1652,7 @@ impl DataStore {
         }
 
         // Parse blueprint row fields
+        let reflects_collection = blueprint_row.reflects_collection()?;
         let parent_blueprint_id =
             blueprint_row.parent_blueprint_id.map(From::from);
         let internal_dns_version = *blueprint_row.internal_dns_version;
@@ -1681,6 +1683,7 @@ impl DataStore {
             pending_mgs_updates,
             sleds: sled_configs,
             parent_blueprint_id,
+            reflects_collection,
             internal_dns_version,
             external_dns_version,
             target_release_minimum_generation,
@@ -3496,6 +3499,7 @@ fn insert_target_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_types::deployment::ReflectsCollection;
     use omicron_generation_kinds::NexusGeneration;
 
     use crate::db::pub_test_utils::TestDatabase;
@@ -3551,7 +3555,6 @@ mod tests {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
@@ -3886,6 +3889,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -3981,6 +3985,11 @@ mod tests {
             };
         }
 
+        // This blueprint was not produced by the planner, so it starts out not
+        // reflecting any particular collection.  Set a specific collection by
+        // hand to ensure that we test roundtripping one through SQL.
+        blueprint1.reflects_collection = ReflectsCollection::from(&collection);
+
         let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
@@ -4068,6 +4077,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test",
             PlannerRng::from_entropy(),
         )
@@ -4344,11 +4354,19 @@ mod tests {
         assert_all_zones_in_service(&blueprint2);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
+        // This blueprint does not reflect any particular collection.  Verify
+        // that so that we know we test roundtripping `Indeterminate` through
+        // SQL.
+        assert_eq!(
+            blueprint2.reflects_collection,
+            ReflectsCollection::Indeterminate
+        );
+
         // This blueprint contains a PendingMgsUpdate that references an SP from
         // `collection`.  This must already be present in the database for
         // blueprint insertion to work.
         datastore
-            .inventory_insert_collection(&opctx, &collection, RackUuid::nil())
+            .inventory_insert_collection(&opctx, &collection)
             .await
             .expect("failed to insert inventory collection");
 
@@ -4417,6 +4435,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
+            ReflectsCollection::Indeterminate,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4472,6 +4491,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
+            ReflectsCollection::Indeterminate,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4524,6 +4544,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint4,
+            ReflectsCollection::Indeterminate,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4580,6 +4601,7 @@ mod tests {
         let blueprint6 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint5,
+            ReflectsCollection::Indeterminate,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4650,6 +4672,7 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4658,6 +4681,7 @@ mod tests {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4757,6 +4781,7 @@ mod tests {
         let blueprint4 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
+            ReflectsCollection::Indeterminate,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4795,6 +4820,7 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4928,6 +4954,7 @@ mod tests {
                 Some(parent) => BlueprintBuilder::new_based_on(
                     log,
                     parent,
+                    ReflectsCollection::Indeterminate,
                     "test-suite",
                     PlannerRng::from_entropy(),
                 )
@@ -5553,6 +5580,7 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             &format!("{test_name}-2"),
             PlannerRng::from_entropy(),
         )
@@ -6076,6 +6104,7 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &target_blueprint,
+                ReflectsCollection::Indeterminate,
                 "test blueprint to delete",
                 PlannerRng::from_entropy(),
             )

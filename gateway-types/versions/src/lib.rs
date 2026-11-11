@@ -41,3 +41,5 @@ pub mod v4;
 pub mod v5;
 #[path = "artifact_hash_schema/mod.rs"]
 pub mod v6;
+#[path = "reject_local_switch_resets/mod.rs"]
+pub mod v8;

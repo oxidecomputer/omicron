@@ -3,11 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::ByteCount;
+use crate::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::silo_quotas;
 use nexus_types::external_api::silo;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(
     Queryable,
@@ -21,7 +24,7 @@ use uuid::Uuid;
 )]
 #[diesel(table_name = silo_quotas)]
 pub struct SiloQuotas {
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
 
@@ -38,14 +41,18 @@ pub struct SiloQuotas {
 }
 
 impl SiloQuotas {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn new(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         cpus: i64,
         memory: ByteCount,
         storage: ByteCount,
     ) -> Self {
         Self {
-            silo_id,
+            silo_id: silo_id.into(),
             time_created: Utc::now(),
             time_modified: Utc::now(),
             cpus,
@@ -54,7 +61,7 @@ impl SiloQuotas {
         }
     }
 
-    pub fn arbitrarily_high_default(silo_id: Uuid) -> Self {
+    pub fn arbitrarily_high_default(silo_id: SiloUuid) -> Self {
         let count = silo::SiloQuotasCreate::arbitrarily_high_default();
         Self::new(
             silo_id,
@@ -68,7 +75,7 @@ impl SiloQuotas {
 impl From<SiloQuotas> for silo::SiloQuotas {
     fn from(silo_quotas: SiloQuotas) -> Self {
         Self {
-            silo_id: silo_quotas.silo_id,
+            silo_id: silo_quotas.silo_id.into_untyped_uuid(),
             limits: silo::VirtualResourceCounts {
                 cpus: silo_quotas.cpus,
                 memory: silo_quotas.memory.into(),

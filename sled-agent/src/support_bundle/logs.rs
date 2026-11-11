@@ -138,7 +138,7 @@ impl<'a> SupportBundleLogs<'a> {
         let storage_paths_to_size: Vec<_> = mounted_debug_datasets
             .into_iter()
             .map(|dataset_path| {
-                let path = dataset_path.path;
+                let path = dataset_path.into_path();
                 async move {
                     match illumos_utils::zfs::Zfs::get_value(
                         path.as_str(),

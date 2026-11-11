@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::analysis_input::{Builder, Input, InvalidInputs};
+use crate::analysis_input::{Builder, Input, InventoryStale};
 use crate::builder::{SitrepBuilder, SitrepBuilderRng};
 use chrono::DateTime;
 use chrono::Utc;
@@ -23,8 +23,8 @@ use nexus_types::inventory;
 use nexus_types::inventory::ZpoolHealth;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
-use omicron_generation_kinds::AlertGeneration;
-use omicron_generation_kinds::SupportBundleGeneration;
+use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -89,7 +89,7 @@ impl FmTest {
         observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
         observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
         config: FmConfig,
-    ) -> Result<Builder, InvalidInputs> {
+    ) -> Result<Builder, InventoryStale> {
         let mut builder = Input::builder(parent_sitrep, inv)?
             .in_service_disks(in_service_disks)
             .observed_sagas(observed_sagas)
@@ -595,8 +595,8 @@ pub fn make_parent_sitrep(
             time_created: Utc::now(),
             next_inv_min_time_started: Utc::now(),
             comment: String::new(),
-            alert_generation: AlertGeneration::new(),
-            support_bundle_generation: SupportBundleGeneration::new(),
+            alert_generation: SitrepAlertGeneration::new(),
+            support_bundle_generation: SitrepSupportBundleGeneration::new(),
         },
         cases: case_map,
         ereports_by_id: Default::default(),

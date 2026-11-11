@@ -118,7 +118,7 @@ WITH
       UPDATE
         subnet_pool
       SET
-        time_modified = now(), rcgen = rcgen + 1
+        rcgen = rcgen + 1
       WHERE
         id = $21 AND EXISTS(SELECT 1 FROM candidate_does_not_overlap) AND time_deleted IS NULL
       RETURNING

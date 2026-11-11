@@ -61,9 +61,11 @@ use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::CapacityMetricsStatus;
 use nexus_types::internal_api::background::DatasetRendezvousOutcome;
 use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
+use nexus_types::internal_api::background::DendriteSubnetDetails;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmConfigLoadStatus;
@@ -88,6 +90,7 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
+use nexus_types::internal_api::background::SledSubnetDetails;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -99,6 +102,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateDetails;
 use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
@@ -1296,6 +1300,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "vmm_stop_for_update" => {
+            print_task_vmm_stop_for_update(details);
+        }
         "attached_subnet_manager" => {
             print_task_attached_subnet_manager_status(details);
         }
@@ -1340,6 +1347,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "instance_watcher" => {
             print_task_instance_watcher(details);
+        }
+        "capacity_metrics" => {
+            print_task_capacity_metrics(details);
         }
         "inventory_collection" => {
             print_task_inventory_collection(details);
@@ -1506,6 +1516,62 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
                 "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
                 sled_reservations_deleted,
             );
+        }
+    };
+}
+
+fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::VmmStopForUpdateDetails;
+    use nexus_types::internal_api::background::VmmStopForUpdateStatus;
+
+    match serde_json::from_value::<VmmStopForUpdateStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(VmmStopForUpdateStatus::Disabled) => {
+            println!("    task explicitly disabled by config!");
+        }
+        Ok(VmmStopForUpdateStatus::Enabled(VmmStopForUpdateDetails {
+            vmms_stopped_by_sled,
+            vmms_failed_to_stop_by_sled,
+            error_messages,
+        })) => {
+            let total: usize =
+                vmms_stopped_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
+            println!("    VMMs stopped for sled evacuation: {total} total");
+            for sled in vmms_stopped_by_sled {
+                println!(
+                    "      sled_id={} n_stopped={}",
+                    sled.sled_id,
+                    sled.vmm_ids.len()
+                );
+            }
+            if !vmms_failed_to_stop_by_sled.is_empty() {
+                let total_failed: usize = vmms_failed_to_stop_by_sled
+                    .iter()
+                    .map(|s| s.vmm_ids.len())
+                    .sum();
+                println!("    VMMs that failed to stop: {total_failed} total");
+                for sled in vmms_failed_to_stop_by_sled {
+                    println!(
+                        "      sled_id={} n_failed_to_stop={}",
+                        sled.sled_id,
+                        sled.vmm_ids.len()
+                    );
+                    for vmm in sled.vmm_ids {
+                        println!("        vmm_id={}", vmm);
+                    }
+                }
+            }
+
+            if !error_messages.is_empty() {
+                let total_err = error_messages.len();
+                println!("    Error messages: {total_err} total");
+                for error in error_messages {
+                    println!("      {error}");
+                }
+            }
         }
     };
 }
@@ -2232,6 +2298,18 @@ fn print_task_instance_updater(details: &serde_json::Value) {
     println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
 }
 
+fn print_task_capacity_metrics(details: &serde_json::Value) {
+    match serde_json::from_value::<CapacityMetricsStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {error:?}: {details:?}",
+        ),
+        Ok(status) => {
+            println!("    silo samples: {}", status.silo_samples);
+            println!("    project samples: {}", status.project_samples);
+        }
+    }
+}
+
 fn print_task_instance_watcher(details: &serde_json::Value) {
     #[derive(Deserialize)]
     struct TaskSuccess {
@@ -2466,42 +2544,79 @@ fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(AttachedSubnetManagerStatus { db_error, dendrite, sled }) => {
-            if let Some(err) = db_error {
-                println!(
+        Ok(status) => {
+            print!("{}", AttachedSubnetManagerStatusDisplay(&status));
+        }
+    };
+}
+
+struct AttachedSubnetManagerStatusDisplay<'a>(&'a AttachedSubnetManagerStatus);
+
+impl std::fmt::Display for AttachedSubnetManagerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (dendrite, sled) = match self.0 {
+            AttachedSubnetManagerStatus::DatabaseError { error } => {
+                writeln!(
+                    f,
                     "  error accessing database to list attached subnets:"
-                );
-                println!("    {err}");
+                )?;
+                writeln!(f, "    {error}")?;
+                return Ok(());
             }
-            if dendrite.is_empty() {
-                println!("   no dendrite instances found");
-            } else {
-                for (switch_slot, details) in dendrite.iter() {
-                    println!("   dendrite instance on switch {switch_slot:?}");
-                    println!(
-                        "     n_subnets_removed={}",
-                        details.n_subnets_removed
-                    );
-                    println!(
-                        "     n_subnets_added={}",
-                        details.n_subnets_added
-                    );
-                    println!(
-                        "     n_subnets_total={}",
-                        details.n_total_subnets
-                    );
-                }
+            AttachedSubnetManagerStatus::Listed { dendrite, sled } => {
+                (dendrite, sled)
             }
-            if sled.is_empty() {
-                println!("   no sleds found");
-            } else {
-                for (sled_id, details) in sled.iter() {
-                    println!("   sled {sled_id}");
-                    println!("     n_subnets={}", details.n_subnets);
+        };
+        match dendrite {
+            Err(err) => {
+                writeln!(f, "  error looking up dendrite instances:")?;
+                writeln!(f, "    {err}")?;
+            }
+            Ok(dendrite) if dendrite.is_empty() => {
+                writeln!(f, "   no dendrite instances found")?;
+            }
+            Ok(dendrite) => {
+                // Sort the data by switch slot to ensure stable output.
+                let mut dendrite: Vec<_> = dendrite.iter().collect();
+                dendrite.sort_unstable_by_key(|(switch_slot, _)| **switch_slot);
+                for (switch_slot, details) in dendrite {
+                    let DendriteSubnetDetails {
+                        n_subnets_added,
+                        n_subnets_removed,
+                        n_total_subnets,
+                        errors,
+                    } = details;
+                    writeln!(
+                        f,
+                        "   dendrite instance on switch {switch_slot:?}"
+                    )?;
+                    writeln!(f, "     n_subnets_removed={n_subnets_removed}")?;
+                    writeln!(f, "     n_subnets_added={n_subnets_added}")?;
+                    writeln!(f, "     n_subnets_total={n_total_subnets}")?;
+                    writeln!(f, "     n_errors={}", errors.len())?;
+                    for error in errors {
+                        writeln!(f, "       {error}")?;
+                    }
                 }
             }
         }
-    };
+        if sled.is_empty() {
+            writeln!(f, "   no sleds found")?;
+        } else {
+            let mut sled: Vec<_> = sled.iter().collect();
+            sled.sort_unstable_by_key(|(sled_id, _)| **sled_id);
+            for (sled_id, details) in sled {
+                let SledSubnetDetails { n_subnets, errors } = details;
+                writeln!(f, "   sled {sled_id}")?;
+                writeln!(f, "     n_subnets={n_subnets}")?;
+                writeln!(f, "     n_errors={}", errors.len())?;
+                for error in errors {
+                    writeln!(f, "       {error}")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
@@ -2926,13 +3041,16 @@ fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(status) => {
-            let VmmMarkStopForUpdateStatus {
+        Ok(VmmMarkStopForUpdateStatus::Disabled) => {
+            println!("    task explicitly disabled by config!");
+        }
+        Ok(VmmMarkStopForUpdateStatus::Enabled(details)) => {
+            let VmmMarkStopForUpdateDetails {
                 vmms_marked,
                 batches,
                 batch_size,
                 error,
-            } = status;
+            } = details;
 
             const MARKED: &str = "VMMs marked to be stopped for an update:";
             const BATCHES: &str = "  batches:";
@@ -3135,6 +3253,43 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                         let pretty = serde_json::to_string_pretty(details)
                             .unwrap_or_else(|_| details.to_string());
                         println!("{}", textwrap::indent(&pretty, "        "));
+                    }
+                }
+                if let Some(exceeded) = &collection.size_limit_exceeded {
+                    println!(
+                        "      Bundle reached its size limit, and collection \
+                         stopped early:"
+                    );
+                    println!(
+                        "        limit:            {}",
+                        exceeded.limit_bytes
+                    );
+                    println!(
+                        "        collected:        {} bytes",
+                        exceeded.used_bytes
+                    );
+                    println!(
+                        "        reached at:       {}",
+                        exceeded.exceeded_at
+                    );
+                    for (title, items) in [
+                        (
+                            "files left out (would exceed the limit)",
+                            exceeded.refused_paths.iter().collect::<Vec<_>>(),
+                        ),
+                        (
+                            "steps stopped before finishing",
+                            exceeded.incomplete_steps.iter().collect(),
+                        ),
+                        (
+                            "steps never started",
+                            exceeded.skipped_steps.iter().collect(),
+                        ),
+                    ] {
+                        println!("        {title}: {}", items.len());
+                        for item in items {
+                            println!("          {item}");
+                        }
                     }
                 }
                 println!(
@@ -3778,8 +3933,9 @@ mod ereporter_status_fields {
 }
 
 fn print_task_fm_analysis(details: &serde_json::Value) {
+    use nexus_types::fm::InventoryStale;
     use nexus_types::internal_api::background::fm_analysis::{
-        AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
+        AnalysisOutcome, AnalysisStatus, Outcome, PreparationFailure,
     };
 
     let FmAnalysisStatus {
@@ -3839,11 +3995,11 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             return;
         }
-        Outcome::WaitingForNewerInventory {
+        Outcome::WaitingForNewerInventory(InventoryStale {
             parent_inv_id,
             next_inv_min_time_started,
             input_inv_time_started,
-        } => {
+        }) => {
             const PARENT_INV: &str = "parent sitrep's inventory ID:";
             const MIN_STARTED: &str = "earliest start time for next inventory:";
             const LOADED_STARTED: &str = "loaded inventory started at:";
@@ -3863,10 +4019,26 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             println!("      {LOADED_STARTED:<WIDTH$}{loaded_started}");
             return;
         }
-        Outcome::PreparationError(error) => {
-            println!(
-                "{ERRICON} failed to prepare analysis inputs:\n    {error}"
-            );
+        Outcome::PreparationError { prep_status, failure } => {
+            match failure {
+                PreparationFailure::StepsFailed(errors) => {
+                    println!(
+                        "{ERRICON} failed to load analysis inputs \
+                         ({} steps failed):",
+                        errors.len()
+                    );
+                    for (step, error) in errors {
+                        println!("      > {step}: {error}");
+                    }
+                }
+                PreparationFailure::InvalidInputs(error) => {
+                    println!(
+                        "{ERRICON} failed to assemble analysis inputs:\n    \
+                         {error}"
+                    );
+                }
+            }
+            print!("{prep_status}");
             return;
         }
         Outcome::RanAnalysis { prep_status, analysis_status } => {
@@ -3945,13 +4117,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         println!("      count: {:>6}", capacity.count);
     }
 
-    let PreparationStatus { warnings } = prep_status;
-    if !warnings.is_empty() {
-        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
-        for error in warnings {
-            println!("      > {error}")
-        }
-    }
+    print!("{prep_status}");
     print_start_end_time(start_time, end_time, 4);
 }
 
@@ -6073,7 +6239,9 @@ mod tests {
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
 
     #[test]
     fn test_ereporter_status_totals_display() {
@@ -6172,6 +6340,78 @@ mod tests {
                 failed: 3,
                 errors: 2,
             },
+        );
+    }
+
+    #[test]
+    fn test_attached_subnet_manager_status_display() {
+        // In this test:
+        //
+        // * There are two entries in `dendrite` to exercise
+        //   the sorting in AttachedSubnetManagerStatusDisplay.
+        // * Some entries have errors. These errors are displayed
+        //   in the snapshot.
+        let sled1 = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
+        let sled2 = SledUuid::from_u128(0x9d8e2f61_7c0d_4b6a_9e5f_3a4b5c6d7e8f);
+        let status = AttachedSubnetManagerStatus::Listed {
+            dendrite: Ok(HashMap::from([
+                (
+                    SwitchSlot::Switch1,
+                    DendriteSubnetDetails {
+                        n_subnets_added: 0,
+                        n_subnets_removed: 1,
+                        n_total_subnets: 2,
+                        errors: vec!["failed to create subnet".to_string()],
+                    },
+                ),
+                (
+                    SwitchSlot::Switch0,
+                    DendriteSubnetDetails {
+                        n_subnets_added: 3,
+                        n_subnets_removed: 0,
+                        n_total_subnets: 3,
+                        errors: Vec::new(),
+                    },
+                ),
+            ])),
+            sled: HashMap::from([
+                (
+                    sled2,
+                    SledSubnetDetails {
+                        n_subnets: 1,
+                        errors: vec![
+                            "duplicate subnet".to_string(),
+                            "failed to send attached subnets".to_string(),
+                        ],
+                    },
+                ),
+                (sled1, SledSubnetDetails { n_subnets: 2, errors: Vec::new() }),
+            ]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status.txt",
+            &AttachedSubnetManagerStatusDisplay(&status).to_string(),
+        );
+
+        let db_error = AttachedSubnetManagerStatus::DatabaseError {
+            error: "database unavailable".to_string(),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-db-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&db_error).to_string(),
+        );
+
+        let dendrite_lookup_error = AttachedSubnetManagerStatus::Listed {
+            dendrite: Err("no dendrite instances in DNS".to_string()),
+            sled: HashMap::from([(
+                sled1,
+                SledSubnetDetails { n_subnets: 2, errors: Vec::new() },
+            )]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-dendrite-lookup-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&dendrite_lookup_error)
+                .to_string(),
         );
     }
 

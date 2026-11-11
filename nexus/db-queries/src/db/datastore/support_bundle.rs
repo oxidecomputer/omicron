@@ -36,7 +36,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_generation_kinds::SupportBundleGeneration;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -220,7 +220,7 @@ impl DataStore {
         opctx: &OpContext,
         id: SupportBundleUuid,
         case_id: CaseUuid,
-        expected_generation: SupportBundleGeneration,
+        expected_generation: SitrepSupportBundleGeneration,
         params: SupportBundleCreateParams<'_>,
     ) -> Result<SupportBundle, FmSupportBundleCreateError> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -998,7 +998,7 @@ mod test {
 
     use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::Generation;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledCpuFamily;
     use nexus_db_model::SledSystemHardware;
@@ -1012,7 +1012,9 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
-    use omicron_generation_kinds::{AlertGeneration, SledConfigGeneration};
+    use omicron_generation_kinds::{
+        SitrepAlertGeneration, SledConfigGeneration, SledRegistrationGeneration,
+    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
@@ -1109,9 +1111,9 @@ mod test {
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             // Create fake zpools that back our fake datasets.
             for pool in &self.pools {
@@ -2331,7 +2333,7 @@ mod test {
     }
 
     fn make_fm_sitrep(
-        support_bundle_generation: SupportBundleGeneration,
+        support_bundle_generation: SitrepSupportBundleGeneration,
     ) -> nexus_types::fm::Sitrep {
         use nexus_types::fm::Sitrep;
         use nexus_types::fm::SitrepMetadata;
@@ -2346,7 +2348,7 @@ mod test {
                 time_created: chrono::Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: chrono::Utc::now(),
-                alert_generation: AlertGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation,
             },
             cases: Default::default(),
@@ -2370,7 +2372,7 @@ mod test {
         datastore
             .fm_sitrep_insert(
                 opctx,
-                make_fm_sitrep(SupportBundleGeneration::from_u32(3)),
+                make_fm_sitrep(SitrepSupportBundleGeneration::from_u32(3)),
                 None,
             )
             .await
@@ -2384,7 +2386,7 @@ mod test {
                 &opctx,
                 bundle_id,
                 case_id,
-                SupportBundleGeneration::from_u32(3),
+                SitrepSupportBundleGeneration::from_u32(3),
                 SupportBundleCreateParams {
                     reason: "fm happy path",
                     nexus_id,
@@ -2411,7 +2413,7 @@ mod test {
             .unwrap();
         assert_eq!(
             marker.created_at_generation(),
-            SupportBundleGeneration::from_u32(3)
+            SitrepSupportBundleGeneration::from_u32(3)
         );
 
         db.terminate().await;
@@ -2434,7 +2436,7 @@ mod test {
         datastore
             .fm_sitrep_insert(
                 opctx,
-                make_fm_sitrep(SupportBundleGeneration::new()),
+                make_fm_sitrep(SitrepSupportBundleGeneration::new()),
                 None,
             )
             .await
@@ -2463,7 +2465,7 @@ mod test {
                 &opctx,
                 bundle_id,
                 CaseUuid::new_v4(),
-                SupportBundleGeneration::new(),
+                SitrepSupportBundleGeneration::new(),
                 SupportBundleCreateParams {
                     reason: "should hit existing row",
                     nexus_id: OmicronZoneUuid::new_v4(),
@@ -2506,7 +2508,7 @@ mod test {
         datastore
             .fm_sitrep_insert(
                 opctx,
-                make_fm_sitrep(SupportBundleGeneration::from_u32(5)),
+                make_fm_sitrep(SitrepSupportBundleGeneration::from_u32(5)),
                 None,
             )
             .await
@@ -2517,7 +2519,7 @@ mod test {
                 &opctx,
                 SupportBundleUuid::new_v4(),
                 CaseUuid::new_v4(),
-                SupportBundleGeneration::new(),
+                SitrepSupportBundleGeneration::new(),
                 SupportBundleCreateParams {
                     reason: "stale activation",
                     nexus_id: OmicronZoneUuid::new_v4(),
@@ -2557,11 +2559,11 @@ mod test {
                 .values(vec![
                     RendezvousSupportBundleCreated::new(
                         present_a,
-                        SupportBundleGeneration::new(),
+                        SitrepSupportBundleGeneration::new(),
                     ),
                     RendezvousSupportBundleCreated::new(
                         present_b,
-                        SupportBundleGeneration::new(),
+                        SitrepSupportBundleGeneration::new(),
                     ),
                 ])
                 .execute_async(&*conn)

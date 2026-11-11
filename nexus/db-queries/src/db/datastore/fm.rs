@@ -2172,6 +2172,7 @@ mod tests {
     use super::test_utils::*;
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TEST_GIT_VERSION;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
@@ -2180,8 +2181,8 @@ mod tests {
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseEreportUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -2189,6 +2190,7 @@ mod tests {
     use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SiloUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
     use std::sync::Arc;
 
@@ -2398,8 +2400,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2451,8 +2453,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2472,8 +2474,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2517,8 +2519,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2539,8 +2541,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2578,8 +2580,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2599,8 +2601,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -2621,8 +2623,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3106,7 +3108,7 @@ mod tests {
                     },
                     payload: fm::FactPayload::Certificate(kind(
                         fm::CertificateExpiryFactPayload {
-                            silo_id: Uuid::new_v4(),
+                            silo_id: SiloUuid::new_v4(),
                             certificate_id: Uuid::new_v4(),
                             not_after: omicron_common::now_db_precision(),
                         },
@@ -3158,8 +3160,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id,
@@ -3185,6 +3187,7 @@ mod tests {
             parent_sitrep_id: sitrep.parent_id(),
             parent_inv_id: None,
             num_ereporter_restarts: 0,
+            unknown_restart_ereport_ids: Default::default(),
             inv_id: sitrep.inv_id(),
             reference_time: None,
             new_ereport_ids: Default::default(),
@@ -3204,8 +3207,12 @@ mod tests {
             ),
             cases: Default::default(),
         };
-        model::fm::SitrepAnalysisReport::new(&input_report, &analysis_report)
-            .expect("failed to serialize analysis report")
+        model::fm::SitrepAnalysisReport::new(
+            &input_report,
+            &analysis_report,
+            &TEST_GIT_VERSION,
+        )
+        .expect("failed to serialize analysis report")
     }
 
     #[tokio::test]
@@ -3360,8 +3367,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
@@ -3418,9 +3425,9 @@ mod tests {
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
-                        alert_generation: AlertGeneration::new(),
-                        support_bundle_generation: SupportBundleGeneration::new(
-                        ),
+                        alert_generation: SitrepAlertGeneration::new(),
+                        support_bundle_generation:
+                            SitrepSupportBundleGeneration::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
@@ -3577,8 +3584,8 @@ mod tests {
                 comment: "my cool sitrep".to_string(),
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3715,8 +3722,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -3829,6 +3836,7 @@ mod tests {
                 open_cases: Default::default(),
                 closed_cases_copied_forward: Default::default(),
                 num_ereporter_restarts: 0,
+                unknown_restart_ereport_ids: Default::default(),
                 in_service_disks: Default::default(),
                 observed_sagas: Default::default(),
                 observed_silo_certificates: Default::default(),
@@ -3843,6 +3851,7 @@ mod tests {
             model::fm::SitrepAnalysisReport::new(
                 &input_report,
                 &analysis_report,
+                &TEST_GIT_VERSION,
             )
             .expect("ghost analysis report should be valid")
         };
@@ -4031,8 +4040,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -4161,8 +4170,8 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -4318,8 +4327,8 @@ mod tests {
                 comment: "child sitrep".to_string(),
                 inv_collection_id: CollectionUuid::new_v4(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),

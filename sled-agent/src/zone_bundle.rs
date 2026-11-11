@@ -364,7 +364,7 @@ impl ZoneBundler {
             .available_datasets_rx
             .all_mounted_debug_datasets()
             .into_iter()
-            .map(|pool_path| pool_path.path)
+            .map(|pool_path| pool_path.into_path())
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(

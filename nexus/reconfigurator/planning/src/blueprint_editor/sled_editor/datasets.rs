@@ -184,7 +184,7 @@ impl DatasetsEditor {
     fn expunge_by_known_valid_id(&mut self, id: DatasetUuid) -> bool {
         let mut dataset = self
             .datasets
-            .get_mut(&id)
+            .get_mut(id)
             .expect("expunge_impl called with invalid ID");
         match dataset.disposition {
             BlueprintDatasetDisposition::InService => {

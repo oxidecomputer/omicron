@@ -73,6 +73,7 @@ use nexus_types::external_api::system_networking;
 use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InstanceMigrateDestination;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::IpVersion;
@@ -122,6 +123,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy::{ProjectRole, SiloRole};
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::SiloUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -806,7 +808,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     }
 
     let client = &cptestctx.external_client;
-    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -853,18 +854,12 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         default_sled_id
     };
 
-    let migrate_url = format!("/instances/{}/migrate", instance_id);
-    let instance = NexusRequest::new(
-        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
-            .expect_status(Some(StatusCode::OK)),
+    let (migration_id, _) = instance_migrate_request(
+        cptestctx,
+        instance_id,
+        InstanceMigrateDestination::ById { dst_sled_id },
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .unwrap();
+    .await;
 
     let new_sled_info = nexus
         .active_instance_info(&instance_id, None)
@@ -876,24 +871,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(current_sled, original_sled);
 
     // Ensure that both sled agents report that the migration is in progress.
-    let migration_id = {
-        let datastore = apictx.nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.new(o!()),
-            datastore.clone(),
-        );
-        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-            .instance_id(instance.identity.id)
-            .lookup_for(nexus_db_queries::authz::Action::Read)
-            .await
-            .unwrap();
-        datastore
-            .instance_refetch(&opctx, &authz_instance)
-            .await
-            .unwrap()
-            .migration_id
-            .expect("since we've started a migration, the instance record must have a migration id!")
-    };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::PENDING);
     assert_eq!(migration.source_state, MigrationState::PENDING);
@@ -1123,7 +1100,6 @@ async fn test_instance_migrate_target_finishes_first(
     }
 
     let client = &cptestctx.external_client;
-    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -1163,25 +1139,22 @@ async fn test_instance_migrate_target_finishes_first(
         .unwrap()
         .expect("running instance should have a sled");
 
+    // Let Nexus pick the destination. There are only two sleds, so it must
+    // choose the one the instance isn't currently on.
     let original_sled = sled_info.sled_id;
-    let dst_sled_id = if original_sled == default_sled_id {
+    let expected_dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
     } else {
         default_sled_id
     };
 
-    let migrate_url = format!("/instances/{}/migrate", instance_id);
-    let instance = NexusRequest::new(
-        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
-            .expect_status(Some(StatusCode::OK)),
+    let (migration_id, dst_sled_id) = instance_migrate_request(
+        cptestctx,
+        instance_id,
+        InstanceMigrateDestination::Autoselect,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .unwrap();
+    .await;
+    assert_eq!(dst_sled_id, expected_dst_sled_id);
 
     let new_sled_info = nexus
         .active_instance_info(&instance_id, None)
@@ -1193,27 +1166,6 @@ async fn test_instance_migrate_target_finishes_first(
     assert_eq!(current_sled, original_sled);
 
     // Ensure that both sled agents report that the migration is in progress.
-    let migration_id = {
-        let datastore = apictx.nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.new(o!()),
-            datastore.clone(),
-        );
-        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-            .instance_id(instance.identity.id)
-            .lookup_for(nexus_db_queries::authz::Action::Read)
-            .await
-            .unwrap();
-        datastore
-            .instance_refetch(&opctx, &authz_instance)
-            .await
-            .unwrap()
-            .migration_id
-            .expect(
-                "since we've started a migration, the instance record must \
-                have a migration id!",
-            )
-    };
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::PENDING);
     assert_eq!(migration.source_state, MigrationState::PENDING);
@@ -1450,7 +1402,6 @@ async fn test_instance_migrate_v2p_and_routes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -1519,45 +1470,19 @@ async fn test_instance_migrate_v2p_and_routes(
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
-    let testctx_sled_id = cptestctx.first_sled_agent().id;
-    let dst_sled_id = if original_sled_id == testctx_sled_id {
-        other_sleds[0].sled_agent.id
-    } else {
-        testctx_sled_id
-    };
-
-    // Kick off migration and simulate its completion on the target.
-    let migrate_url = format!("/instances/{}/migrate", instance_id);
-    let _ = NexusRequest::new(
-        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
-            .expect_status(Some(StatusCode::OK)),
+    // Kick off migration, letting Nexus pick the destination from among the
+    // other sleds, and simulate its completion on the target.
+    let (migration_id, dst_sled_id) = instance_migrate_request(
+        cptestctx,
+        instance_id,
+        InstanceMigrateDestination::Autoselect,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .unwrap();
-
-    let migration_id = {
-        let datastore = apictx.nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.new(o!()),
-            datastore.clone(),
-        );
-        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-            .instance_id(instance.identity.id)
-            .lookup_for(nexus_db_queries::authz::Action::Read)
-            .await
-            .unwrap();
-        datastore
-            .instance_refetch(&opctx, &authz_instance)
-            .await
-            .unwrap()
-            .migration_id
-            .expect("since we've started a migration, the instance record must have a migration id!")
-    };
+    .await;
+    assert_ne!(dst_sled_id, original_sled_id);
+    assert!(
+        sled_agents.iter().any(|sa| sa.id == dst_sled_id),
+        "autoselected destination {dst_sled_id} is not a known sled"
+    );
 
     let info = nexus
         .active_instance_info(&instance_id, None)
@@ -1662,7 +1587,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         .add_sled(
             new_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurin,
         )
         .await;
 
@@ -1709,7 +1634,9 @@ async fn test_instance_migration_compatible_cpu_platforms(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1844,7 +1771,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         .add_sled(
             turin_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurin,
         )
         .await;
 
@@ -1889,13 +1816,31 @@ async fn test_instance_migration_incompatible_cpu_platforms(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id: milan_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById {
+                    dst_sled_id: milan_sled_id,
+                },
+            }))
             .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("migration should fail with 507 Insufficient Storage");
+
+    // Letting Nexus choose the destination should fail the same way: the only
+    // other sled is the Milan sled, which is incompatible.
+    NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::Autoselect,
+            }))
+            .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("autoselect migration should fail with 507 Insufficient Storage");
 }
 
 #[nexus_test]
@@ -1915,7 +1860,7 @@ async fn test_instance_migration_unknown_sled_type(
         .add_sled(
             new_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::Unknown,
+            omicron_sled_agent::sim::SledCpuFamily::Unknown,
         )
         .await;
 
@@ -1971,13 +1916,310 @@ async fn test_instance_migration_unknown_sled_type(
     let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById { dst_sled_id },
+            }))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("expected migration to fail with specific status");
+
+    // Letting Nexus choose the destination should fail with the same status
+    // for the same reasons: either the only other sled has an unknown CPU
+    // family (507), or the instance itself is on the unknown-family sled and
+    // can't be migrated anywhere (400).
+    NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::Autoselect,
+            }))
+            .expect_status(Some(expected_status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("expected autoselect migration to fail with specific status");
+}
+
+// Requesting a migration with an automatically-chosen destination when there
+// is no other sled to choose fails with 507 and leaves the instance untouched.
+#[nexus_test]
+async fn test_instance_migrate_autoselect_no_other_sled(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let original_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    // This test context has only one sled, so there is nowhere to go.
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
+    NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::Autoselect,
+            }))
+            .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("migration should fail with 507 Insufficient Storage");
+
+    // The saga should have unwound cleanly: the instance is still running on
+    // its original sled with no migration in progress.
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+    assert_eq!(info.sled_id, original_sled);
+    assert_eq!(info.dst_propolis_id, None);
+    assert_eq!(instance_migration_id(cptestctx, instance_id).await, None);
+}
+
+// An automatically-chosen migration destination respects sled provision
+// policy: a non-provisionable sled is never chosen, and becomes eligible again
+// once it is marked provisionable.
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_instance_migrate_autoselect_skips_non_provisionable_sled(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let instance_name = "bird-ecology";
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let original_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+    let other_sled = cptestctx
+        .find_sled_id_other_than(original_sled)
+        .expect("need at least one other sled");
+
+    // Mark the only other sled non-provisionable.
+    let (authz_sled, ..) = LookupPath::new(&opctx, datastore)
+        .sled_id(other_sled)
+        .lookup_for(Action::Modify)
+        .await
+        .expect("lookup authz_sled");
+    datastore
+        .sled_set_provision_policy(
+            &opctx,
+            &authz_sled,
+            SledProvisionPolicy::NonProvisionable,
+        )
+        .await
+        .expect("set sled provision policy");
+
+    // Nexus must not pick the non-provisionable sled, so there is nowhere to
+    // go.
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
+    NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::Autoselect,
+            }))
+            .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("migration should fail with 507 Insufficient Storage");
+    assert_eq!(instance_migration_id(cptestctx, instance_id).await, None);
+
+    // Once the other sled is provisionable again, it should be chosen.
+    datastore
+        .sled_set_provision_policy(
+            &opctx,
+            &authz_sled,
+            SledProvisionPolicy::Provisionable,
+        )
+        .await
+        .expect("set sled provision policy");
+
+    let (_migration_id, dst_sled_id) = instance_migrate_request(
+        cptestctx,
+        instance_id,
+        InstanceMigrateDestination::Autoselect,
+    )
+    .await;
+    assert_eq!(dst_sled_id, other_sled);
+}
+
+// An automatically-chosen migration destination respects anti-affinity: if
+// every other sled hosts a member of the instance's anti-affinity group (with
+// policy "fail"), there is nowhere to migrate to.
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_instance_migrate_autoselect_anti_affinity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let group_name = "anti-affinity-group";
+
+    create_project_and_pool(&client).await;
+
+    // The group created by this helper has `AffinityPolicy::Fail`.
+    let _group =
+        nexus_test_utils::resource_helpers::create_anti_affinity_group(
+            client,
+            PROJECT_NAME,
+            group_name,
+        )
+        .await;
+
+    // Create and start two instances in the group. With exactly two sleds and
+    // a "fail" policy, they must land on different sleds.
+    let mut instance_ids = Vec::new();
+    for instance_name in ["bird-ecology", "desert-locust"] {
+        let instance_url = get_instance_url(instance_name);
+        let instance: Instance = object_create(
+            client,
+            &get_instances_url(),
+            &instance::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: instance_name.parse().unwrap(),
+                    description: format!("instance {:?}", instance_name),
+                },
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: "the-host".parse().unwrap(),
+                user_data: b"#cloud-config".to_vec(),
+                ssh_public_keys: Some(Vec::new()),
+                network_interfaces:
+                    instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                external_ips: vec![],
+                // Explicitly create an instance with no disks. Simulated sled
+                // agent assumes that disks are co-located with their
+                // instances.
+                disks: vec![],
+                boot_disk: None,
+                cpu_platform: None,
+                start: true,
+                auto_restart_policy: Default::default(),
+                anti_affinity_groups: vec![NameOrId::Name(
+                    group_name.parse().unwrap(),
+                )],
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
+            },
+        )
+        .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+        // Poke the instance into an active state.
+        instance_simulate(nexus, &instance_id).await;
+        let instance_next = instance_get(&client, &instance_url).await;
+        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+        instance_ids.push(instance_id);
+    }
+
+    let mut sled_ids = HashSet::new();
+    for instance_id in &instance_ids {
+        let sled_id = nexus
+            .active_instance_info(instance_id, None)
+            .await
+            .unwrap()
+            .expect("running instance should have a sled")
+            .sled_id;
+        sled_ids.insert(sled_id);
+    }
+    assert_eq!(
+        sled_ids.len(),
+        instance_ids.len(),
+        "anti-affine instances should be on distinct sleds"
+    );
+
+    // Each instance's only possible destination hosts the other member of
+    // its anti-affinity group, so neither can be migrated.
+    for instance_id in &instance_ids {
+        let migrate_url = format!("/instances/{}/migrate", instance_id);
+        NexusRequest::new(
+            RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+                .body(Some(&InstanceMigrateRequest {
+                    destination: InstanceMigrateDestination::Autoselect,
+                }))
+                .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("migration should fail with 507 Insufficient Storage");
+        assert_eq!(instance_migration_id(cptestctx, *instance_id).await, None);
+    }
 }
 
 // Verifies that if a request to reboot or stop an instance fails because of a
@@ -2455,28 +2697,28 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = cptestctx.first_sled_agent();
-    sled_agent
-        .set_instance_ensure_state_error(Some(
-            omicron_common::api::external::Error::internal_error(
-                "somebody set up us the bomb",
-            ),
-        ))
-        .await;
-
-    // Attempting to reboot the instance will fail, but it should *not* go to
-    // Failed.
-    expect_instance_reboot_fail(
-        client,
-        instance_name,
-        http::StatusCode::INTERNAL_SERVER_ERROR,
-    )
-    .await;
+    // Fail the reboot request's call to the sled-agent with an error that does
+    // not indicate the VMM is gone. The reboot will fail, but the instance
+    // should *not* go to Failed.
+    let next_put_state =
+        cptestctx.first_sled_agent().pause_next_vmm_put_state();
+    tokio::join!(
+        expect_instance_reboot_fail(
+            client,
+            instance_name,
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        async {
+            next_put_state.wait_for_request(Duration::from_secs(60)).await.fail(
+                omicron_common::api::external::Error::internal_error(
+                    "somebody set up us the bomb",
+                ),
+            )
+        },
+    );
 
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
-
-    sled_agent.set_instance_ensure_state_error(None).await;
 
     expect_instance_reboot_ok(client, instance_name).await;
 }
@@ -2499,20 +2741,24 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = cptestctx.first_sled_agent();
-    sled_agent
-        .set_instance_ensure_state_error(Some(
-            omicron_common::api::external::Error::internal_error(
-                "you have no chance to survive, make your time",
-            ),
-        ))
-        .await;
-
-    nexus_test_utils::background::activate_background_task(
-        &cptestctx.lockstep_client,
-        "instance_watcher",
-    )
-    .await;
+    // Fail the instance-watcher's health check with an error that does not
+    // indicate the VMM is gone. The check is inconclusive, so the instance
+    // should *not* go to Failed.
+    let next_get_state =
+        cptestctx.first_sled_agent().pause_next_vmm_get_state();
+    tokio::join!(
+        nexus_test_utils::background::activate_background_task(
+            &cptestctx.lockstep_client,
+            "instance_watcher",
+        ),
+        async {
+            next_get_state.wait_for_request(Duration::from_secs(60)).await.fail(
+                omicron_common::api::external::Error::internal_error(
+                    "you have no chance to survive, make your time",
+                ),
+            )
+        },
+    );
 
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
@@ -2644,6 +2890,23 @@ async fn expect_instance_reboot_ok(
         .expect("expected instance reboot to succeed");
 }
 
+/// Assert that the provided `instance_id` refers to a running instance, and
+/// that that instance is on the sled Nexus knows as `sled_id`.
+async fn expect_instance_on_sled(
+    nexus: &Arc<Nexus>,
+    instance_id: &InstanceUuid,
+    sled_id: &SledUuid,
+) {
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(&instance_sled, sled_id);
+}
+
 /// Assert values for fleet, silo, and project using both system and silo
 /// metrics endpoints
 async fn assert_metrics(
@@ -2656,7 +2919,7 @@ async fn assert_metrics(
     for id in [None, Some(project_id)] {
         assert_silo_metrics(cptestctx, id, disk, cpus, ram).await;
     }
-    for id in [None, Some(DEFAULT_SILO_ID)] {
+    for id in [None, Some(DEFAULT_SILO_ID.into_untyped_uuid())] {
         assert_system_metrics(cptestctx, id, disk, cpus, ram).await;
     }
 }
@@ -2743,7 +3006,6 @@ async fn test_instance_metrics_with_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let lockstep_client = &cptestctx.lockstep_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -2824,38 +3086,12 @@ async fn test_instance_metrics_with_migration(
         default_sled_id
     };
 
-    // instance is already running on destination sled
-    let migrate_url = format!("/instances/{}/migrate", instance_id);
-    let _ = NexusRequest::new(
-        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
-            .expect_status(Some(StatusCode::OK)),
+    let (migration_id, _) = instance_migrate_request(
+        cptestctx,
+        instance_id,
+        InstanceMigrateDestination::ById { dst_sled_id },
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .unwrap();
-
-    let migration_id = {
-        let datastore = apictx.nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.new(o!()),
-            datastore.clone(),
-        );
-        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-            .instance_id(instance.identity.id)
-            .lookup_for(nexus_db_queries::authz::Action::Read)
-            .await
-            .unwrap();
-        datastore
-            .instance_refetch(&opctx, &authz_instance)
-            .await
-            .unwrap()
-            .migration_id
-            .expect("since we've started a migration, the instance record must have a migration id!")
-    };
+    .await;
 
     let info = nexus
         .active_instance_info(&instance_id, None)
@@ -5832,15 +6068,9 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(None),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(None);
+        }),
     )
     .await;
     assert_eq!(instance.boot_disk_id, None);
@@ -5942,15 +6172,9 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     let error = expect_instance_reconfigure_err(
         &client,
         &instance_id.into_untyped_uuid(),
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(alsodata.clone().into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(alsodata.clone().into()));
+        }),
         http::StatusCode::CONFLICT,
     )
     .await;
@@ -5961,19 +6185,18 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     expect_instance_reconfigure_ok(
         &client,
         &instance_id.into_untyped_uuid(),
-        instance::InstanceUpdate {
-            // Leave the boot disk the same as the one with which the instance
-            // was created.
-            boot_disk: Nullable(Some(probablydata.clone().into())),
-            auto_restart_policy: Nullable(Some(
-                InstanceAutoRestartPolicy::BestEffort,
-            )),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            // The instance's boot disk should not have actually changed from
+            // the one with which it was created.
+            let current_boot_disk = instance.boot_disk_id.unwrap();
+            assert_eq!(
+                update.boot_disk,
+                Nullable(Some(NameOrId::Id(current_boot_disk))),
+            );
+
+            update.auto_restart_policy =
+                Nullable(Some(InstanceAutoRestartPolicy::BestEffort));
+        }),
     )
     .await;
 }
@@ -6006,6 +6229,30 @@ async fn test_updating_missing_instance_is_not_found(
         error.message,
         format!("not found: instance with id \"{}\"", UUID_THAT_DOESNT_EXIST)
     );
+}
+
+fn instance_compute_update(
+    instance: &Instance,
+    edit_update: impl Fn(&mut instance::InstanceUpdate),
+) -> instance::InstanceUpdate {
+    // Construct an update which, if used to reconfigure `Instance`, would result
+    // in no changes.
+    let unchanged_boot_disk = instance.boot_disk_id.map(|id| NameOrId::Id(id));
+    let mut update = instance::InstanceUpdate {
+        boot_disk: Nullable(unchanged_boot_disk),
+        auto_restart_policy: Nullable(instance.auto_restart_status.policy),
+        cpu_platform: Nullable(instance.cpu_platform),
+        ncpus: instance.ncpus,
+        memory: instance.memory,
+        // "If not provided, the instance's multicast group membership will not
+        // be changed."
+        multicast_groups: None,
+        enable_jumbo_frames: instance.enable_jumbo_frames,
+    };
+
+    edit_update(&mut update);
+
+    update
 }
 
 async fn expect_instance_reconfigure_ok(
@@ -6089,7 +6336,6 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         cpu_platform: None,
         disks: Vec::new(),
         start: true,
-        // Start out with None
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
@@ -6107,33 +6353,18 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected instance creation to work!");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    let boot_disk_nameorid: Option<NameOrId> =
-        instance.boot_disk_id.map(|x| x.into());
-    let auto_restart_policy = instance.auto_restart_status.policy;
 
     let new_ncpus = InstanceCpuCount::try_from(4).unwrap();
     let new_memory = ByteCount::from_gibibytes_u32(8);
-
-    let base_update = instance::InstanceUpdate {
-        auto_restart_policy: Nullable(auto_restart_policy),
-        boot_disk: Nullable(boot_disk_nameorid.clone()),
-        cpu_platform: Nullable(None),
-        ncpus: initial_ncpus,
-        memory: initial_memory,
-        multicast_groups: None,
-        enable_jumbo_frames: false,
-    };
 
     // Resizing the instance immediately will error; the instance is running.
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: new_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = new_ncpus;
+            update.memory = new_memory;
+        }),
         StatusCode::CONFLICT,
     )
     .await;
@@ -6150,12 +6381,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: new_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = new_ncpus;
+            update.memory = new_memory;
+        }),
     )
     .await;
     assert_eq!(instance.ncpus.0, new_ncpus.0);
@@ -6165,12 +6394,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: initial_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = initial_ncpus;
+            update.memory = new_memory;
+        }),
     )
     .await;
     assert_eq!(instance.ncpus.0, initial_ncpus.0);
@@ -6179,12 +6406,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: initial_ncpus,
-            memory: initial_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = initial_ncpus;
+            update.memory = initial_memory;
+        }),
     )
     .await;
     assert_eq!(instance.ncpus.0, initial_ncpus.0);
@@ -6197,12 +6422,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
-            memory: instance.memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1);
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6218,12 +6440,9 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: instance.ncpus,
-            memory: ByteCount::from_mebibytes_u32(0),
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.memory = ByteCount::from_mebibytes_u32(0);
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6233,13 +6452,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: instance.ncpus,
-            memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1)
-                .unwrap(),
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.memory =
+                ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1).unwrap();
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6250,14 +6466,11 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let err = expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: instance.ncpus,
-            memory: ByteCount::from_mebibytes_u32(
+        instance_compute_update(&instance, |update| {
+            update.memory = ByteCount::from_mebibytes_u32(
                 (max_mib + 1024).try_into().unwrap(),
-            ),
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+            );
+        }),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6272,12 +6485,10 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     expect_instance_reconfigure_err(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            ncpus: new_ncpus,
-            memory: new_memory,
-            multicast_groups: None,
-            ..base_update.clone()
-        },
+        instance_compute_update(&instance, |update| {
+            update.ncpus = new_ncpus;
+            update.memory = new_memory;
+        }),
         StatusCode::NOT_FOUND,
     )
     .await;
@@ -6328,27 +6539,22 @@ async fn test_auto_restart_policy_can_be_changed(
         .expect("Expected instance creation to work!");
 
     let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_ref: &Instance = &instance;
 
     // Starts out as None.
     assert_eq!(instance.auto_restart_status.policy, None);
 
     let assert_reconfigured = |auto_restart_policy| async move {
-        let instance = expect_instance_reconfigure_ok(
+        let reconfigured = expect_instance_reconfigure_ok(
             client,
-            &instance.identity.id,
-            dbg!(instance::InstanceUpdate {
-                auto_restart_policy: Nullable(auto_restart_policy),
-                boot_disk: Nullable(None),
-                cpu_platform: Nullable(None),
-                ncpus: InstanceCpuCount::try_from(2).unwrap(),
-                memory: ByteCount::from_gibibytes_u32(4),
-                multicast_groups: None,
-                enable_jumbo_frames: false,
-            }),
+            &instance_ref.identity.id,
+            dbg!(instance_compute_update(instance_ref, |update| {
+                update.auto_restart_policy = Nullable(auto_restart_policy);
+            })),
         )
         .await;
         assert_eq!(
-            dbg!(instance).auto_restart_status.policy,
+            dbg!(reconfigured).auto_restart_status.policy,
             auto_restart_policy,
         );
     };
@@ -6385,7 +6591,6 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
             instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         boot_disk: None,
-        // Start out with None
         cpu_platform: None,
         disks: Vec::new(),
         start: false,
@@ -6406,26 +6611,21 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected instance creation to work!");
 
     let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_ref: &Instance = &instance;
 
     // Starts out as None.
     assert_eq!(instance.cpu_platform, None);
 
     let assert_reconfigured = |cpu_platform| async move {
-        let instance = expect_instance_reconfigure_ok(
+        let reconfigured = expect_instance_reconfigure_ok(
             client,
-            &instance.identity.id,
-            dbg!(instance::InstanceUpdate {
-                auto_restart_policy: Nullable(None),
-                boot_disk: Nullable(None),
-                cpu_platform: Nullable(cpu_platform),
-                ncpus: InstanceCpuCount::try_from(2).unwrap(),
-                memory: ByteCount::from_gibibytes_u32(4),
-                multicast_groups: None,
-                enable_jumbo_frames: false,
-            }),
+            &instance_ref.identity.id,
+            dbg!(instance_compute_update(instance_ref, |update| {
+                update.cpu_platform = Nullable(cpu_platform);
+            })),
         )
         .await;
-        assert_eq!(dbg!(instance).cpu_platform, cpu_platform,);
+        assert_eq!(dbg!(reconfigured).cpu_platform, cpu_platform,);
     };
 
     // Reconfigure to Milan.
@@ -6487,22 +6687,14 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let instance = response.parsed_body::<Instance>().unwrap();
     assert!(!instance.enable_jumbo_frames);
 
-    let base_update = || instance::InstanceUpdate {
-        boot_disk: Nullable(None),
-        auto_restart_policy: Nullable(None),
-        cpu_platform: Nullable(None),
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
-        multicast_groups: None,
-        enable_jumbo_frames: false,
-    };
-
     // Without the fleet-wide opt-in, requesting `enable_jumbo_frames: true` is
     // rejected.
     let err = expect_instance_reconfigure_err(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+        instance_compute_update(&instance, |update| {
+            update.enable_jumbo_frames = true;
+        }),
         http::StatusCode::BAD_REQUEST,
     )
     .await;
@@ -6517,7 +6709,9 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let reconfigured = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        base_update(),
+        instance_compute_update(&instance, |update| {
+            update.enable_jumbo_frames = false;
+        }),
     )
     .await;
     assert!(!reconfigured.enable_jumbo_frames);
@@ -6538,7 +6732,9 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let reconfigured = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        instance::InstanceUpdate { enable_jumbo_frames: true, ..base_update() },
+        instance_compute_update(&instance, |update| {
+            update.enable_jumbo_frames = true;
+        }),
     )
     .await;
     assert!(reconfigured.enable_jumbo_frames);
@@ -6553,7 +6749,9 @@ async fn test_enable_jumbo_frames_can_be_changed(
     let reconfigured = expect_instance_reconfigure_ok(
         client,
         &instance.identity.id,
-        base_update(),
+        instance_compute_update(&reconfigured, |update| {
+            update.enable_jumbo_frames = false;
+        }),
     )
     .await;
     assert!(!reconfigured.enable_jumbo_frames);
@@ -6630,20 +6828,14 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 
-    // Change the instance's boot disk.ity.id);
+    // Change the instance's boot disk.
 
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(disks[1].identity.id.into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(disks[1].identity.id.into()));
+        }),
     )
     .await;
     assert_eq!(instance.boot_disk_id, Some(disks[1].identity.id));
@@ -6709,15 +6901,9 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let error = expect_instance_reconfigure_err(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(disks[0].identity.id.into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(disks[0].identity.id.into()));
+        }),
         http::StatusCode::CONFLICT,
     )
     .await;
@@ -6745,15 +6931,9 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(Some(disks[0].identity.id.into())),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(None),
-            ncpus: InstanceCpuCount::try_from(2).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.boot_disk = Nullable(Some(disks[0].identity.id.into()));
+        }),
     )
     .await;
     assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
@@ -7716,15 +7896,9 @@ async fn test_can_start_instance_with_cpu_platform(
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(None),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurin)),
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform = Nullable(Some(InstanceCpuPlatform::AmdTurin));
+        }),
     )
     .await;
 
@@ -7744,7 +7918,7 @@ async fn test_can_start_instance_with_cpu_platform(
         .add_sled(
             new_sled_id,
             omicron_sled_agent::sim::SimMode::Explicit,
-            sled_agent_types::inventory::SledCpuFamily::AmdTurin,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurin,
         )
         .await;
 
@@ -7752,14 +7926,7 @@ async fn test_can_start_instance_with_cpu_platform(
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should specifically be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
-
-    assert_eq!(instance_sled, new_sled_id);
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 
     // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
     // identical placement constraints and should land on the same simulated Turin sled.
@@ -7770,29 +7937,136 @@ async fn test_can_start_instance_with_cpu_platform(
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        instance::InstanceUpdate {
-            boot_disk: Nullable(None),
-            auto_restart_policy: Nullable(None),
-            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(4),
-            multicast_groups: None,
-            enable_jumbo_frames: false,
-        },
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform =
+                Nullable(Some(InstanceCpuPlatform::AmdTurinV2));
+        }),
     )
     .await;
 
     expect_instance_start_ok(client, instance.identity.name.as_str()).await;
 
     // The VMM should still be on our new fake Turin sled.
-    let instance_sled = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance should have a sled")
-        .sled_id;
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
+}
 
-    assert_eq!(instance_sled, new_sled_id);
+#[nexus_test]
+async fn test_can_start_turin_dense_instance_with_cpu_platform(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "test".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        // Note that we're actually setting cpu_platform this time!
+        cpu_platform: Some(InstanceCpuPlatform::AmdMilan),
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: vec![],
+        enable_jumbo_frames: false,
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    // Now that the instance is created, lets try to start it.
+
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Great, now let's update the instance to require Turin and start it again.
+    // This will fail because there is no Turin in our simulated environment
+    // (yet!)
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform =
+                Nullable(Some(InstanceCpuPlatform::AmdTurinV2));
+        }),
+    )
+    .await;
+
+    expect_instance_start_fail_507(client, instance.identity.name.as_str())
+        .await;
+
+    // We'd like to see the instance actually start, so add a Turin sled and try again.
+
+    // There should be one sled from `#[nexus_test]`, check that first.
+    assert_eq!(
+        objects_list_page_authz::<Sled>(&client, SLEDS_URL).await.items.len(),
+        1
+    );
+
+    let new_sled_id = SledUuid::new_v4();
+    let _turin_sled = cptestctx
+        .add_sled(
+            new_sled_id,
+            omicron_sled_agent::sim::SimMode::Explicit,
+            omicron_sled_agent::sim::SledCpuFamily::AmdTurinDense,
+        )
+        .await;
+
+    // Finally, start the Turin-requiring instance for real!
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should specifically be on our new fake Turin sled.
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
+
+    // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
+    // identical placement constraints and should land on the same simulated Turin sled.
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance_compute_update(&instance, |update| {
+            update.cpu_platform =
+                Nullable(Some(InstanceCpuPlatform::AmdTurinV2));
+        }),
+    )
+    .await;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should still be on our new fake Turin sled.
+    expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
 }
 
 #[nexus_test]
@@ -8015,13 +8289,25 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // make first pool the default for the priv user's silo
     create_ip_pool(&client, "pool1", Some(range1)).await;
-    link_ip_pool(&client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
+    link_ip_pool(
+        &client,
+        "pool1",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        /*default*/ true,
+    )
+    .await;
 
     assert_ip_pool_utilization(client, "pool1", 0, capacity1).await;
 
     // second pool is associated with the silo but not default
     create_ip_pool(&client, "pool2", Some(range2)).await;
-    link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
+    link_ip_pool(
+        &client,
+        "pool2",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        /*default*/ false,
+    )
+    .await;
 
     assert_ip_pool_utilization(client, "pool2", 0, capacity2).await;
 
@@ -8168,7 +8454,13 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 
     // make first pool the default for the priv user's silo
     create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
 
     let orphan_pool_range = IpRange::V4(
         Ipv4Range::new(
@@ -8336,7 +8628,13 @@ async fn test_instance_attach_several_external_ips(
     let capacity = range.len().into();
     let default_pool_range = IpRange::V4(range);
     create_ip_pool(&client, "default", Some(default_pool_range)).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
 
     assert_ip_pool_utilization(client, "default", 0, capacity).await;
 
@@ -8814,7 +9112,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         Arc::new(nexus_db_queries::authz::Authz::new(&cptestctx.logctx.log)),
         nexus_db_queries::authn::Context::for_test_user(
             user_id,
-            silo.identity.id,
+            SiloUuid::from_untyped_uuid(silo.identity.id),
             nexus_db_queries::authn::SiloAuthnPolicy::try_from(&*DEFAULT_SILO)
                 .unwrap(),
         ),
@@ -9813,6 +10111,93 @@ pub async fn vmm_simulate_on_sled(
           "propolis_id" => %propolis_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
     sa.vmm_finish_transition(propolis_id).await;
+}
+
+/// Fetches the instance's current `migration_id` from the database.
+async fn instance_migration_id(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+) -> Option<Uuid> {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(nexus_db_queries::authz::Action::Read)
+        .await
+        .unwrap();
+    datastore
+        .instance_refetch(&opctx, &authz_instance)
+        .await
+        .unwrap()
+        .migration_id
+}
+
+/// Requests a migration of `instance_id` to `destination`.
+///
+/// Returns the ID of the newly-created migration and the ID of the sled the
+/// migration target VMM was placed on.
+async fn instance_migrate_request(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+    destination: InstanceMigrateDestination,
+) -> (Uuid, SledUuid) {
+    let lockstep_client = &cptestctx.lockstep_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
+    let _ = NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest { destination }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let migration_id =
+        instance_migration_id(cptestctx, instance_id).await.expect(
+            "since we've started a migration, the instance record must have \
+             a migration id!",
+        );
+
+    let dst_propolis_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled")
+        .dst_propolis_id
+        .expect("instance should have a migration target");
+    let dst_sled_id = datastore
+        .vmm_fetch(&opctx, &dst_propolis_id)
+        .await
+        .expect("migration target VMM should exist")
+        .sled_id();
+
+    if let InstanceMigrateDestination::ById { dst_sled_id: requested } =
+        destination
+    {
+        assert_eq!(
+            dst_sled_id, requested,
+            "migration target VMM should be on the requested sled"
+        );
+    }
+
+    info!(
+        &cptestctx.logctx.log,
+        "requested migration";
+        "instance_id" => %instance_id,
+        "migration_id" => %migration_id,
+        "dst_sled_id" => %dst_sled_id,
+    );
+
+    (migration_id, dst_sled_id)
 }
 
 /// Simulates a migration source for the provided instance ID, sled ID, and

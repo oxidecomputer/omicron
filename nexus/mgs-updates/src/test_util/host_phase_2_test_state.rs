@@ -9,6 +9,8 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
+use nexus_test_utils::RACK_UUID;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::SledRole;
@@ -128,7 +130,8 @@ impl HostPhase2TestContext {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
                     sled_agent_api::latest_version(),
-                ),
+                )
+                .min_version(sled_agent_api::oldest_version()),
             )))
             .start()
             .context("failed to create dropshot server")?
@@ -158,6 +161,7 @@ struct HostPhase2SledAgentContext {
     id: SledUuid,
     role: SledRole,
     baseboard: BaseboardId,
+    rack_id: RackUuid,
 }
 
 impl HostPhase2SledAgentContext {
@@ -173,6 +177,7 @@ impl HostPhase2SledAgentContext {
                 part_number: "test".to_string(),
                 serial_number: "test".to_string(),
             },
+            rack_id: RACK_UUID,
         }
     }
 }
@@ -249,7 +254,10 @@ mod api_impl {
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::SledRegistrationInfo;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::multirack::MultirackJoinCompleteResponse;
+    use sled_agent_types::multirack::MultirackJoinServiceStatus;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -259,6 +267,8 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
+    use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+    use sled_agent_types::trust_quorum::TrustQuorumNetworkConfigResponse;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -359,6 +369,7 @@ mod api_impl {
                 sled_agent_address,
                 sled_role: ctx.role,
                 baseboard_id: ctx.baseboard.clone(),
+                rack_id: ctx.rack_id,
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),
@@ -997,9 +1008,7 @@ mod api_impl {
         async fn trust_quorum_coordinator_status(
             _request_context: RequestContext<Self::Context>,
         ) -> Result<
-            HttpResponseOk<
-                Option<trust_quorum_types::status::CoordinatorStatus>,
-            >,
+            HttpResponseOk<TrustQuorumCoordinatorStatusResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -1059,14 +1068,8 @@ mod api_impl {
 
         async fn trust_quorum_network_config_get(
             _request_context: RequestContext<Self::Context>,
-        ) -> Result<
-            HttpResponseOk<
-                Option<
-                    sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
-                >,
-            >,
-            HttpError,
-        > {
+        ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
+        {
             unimplemented!()
         }
 
@@ -1144,7 +1147,21 @@ mod api_impl {
 
         async fn multirack_join_complete(
             _request_context: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError>
+        {
+            unimplemented!()
+        }
+
+        async fn multirack_join_service_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError>
+        {
+            unimplemented!()
+        }
+
+        async fn sled_registration_info(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
             unimplemented!()
         }
     }

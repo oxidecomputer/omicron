@@ -21,8 +21,11 @@ use omicron_uuid_kinds::AffinityGroupKind;
 use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupKind;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -87,14 +90,14 @@ impl From<affinity::FailureDomain> for FailureDomain {
 pub struct AffinityGroup {
     #[diesel(embed)]
     pub identity: AffinityGroupIdentity,
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
 
 impl AffinityGroup {
     pub fn new(
-        project_id: Uuid,
+        project_id: ProjectUuid,
         params: affinity::AffinityGroupCreate,
     ) -> Self {
         Self {
@@ -102,10 +105,14 @@ impl AffinityGroup {
                 Uuid::new_v4(),
                 params.identity,
             ),
-            project_id,
+            project_id: project_id.into(),
             policy: params.policy.into(),
             failure_domain: params.failure_domain.into(),
         }
+    }
+
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
     }
 }
 
@@ -120,7 +127,7 @@ impl From<AffinityGroup> for affinity::AffinityGroup {
         };
         Self {
             identity,
-            project_id: group.project_id,
+            project_id: group.project_id.into_untyped_uuid(),
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
         }
@@ -153,14 +160,14 @@ impl From<affinity::AffinityGroupUpdate> for AffinityGroupUpdate {
 pub struct AntiAffinityGroup {
     #[diesel(embed)]
     pub identity: AntiAffinityGroupIdentity,
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
 
 impl AntiAffinityGroup {
     pub fn new(
-        project_id: Uuid,
+        project_id: ProjectUuid,
         params: affinity::AntiAffinityGroupCreate,
     ) -> Self {
         Self {
@@ -168,10 +175,14 @@ impl AntiAffinityGroup {
                 Uuid::new_v4(),
                 params.identity,
             ),
-            project_id,
+            project_id: project_id.into(),
             policy: params.policy.into(),
             failure_domain: params.failure_domain.into(),
         }
+    }
+
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
     }
 }
 
@@ -186,7 +197,7 @@ impl From<AntiAffinityGroup> for affinity::AntiAffinityGroup {
         };
         Self {
             identity,
-            project_id: group.project_id,
+            project_id: group.project_id.into_untyped_uuid(),
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
         }
