@@ -28,8 +28,6 @@ use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
-use nexus_types::trust_quorum::TRUST_QUORUM_MAX_MEMBERS;
-use nexus_types::trust_quorum::TRUST_QUORUM_MIN_MEMBERS;
 use nexus_types::trust_quorum::{
     TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
     TrustQuorumMemberState,
@@ -47,6 +45,8 @@ use rand::rng;
 use rand::seq::IteratorRandom;
 use sled_hardware_types::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet};
+use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
+use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::{
     crypto::{EncryptedRackSecrets, Salt, Sha3_256Digest},
     types::{Epoch, Threshold},

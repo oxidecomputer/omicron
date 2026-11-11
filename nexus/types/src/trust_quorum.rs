@@ -16,6 +16,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
+use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
+use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
@@ -303,12 +305,6 @@ impl ProposedTrustQuorumConfig {
         })
     }
 }
-
-/// The minimum number of members in a trust quorum.
-pub const TRUST_QUORUM_MIN_MEMBERS: usize = 3;
-
-/// The maximum number of members in a trust quorum.
-pub const TRUST_QUORUM_MAX_MEMBERS: usize = 32;
 
 /// Given the current trust quorum config returned by
 /// `tq_load_latest_possible_committed_config`, determine whether the provided
