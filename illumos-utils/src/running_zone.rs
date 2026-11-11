@@ -130,8 +130,9 @@ mod zenter {
 /// Represents a running zone.
 #[derive(Debug)]
 pub struct RunningZone {
-    // The `zoneid_t` for the zone, while it's running, or `None` if not.
-    id: Option<i32>,
+    // The `zoneid_t` for the zone. This is only used on illumos, for `zenter`.
+    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
+    id: i32,
     inner: InstalledZone,
 }
 
@@ -201,7 +202,7 @@ impl RunningZone {
         S: AsRef<std::ffi::OsStr>,
     {
         use std::os::unix::process::CommandExt;
-        let Some(id) = self.id else {
+        if !self.inner.has_stopped {
             return Err(RunCommandError {
                 zone: self.name().to_string(),
                 err: crate::ExecutionError::NotRunning,
@@ -225,7 +226,7 @@ impl RunningZone {
 
                 // Enter the target zone itself, in which the `exec()` call will
                 // be made.
-                if zenter::zone_enter(id) == 0 {
+                if zenter::zone_enter(self.id) == 0 {
                     Ok(())
                 } else {
                     let err = std::io::Error::last_os_error();
@@ -296,7 +297,7 @@ impl RunningZone {
                 BootError::NoZoneId { zone: zone.name.clone() }
             })?;
 
-        let running_zone = RunningZone { id: Some(id), inner: zone };
+        let running_zone = RunningZone { id, inner: zone };
 
         Ok(running_zone)
     }
@@ -304,7 +305,7 @@ impl RunningZone {
     /// Create a fake running zone for use in tests.
     #[cfg(feature = "testing")]
     pub fn fake_boot(zone_id: i32, zone: InstalledZone) -> Self {
-        RunningZone { id: Some(zone_id), inner: zone }
+        RunningZone { id: zone_id, inner: zone }
     }
 
     pub async fn ensure_address(
@@ -428,15 +429,18 @@ impl RunningZone {
     ///
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
-        if let Some(_) = self.id.take() {
-            let log = self.inner.log.clone();
-            let name = self.name().to_string();
-            self.inner
-                .zones_api
-                .halt_and_remove_logged(&log, &name)
-                .await
-                .map_err(|err| err.to_string())?;
+        if self.inner.has_stopped {
+            return Ok(());
         }
+
+        let log = self.inner.log.clone();
+        let name = self.name().to_string();
+        self.inner
+            .zones_api
+            .halt_and_remove_logged(&log, &name)
+            .await
+            .map_err(|err| err.to_string())?;
+        self.inner.has_stopped = true;
         Ok(())
     }
 
@@ -616,6 +620,10 @@ pub struct InstalledZone {
 
     // API to underlying zone commands
     zones_api: DebugIgnore<Arc<dyn crate::zone::Api>>,
+
+    // If `true`, this zone has been successfully stopped, and dropping the
+    // `InstalledZone` does not need to halt and remove it.
+    has_stopped: bool,
 }
 
 impl InstalledZone {
@@ -671,6 +679,12 @@ impl InstalledZone {
 
 impl Drop for InstalledZone {
     fn drop(&mut self) {
+        // If this zone has already been stopped successfully, we don't need to
+        // try to halt and remove it a second time.
+        if self.has_stopped {
+            return;
+        }
+
         let log = self.log.clone();
         let name = self.name().to_string();
         let zones_api = self.zones_api.clone();
@@ -938,6 +952,7 @@ impl<'a> ZoneBuilder<'a> {
                 opte_ports: self.opte_ports?,
                 links: self.links?,
                 zones_api: DebugIgnore(zones_api),
+                has_stopped: false,
             };
             let xml_path = iz.site_profile_xml_path().parent()?.to_path_buf();
             std::fs::create_dir_all(&xml_path)
@@ -1045,6 +1060,7 @@ impl<'a> ZoneBuilder<'a> {
             opte_ports,
             links,
             zones_api: DebugIgnore(zones_api),
+            has_stopped: false,
         })
     }
 }
