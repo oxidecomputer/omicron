@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 use uuid::Uuid;
 
 const LLDP_LINK_CONFIG_ID: Uuid =
-    Uuid::from_u128(31600000_0000_0000_0000_000000000001);
+    Uuid::from_u128(31700000_0000_0000_0000_000000000001);
 
 pub(crate) fn checks() -> DataMigrationFns {
     DataMigrationFns::new().before(before).after(after)
