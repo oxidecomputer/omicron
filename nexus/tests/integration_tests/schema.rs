@@ -551,7 +551,7 @@ async fn update_since_base_has_idempotent_up() {
     logctx.cleanup_successful();
 }
 
-const COLUMNS: [&'static str; 7] = [
+const COLUMNS: [&'static str; 8] = [
     "table_catalog",
     "table_schema",
     "table_name",
@@ -559,6 +559,11 @@ const COLUMNS: [&'static str; 7] = [
     "column_default",
     "is_nullable",
     "data_type",
+    // "data_type" omits precision, length, and array element types (e.g.
+    // "INTERVAL(0)" is "interval", and all arrays are "ARRAY"). This
+    // CockroachDB-specific column includes them. See:
+    // https://www.cockroachlabs.com/docs/v23.1/information-schema#columns
+    "crdb_sql_type",
 ];
 
 const CONSTRAINT_COLUMN_USAGE: [&'static str; 7] = [
@@ -1353,6 +1358,85 @@ async fn compare_table_differing_not_null_order() {
     .await;
 
     schema1.pretty_assert_eq(&schema2);
+    logctx.cleanup_successful();
+}
+
+// Reproduction case for https://github.com/oxidecomputer/omicron/issues/11769
+//
+// Each pair of differing types below has the same base type, but differs in
+// precision, length, interval fields, or array element type. Pairs of
+// identical types act as a control. Mirroring a migration, one schema creates
+// the column with "CREATE TABLE", the other with "ALTER TABLE ... ADD COLUMN".
+#[tokio::test]
+async fn compare_table_differing_column_type_modifiers() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_table_differing_column_type_modifiers",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let cases = [
+        ("INTERVAL", "INTERVAL(0)"),
+        ("INTERVAL", "INTERVAL HOUR"),
+        ("STRING", "STRING(63)"),
+        ("TIMESTAMPTZ", "TIMESTAMPTZ(0)"),
+        ("DECIMAL", "DECIMAL(10,2)"),
+        ("INET[]", "UUID[]"),
+        ("INTERVAL(0)", "INTERVAL(0)"),
+        ("UUID[]", "UUID[]"),
+    ];
+
+    let mut wrong = Vec::new();
+    for (dbinit_type, migration_type) in cases {
+        let dbinit = get_information_schema(
+            log,
+            &format!(
+                "
+                CREATE DATABASE omicron;
+                CREATE TABLE omicron.public.animal (
+                    id UUID PRIMARY KEY,
+                    value {dbinit_type}
+                );
+                "
+            ),
+        )
+        .await;
+
+        let migrated = get_information_schema(
+            log,
+            &format!(
+                "
+                CREATE DATABASE omicron;
+                CREATE TABLE omicron.public.animal (
+                    id UUID PRIMARY KEY
+                );
+                ALTER TABLE omicron.public.animal
+                    ADD COLUMN IF NOT EXISTS value {migration_type};
+                "
+            ),
+        )
+        .await;
+
+        // Use the same comparison as the migration tests.
+        let detected = std::panic::catch_unwind(|| {
+            migrated.pretty_assert_eq(&dbinit);
+        })
+        .is_err();
+        let expected = dbinit_type != migration_type;
+        if detected != expected {
+            wrong.push(format!(
+                "{dbinit_type} vs {migration_type}: \
+                 expected mismatch = {expected}, detected = {detected}"
+            ));
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "unexpected schema comparison results: {wrong:#?}"
+    );
+
     logctx.cleanup_successful();
 }
 
