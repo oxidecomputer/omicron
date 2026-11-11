@@ -551,7 +551,7 @@ async fn update_since_base_has_idempotent_up() {
     logctx.cleanup_successful();
 }
 
-const COLUMNS: [&'static str; 8] = [
+const COLUMNS: [&'static str; 11] = [
     "table_catalog",
     "table_schema",
     "table_name",
@@ -564,6 +564,15 @@ const COLUMNS: [&'static str; 8] = [
     // CockroachDB-specific column includes them. See:
     // https://www.cockroachlabs.com/docs/v23.1/information-schema#columns
     "crdb_sql_type",
+    // None of the type columns above say whether a column is computed, or
+    // what it is computed from. Whether a computed column is STORED or
+    // VIRTUAL is not reported here; it is compared through
+    // "information_schema.statistics", where a STORED computed column appears
+    // as a "storing" column of the primary index and a VIRTUAL one does not.
+    "is_generated",
+    "generation_expression",
+    // CockroachDB-specific: "YES" for NOT VISIBLE columns.
+    "is_hidden",
 ];
 
 const CONSTRAINT_COLUMN_USAGE: [&'static str; 7] = [
@@ -1365,8 +1374,7 @@ async fn compare_table_differing_not_null_order() {
 //
 // Each pair of differing types below has the same base type, but differs in
 // precision, length, interval fields, or array element type. Pairs of
-// identical types act as a control. Mirroring a migration, one schema creates
-// the column with "CREATE TABLE", the other with "ALTER TABLE ... ADD COLUMN".
+// identical types act as a control.
 #[tokio::test]
 async fn compare_table_differing_column_type_modifiers() {
     let config = load_test_config();
@@ -1376,19 +1384,68 @@ async fn compare_table_differing_column_type_modifiers() {
     );
     let log = &logctx.log;
 
-    let cases = [
-        ("INTERVAL", "INTERVAL(0)"),
-        ("INTERVAL", "INTERVAL HOUR"),
-        ("STRING", "STRING(63)"),
-        ("TIMESTAMPTZ", "TIMESTAMPTZ(0)"),
-        ("DECIMAL", "DECIMAL(10,2)"),
-        ("INET[]", "UUID[]"),
-        ("INTERVAL(0)", "INTERVAL(0)"),
-        ("UUID[]", "UUID[]"),
-    ];
+    assert_column_definition_mismatches_detected(
+        log,
+        &[
+            ("INTERVAL", "INTERVAL(0)"),
+            ("INTERVAL", "INTERVAL HOUR"),
+            ("STRING", "STRING(63)"),
+            ("TIMESTAMPTZ", "TIMESTAMPTZ(0)"),
+            ("DECIMAL", "DECIMAL(10,2)"),
+            ("INET[]", "UUID[]"),
+            ("INTERVAL(0)", "INTERVAL(0)"),
+            ("UUID[]", "UUID[]"),
+        ],
+    )
+    .await;
 
+    logctx.cleanup_successful();
+}
+
+// Each pair of differing definitions below differs in whether the column is
+// computed, its computed expression, whether it is stored or virtual, or
+// whether it is hidden. Pairs of identical definitions act as a control.
+#[tokio::test]
+async fn compare_table_differing_generated_and_hidden_columns() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_table_differing_generated_and_hidden_columns",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    assert_column_definition_mismatches_detected(
+        log,
+        &[
+            ("INT8", "INT8 AS (num + 1) STORED"),
+            ("INT8 AS (num + 1) STORED", "INT8 AS (num + 2) STORED"),
+            ("INT8 AS (num + 1) VIRTUAL", "INT8 AS (num + 1) STORED"),
+            ("INT8", "INT8 NOT VISIBLE"),
+            ("INT8 AS (num + 1) STORED", "INT8 AS (num + 1) STORED"),
+            ("INT8 AS (num + 1) VIRTUAL", "INT8 AS (num + 1) VIRTUAL"),
+            ("INT8 NOT VISIBLE", "INT8 NOT VISIBLE"),
+        ],
+    )
+    .await;
+
+    logctx.cleanup_successful();
+}
+
+// For each `(dbinit_definition, migration_definition)` pair, builds one schema
+// that creates a column with `dbinit_definition` using "CREATE TABLE", and
+// another that adds it with `migration_definition` using "ALTER TABLE ... ADD
+// COLUMN", as a migration would. The table also has an INT8 column named
+// "num" that column definitions may refer to.
+//
+// Asserts that `InformationSchema::pretty_assert_eq` (the comparison used by
+// the migration tests) reports a mismatch exactly when the two definitions
+// differ.
+async fn assert_column_definition_mismatches_detected(
+    log: &Logger,
+    cases: &[(&str, &str)],
+) {
     let mut wrong = Vec::new();
-    for (dbinit_type, migration_type) in cases {
+    for (dbinit_definition, migration_definition) in cases {
         let dbinit = get_information_schema(
             log,
             &format!(
@@ -1396,7 +1453,8 @@ async fn compare_table_differing_column_type_modifiers() {
                 CREATE DATABASE omicron;
                 CREATE TABLE omicron.public.animal (
                     id UUID PRIMARY KEY,
-                    value {dbinit_type}
+                    num INT8,
+                    value {dbinit_definition}
                 );
                 "
             ),
@@ -1409,24 +1467,24 @@ async fn compare_table_differing_column_type_modifiers() {
                 "
                 CREATE DATABASE omicron;
                 CREATE TABLE omicron.public.animal (
-                    id UUID PRIMARY KEY
+                    id UUID PRIMARY KEY,
+                    num INT8
                 );
                 ALTER TABLE omicron.public.animal
-                    ADD COLUMN IF NOT EXISTS value {migration_type};
+                    ADD COLUMN IF NOT EXISTS value {migration_definition};
                 "
             ),
         )
         .await;
 
-        // Use the same comparison as the migration tests.
         let detected = std::panic::catch_unwind(|| {
             migrated.pretty_assert_eq(&dbinit);
         })
         .is_err();
-        let expected = dbinit_type != migration_type;
+        let expected = dbinit_definition != migration_definition;
         if detected != expected {
             wrong.push(format!(
-                "{dbinit_type} vs {migration_type}: \
+                "{dbinit_definition} vs {migration_definition}: \
                  expected mismatch = {expected}, detected = {detected}"
             ));
         }
@@ -1436,8 +1494,6 @@ async fn compare_table_differing_column_type_modifiers() {
         wrong.is_empty(),
         "unexpected schema comparison results: {wrong:#?}"
     );
-
-    logctx.cleanup_successful();
 }
 
 #[tokio::test]
