@@ -13,6 +13,7 @@ use nexus_auth::context::OpContext;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
+use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
 use nexus_networking::{
     sled_client_by_baseboard_id_and_rack_id_if_commissioned,
     sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext,
@@ -364,7 +365,7 @@ async fn prepare(
     };
 
     // Write state back to DB
-    let state = datastore
+    let outcome = datastore
         .tq_update_prepare_status(&opctx, status.config, status.acked_prepares)
         .await?;
 
@@ -374,10 +375,15 @@ async fn prepare(
     // safety.
     //
     // Otherwise, we haven't finished preparing, so just return.
-    if state.is_committing() {
-        return commit(log, opctx, datastore, config).await;
-    } else {
-        return Ok(Status::Preparing);
+    match outcome {
+        // TODO: This still commits using the possibly-stale config loaded
+        // before the prepare update. In particular, it is possible for digests
+        // to be present but secrets to be missing. It should use the returned
+        // one.
+        TqPrepareStatusOutcome::Committing { config: _ } => {
+            commit(log, opctx, datastore, config).await
+        }
+        TqPrepareStatusOutcome::StillPreparing => Ok(Status::Preparing),
     }
 }
 
