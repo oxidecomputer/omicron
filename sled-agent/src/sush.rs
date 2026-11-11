@@ -11,13 +11,12 @@
 //!
 //! Jobs are distributed among servers using a gossip network implemented
 //! by the [rumors] library, running over sprockets on the bootstrap network.
-//! _Peers_ (servers) exchange messages that are causally ordered; the set
-//! of causally related messages sent between all peers in a network is
-//! called a _universe_. Various pieces of universe state are persisted
-//! to the M.2s using a [sush locker], described in the _Storage_ section
-//! of [RFD 620]. This is similar to an [`omicron_ledger::Ledger`], which
-//! also holds records across M.2s, but handles disagreements between the
-//! two drives differently.
+//! _Peers_ (servers) exchange messages that are causally ordered. Various
+//! pieces of gossip network state are persisted to the M.2s using a
+//! [sush locker], described in the _Storage_ section of [RFD 620]. This
+//! is similar to an [`omicron_ledger::Ledger`], which also holds records
+//! across M.2s, but handles disagreements between the two drives
+//! differently.
 //!
 //! The gossip network is invisible to clients, which speak only the
 //! `sush` HTTP API; the server relays requests and events. That API is
@@ -75,13 +74,11 @@ use x509_cert::time::{Time, Validity};
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
 use sush_common::targets::Cubbies;
 use sush_server::executor::PathIsolation;
-use sush_server::gossip::{
-    GossipConfig, LinkedBaseboards, Universe, spawn_gossip,
-};
-use sush_server::link::CorpusSource;
+use sush_server::gossip::{ConnectedBaseboards, GossipConfig, spawn_gossip};
 use sush_server::locker::Locker;
 use sush_server::output::{JobOutputDir, OutputDirs};
 use sush_server::server::ApiServer;
+use sush_server::sprockets::CorpusSource;
 use sush_server::{JobManager, seed_gossip};
 
 /// Subdirectory of an encrypted dataset that job output is recorded in.
@@ -241,7 +238,7 @@ pub async fn spawn_sush_tasks(
     });
 
     let listen_addr = SocketAddrV6::new(bootstrap_ip, SUSH_GOSSIP_PORT, 0, 0);
-    let (universe, linked) = match spawn_gossip(
+    let (network, connected) = match spawn_gossip(
         &log,
         GossipConfig::default(),
         sprockets,
@@ -253,7 +250,7 @@ pub async fn spawn_sush_tasks(
     )
     .await
     {
-        Ok((_, universe, linked)) => (universe, linked),
+        Ok((_, network, connected)) => (network, connected),
         Err(err) => {
             warn!(
                 log,
@@ -264,7 +261,7 @@ pub async fn spawn_sush_tasks(
             // Don't persist an isolated identity.
             let locker = Locker::null();
             let seed = seed_gossip(&log, &locker).await;
-            (Universe::isolated(seed.into_rumors()), LinkedBaseboards::lonely())
+            (seed.without_gossip(), ConnectedBaseboards::empty())
         }
     };
 
@@ -276,8 +273,8 @@ pub async fn spawn_sush_tasks(
         JobOutputDir::new(output_dirs_rx),
         own_baseboard,
         rx_cubbies,
-        universe,
-        linked,
+        network,
+        connected,
         &locker,
         &anchors,
         shutdown.clone(),
