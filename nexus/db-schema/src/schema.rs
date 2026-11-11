@@ -576,6 +576,16 @@ table! {
 }
 
 table! {
+    project_utilization(project_id) {
+        project_id -> Uuid,
+        silo_id -> Uuid,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+    }
+}
+
+table! {
     silo_auth_settings(silo_id) {
         silo_id -> Uuid,
         time_created -> Timestamptz,
@@ -3608,6 +3618,32 @@ table! {
         created_at_generation -> Int8,
     }
 }
+
+table! {
+    problem (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        current_revision -> Int8,
+    }
+}
+
+table! {
+    problem_revision (problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        time_created -> Timestamptz,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(problem, problem_revision);
+joinable!(problem_revision -> problem (problem_id));
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

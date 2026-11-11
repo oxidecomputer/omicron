@@ -13,6 +13,7 @@ use nexus_db_model::Sled as DbSled;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
 use nexus_lockstep_client::types::SledPolicy;
 use nexus_lockstep_client::types::SledProvisionPolicy;
 use nexus_lockstep_client::types::SledSelector;
@@ -484,14 +485,18 @@ impl TrustQuorumConfigDriver<'_> {
             threshold: config.threshold,
             encrypted_rack_secrets: None,
         };
-        let state = self
+        let outcome = self
             .datastore
             .tq_update_prepare_status(self.opctx, coordinator_config, members)
             .await
             .unwrap_or_else(|error| {
                 panic!("acked prepares at epoch {epoch}: {error}")
             });
-        assert_eq!(state, TrustQuorumConfigState::Committing);
+        let TqPrepareStatusOutcome::Committing { config: _ } = outcome else {
+            panic!(
+                "acked prepares at epoch {epoch} committing, got {outcome:?}"
+            );
+        };
     }
 
     async fn ack_commits(

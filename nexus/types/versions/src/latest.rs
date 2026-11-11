@@ -194,12 +194,12 @@ pub mod instance {
 
     pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
-    pub use crate::v2026_11_05_00::instance::AcpiTimeoutSecs;
-    pub use crate::v2026_11_05_00::instance::Instance;
-    pub use crate::v2026_11_05_00::instance::InstanceCreate;
-    pub use crate::v2026_11_05_00::instance::InstanceShutdownPolicy;
-    pub use crate::v2026_11_05_00::instance::InstanceStopOrRebootParams;
-    pub use crate::v2026_11_05_00::instance::InstanceUpdate;
+    pub use crate::v2026_11_11_00::instance::AcpiTimeoutSecs;
+    pub use crate::v2026_11_11_00::instance::Instance;
+    pub use crate::v2026_11_11_00::instance::InstanceCreate;
+    pub use crate::v2026_11_11_00::instance::InstanceShutdownPolicy;
+    pub use crate::v2026_11_11_00::instance::InstanceStopOrRebootParams;
+    pub use crate::v2026_11_11_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {
@@ -375,6 +375,18 @@ pub mod probe {
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
     pub use crate::v2026_01_05_00::probe::ProbeCreate;
+}
+
+pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactListParams;
+    pub use crate::v2026_11_05_00::problem::ImpactState;
+    pub use crate::v2026_11_05_00::problem::ImpactedResource;
+    pub use crate::v2026_11_05_00::problem::Problem;
+    pub use crate::v2026_11_05_00::problem::ProblemImpact;
+    pub use crate::v2026_11_05_00::problem::ProblemListParams;
+    pub use crate::v2026_11_05_00::problem::ProblemSelector;
+    pub use crate::v2026_11_05_00::problem::ProblemState;
+    pub use crate::v2026_11_05_00::problem::RelatedProblem;
 }
 
 pub mod project {
