@@ -555,6 +555,11 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
         "Should have attempted to list service processors"
     );
+    assert!(
+        step_names
+            .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS),
+        "Should have attempted to collect SP components"
+    );
 
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
@@ -569,6 +574,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(names.next(), Some("meta/report.json"));
     assert_eq!(names.next(), Some("meta/trace.json"));
     assert_eq!(names.next(), Some("rack/"));
+    assert!(names.any(|n| n == "sp_components/"));
     assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point
     // of this test, which cares more about bundle lifecycle.
