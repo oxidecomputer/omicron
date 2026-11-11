@@ -232,24 +232,30 @@ pub enum UpdaterLockError {
     Query(#[from] Error),
 }
 
-pub struct UpdateToCommit<'a> {
-    pub new_runtime: &'a InstanceRuntimeState,
-    /// Only commit the update if the instance's intended state matches this
+/// An update to commit with [`DataStore::instance_commit_update`].
+pub struct UpdateToCommit {
+    /// The new runtime state to write back to the instance record.
+    pub new_runtime: InstanceRuntimeState,
+    /// The instance's intended state from which `new_runtime` and
+    /// `new_intent` were determined. The update is committed only if the
+    /// instance's intended state still has this value.
+    pub expected_intent: InstanceIntendedState,
+    /// If this is [`Some`], the instance's intended state is set to this
     /// value.
-    pub conditional_on_intent: Option<InstanceIntendedState>,
     pub new_intent: Option<InstanceIntendedState>,
 }
 
-/// Errors returned by [`DataStore::instance_updater_lock`].
+/// Errors returned by [`DataStore::instance_commit_update`].
 #[derive(
     Debug, thiserror::Error, PartialEq, serde::Serialize, serde::Deserialize,
 )]
 pub enum CommitUpdateError {
-    /// The commit operation was made conditional on the instance's intended
-    /// state, and the intended state has changed since the lock has been
-    /// acquired.
-    #[error("intended state changed to {current_intent:?}")]
-    IntendedStateChanged { current_intent: InstanceIntendedState },
+    /// The instance's intended state is no longer the
+    /// [`UpdateToCommit::expected_intent`] the update was determined from.
+    /// The instance remains locked, and the caller may determine a new update
+    /// from `actual_intent` and try again.
+    #[error("intended state changed to {actual_intent:?}")]
+    IntendedStateChanged { actual_intent: InstanceIntendedState },
     #[error(transparent)]
     Other(#[from] Error),
 }
@@ -2035,22 +2041,29 @@ impl DataStore {
     /// - `authz_instance`: the instance to attempt to unlock
     /// - `updater_lock`: an [`UpdaterLock`] token representing the acquired
     ///   lock to release.
-    /// - `new_runtime`: an [`InstanceRuntimeState`] to write
-    ///   back to the database when the lock is released. If this is [`None`],
-    ///   the instance's runtime state will not be modified.
+    /// - `update`: the [`UpdateToCommit`] to write back to the database when
+    ///   the lock is released.
+    ///
+    /// # Errors
+    ///
+    /// If the lock is still held by the provided `updater_id`, but the
+    /// instance's intended state is not `update.expected_intent`, nothing is
+    /// written, the instance remains locked, and this method returns
+    /// [`CommitUpdateError::IntendedStateChanged`] with the current intended
+    /// state.
     pub async fn instance_commit_update(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         lock: &UpdaterLock,
-        update: UpdateToCommit<'_>,
+        update: &UpdateToCommit,
     ) -> Result<bool, CommitUpdateError> {
         use nexus_db_schema::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
         let UpdaterLock { updater_id, locked_gen } = *lock;
-        let UpdateToCommit { new_runtime, conditional_on_intent, new_intent } =
-            update;
+        let UpdateToCommit { ref new_runtime, expected_intent, new_intent } =
+            *update;
 
         #[derive(diesel::AsChangeset)]
         #[diesel(table_name = nexus_db_schema::schema::instance)]
@@ -2058,15 +2071,10 @@ impl DataStore {
             intended_state: Option<InstanceIntendedState>,
         }
 
-        let intended_state_filter = conditional_on_intent
-            .as_ref()
-            .map(InstanceIntendedState::as_filter)
-            .unwrap_or(InstanceIntendedState::ANY);
-
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(dsl::intended_state.eq_any(intended_state_filter))
+            .filter(dsl::intended_state.eq(expected_intent))
             // Only unlock the instance if:
             // - the provided updater ID matches that of the saga that has
             //   currently locked this instance.
@@ -2183,18 +2191,17 @@ impl DataStore {
                 )))
             }
 
-            // We were asked to commit the update if, and only if the intended
-            // state matches `conditional_on_intent`. If this has changed since
-            // the desired state update was determined, return an error so that
-            // the caller can re-consider the state update and try again.
+            // We still hold the lock, but the instance's intended state has
+            // changed since the update was determined from it. Intended state
+            // changes don't take the lock or advance the state generation, so
+            // this is expected; return the current intended state so that the
+            // caller can determine a new update from it and try again.
             UpdateAndQueryResult { ref found, .. }
-                if conditional_on_intent
-                    .map(|intent| intent != found.intended_state)
-                    .unwrap_or(false)
+                if found.intended_state != expected_intent
                     && found.updater_id == Some(updater_id) =>
             {
                 Err(CommitUpdateError::IntendedStateChanged {
-                    current_intent: found.intended_state,
+                    actual_intent: found.intended_state,
                 })
             }
 
@@ -3060,9 +3067,9 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    UpdateToCommit {
-                        new_runtime,
-                        conditional_on_intent: None,
+                    &UpdateToCommit {
+                        new_runtime: new_runtime.clone(),
+                        expected_intent: InstanceIntendedState::Stopped,
                         new_intent: None,
                     },
                 )
@@ -3078,9 +3085,9 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    UpdateToCommit {
-                        new_runtime,
-                        conditional_on_intent: None,
+                    &UpdateToCommit {
+                        new_runtime: new_runtime.clone(),
+                        expected_intent: InstanceIntendedState::Stopped,
                         new_intent: None,
                     },
                 )
@@ -3102,14 +3109,14 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    UpdateToCommit {
-                        new_runtime: &InstanceRuntimeState {
+                    &UpdateToCommit {
+                        new_runtime: InstanceRuntimeState {
                             propolis_id: Some(Uuid::new_v4()),
                             migration_id: Some(Uuid::new_v4()),
                             dst_propolis_id: Some(Uuid::new_v4()),
                             ..new_runtime.clone()
                         },
-                        conditional_on_intent: None,
+                        expected_intent: InstanceIntendedState::Stopped,
                         new_intent: None,
                     },
                 )
@@ -3187,8 +3194,8 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    UpdateToCommit {
-                        new_runtime: &InstanceRuntimeState {
+                    &UpdateToCommit {
+                        new_runtime: InstanceRuntimeState {
                             time_updated: Utc::now(),
                             generation: InstanceStateGeneration::from_u32(2)
                                 .into(),
@@ -3198,7 +3205,7 @@ mod tests {
                             nexus_state: InstanceState::NoVmm,
                             time_last_auto_restarted: None,
                         },
-                        conditional_on_intent: None,
+                        expected_intent: InstanceIntendedState::Stopped,
                         new_intent: None,
                     },
                 )
@@ -3219,6 +3226,133 @@ mod tests {
         );
         assert_eq!(instance.runtime().migration_id, new_runtime.migration_id);
         assert_eq!(instance.runtime().nexus_state, new_runtime.nexus_state);
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // An instance's intended state may change while it is locked by an update
+    // saga. Committing an update determined from the previous intended state
+    // must fail without writing anything or releasing the lock, and report the
+    // current intended state, so that the caller can determine a new update
+    // and commit that instead.
+    #[tokio::test]
+    async fn test_instance_commit_update_intended_state_changed() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_instance_commit_update_intended_state_changed",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+        let saga1 = Uuid::new_v4();
+
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect("instance should be locked");
+
+        // Change the intended state while the instance is locked. This must
+        // succeed without the lock.
+        datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                InstanceIntendedState::Running,
+            )
+            .await
+            .expect("setting the intended state should succeed");
+        let prev_runtime =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist")
+                .runtime()
+                .clone();
+
+        let new_runtime = &InstanceRuntimeState {
+            time_updated: Utc::now(),
+            generation: InstanceStateGeneration::from(prev_runtime.generation)
+                .next()
+                .into(),
+            propolis_id: None,
+            dst_propolis_id: None,
+            migration_id: None,
+            nexus_state: InstanceState::Failed,
+            time_last_auto_restarted: None,
+        };
+
+        // The update was determined from the old intended state, so it must
+        // not be committed.
+        let err = dbg!(
+            datastore
+                .instance_commit_update(
+                    &opctx,
+                    &authz_instance,
+                    &lock,
+                    &UpdateToCommit {
+                        new_runtime: new_runtime.clone(),
+                        expected_intent: InstanceIntendedState::Stopped,
+                        new_intent: Some(InstanceIntendedState::GuestShutdown),
+                    },
+                )
+                .await
+        )
+        .expect_err(
+            "instance_commit_update should fail if the intended state changed",
+        );
+        assert_eq!(
+            err,
+            CommitUpdateError::IntendedStateChanged {
+                actual_intent: InstanceIntendedState::Running
+            }
+        );
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(
+            instance.updater_id,
+            Some(saga1),
+            "the instance should still be locked"
+        );
+        assert_eq!(instance.intended_state, InstanceIntendedState::Running);
+        assert_eq!(instance.runtime().nexus_state, prev_runtime.nexus_state);
+        assert_eq!(instance.runtime().generation, prev_runtime.generation);
+
+        // An update determined from the current intended state is committed.
+        let updated = dbg!(
+            datastore
+                .instance_commit_update(
+                    &opctx,
+                    &authz_instance,
+                    &lock,
+                    &UpdateToCommit {
+                        new_runtime: new_runtime.clone(),
+                        expected_intent: InstanceIntendedState::Running,
+                        new_intent: Some(InstanceIntendedState::GuestShutdown),
+                    },
+                )
+                .await
+        )
+        .expect("instance_commit_update should succeed");
+        assert!(updated, "it should be updated");
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(instance.updater_id, None, "the lock should be released");
+        assert_eq!(
+            instance.intended_state,
+            InstanceIntendedState::GuestShutdown
+        );
+        assert_eq!(instance.runtime().nexus_state, InstanceState::Failed);
 
         // Clean up.
         db.terminate().await;

@@ -473,10 +473,15 @@ pub fn update_saga_needed(
 struct UpdatesRequired {
     /// The new runtime state that must be written back to the database when the
     /// saga completes.
+    ///
+    /// If [`UpdatesRequired::no_vmm_reason`] is [`Some`], this state's
+    /// `nexus_state` is not final: it is determined when the update is
+    /// committed, by [`UpdatesRequired::update_to_commit`].
     new_runtime: InstanceRuntimeState,
 
-    /// A new intended state should be written to the instance record.
-    new_intent: Option<InstanceIntendedState>,
+    /// If this is [`Some`], the instance no longer has an active VMM, for this
+    /// reason.
+    no_vmm_reason: Option<NoVmmReason>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
     /// transitioned to a terminal state ([`VmmState::Destroyed`] or
@@ -509,12 +514,6 @@ struct UpdatesRequired {
     /// instance has moved to a new sled, or deleting them if it is no longer
     /// incarnated.
     network_config: Option<NetworkConfigUpdate>,
-
-    /// If this is [`Some`], then the attempt to update the instance's runtime
-    /// state must be conditional on its [`InstanceIntendedState`] having this
-    /// value, and the new runtime state must be re-computed if the intended
-    /// state has changed while the update saga was running.
-    conditional_on_intent: Option<InstanceIntendedState>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -538,6 +537,41 @@ struct Deprovision {
     ram_diff: ByteCount,
 }
 
+/// Why an instance no longer has an active VMM.
+///
+/// The state an instance with no VMM should come to rest in (and whether its
+/// intended state should change) depends on both *why* it has no VMM and on its
+/// [`InstanceIntendedState`]. The reason is determined from the state snapshot,
+/// by [`UpdatesRequired::for_instance`]. The intended state, however, can be
+/// changed by user requests at any time, without taking the updater lock or
+/// advancing the instance's state generation, so it may have changed since the
+/// snapshot was taken. Therefore, [`siu_commit_instance_updates`] reads the
+/// current intended state, determines what update to perform by calling
+/// [`UpdatesRequired::update_to_commit`] with the current intended state, and
+/// commits the result conditionally on the intended state not having changed
+/// again in the meantime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+enum NoVmmReason {
+    /// The active VMM has `Failed`.
+    Failed,
+    /// The active VMM was stopped because its sled is being evacuated for an
+    /// update.
+    StoppedForUpdate,
+    /// The active VMM stopped while the instance was intended to be running,
+    /// was not migrating, and its sled was not being evacuated. In this case,
+    /// we believe the guest must have shut itself down and the VMM process
+    /// stopped for that reason.
+    GuestShutdown,
+    /// The active VMM was destroyed while the instance was not intended to be
+    /// running, was not migrating, and was not being evacuated: i.e., it was
+    /// stopped by a user request.
+    Stopped,
+    /// The instance has no active VMM for some other reason: e.g., the VMM was
+    /// destroyed while migrating, or the instance migrated out to a target VMM
+    /// that has since been destroyed.
+    Other,
+}
+
 impl UpdatesRequired {
     fn for_instance(
         log: &slog::Logger,
@@ -547,18 +581,14 @@ impl UpdatesRequired {
         new_runtime.generation =
             InstanceStateGeneration::from(new_runtime.generation).next().into();
         new_runtime.time_updated = Utc::now();
-        let current_intent = snapshot.instance.intended_state;
-        let mut new_intent = None;
         let instance_id = snapshot.instance.id();
 
         let mut update_required = false;
-        let mut active_vmm_failed = false;
-        let mut active_vmm_update_disposition_gen = None;
+        // N.B. that this is only used if the instance ends up with no active
+        // VMM; see below.
+        let mut no_vmm_reason = NoVmmReason::Other;
         let mut network_config = None;
         let mut update_sled_reservations_for_migration_success = None;
-        // In most cases, the same update should be applied regardless of the
-        // intended state at the end of the update saga.
-        let mut conditional_on_intent = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
@@ -572,34 +602,47 @@ impl UpdatesRequired {
                     new_runtime.propolis_id = None;
                     update_required = true;
 
-                    // If the active VMM's state is `Failed`, move the
-                    // instance's new state to `Failed` rather than to `NoVmm`.
+                    // Why did the active VMM go away? This determines what
+                    // state the instance will end up in, together with its
+                    // intended state at the time the update is committed.
                     if active_vmm.state == VmmState::Failed {
-                        active_vmm_failed = true;
+                        no_vmm_reason = NoVmmReason::Failed;
                     }
                     // If the active VMM is marked as stopped for an update, its
-                    // sled is being evacuated. Move the instance's new state to
-                    // `SledEvacuating` rather than to `NoVmm`.
-                    else if let Some(generation) = active_vmm
-                    .stop_for_update_disposition_generation {
-                        active_vmm_update_disposition_gen = Some(generation);
-
-                    } else if current_intent == InstanceIntendedState::Running
-                        && snapshot.migration.is_none()
+                    // sled is being evacuated.
+                    else if let Some(generation) =
+                        active_vmm.stop_for_update_disposition_generation
                     {
-                        // Did the active VMM shut itself down, when it was
-                        // intended to be running *and* we were not migrating
-                        // out, or destroying it intentionally for an update?
-                        // If so, update the instance's intended state to
-                        // indicate that it stopped itself.
-                        new_intent = Some(InstanceIntendedState::GuestShutdown);
                         info!(
                             log,
-                            "instance update (active VMM destroyed): guest shut \
-                             itself down";
+                            "instance update (active VMM destroyed): VMM was \
+                             stopped due to its sled being evacuated for an \
+                             update";
                             "instance_id" => %instance_id,
                             "propolis_id" => %active_vmm.id,
+                            "update_disposition_generation" => ?generation,
                         );
+                        no_vmm_reason = NoVmmReason::StoppedForUpdate;
+                    } else if snapshot.migration.is_none() {
+                        // The active VMM was destroyed while we were not
+                        // migrating out, or destroying it intentionally for an
+                        // update. If the instance was intended to be running,
+                        // the guest has probably shut itself down. Otherwise,
+                        // it was stopped at a user's request.
+                        if snapshot.instance.intended_state
+                            == InstanceIntendedState::Running
+                        {
+                            info!(
+                                log,
+                                "instance update (active VMM destroyed): guest \
+                                 shut itself down";
+                                "instance_id" => %instance_id,
+                                "propolis_id" => %active_vmm.id,
+                            );
+                            no_vmm_reason = NoVmmReason::GuestShutdown;
+                        } else {
+                            no_vmm_reason = NoVmmReason::Stopped;
+                        }
                     }
 
                     Some(id)
@@ -750,37 +793,16 @@ impl UpdatesRequired {
         // (or, we migrated out to a target VMM that was immediately destroyed,
         // which could happen if a running VM shut down immediately after
         // migrating). In that case, the instance is no longer incarnated on a
-        // sled, and we must update the state of the world to reflect that.
-        let deprovision = if new_runtime.propolis_id.is_none() {
+        // sled, and we must update the state of the world to reflect that. The
+        // instance's new state will be determined from `no_vmm_reason` when the
+        // update is committed.
+        let (deprovision, no_vmm_reason) = if new_runtime.propolis_id.is_none()
+        {
             // N.B. that this does *not* set `update_required`, because
             // `new_runtime.propolis_id` might be `None` just because there was,
             // already, no VMM there. `update_required` gets set above if there
             // was any actual state change.
 
-            // We no longer have a VMM.
-            new_runtime.nexus_state = if active_vmm_failed {
-                InstanceState::Failed
-            } else if let Some(g) = active_vmm_update_disposition_gen
-                && current_intent == InstanceIntendedState::Running
-            {
-                info!(
-                    log,
-                    "instance update: VMM was stopped due to its sled being \
-                     evacuated for an update. Setting new runtime instance \
-                     state to SledEvacuating.";
-                    "instance_id" => %instance_id,
-                    "update_disposition_generation" => ?g
-                );
-                // Updates that set the instance state to `SledEvacuating` must
-                // be conditional on the intended state remaining `Running` when
-                // the update is committed. If the intended state changes while
-                // the saga is running, we may need to reevaluate the update to
-                // apply.
-                conditional_on_intent = Some(InstanceIntendedState::Running);
-                InstanceState::SledEvacuating
-            } else {
-                InstanceState::NoVmm
-            };
             // If the active VMM was destroyed and the instance has not migrated
             // out of it, we must delete the instance's network configuration.
             //
@@ -792,13 +814,14 @@ impl UpdatesRequired {
             // as it is no longer consuming any virtual resources. Providing a
             // set of virtual provisioning counters to deallocate also indicates
             // that the instance's oximeter producer should be cleaned up.
-            Some(Deprovision {
+            let deprovision = Deprovision {
                 project_id: snapshot.instance.project_id(),
                 cpus_diff: i64::from(snapshot.instance.ncpus.0.0),
                 ram_diff: snapshot.instance.memory,
-            })
+            };
+            (Some(deprovision), Some(no_vmm_reason))
         } else {
-            None
+            (None, None)
         };
 
         if !update_required {
@@ -806,15 +829,78 @@ impl UpdatesRequired {
         }
 
         Some(Self {
-            new_intent,
             new_runtime,
+            no_vmm_reason,
             destroy_active_vmm,
-            conditional_on_intent,
             update_sled_reservations_for_migration_success,
             destroy_target_vmm,
             deprovision,
             network_config,
         })
+    }
+
+    /// Returns the runtime state to write back to the instance record, and the
+    /// new intended state (or `None` if it should not change), given the
+    /// instance's current intended state at the time the update is committed.
+    fn update_to_commit(
+        &self,
+        current_intent: InstanceIntendedState,
+    ) -> instance::UpdateToCommit {
+        let mut new_runtime = self.new_runtime.clone();
+        // Some state transitions will also require us to update the instance's
+        // intended state. By default, though, we shall not touch it.
+        let mut new_intent = None;
+
+        // If the instance is transitioning to a no-VMM state, we will use the
+        // reason the active VMM has gone away to determine the new state, based
+        // on the current intended state. Otherwise, we will use the new runtime
+        // state determined in `UpdatesRequired`.
+        match self.no_vmm_reason {
+            // If the active VMM has failed, the instance should always be
+            // considered `Failed`, regardless of its intended state.
+            Some(NoVmmReason::Failed) => {
+                new_runtime.nexus_state = InstanceState::Failed;
+            }
+            // If the active VMM stopped for a sled update, *and* the instance
+            // is intended to be running, then the new instance state should be
+            // `SledEvacuating`. This way, it will appear as `Rebooting` in the
+            // external API, and will be eligible to be automatically restarted.
+            Some(NoVmmReason::StoppedForUpdate)
+                if current_intent == InstanceIntendedState::Running =>
+            {
+                new_runtime.nexus_state = InstanceState::SledEvacuating;
+            }
+            // If, on the other hand, the active VMM stopped for a sled update,
+            // but the instance is no longer intended to be running, then the
+            // new instance state should be `NoVmm` (`Stopped`).
+            Some(NoVmmReason::StoppedForUpdate) => {
+                new_runtime.nexus_state = InstanceState::NoVmm;
+            }
+            // If the guest shut itself down, record that in the intended state,
+            // *unless* something else has changed the intended state since the
+            // VMM went away. In that case, don't clobber the more recently set
+            // intended state.
+            Some(NoVmmReason::GuestShutdown)
+                if current_intent == InstanceIntendedState::Running =>
+            {
+                new_runtime.nexus_state = InstanceState::NoVmm;
+                new_intent = Some(InstanceIntendedState::GuestShutdown);
+            }
+            // Otherwise, the instance state should be `NoVmm` (`Stopped`).
+            Some(
+                NoVmmReason::GuestShutdown
+                | NoVmmReason::Stopped
+                | NoVmmReason::Other,
+            ) => {
+                new_runtime.nexus_state = InstanceState::NoVmm;
+            }
+            None => {}
+        };
+        instance::UpdateToCommit {
+            new_runtime,
+            new_intent,
+            expected_intent: current_intent,
+        }
     }
 }
 
@@ -963,8 +1049,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
 
         let UpdatesRequired {
             new_runtime: _,
-            new_intent: _,
-            conditional_on_intent: _,
+            no_vmm_reason: _,
             destroy_active_vmm,
             update_sled_reservations_for_migration_success,
             destroy_target_vmm,
@@ -1383,97 +1468,68 @@ async fn siu_commit_instance_updates(
     let nexus = osagactx.nexus();
 
     let instance_id = authz_instance.id();
-
-    let mut new_runtime = update.new_runtime;
-    let new_intent = update.new_intent;
-    let mut conditional_on_intent = update.conditional_on_intent;
-    let did_unlock = loop {
+    // The instance's new state may depend on its current intended state at the
+    // time we commit the update. User requests may change the intended state
+    // without taking the updater lock, so it may have changed since the
+    // snapshot this update was determined from was read. Therefore, we read the
+    // current intended state, determine the update to commit based on it, and
+    // commit the result only if the intended state hasn't changed yet again. If
+    // it has, we try again with the latest intended state.
+    let mut current_intent = osagactx
+        .datastore()
+        .instance_refetch(&opctx, &authz_instance)
+        .await
+        .map_err(saga_action_failed)?
+        .intended_state;
+    loop {
+        let to_commit = update.update_to_commit(current_intent);
         debug!(
             log,
             "instance update: committing new runtime state and unlocking...";
             "instance_id" => %instance_id,
-            "new_runtime" => ?new_runtime,
-            "new_intent" => ?new_intent,
-            "conditional_on_intent" => ?conditional_on_intent,
+            "intended_state" => %current_intent,
+            "no_vmm_reason" => ?update.no_vmm_reason,
+            "new_runtime" => ?to_commit.new_runtime,
+            "new_intent" => ?to_commit.new_intent,
             "lock" => ?lock,
         );
 
-        let to_commit = instance::UpdateToCommit {
-            new_runtime: &new_runtime,
-            conditional_on_intent,
-            new_intent,
-        };
-
         let commit_result = osagactx
             .datastore()
-            .instance_commit_update(&opctx, &authz_instance, &lock, to_commit)
+            .instance_commit_update(&opctx, &authz_instance, &lock, &to_commit)
             .await;
         match commit_result {
-            Ok(did_unlock) => break did_unlock,
-            Err(instance::CommitUpdateError::Other(e)) => {
-                return Err(saga_action_failed(e));
+            Ok(did_unlock) => {
+                info!(
+                    log,
+                    "instance update: committed update new runtime state!";
+                    "instance_id" => %instance_id,
+                    "intended_state" => %current_intent,
+                    "no_vmm_reason" => ?update.no_vmm_reason,
+                    "new_runtime" => ?to_commit.new_runtime,
+                    "new_intent" => ?to_commit.new_intent,
+                    "did_unlock" => ?did_unlock,
+                );
+                break;
             }
             Err(instance::CommitUpdateError::IntendedStateChanged {
-                current_intent,
+                actual_intent,
             }) => {
                 info!(
                     log,
-                    "instance update: tried to commit updates conditionally on \
-                     the instance's intended state remaining \
-                     {conditional_on_intent:?},  but it has changed to \
-                     {current_intent:?}";
+                    "instance update: intended state changed while \
+                     committing; retrying with the new intended state";
                     "instance_id" => %instance_id,
-                    "new_runtime" => ?new_runtime,
-                    "new_intent" => ?new_intent,
-                    "conditional_on_intent" => ?conditional_on_intent,
-                    "lock" => ?lock,
+                    "expected_intent" => %current_intent,
+                    "current_intent" => %actual_intent,
                 );
-                if new_runtime.nexus_state == InstanceState::SledEvacuating {
-                    match current_intent {
-                        InstanceIntendedState::Stopped
-                        | InstanceIntendedState::Destroyed
-                        // XXX(eliza): it's weird to see guest shutdown here,
-                        // but we should try to handle it gracefully i guess...
-                        | InstanceIntendedState::GuestShutdown => {
-                            new_runtime.nexus_state = InstanceState::NoVmm;
-                            conditional_on_intent =
-                                Some(current_intent);
-                        },
-                        InstanceIntendedState::Running => {
-                            return Err(saga_action_failed(Error::internal_error(
-                                "if transitioning to SledEvacuating, then \
-                                    running should have been the desired \
-                                    intended state, so this really shouldn't \
-                                    have happened!"
-                            )));
-                        },
-                    }
-                } else {
-                    // XXX(eliza): might there be other reasons we want to
-                    // perform conditional updates?
-                    return Err(saga_action_failed(Error::internal_error(
-                        format!(
-                            "committing an instance update conditionally on \
-                            the instance's intended state should currently only \
-                            occur for state transitions to SledEvacuating, but \
-                            {instance_id} attempted to transition to {} \
-                            conditional on {conditional_on_intent:?}",
-                            new_runtime.nexus_state
-                        ),
-                    )));
-                }
+                current_intent = actual_intent;
+            }
+            Err(instance::CommitUpdateError::Other(e)) => {
+                return Err(saga_action_failed(e));
             }
         }
-    };
-
-    info!(
-        log,
-        "instance update: committed update new runtime state!";
-        "instance_id" => %instance_id,
-        "new_runtime" => ?new_runtime,
-        "new_intent" => ?new_intent,
-        "did_unlock" => ?did_unlock,
-    );
+    }
 
     if update.network_config.is_some() {
         // If the update we performed changed networking configuration, activate
@@ -1651,6 +1707,7 @@ async fn siu_chain_successor_saga(
                  successor update saga...";
                 "instance_id" => %instance_id,
                 "update.new_runtime_state" => ?update.new_runtime,
+                "update.no_vmm_reason" => ?update.no_vmm_reason,
                 "update.network_config_update" => ?update.network_config,
                 "update.destroy_active_vmm" => ?update.destroy_active_vmm,
                 "update.destroy_target_vmm" => ?update.destroy_target_vmm,
@@ -2206,7 +2263,8 @@ mod test {
             let update = UpdatesRequired::for_instance(&logctx.log, &snapshot)
                 .expect("the destroyed active VMM requires an update");
 
-            let found_instance_state = update.new_runtime.nexus_state;
+            let to_commit = update.update_to_commit(intended_state);
+            let found_instance_state = to_commit.new_runtime.nexus_state;
             assert_eq!(
                 found_instance_state, expected_instance_state,
                 "unexpected instance state when the intended state is {intended_state:?}",
@@ -2461,10 +2519,10 @@ mod test {
     // update saga to transition the instance record to the `SledEvacuating`
     // state if (and only if) its intended state is `Running`. If the instance
     // is `SledEvacuating`, the instance-reincarnation task will attempt to
-    // restart it. The decision to advance the state to `SledEvacuating` is made
-    // from the snapshot taken by the `start_instance_update` saga, but the
-    // state is not actually written until the `siu_commit_instance_update` node
-    // in the "real" update saga.
+    // restart it. Previously, the decision to advance the state to
+    // `SledEvacuating` was made from the snapshot taken by the
+    // `start_instance_update` saga, but the state is not actually written until
+    // the `siu_commit_instance_update` node in the "real" update saga.
     //
     // If the instance is stopped by an external API request after the state
     // snapshot is read snapshot but before `siu_commit_instance_update`, the
@@ -2529,12 +2587,11 @@ mod test {
         let real_params = make_real_params(cptestctx, &opctx, params).await;
         // Make sure we are still actually testing the expected update saga...
         assert_eq!(
-            real_params.update.new_runtime.nexus_state,
-            InstanceState::SledEvacuating,
-            "the update computed from a snapshot with intended state \
-             `Running` should move the instance to `SledEvacuating`. if this \
-             is no longer the case, this test is no longer testing the right \
-             thing!",
+            real_params.update.no_vmm_reason,
+            Some(NoVmmReason::StoppedForUpdate),
+            "the update should be for a VMM stopped for a sled evacuation. if \
+             this is no longer the case, this test is no longer testing the \
+             right thing!",
         );
 
         // Now, simulate a user stopping the instance through the external API.
@@ -2574,6 +2631,70 @@ mod test {
             "an instance stopped by the user during an update saga for an \
              active VMM stopped due to sled evacuation should come to rest in \
              the `NoVmm` state, not `SledEvacuating`\ninstance: {instance:#?}",
+        );
+    }
+
+    // Like `test_sled_evacuating_update_races_with_instance_stop`, but for an
+    // active VMM that was *not* stopped for a sled evacuation. When such a VMM
+    // is destroyed while the instance is intended to be running, the update
+    // saga records that the guest shut itself down by changing the instance's
+    // intended state to `GuestShutdown`. That must not overwrite a user's
+    // request to stop the instance which arrives after the state snapshot is
+    // taken.
+    #[nexus_test(server = crate::Server)]
+    async fn test_guest_shutdown_update_races_with_instance_stop(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+        let instance_id =
+            InstanceUuid::from_untyped_uuid(state.instance().id());
+        let authz_instance = params.authz_instance.clone();
+        assert_eq!(
+            state.instance().intended_state,
+            InstanceIntendedState::Running
+        );
+
+        let real_params = make_real_params(cptestctx, &opctx, params).await;
+        // Make sure we are still actually testing the expected update saga...
+        assert_eq!(
+            real_params.update.no_vmm_reason,
+            Some(NoVmmReason::GuestShutdown),
+            "the update should be for a VMM that was destroyed while intended \
+             to be running, and not migrating or being evacuated. if this is \
+             no longer the case, this test is no longer testing the right \
+             thing!",
+        );
+
+        // The user stops the instance after the snapshot was taken.
+        datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                InstanceIntendedState::Stopped,
+            )
+            .await
+            .expect("setting the intended state should succeed");
+
+        nexus
+            .sagas
+            .saga_execute::<SagaDoActualInstanceUpdate>(real_params)
+            .await
+            .expect("update saga should succeed");
+
+        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
+        let instance = state.instance();
+        assert_instance_unlocked(instance);
+        assert_instance_record_is_consistent(instance);
+        assert_eq!(instance.runtime().nexus_state, InstanceState::NoVmm);
+        assert_eq!(
+            instance.intended_state,
+            InstanceIntendedState::Stopped,
+            "a user's request to stop the instance should not be overwritten \
+             with `GuestShutdown`\ninstance: {instance:#?}",
         );
     }
 
