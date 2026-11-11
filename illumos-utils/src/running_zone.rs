@@ -548,35 +548,6 @@ impl RunningZone {
     }
 }
 
-impl Drop for RunningZone {
-    fn drop(&mut self) {
-        if let Some(_) = self.id.take() {
-            let log = self.inner.log.clone();
-            let name = self.name().to_string();
-            let zones_api = self.inner.zones_api.clone();
-
-            // Take the OPTE ports and move them into the scope of the spawned
-            // task below, where we'll drop them _after_ the zone is removed.
-            // The order matters, because deleting the ports while the zone owns
-            // them will return `EBUSY`. See
-            // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
-            // and the surrounding thread for context.
-            let opte_ports = std::mem::take(&mut self.inner.opte_ports);
-            tokio::task::spawn(async move {
-                match zones_api.halt_and_remove_logged(&log, &name).await {
-                    Ok(()) => {
-                        info!(log, "Stopped and uninstalled zone")
-                    }
-                    Err(e) => {
-                        warn!(log, "Failed to stop zone: {}", e)
-                    }
-                }
-                drop(opte_ports);
-            });
-        }
-    }
-}
-
 /// A process running in the zone associated with an SMF service.
 #[derive(Clone, Debug)]
 pub struct ServiceProcess {
@@ -695,6 +666,43 @@ impl InstalledZone {
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
         &self.links
+    }
+}
+
+impl Drop for InstalledZone {
+    fn drop(&mut self) {
+        let log = self.log.clone();
+        let name = self.name().to_string();
+        let zones_api = self.zones_api.clone();
+
+        // Take the OPTE ports and move them into the scope of the spawned
+        // task below, where we'll drop them _after_ the zone is removed.
+        // The order matters, because deleting the ports while the zone owns
+        // them will return `EBUSY`. See
+        // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
+        // and the surrounding thread for context.
+        let opte_ports = std::mem::take(&mut self.opte_ports);
+        tokio::task::spawn(async move {
+            // Regardless of whether or not this InstalledZone` has been booted
+            // and is owned by a `RunningZone`, `halt_and_remove_logged` will do
+            // the correct thing: if the zone is `Ready` or `Running`, it will
+            // halt and uninstall it; if the zone is `Configured` and has not
+            // yet been installed, it will just be deleted; and otherwise, it
+            // will be uninstalled.
+            //
+            // Thus, this drop impl should be sufficient to properly remove the
+            // zone *regardless* of whether it is dropped before it is booted or
+            // if it is part of a `RunningZone` which is being dropped.
+            match zones_api.halt_and_remove_logged(&log, &name).await {
+                Ok(()) => {
+                    info!(log, "Stopped and uninstalled zone")
+                }
+                Err(e) => {
+                    warn!(log, "Failed to stop zone: {}", e)
+                }
+            }
+            drop(opte_ports);
+        });
     }
 }
 
