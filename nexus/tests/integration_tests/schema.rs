@@ -551,7 +551,7 @@ async fn update_since_base_has_idempotent_up() {
     logctx.cleanup_successful();
 }
 
-const COLUMNS: [&'static str; 8] = [
+const COLUMNS: [&'static str; 11] = [
     "table_catalog",
     "table_schema",
     "table_name",
@@ -564,6 +564,15 @@ const COLUMNS: [&'static str; 8] = [
     // CockroachDB-specific column includes them. See:
     // https://www.cockroachlabs.com/docs/v23.1/information-schema#columns
     "crdb_sql_type",
+    // None of the type columns above say whether a column is computed, or
+    // what it is computed from. Whether a computed column is STORED or
+    // VIRTUAL is not reported here; it is compared through
+    // "information_schema.statistics", where STORED columns appear in the
+    // primary index.
+    "is_generated",
+    "generation_expression",
+    // CockroachDB-specific: "YES" for NOT VISIBLE columns.
+    "is_hidden",
 ];
 
 const CONSTRAINT_COLUMN_USAGE: [&'static str; 7] = [
