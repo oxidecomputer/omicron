@@ -61,6 +61,26 @@ macro_rules! bail_txn {
     }
 }
 
+/// An outcome of [`DataStore::tq_update_prepare_status`].
+///
+/// Other states (e.g., not latest, no longer preparing) are returned as errors.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TqPrepareStatusOutcome {
+    /// Trust quorum is still in the `Preparing` or `PreparingLrtqUpgrade`
+    /// states.
+    // (This doesn't carry the config for purely instrumental reasons -- no
+    // caller needs the config here.)
+    StillPreparing,
+    /// Trust quorum has moved to the `Committing` state.
+    Committing {
+        /// The trust quorum config.
+        ///
+        /// The config is read at the end of the update's transaction, so it
+        /// includes everything written by the `tq_update_prepare_status` call.
+        config: Box<TrustQuorumConfig>,
+    },
+}
+
 fn i64_to_epoch(val: i64) -> Result<Epoch, Error> {
     let Ok(epoch) = val.try_into() else {
         return Err(Error::internal_error(&format!(
@@ -773,17 +793,23 @@ impl DataStore {
         })
     }
 
-    /// If this configuration is in the `Preparing` state, then update any
-    /// members to acknowledge the prepare.
+    /// If this configuration is the latest one and is in the `Preparing` or
+    /// `PreparingLrtqUpgrade` state, update any members to acknowledge the
+    /// prepare.
     ///
-    /// Also, update any digests or encrypted rack secrets if necessary.
-    /// Lastly, if enough members have acked prepares then commit the configuration.
+    /// Also, update any digests or encrypted rack secrets if necessary. Lastly,
+    /// if enough members have acked prepares, move the configuration to the
+    /// `Committing` state, and return the configuration as written by this
+    /// transaction.
+    ///
+    /// Returns an error if this configuration is not the latest one, or if it
+    /// is no longer preparing.
     pub async fn tq_update_prepare_status(
         &self,
         opctx: &OpContext,
         config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
-    ) -> Result<TrustQuorumConfigState, Error> {
+    ) -> Result<TqPrepareStatusOutcome, Error> {
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(config.rack_id);
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
@@ -925,10 +951,29 @@ impl DataStore {
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
 
-                        return Ok(TrustQuorumConfigState::Committing);
+                        let committing_config =
+                            Self::tq_get_config_with_members_from_epoch_conn(
+                                &c,
+                                rack_id,
+                                config.epoch,
+                            )
+                            .await
+                            .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                        let Some(committing_config) = committing_config else {
+                            bail_txn!(
+                                err,
+                                "Trust quorum config for rack_id {} at epoch \
+                                 {} disappeared after moving it to committing",
+                                rack_id,
+                                epoch
+                            );
+                        };
+                        return Ok(TqPrepareStatusOutcome::Committing {
+                            config: Box::new(committing_config),
+                        });
                     }
 
-                    Ok(db_config.state.into())
+                    Ok(TqPrepareStatusOutcome::StillPreparing)
                 }
             })
             .await
@@ -2324,7 +2369,7 @@ mod tests {
         let min_acks = coordinator_config.threshold.0 as usize
             + read_config.commit_crash_tolerance as usize;
 
-        datastore
+        let outcome = datastore
             .tq_update_prepare_status(
                 opctx,
                 coordinator_config.clone(),
@@ -2343,6 +2388,13 @@ mod tests {
             .await
             .expect("no error")
             .expect("returned config");
+
+        assert_eq!(
+            outcome,
+            TqPrepareStatusOutcome::Committing {
+                config: Box::new(read_config.clone())
+            }
+        );
 
         // We've acked enough nodes and should have written our status to the DB
         assert_eq!(read_config.epoch, config.epoch);
