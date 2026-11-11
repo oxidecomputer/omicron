@@ -45,6 +45,7 @@ mod sled_resource_vmm_state;
 mod support_bundle_time_range;
 mod tufaceous_v2;
 mod vmm_failure_reason_if_failed;
+mod widen_lldp_system_description;
 
 pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let versions: HashMap<&str, Version> = KNOWN_VERSIONS
@@ -90,6 +91,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(support_bundle_time_range);
     register!(inv_service_processor_rack_id);
     register!(add_rack_id_to_inv_sled_agent);
+    register!(widen_lldp_system_description);
 
     map
 }
