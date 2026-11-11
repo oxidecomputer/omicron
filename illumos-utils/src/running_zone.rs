@@ -202,12 +202,13 @@ impl RunningZone {
         S: AsRef<std::ffi::OsStr>,
     {
         use std::os::unix::process::CommandExt;
-        if !self.inner.has_stopped {
+        if self.inner.has_stopped {
             return Err(RunCommandError {
                 zone: self.name().to_string(),
                 err: crate::ExecutionError::NotRunning,
             });
         };
+        let id = self.id;
         let template = std::sync::Arc::new(
             contract::Template::new(contract::ContractType::Process).map_err(
                 |err| RunCommandError { zone: self.name().to_string(), err },
@@ -226,7 +227,7 @@ impl RunningZone {
 
                 // Enter the target zone itself, in which the `exec()` call will
                 // be made.
-                if zenter::zone_enter(self.id) == 0 {
+                if zenter::zone_enter(id) == 0 {
                     Ok(())
                 } else {
                     let err = std::io::Error::last_os_error();
