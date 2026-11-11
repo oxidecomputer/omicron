@@ -1,0 +1,164 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Defines database model types for the Vmm table.
+//!
+//! A row in the Vmm table stores information about a single Propolis VMM
+//! running on a specific sled that incarnates a specific instance. A VMM's
+//! instance ID, sled assignment, and Propolis server IP are all fixed for the
+//! lifetime of the VMM. As with instances, the VMM's lifecycle-related state is
+//! broken out into a separate type that allows sled agent and Nexus to send VMM
+//! state updates to each other without sending parameters that are useless to
+//! sled agent or that sled agent will never update (like the sled ID).
+
+use super::{Generation, VmmState};
+use crate::typed_generation::DbTypedGeneration;
+use crate::typed_uuid::DbTypedUuid;
+use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason};
+use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::vmm;
+use omicron_generation_kinds::UpdateDispositionGenerationKind;
+use omicron_uuid_kinds::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// An individual VMM process that incarnates a specific instance.
+#[derive(
+    Clone,
+    Queryable,
+    Debug,
+    Selectable,
+    Serialize,
+    Deserialize,
+    Insertable,
+    PartialEq,
+)]
+#[diesel(table_name = vmm)]
+pub struct Vmm {
+    /// This VMM's primary ID, referred to by an `Instance`'s `propolis_id` or
+    /// `target_propolis_id` fields.
+    pub id: Uuid,
+
+    /// The time this VMM record was created.
+    pub time_created: DateTime<Utc>,
+
+    /// The time this VMM was destroyed.
+    pub time_deleted: Option<DateTime<Utc>>,
+
+    /// The ID of the `Instance` that owns this VMM.
+    pub instance_id: Uuid,
+
+    /// The time at which this state was most recently updated.
+    pub time_state_updated: DateTime<Utc>,
+
+    /// The generation number protecting this VMM's state and update time.
+    #[diesel(column_name = state_generation)]
+    #[serde(rename = "gen")]
+    pub generation: Generation,
+
+    /// The sled assigned to the care and feeding of this VMM.
+    pub sled_id: DbTypedUuid<SledKind>,
+
+    /// The IP address at which this VMM is serving the Propolis server API.
+    pub propolis_ip: ipnetwork::IpNetwork,
+
+    /// The socket port on which this VMM is serving the Propolis server API.
+    pub propolis_port: SqlU16,
+
+    /// The state of this VMM. If this VMM is the active VMM for a given
+    /// instance, this state is the instance's logical state.
+    pub state: VmmState,
+
+    /// The CPU platform for this VMM. This may be chosen implicitly by the
+    /// control plane if this VMM's instance didn't specify a required platform
+    /// when it was started.
+    pub cpu_platform: VmmCpuPlatform,
+
+    /// If this VMM is, or has ever been, in the `Failed` state, this field
+    /// describes why it failed. This is `None` for VMMs that have never been in
+    /// the `Failed` state.
+    pub failure_reason: Option<VmmFailureReason>,
+
+    /// The sled's `update_disposition` generation at which this VMM was marked
+    /// as needing to be stopped in order to update the sled.
+    ///
+    /// This is set when the sled begins evacuating its VMs. It indicates two
+    /// things: that the VMM needs to be stopped, and that when it is stopped,
+    /// this was in order to update the sled.
+    ///
+    /// This field is set just as a blueprint containing sleds to be updated
+    /// is executed. So, depending on _when_ this field is observed, the sled
+    /// and/or associated VMMs may not have been stopped yet.
+    ///
+    /// The `update_disposition` generation number is used primarily for
+    /// debugging purposes. During the process to stop VMMs for an update, we
+    /// only care if this field is stopped or not. THe field is NULL when its
+    /// state has not been modified by an update.
+    pub stop_for_update_disposition_generation:
+        Option<DbTypedGeneration<UpdateDispositionGenerationKind>>,
+}
+
+impl Vmm {
+    /// Creates a new VMM record.
+    ///
+    /// The new VMM record will be in [`VmmState::Creating`] until it is
+    /// registered with a sled-agent.
+    pub fn new(
+        id: PropolisUuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
+        propolis_ip: ipnetwork::IpNetwork,
+        propolis_port: u16,
+        cpu_platform: VmmCpuPlatform,
+    ) -> Self {
+        let now = Utc::now();
+
+        Self {
+            id: id.into_untyped_uuid(),
+            time_created: now,
+            time_deleted: None,
+            instance_id: instance_id.into_untyped_uuid(),
+            time_state_updated: now,
+            generation: Generation::new(),
+            sled_id: sled_id.into(),
+            propolis_ip,
+            propolis_port: SqlU16(propolis_port),
+            state: VmmState::Creating,
+            cpu_platform,
+            failure_reason: None,
+            stop_for_update_disposition_generation: None,
+        }
+    }
+
+    pub fn runtime(&self) -> nexus_types::instance::VmmRuntimeState {
+        use nexus_types::instance as types;
+        let state = match (self.state, self.failure_reason) {
+            (VmmState::Failed, None) => {
+                // Weird and bad!
+                types::VmmState::Failed(types::VmmFailureReason::Prehistoric)
+            }
+            (VmmState::Failed, Some(reason)) => {
+                types::VmmState::Failed(reason.into())
+            }
+            (VmmState::Creating, _) => types::VmmState::Creating,
+            (VmmState::Starting, _) => types::VmmState::Starting,
+            (VmmState::Running, _) => types::VmmState::Running,
+            (VmmState::Stopping, _) => types::VmmState::Stopping,
+            (VmmState::Stopped, _) => types::VmmState::Stopped,
+            (VmmState::Rebooting, _) => types::VmmState::Rebooting,
+            (VmmState::Migrating, _) => types::VmmState::Migrating,
+            (VmmState::Destroyed, _) => types::VmmState::Destroyed,
+            (VmmState::SagaUnwound, _) => types::VmmState::SagaUnwound,
+        };
+        types::VmmRuntimeState {
+            state,
+            generation: self.generation.into(),
+            time_updated: self.time_state_updated,
+        }
+    }
+
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id.into()
+    }
+}

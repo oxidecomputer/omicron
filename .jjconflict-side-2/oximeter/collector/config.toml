@@ -1,0 +1,12 @@
+# Example configuration file for running an oximeter collector server
+
+nexus_address = "[::1]:12221"
+
+[db]
+address = "[::1]:9000"
+batch_size = 1000
+batch_interval = 5 # In seconds
+
+[log]
+level = "debug"
+mode = "stderr-terminal"

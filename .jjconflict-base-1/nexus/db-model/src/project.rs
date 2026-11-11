@@ -1,0 +1,148 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use super::{
+    AffinityGroup, AntiAffinityGroup, Disk, Generation, Instance, Name,
+    Snapshot, Vpc,
+};
+use crate::DbTypedUuid;
+use crate::Image;
+use crate::collection::DatastoreCollectionConfig;
+use chrono::{DateTime, Utc};
+use db_macros::Resource;
+use nexus_db_schema::schema::{
+    affinity_group, anti_affinity_group, disk, image, instance, project,
+    snapshot, vpc,
+};
+use nexus_types::external_api::project as project_types;
+use nexus_types::identity::Resource;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
+use serde::Deserialize;
+use serde::Serialize;
+
+/// Describes a project within the database.
+#[derive(
+    Selectable,
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = project)]
+#[resource(uuid_kind = ProjectKind)]
+pub struct Project {
+    #[diesel(embed)]
+    identity: ProjectIdentity,
+
+    /// child resource generation number, per RFD 192
+    pub rcgen: Generation,
+    pub silo_id: DbTypedUuid<SiloKind>,
+}
+
+impl Project {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
+    /// Creates a new database Project object.
+    pub fn new(
+        silo_id: SiloUuid,
+        params: project_types::ProjectCreate,
+    ) -> Self {
+        Self::new_with_id(ProjectUuid::new_v4(), silo_id, params)
+    }
+
+    /// Creates a new database Project object with a specific ID.
+    pub fn new_with_id(
+        id: ProjectUuid,
+        silo_id: SiloUuid,
+        params: project_types::ProjectCreate,
+    ) -> Self {
+        Self {
+            identity: ProjectIdentity::new(id, params.identity),
+            rcgen: Generation::new(),
+            silo_id: silo_id.into(),
+        }
+    }
+}
+
+impl From<Project> for project_types::Project {
+    fn from(project: Project) -> Self {
+        Self { identity: project.identity() }
+    }
+}
+
+impl DatastoreCollectionConfig<Instance> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = instance::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<AffinityGroup> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = affinity_group::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<AntiAffinityGroup> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = anti_affinity_group::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Disk> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = disk::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Image> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = image::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Snapshot> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = snapshot::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<Vpc> for Project {
+    type CollectionId = DbTypedUuid<ProjectKind>;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = vpc::dsl::project_id;
+}
+
+/// Describes a set of updates for the [`Project`] model.
+#[derive(AsChangeset)]
+#[diesel(table_name = project)]
+pub struct ProjectUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<project_types::ProjectUpdate> for ProjectUpdate {
+    fn from(params: project_types::ProjectUpdate) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
+}

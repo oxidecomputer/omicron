@@ -1,0 +1,40 @@
+format_version = 1
+
+[target]
+name = "collection_target"
+description = "A collection such as project or silo, whose provisioned virtual resources are tracked"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "id" ] },
+]
+
+[fields.id]
+type = "uuid"
+description = "UUID of the tracked collection"
+
+[[metrics]]
+name = "virtual_disk_space_provisioned"
+description = "Total virtual disk space provisioned in the collection"
+units = "bytes"
+datum_type = "i64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "ram_provisioned"
+description = "Total memory provisioned in the collection"
+units = "bytes"
+datum_type = "i64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "cpus_provisioned"
+description = "Total number of vCPUs provisioned in the collection"
+units = "count"
+datum_type = "i64"
+versions = [
+    { added_in = 1, fields = [] }
+]

@@ -1,0 +1,5 @@
+        found sagas:   5 (in-progress, assigned to this Nexus)
+        recovered:     4 (successfully)
+        failed:        3
+        skipped:       2 (already running)
+        removed:       1 (newly finished)

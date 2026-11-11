@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_i8_local MODIFY COLUMN datum Nullable(Int8)

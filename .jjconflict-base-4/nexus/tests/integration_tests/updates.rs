@@ -1,0 +1,1298 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use anyhow::{Context, Result, ensure};
+use camino_tempfile::{Builder, Utf8TempPath};
+use chrono::{DateTime, Duration, SubsecRound, Utc};
+use dropshot::ResultsPage;
+use dropshot::test_util::ClientTestContext;
+use http::{Method, StatusCode};
+use nexus_db_model::SemverVersion;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pub_test_utils::helpers::insert_test_tuf_repo;
+use nexus_test_interface::NexusServer;
+use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::background::run_tuf_artifact_replication_step;
+use nexus_test_utils::background::wait_tuf_artifact_replication_step;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::object_get;
+use nexus_test_utils::resource_helpers::object_get_error;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::update;
+use nexus_types::external_api::update::TufRepoUpload;
+use nexus_types::external_api::update::TufRepoUploadStatus;
+use pretty_assertions::assert_eq;
+use semver::Version;
+use serde::Deserialize;
+use std::assert_matches;
+use std::collections::HashSet;
+use std::fmt::Debug;
+use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
+use tufaceous_artifact::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
+
+use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_lockstep_client::types::SledSelector;
+use nexus_test_utils::background::run_blueprint_planner;
+use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::deployment::ReconfiguratorStateInput;
+use nexus_types::deployment::UnstableReconfiguratorState;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
+use omicron_test_utils::dev::dropbox::DropboxReader;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_uuid_kinds::GenericUuid;
+use slog_error_chain::InlineErrorChain;
+
+const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+/// Get artifacts for a repository using the datastore directly, sorted by ID
+async fn get_repo_artifacts(
+    cptestctx: &ControlPlaneTestContext,
+    version: &str,
+) -> ArtifactSet {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let system_version = SemverVersion::from(
+        version.parse::<Version>().expect("version should parse"),
+    );
+
+    let repo = datastore
+        .tuf_repo_get_by_version(&opctx, system_version)
+        .await
+        .expect("should get repo by version");
+
+    let artifacts = datastore
+        .tuf_list_repo_artifacts(&opctx, repo.id.into())
+        .await
+        .expect("should get artifacts");
+
+    artifacts.into_iter().map(Artifact::from).collect()
+}
+
+pub struct TestTrustRoot {
+    pub key: Ed25519Key,
+    pub expiry: DateTime<Utc>,
+    pub root_role: Root,
+}
+
+impl TestTrustRoot {
+    pub async fn generate() -> Result<TestTrustRoot> {
+        let key = Ed25519Key::generate()?;
+        let expiry = Utc::now().trunc_subsecs(0) + Duration::weeks(1);
+        let root_role =
+            Root::generate(&[Box::new(key.clone())], expiry).await?;
+        Ok(TestTrustRoot { key, expiry, root_role })
+    }
+
+    pub fn to_upload_request<'a>(
+        &'a self,
+        client: &'a dropshot::test_util::ClientTestContext,
+        expected_status: StatusCode,
+    ) -> NexusRequest<'a> {
+        let request =
+            RequestBuilder::new(client, Method::POST, TRUST_ROOTS_URL)
+                .raw_body(Some(self.root_role.to_string()))
+                .expect_status(Some(expected_status));
+        NexusRequest::new(request).authn_as(AuthnMode::PrivilegedUser)
+    }
+
+    pub async fn assemble_repo(
+        &self,
+        editor: RepositoryEditor<'_>,
+    ) -> Result<TestRepo> {
+        let (file, archive_path) = Builder::new()
+            .prefix("archive")
+            .suffix(".zip")
+            .tempfile()
+            .context("error creating temp file for archive")?
+            .into_parts();
+        let signed = editor
+            .finish()
+            .await?
+            .root(self.root_role.as_str())
+            .key(self.key.clone())
+            .snapshot_expires(self.expiry)
+            .targets_expires(self.expiry)
+            .timestamp_expires(self.expiry)
+            .sign()
+            .await?;
+        signed.write_zip(file, chrono::Utc::now()).await?;
+        Ok(TestRepo(archive_path))
+    }
+}
+
+pub struct TestRepo(pub Utf8TempPath);
+
+impl TestRepo {
+    /// Generate a `NexusRequest` to upload this repo.
+    ///
+    /// Prefer `into_upload_request` to ensure the temporary file is deleted.
+    pub fn to_upload_request<'a>(
+        &self,
+        client: &'a dropshot::test_util::ClientTestContext,
+        expected_status: StatusCode,
+    ) -> NexusRequest<'a> {
+        let url = format!(
+            "/v1/system/update/repositories?file_name={}",
+            self.0.file_name().expect("archive path must have a file name")
+        );
+        let request = RequestBuilder::new(client, Method::PUT, &url)
+            .body_file(Some(&self.0))
+            .expect_status(Some(expected_status));
+        NexusRequest::new(request).authn_as(AuthnMode::PrivilegedUser)
+    }
+
+    /// Generate a `NexusRequest` to upload this repo, and then delete the
+    /// temporary file.
+    ///
+    /// Panics if we fail to delete the temporary file.
+    pub fn into_upload_request(
+        self,
+        client: &dropshot::test_util::ClientTestContext,
+        expected_status: StatusCode,
+    ) -> NexusRequest<'_> {
+        let request = self.to_upload_request(client, expected_status);
+        self.0.close().unwrap();
+        request
+    }
+}
+
+#[tokio::test]
+async fn test_repo_upload_unconfigured() -> Result<()> {
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_repo_upload_unconfigured",
+    )
+    .start::<omicron_nexus::Server>()
+    .await;
+    let client = &cptestctx.external_client;
+
+    // Generate a trust root, but _don't_ upload it to Nexus.
+    let trust_root = TestTrustRoot::generate().await?;
+    // Build a fake TUF repo and attempt to upload it to Nexus. This should fail
+    // with a 400 error because we did not upload a trusted root role.
+    trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
+        .await?
+        .into_upload_request(client, StatusCode::BAD_REQUEST)
+        .execute()
+        .await?;
+
+    // The artifact replication background task should have nothing to do.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    assert_eq!(
+        status.last_run_counters.put_ok + status.last_run_counters.copy_ok,
+        0
+    );
+    assert_eq!(status.local_repos, 0);
+
+    // Attempt to fetch a repository description from Nexus. This should fail
+    // with a 404 error.
+    object_get_error(
+        client,
+        "/v1/system/update/repositories/1.0.0",
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
+    cptestctx.teardown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_repo_upload() -> Result<()> {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_repo_upload")
+            .with_extra_sled_agents(3)
+            .start::<omicron_nexus::Server>()
+            .await;
+    let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
+
+    // The initial generation number should be 1.
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        1u32.into()
+    );
+
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+
+    // Build a fake TUF repo
+    let repo = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
+        .await?;
+    // To ensure the next repo we generate with the same arguments has a
+    // different hash, start a 1s timer now which we will await later. (The
+    // intervening steps almost certainly take longer than a second, but just in
+    // case we make things faster...)
+    let different_hash_timer =
+        tokio::time::sleep(std::time::Duration::from_secs(1));
+
+    // Generate a repository and upload it to Nexus.
+    let initial_repo = {
+        let response = repo
+            .to_upload_request(client, StatusCode::OK)
+            .execute()
+            .await
+            .context("error uploading repository")?;
+
+        let response = serde_json::from_slice::<TufRepoUpload>(&response.body)
+            .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoUploadStatus::Inserted);
+        response.repo
+    };
+
+    // Get artifacts using the datastore directly
+    let initial_artifacts = get_repo_artifacts(&cptestctx, "1.0.0").await;
+    let unique_sha256_count = initial_artifacts
+        .iter()
+        .map(|artifact| artifact.hash)
+        .collect::<HashSet<_>>()
+        .len();
+    // The generation number should now be 2.
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        2u32.into()
+    );
+
+    // The artifact replication background task should have been activated, and
+    // we should see a local repo and successful PUTs.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.generation, 2u32.into());
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.put_ok, 3 * unique_sha256_count);
+    assert_eq!(status.last_run_counters.copy_ok, unique_sha256_count);
+    // The local repo is not deleted until the next task run.
+    assert_eq!(status.local_repos, 1);
+
+    // Wait for all the copy requests to complete.
+    futures::future::join_all(cptestctx.sled_agents.iter().map(|sled_agent| {
+        sled_agent.sled_agent().artifact_store().wait_for_writers()
+    }))
+    .await;
+
+    // Run the replication background task again; the local repos should be
+    // dropped.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.local_repos, 0);
+
+    // Upload the repository to Nexus again. This should return a 200 with an
+    // `AlreadyExists` status.
+    let reupload_description = {
+        let response = repo
+            .into_upload_request(client, StatusCode::OK)
+            .execute()
+            .await
+            .context("error uploading repository a second time")?;
+
+        let response = serde_json::from_slice::<TufRepoUpload>(&response.body)
+            .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoUploadStatus::AlreadyExists);
+        response.repo
+    };
+
+    // Get artifacts again and compare them
+    let reupload_artifacts = get_repo_artifacts(&cptestctx, "1.0.0").await;
+
+    assert_eq!(
+        initial_artifacts, reupload_artifacts,
+        "initial artifacts match reupload artifacts"
+    );
+
+    // Also verify that the repo metadata (without artifacts) matches
+    assert_eq!(
+        initial_repo.hash, reupload_description.hash,
+        "repo hash matches"
+    );
+    assert_eq!(
+        initial_repo.system_version, reupload_description.system_version,
+        "system version matches"
+    );
+
+    // We didn't insert a new repo, so the generation number should still be 2.
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        2u32.into()
+    );
+
+    // Now get the repository that was just uploaded.
+    let repo = object_get::<update::TufRepo>(
+        client,
+        "/v1/system/update/repositories/1.0.0",
+    )
+    .await;
+
+    // Compare just the repo metadata (not artifacts)
+    assert_eq!(initial_repo.hash, repo.hash, "repo hash matches");
+    assert_eq!(
+        initial_repo.system_version, repo.system_version,
+        "system version matches"
+    );
+
+    // Upload a newly-generated repository with the same system version. The ZIP
+    // archive timestamps will differ and produce a different hash, which should
+    // return an error.
+    {
+        different_hash_timer.await;
+        let response = trust_root
+            .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
+            .await?
+            .into_upload_request(client, StatusCode::CONFLICT)
+            .execute()
+            .await
+            .context("error uploading repository for hash mismatch")?;
+        assert_error_message_contains(
+            &response.body,
+            "Uploaded repository with system version 1.0.0 has SHA256 hash",
+        )?;
+    }
+
+    // Upload a new repository with the same system version but with an extra
+    // artifact. This should return an error.
+    {
+        let editor = RepositoryEditor::fake(Version::new(1, 0, 0))?
+            .add_fake_sp_archive(SpTags { sp_board: "another-one".into() })?;
+        let response = trust_root
+            .assemble_repo(editor)
+            .await?
+            .into_upload_request(client, StatusCode::CONFLICT)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with different artifact version \
+                 but same system version",
+            )?;
+        assert_error_message_contains(
+            &response.body,
+            "Uploaded repository with system version 1.0.0 does not have the \
+            same artifacts as existing repository with same system version",
+        )?;
+    }
+
+    // Upload a new repository with a different system version, but with
+    // artifacts with the same contents as already-uploaded artifacts and
+    // different versions. This must fail, because two artifacts with the same
+    // contents must have the same version. This is done by setting the version
+    // field to 2.0.0 while creating the fake artifacts with an interior version
+    // of 1.0.0.
+    {
+        let editor = RepositoryEditor::inconsistent_fake(
+            Version::new(2, 0, 0),
+            &"2.0.0".parse().unwrap(),
+            &"1.0.0".parse().unwrap(),
+        )?;
+        let response = trust_root
+            .assemble_repo(editor)
+            .await?
+            .into_upload_request(client, StatusCode::CONFLICT)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with artifact \
+                 containing different hash for same version",
+            )?;
+        assert_error_message_contains(
+            &response.body,
+            "Uploaded artifacts don't match existing artifacts:",
+        )?;
+    }
+
+    // Upload a new repository with a different system version but no other
+    // changes compared to the already-uploaded repository. This should be
+    // accepted.
+    let initial_installinator_doc_hash = {
+        let editor = RepositoryEditor::inconsistent_fake(
+            Version::new(2, 0, 0),
+            &"1.0.0".parse().unwrap(),
+            &"1.0.0".parse().unwrap(),
+        )?;
+        let response = trust_root
+            .assemble_repo(editor)
+            .await?
+            .into_upload_request(client, StatusCode::OK)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with different system version \
+                (should succeed)",
+            )?;
+
+        let response = serde_json::from_slice::<TufRepoUpload>(&response.body)
+            .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoUploadStatus::Inserted);
+
+        // Get artifacts for the 2.0.0 repository
+        let artifacts_2_0_0 = get_repo_artifacts(&cptestctx, "2.0.0").await;
+
+        // The artifacts should be exactly the same as the 1.0.0 repo we
+        // uploaded, other than the installinator document (which will have
+        // system version 2.0.0).
+        let mut installinator_doc_1 = None;
+        let filtered_artifacts_1 = initial_artifacts
+            .iter()
+            .filter(|artifact| {
+                if artifact.known_tags()
+                    == Some(KnownArtifactTags::InstallinatorDocument)
+                {
+                    installinator_doc_1 = Some(*artifact);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut installinator_doc_2 = None;
+        let filtered_artifacts_2 = artifacts_2_0_0
+            .iter()
+            .filter(|artifact| {
+                if artifact.known_tags()
+                    == Some(KnownArtifactTags::InstallinatorDocument)
+                {
+                    installinator_doc_2 = Some(*artifact);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let installinator_doc_1 = installinator_doc_1
+            .expect("should have found installinator document in 1.0.0");
+        assert_eq!(installinator_doc_1.version, "1.0.0".parse().unwrap());
+        let installinator_doc_2 = installinator_doc_2
+            .expect("should have found installinator document in 2.0.0");
+        assert_eq!(installinator_doc_2.version, "2.0.0".parse().unwrap());
+
+        assert_eq!(
+            filtered_artifacts_1, filtered_artifacts_2,
+            "artifacts for 1.0.0 and 2.0.0 should match"
+        );
+
+        // Now get the repository that was just uploaded.
+        let get_repo = object_get::<update::TufRepo>(
+            client,
+            "/v1/system/update/repositories/2.0.0",
+        )
+        .await;
+
+        // Validate the repo metadata
+        assert_eq!(get_repo.system_version.to_string(), "2.0.0");
+
+        installinator_doc_1.hash.to_string()
+    };
+    // The installinator document changed, so the generation number is bumped to
+    // 3.
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        3u32.into()
+    );
+    // ... and the task will have one artifact to replicate.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.generation, 3u32.into());
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.put_ok, 3);
+    assert_eq!(status.last_run_counters.copy_ok, 1);
+    assert_eq!(status.local_repos, 1);
+    // Run the replication background task again; the local repos should be
+    // dropped.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.local_repos, 0);
+
+    // Verify the initial installinator document is present on all sled-agents.
+    for sled_agent in &cptestctx.sled_agents {
+        for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
+            let path = dir.join(&initial_installinator_doc_hash);
+            assert!(path.exists(), "{path} does not exist");
+        }
+    }
+    // Collect watchers for all of the sled-agent artifact delete reconcilers.
+    let mut delete_watchers = cptestctx
+        .sled_agents
+        .iter()
+        .map(|sled_agent| {
+            sled_agent.sled_agent().artifact_store().subscribe_delete_done()
+        })
+        .collect::<Vec<_>>();
+    // Manually prune the first repo.
+    let initial_repo = datastore
+        .tuf_repo_get_by_version(
+            &opctx,
+            "1.0.0".parse::<Version>().unwrap().into(),
+        )
+        .await?;
+    let recent_releases =
+        datastore.target_release_fetch_recent_distinct(&opctx, 3).await?;
+    datastore
+        .tuf_repo_mark_pruned(
+            &opctx,
+            status.generation,
+            &recent_releases,
+            initial_repo.id(),
+        )
+        .await
+        .unwrap();
+    // Marking a repository as pruned bumps the generation number.
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        4u32.into()
+    );
+    // Run the replication background task; we should see new configs be put.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.generation, 4u32.into());
+    // Wait for the delete reconciler to finish on all sled agents.
+    futures::future::join_all(
+        delete_watchers.iter_mut().map(|watcher| watcher.changed()),
+    )
+    .await;
+    // Verify the installinator document from the initial repo is deleted.
+    for sled_agent in &cptestctx.sled_agents {
+        for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
+            let path = dir.join(&initial_installinator_doc_hash);
+            assert!(!path.exists(), "{path} was not deleted");
+        }
+    }
+
+    cptestctx.teardown().await;
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorBody {
+    message: String,
+}
+
+// XXX: maybe replace this with a more detailed error code
+fn assert_error_message_contains(
+    body: &[u8],
+    needle: &str,
+) -> anyhow::Result<()> {
+    let body: ErrorBody =
+        serde_json::from_slice(body).context("body is not valid JSON")?;
+    ensure!(
+        body.message.contains(needle),
+        "expected body to contain {:?}, but it was {:?}",
+        needle,
+        body
+    );
+    Ok(())
+}
+
+#[nexus_test]
+async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let trust_root =
+        TestTrustRoot::generate().await.expect("trust root generation failed");
+
+    // POST /v1/system/update/trust-roots
+    let trust_root_view: update::UpdatesTrustRoot = trust_root
+        .to_upload_request(client, StatusCode::CREATED)
+        .execute()
+        .await
+        .expect("trust root add failed")
+        .parsed_body()
+        .expect("failed to parse add response");
+
+    // GET /v1/system/update/trust-roots
+    let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
+        .expect_status(Some(StatusCode::OK));
+    let response: ResultsPage<update::UpdatesTrustRoot> =
+        NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("trust root list failed")
+            .parsed_body()
+            .expect("failed to parse list response");
+    assert_eq!(response.items, std::slice::from_ref(&trust_root_view.clone()));
+
+    // GET /v1/system/update/trust-roots/{id}
+    let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);
+    let request = RequestBuilder::new(client, Method::GET, &id_url)
+        .expect_status(Some(StatusCode::OK));
+    let response: update::UpdatesTrustRoot = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root get failed")
+        .parsed_body()
+        .expect("failed to parse get response");
+    assert_eq!(response, trust_root_view);
+
+    // DELETE /v1/system/update/trust-roots/{id}
+    let request = RequestBuilder::new(client, Method::DELETE, &id_url)
+        .expect_status(Some(StatusCode::NO_CONTENT));
+    NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root delete failed");
+    let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
+        .expect_status(Some(StatusCode::OK));
+    let response: ResultsPage<update::UpdatesTrustRoot> =
+        NexusRequest::new(request)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("trust root list after delete failed")
+            .parsed_body()
+            .expect("failed to parse list after delete response");
+    assert!(response.items.is_empty());
+}
+
+#[tokio::test]
+async fn test_update_status() -> Result<()> {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_update_status")
+            .start::<omicron_nexus::Server>()
+            .await;
+    let client = &cptestctx.external_client;
+
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. Ensure the inventory
+    // watch channel is populated. (Do not query the database directly, since
+    // update status uses the watch channel.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
+    // initial status
+    let status: update::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+    assert_eq!(status.target_release.0, None);
+    // does not start suspended because the DB migration initialized the
+    // target_release table with a row with gen 1, and the initial target
+    // blueprint also has gen 1
+    assert!(!status.suspended);
+
+    let counts = status.components_by_release_version;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
+
+    // hold onto this to compare it to later values
+    let time_last_step_planned = status.time_last_step_planned;
+
+    // Upload a fake TUF repo and set it as the target release
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    let v1 = Version::new(1, 0, 0);
+    trust_root
+        .assemble_repo(RepositoryEditor::fake(v1.clone())?)
+        .await?
+        .to_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?;
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &v1,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
+
+    let status: update::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+    assert_eq!(status.target_release.0.unwrap().version, v1);
+    assert!(!status.suspended, "should not be suspended after setting v1");
+
+    // blueprint time doesn't change
+    assert_eq!(time_last_step_planned, status.time_last_step_planned);
+
+    let counts = status.components_by_release_version;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
+
+    // do it again so there are two, so both versions are associated with tuf
+    // repos
+    let v2 = Version::new(2, 0, 0);
+    trust_root
+        .assemble_repo(RepositoryEditor::fake(v2.clone())?)
+        .await?
+        .to_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?;
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &v2,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
+
+    let status: update::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+
+    assert_eq!(status.target_release.0.unwrap().version, v2);
+    assert!(!status.suspended, "should not be suspended after setting v2");
+
+    // blueprint time doesn't change
+    assert_eq!(time_last_step_planned, status.time_last_step_planned);
+
+    let counts = status.components_by_release_version;
+    assert_eq!(counts.get("install dataset").unwrap(), &7);
+    assert_eq!(counts.get("unknown").unwrap(), &14);
+
+    // Setting the target release for mupdate recovery only updates the
+    // target_release row, but the blueprint stays in its initial
+    // `WaitingForMupdateToBeCleared` state. This state is not treated as an
+    // update in progress, so `contact_support()` runs the full health checks
+    // instead of skipping them due to an "update in-progress".
+    //
+    // The task that checks for enabled not online SMF services isn't running on
+    // a simulated system; the contact_support field should be true
+    assert!(status.contact_support, "should need to contact support");
+
+    cptestctx.teardown().await;
+    Ok(())
+}
+
+#[nexus_test]
+async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
+    let logctx = &cptestctx.logctx;
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+    // Wait for one activation of the task to avoid racing with it.
+    let client = &cptestctx.lockstep_client;
+    activate_background_task(client, "tuf_repo_pruner").await;
+
+    // Insert four TUF repos.
+    let repo1id = insert_test_tuf_repo(&opctx, datastore, 1).await;
+    let repo2id = insert_test_tuf_repo(&opctx, datastore, 2).await;
+    let repo3id = insert_test_tuf_repo(&opctx, datastore, 3).await;
+    let repo4id = insert_test_tuf_repo(&opctx, datastore, 4).await;
+
+    // Immediately, all four repos ought to be visible.
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 4);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Activate the task again and wait for it to complete.  Exactly one of
+    // the repos should be pruned.
+    activate_background_task(client, "tuf_repo_pruner").await;
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 3);
+    assert!(!repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Re-insert repo 1.
+    let repo1id_again = insert_test_tuf_repo(&opctx, datastore, 1).await;
+    // The ID should be the same.
+    assert_eq!(repo1id, repo1id_again);
+    // All four repos should be visible again.
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 4);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Activate the task again and wait for it to complete.  The second repo
+    // should now be pruned, since it is the least-recently uploaded.
+    activate_background_task(client, "tuf_repo_pruner").await;
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 3);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(!repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+}
+
+#[tokio::test]
+async fn test_repo_list() -> Result<()> {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_repo_list")
+            .with_extra_sled_agents(3)
+            .start::<omicron_nexus::Server>()
+            .await;
+    let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
+
+    // Initially, list should be empty
+    let initial_list: ResultsPage<update::TufRepo> =
+        objects_list_page_authz(client, "/v1/system/update/repositories").await;
+
+    assert_eq!(initial_list.items.len(), 0);
+    assert!(initial_list.next_page.is_none());
+
+    // Add a trust root
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+
+    // Upload first repository (system version 1.0.0)
+    let repo1 = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
+        .await?;
+    let upload_response1 = repo1
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .context("error uploading first repository")?;
+    let response1 =
+        serde_json::from_slice::<TufRepoUpload>(&upload_response1.body)
+            .context("error deserializing first response body")?;
+    assert_eq!(response1.status, TufRepoUploadStatus::Inserted);
+
+    // Upload second repository (system version 2.0.0)
+    let repo2 = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(2, 0, 0))?)
+        .await?;
+    let upload_response2 = repo2
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .context("error uploading second repository")?;
+    let response2 =
+        serde_json::from_slice::<TufRepoUpload>(&upload_response2.body)
+            .context("error deserializing second response body")?;
+    assert_eq!(response2.status, TufRepoUploadStatus::Inserted);
+
+    // Upload third repository (system version 3.0.0)
+    let repo3 = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(3, 0, 0))?)
+        .await?;
+    let upload_response3 = repo3
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .context("error uploading third repository")?;
+    let response3 =
+        serde_json::from_slice::<TufRepoUpload>(&upload_response3.body)
+            .context("error deserializing third response body")?;
+    assert_eq!(response3.status, TufRepoUploadStatus::Inserted);
+
+    // List repositories - should return all 3, ordered by system version
+    // (newest first)
+    let list: ResultsPage<update::TufRepo> =
+        objects_list_page_authz(client, "/v1/system/update/repositories").await;
+
+    assert_eq!(list.items.len(), 3);
+
+    // Repositories should be ordered by system version descending (newest
+    // first)
+    let system_versions: Vec<String> =
+        list.items.iter().map(|item| item.system_version.to_string()).collect();
+    assert_eq!(system_versions, vec!["3.0.0", "2.0.0", "1.0.0"]);
+
+    // Verify that each response contains the correct system version
+    for (i, item) in list.items.iter().enumerate() {
+        let expected_version = match i {
+            0 => "3.0.0",
+            1 => "2.0.0",
+            2 => "1.0.0",
+            _ => panic!("unexpected index"),
+        };
+        assert_eq!(item.system_version.to_string(), expected_version);
+    }
+
+    // Request ascending order and expect the versions oldest-first
+    let ascending_list: ResultsPage<update::TufRepo> = objects_list_page_authz(
+        client,
+        "/v1/system/update/repositories?sort_by=version_ascending",
+    )
+    .await;
+
+    assert_eq!(ascending_list.items.len(), 3);
+
+    let ascending_versions: Vec<String> = ascending_list
+        .items
+        .iter()
+        .map(|item| item.system_version.to_string())
+        .collect();
+    assert_eq!(ascending_versions, vec!["1.0.0", "2.0.0", "3.0.0"]);
+
+    // Test pagination by setting a small limit
+    let paginated_list = objects_list_page_authz::<update::TufRepo>(
+        client,
+        "/v1/system/update/repositories?limit=2",
+    )
+    .await;
+
+    assert_eq!(paginated_list.items.len(), 2);
+    assert!(paginated_list.next_page.is_some());
+
+    // First two items should be 3.0.0 and 2.0.0 (newest first)
+    let paginated_versions: Vec<String> = paginated_list
+        .items
+        .iter()
+        .map(|item| item.system_version.to_string())
+        .collect();
+    assert_eq!(paginated_versions, vec!["3.0.0", "2.0.0"]);
+
+    // Fetch the next page via the returned page token and expect the remaining
+    // repo
+    let next_page_url = format!(
+        "/v1/system/update/repositories?limit=2&page_token={}",
+        paginated_list.next_page.clone().expect("expected next page token"),
+    );
+    let next_page: ResultsPage<update::TufRepo> =
+        objects_list_page_authz(client, &next_page_url).await;
+    assert_eq!(next_page.items.len(), 1);
+    assert_eq!(next_page.items[0].system_version.to_string(), "1.0.0");
+
+    // Test filtering out pruned repos
+
+    // Confirm that GET works for 1.0.0 before pruning
+    let _repo_before_prune: update::TufRepo =
+        object_get(client, "/v1/system/update/repositories/1.0.0").await;
+
+    // Mark the 1.0.0 repo as pruned (use datastore methods since there's no API
+    // for it)
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+    let v1 = "1.0.0".parse::<Version>().unwrap();
+    let repo_to_prune =
+        datastore.tuf_repo_get_by_version(&opctx, v1.into()).await?;
+
+    let generation = datastore.tuf_get_generation(&opctx).await?;
+    let recent_releases =
+        datastore.target_release_fetch_recent_distinct(&opctx, 3).await?;
+
+    datastore
+        .tuf_repo_mark_pruned(
+            &opctx,
+            generation,
+            &recent_releases,
+            repo_to_prune.id(),
+        )
+        .await?;
+
+    // pruned repo now 404s
+    object_get_error(
+        client,
+        "/v1/system/update/repositories/1.0.0",
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
+    // List repositories again - the pruned repo should not appear
+    let list_after_prune: ResultsPage<update::TufRepo> =
+        objects_list_page_authz(client, "/v1/system/update/repositories").await;
+
+    assert_eq!(list_after_prune.items.len(), 2);
+    let versions_after_prune: Vec<String> = list_after_prune
+        .items
+        .iter()
+        .map(|item| item.system_version.to_string())
+        .collect();
+    assert_eq!(versions_after_prune, vec!["3.0.0", "2.0.0"]);
+
+    cptestctx.teardown().await;
+    Ok(())
+}
+
+/// Test that a request without an API version header still succeeds.
+///
+/// Unlike internal APIs, we don't control all clients for our external API, so
+/// we make the api-version header optional. This test ensures that a request
+/// without the header succeeds.
+#[nexus_test]
+async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
+    // We can't use cptestctx.external_client directly since it always sets the
+    // header. Instead, construct a NexusRequest by hand.
+    let server_addr = cptestctx
+        .server
+        .get_all_http_server_external_addresses()
+        .into_iter()
+        .next()
+        .expect("Should have >= 1 external API address");
+    let test_cx =
+        ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
+
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. Ensure the inventory
+    // watch channel is populated. (Do not query the database directly, since
+    // update status uses the watch channel.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
+    let req_builder = RequestBuilder::new(
+        &test_cx,
+        http::Method::GET,
+        "/v1/system/update/status",
+    );
+    assert_eq!(
+        req_builder.headers().get(&omicron_common::api::VERSION_HEADER),
+        None,
+        "api-version header is not set"
+    );
+    let req =
+        NexusRequest::new(req_builder).authn_as(AuthnMode::PrivilegedUser);
+    let status: update::UpdateStatus = req.execute_and_parse_unwrap().await;
+    assert_eq!(status.target_release.0, None);
+}
+
+/// Tests creation of debug files by the autoplanner and blueprint APIs
+// Define an extra sled agent so that we can expunge one.
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let dropbox_path = cptestctx.debug_dropbox_path();
+    let mut dropbox = DropboxReader::new(
+        &dropbox_path,
+        DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR,
+    );
+    let mut cli_inputs = Vec::new();
+
+    // Verify initial state of the dropbox.
+    let initial = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert!(initial.is_empty(), "dropbox was not initially empty");
+
+    // Fetch the initial blueprint information.
+    let target_initial = datastore
+        .blueprint_target_get_current(&opctx)
+        .await
+        .expect("initial target blueprint");
+    let bp1_id = target_initial.target_id;
+
+    // We need an inventory collection for the next step.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
+    // Case: creating a new blueprint via the lockstep API creates a debug file.
+    let nexus_client = cptestctx.lockstep_client();
+    let bp2_id = nexus_client
+        .blueprint_regenerate()
+        .await
+        .expect("creating new blueprint")
+        .into_inner()
+        .id;
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file1", &file));
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert!(file.blueprints.contains_key(&bp1_id));
+    assert_eq!(file.target_blueprint.target_id, bp1_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Create a second blueprint for use later.
+    let bp3_id = nexus_client
+        .blueprint_regenerate()
+        .await
+        .expect("creating new blueprint")
+        .into_inner()
+        .id;
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file2", &file));
+    assert!(file.blueprints.contains_key(&bp3_id));
+    assert!(file.blueprints.contains_key(&bp1_id));
+    assert_eq!(file.target_blueprint.target_id, bp1_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: making a blueprint the target creates another debug file.  (This
+    // process also creates an intent file, but removes it before we have a
+    // chance to observe it.)
+    nexus_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_initial.enabled,
+            target_id: bp2_id,
+        })
+        .await
+        .expect("setting target bp2");
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file3", &file));
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert_eq!(file.target_blueprint.target_id, bp2_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: failing to make a blueprint the target does not create any debug
+    // files (or rather, does not leave any around).  To test this, we'll use
+    // the second blueprint that we created earlier and try to set it as the
+    // target.  This will fail, since its parent is no longer the current
+    // target.  Then we'll verify that on net, no new files have been created.
+    let error = nexus_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_initial.enabled,
+            target_id: bp3_id,
+        })
+        .await
+        .expect_err("unexpectedly succeeded in setting target bp3");
+    // Make sure that the error involved that it was the wrong parent blueprint.
+    // Otherwise, we're simulating a different failure mode than we intend.
+    let nexus_lockstep_client::Error::ErrorResponse(error_response) = error
+    else {
+        panic!("unexpected error setting stale blueprint as target: {error:?}");
+    };
+    assert!(
+        error_response
+            .into_inner()
+            .message
+            .contains("parent blueprint is not the current target blueprint")
+    );
+
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert!(files.is_empty());
+
+    // Case: autoplanner generates a new blueprint.
+    //
+    // The autoplanner is off by default in the test context.  First, enable it.
+    let config_initial = nexus_client
+        .reconfigurator_config_show_current()
+        .await
+        .expect("load initial reconfigurator config")
+        .into_inner();
+    let _ = nexus_client
+        .reconfigurator_config_set(&ReconfiguratorConfigParam {
+            version: config_initial.version + 1,
+            config: ReconfiguratorConfig {
+                planner_enabled: true,
+                ..config_initial.config
+            },
+        })
+        .await
+        .expect("enable blueprint planner");
+
+    // Now, expunge a sled to make sure there's something for the planner to do.
+    let _ = nexus_client
+        .sled_expunge(&SledSelector {
+            sled: cptestctx.second_sled_id().into_untyped_uuid(),
+        })
+        .await
+        .expect("expunge sled");
+
+    // We need to wait until there's a new target blueprint.  As usual, we wait
+    // for the thing we care about rather than waiting precisely for one more
+    // activation of the background task.  Expunging the sled activates the
+    // planner, but there's also other asynchrony involved here (e.g., the
+    // updated reconfigurator config needs to be loaded, too).
+    let bp4_id = wait_for_condition(
+        || async {
+            let target = datastore
+                .blueprint_target_get_current(&opctx)
+                .await
+                .expect("target blueprint");
+            if target.target_id == bp2_id {
+                Err(CondCheckError::<()>::NotYet { status: None })
+            } else {
+                Ok(target.target_id)
+            }
+        },
+        &std::time::Duration::from_secs(1),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("autoplanner should have created new blueprint within 60s");
+
+    // We know that the planner has gotten far enough to set the new target
+    // blueprint, but it might still be saving out files.  Wait for it to come
+    // to rest.
+    let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file4", &file));
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert!(file.blueprints.contains_key(&bp4_id));
+    assert_eq!(file.target_blueprint.target_id, bp4_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: autoplanner produces no files when it doesn't generate a new
+    // blueprint.
+    let status = run_blueprint_planner(&cptestctx.lockstep_client).await;
+    assert_matches!(status, BlueprintPlannerStatus::Unchanged { .. });
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
+    assert!(files.is_empty());
+
+    // Load all the files together and make sure we wind up with the expected
+    // combined state.
+    let inputs = cli_inputs.into_iter().map(|(label, state)| {
+        let bytes = serde_json::to_string(state).expect("serializable");
+        ReconfiguratorStateInput {
+            label: label.to_owned(),
+            reader: std::io::Cursor::new(bytes),
+        }
+    });
+
+    let st = UnstableReconfiguratorState::read_series(inputs)
+        .expect("reading inputs");
+    assert!(st.warnings.is_empty(), "no warnings loading state files");
+    assert!(st.state.intended_target_blueprint.is_none());
+    assert_eq!(st.state.target_blueprint.target_id, bp4_id);
+    assert!(st.state.blueprints.contains_key(&bp1_id));
+    assert!(st.state.blueprints.contains_key(&bp2_id));
+    assert!(st.state.blueprints.contains_key(&bp3_id));
+    assert!(st.state.blueprints.contains_key(&bp4_id));
+}
+
+/// Test that in a stock test environment, one can run the planner and get a new
+/// blueprint.
+#[nexus_test(configure_second_nexus = true)]
+async fn test_stock_planner(cptestctx: &ControlPlaneTestContext) {
+    let nexus_client = cptestctx.lockstep_client();
+    // We need an inventory collection available to do this.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    let _blueprint =
+        nexus_client.blueprint_regenerate().await.unwrap_or_else(|error| {
+            panic!(
+                "unexpectedly failed to generate new blueprint in stock test \
+                 environment: {}",
+                InlineErrorChain::new(&error)
+            );
+        });
+}

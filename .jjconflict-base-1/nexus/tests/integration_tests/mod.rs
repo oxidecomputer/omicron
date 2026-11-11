@@ -1,0 +1,80 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Nexus integration tests
+//!
+//! See the driver in the parent directory for how and why this is structured
+//! the way it is.
+
+mod address_lots;
+mod affinity;
+mod alerts;
+mod allow_list;
+mod audit_log;
+mod authn_http;
+mod authz;
+mod basic;
+mod bfd;
+mod certificates;
+mod cockroach;
+mod commands;
+mod console_api;
+mod crucible_replacements;
+mod data_migrations;
+mod demo_saga;
+mod device_auth;
+mod disks;
+mod external_ips;
+mod external_subnets;
+mod images;
+mod initialization;
+mod instances;
+mod internet_gateway;
+mod inventory_matching;
+mod ip_pools;
+mod local_storage;
+mod metrics;
+mod metrics_querier;
+#[cfg(feature = "multicast")]
+mod multicast;
+mod multirack;
+mod oximeter;
+mod pantry;
+mod password_login;
+mod probe;
+mod projects;
+mod quiesce;
+mod quotas;
+mod rack;
+mod role_assignments;
+mod router_routes;
+mod saml;
+mod schema;
+mod scim;
+mod silo_users;
+mod silos;
+mod sled_bp_availability;
+mod sleds;
+mod snapshots;
+mod ssh_keys;
+mod subnet_allocation;
+mod subnet_pools;
+mod support_bundles;
+mod switch_port;
+mod target_release;
+mod unauthorized;
+mod unauthorized_coverage;
+mod updates;
+mod users_builtin;
+mod utilization;
+mod volume_management;
+mod vpc_firewall;
+mod vpc_routers;
+mod vpc_subnets;
+mod vpcs;
+mod webhooks;
+
+// These modules are used only for shared data/utilities, not test cases.
+mod endpoint_coverage;
+mod endpoints;

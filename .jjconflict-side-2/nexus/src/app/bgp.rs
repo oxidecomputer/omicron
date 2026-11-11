@@ -1,0 +1,412 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::app::authz;
+use mg_admin_client::types::MessageHistoryRequest;
+use mg_api_types::bgp::history::HistoryBufferSelector;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
+use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
+use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::networking;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{
+    self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    UpdateResult,
+};
+use omicron_uuid_kinds::BgpAnnounceSetUuid;
+use omicron_uuid_kinds::BgpConfigUuid;
+use omicron_uuid_kinds::GenericUuid;
+use slog_error_chain::InlineErrorChain;
+
+impl super::Nexus {
+    pub async fn bgp_config_create(
+        &self,
+        opctx: &OpContext,
+        config: &networking::BgpConfigCreate,
+    ) -> CreateResult<BgpConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let (.., authz_bgp_announce_set) = self
+            .bgp_announce_set_lookup(opctx, config.bgp_announce_set_id.clone())?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let config =
+            BgpConfig::from_config_create(config, authz_bgp_announce_set.id());
+
+        let result = self.db_datastore.bgp_config_create(opctx, config).await?;
+        Ok(result)
+    }
+
+    pub async fn bgp_config_get(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<BgpConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let (.., bgp_config) = self
+            .bgp_config_lookup(opctx, name_or_id)?
+            .fetch_for(authz::Action::Read)
+            .await?;
+
+        Ok(bgp_config)
+    }
+
+    pub async fn bgp_config_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<BgpConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.bgp_config_list(opctx, pagparams).await
+    }
+
+    pub fn bgp_config_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<lookup::BgpConfig<'a>> {
+        match name_or_id {
+            NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
+                .bgp_config_id(BgpConfigUuid::from_untyped_uuid(id))),
+            NameOrId::Name(name) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .bgp_config_name_owned(name.into()))
+            }
+        }
+    }
+
+    pub fn bgp_announce_set_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<lookup::BgpAnnounceSet<'a>> {
+        match name_or_id {
+            NameOrId::Id(id) => Ok(LookupPath::new(opctx, &self.db_datastore)
+                .bgp_announce_set_id(BgpAnnounceSetUuid::from_untyped_uuid(
+                    id,
+                ))),
+            NameOrId::Name(name) => {
+                Ok(LookupPath::new(opctx, &self.db_datastore)
+                    .bgp_announce_set_name_owned(name.into()))
+            }
+        }
+    }
+
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpConfigSelector,
+        update: networking::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let (.., authz_bgp_config, db_bgp_config) = self
+            .bgp_config_lookup(opctx, sel.name_or_id.clone())?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+
+        let (.., authz_bgp_announce_set) = self
+            .bgp_announce_set_lookup(
+                opctx,
+                update.bgp_announce_set_id.clone().unwrap_or(NameOrId::Id(
+                    db_bgp_config.bgp_announce_set_id.into_untyped_uuid(),
+                )),
+            )?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        let update = nexus_db_model::BgpConfigUpdate::new(
+            update,
+            authz_bgp_announce_set.id().into_untyped_uuid(),
+        );
+
+        let result = self
+            .db_datastore
+            .bgp_config_update(opctx, &authz_bgp_config, update)
+            .await?;
+
+        // Eagerly propagate changes via background task
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+        Ok(result)
+    }
+
+    pub async fn bgp_config_delete(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpConfigSelector,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let (.., authz_bgp_config) = self
+            .bgp_config_lookup(opctx, sel.name_or_id.clone())?
+            .lookup_for(authz::Action::Delete)
+            .await?;
+
+        self.db_datastore.bgp_config_delete(opctx, &authz_bgp_config).await
+    }
+
+    pub async fn bgp_update_announce_set(
+        &self,
+        opctx: &OpContext,
+        announce: &networking::BgpAnnounceSetCreate,
+    ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let result =
+            self.db_datastore.bgp_update_announce_set(opctx, announce).await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
+        Ok(result)
+    }
+
+    pub async fn bgp_announce_set_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<BgpAnnounceSet> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.bgp_announce_set_list(opctx, pagparams).await
+    }
+
+    pub async fn bgp_delete_announce_set(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpAnnounceSetSelector,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let result =
+            self.db_datastore.bgp_delete_announce_set(opctx, sel).await?;
+        Ok(result)
+    }
+
+    pub async fn bgp_announcement_list(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpAnnounceSetSelector,
+    ) -> ListResultVec<BgpAnnouncement> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.bgp_announcement_list(opctx, sel).await
+    }
+
+    pub async fn bgp_peer_status(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<networking::BgpPeerStatus> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let mut result = Vec::new();
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let router_info = match client.read_routers().await {
+                Ok(result) => result.into_inner(),
+                Err(e) => {
+                    error!(
+                        self.log, "failed to get routers from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
+                    );
+                    continue;
+                }
+            };
+
+            for r in &router_info {
+                let asn = r.asn;
+                let peers = match client.get_neighbors(asn).await {
+                    Ok(result) => result.into_inner(),
+                    Err(e) => {
+                        error!(
+                            self.log,
+                            "failed to get peers for asn {asn} from switch";
+                            "switch_slot" => ?switch_slot,
+                            InlineErrorChain::new(&e),
+                        );
+                        continue;
+                    }
+                };
+                for (peer_id, info) in peers {
+                    result.push(networking::BgpPeerStatus {
+                        switch: switch_slot,
+                        peer_id: peer_id.clone(),
+                        addr: info.remote_ip,
+                        local_asn: r.asn,
+                        remote_asn: info.asn.unwrap_or(0),
+                        state: info.fsm_state.into(),
+                        state_duration_millis: u64::try_from(
+                            info.fsm_state_duration.as_millis(),
+                        )
+                        .unwrap_or(u64::MAX),
+                    });
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub async fn bgp_exported(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<networking::BgpExported>> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let mut result = vec![];
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let router_info = match client.read_routers().await {
+                Ok(result) => result.into_inner(),
+                Err(e) => {
+                    error!(
+                        self.log, "failed to get routers from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
+                    );
+                    continue;
+                }
+            };
+
+            for r in &router_info {
+                let asn = r.asn;
+                let selector = mg_api_types::bgp::session::ExportedSelector {
+                    afi: None,
+                    asn,
+                    peer: None,
+                };
+
+                let exported = match client.get_exported(&selector).await {
+                    Ok(result) => result.into_inner(),
+                    Err(e) => {
+                        error!(
+                            self.log,
+                            "failed to get exports for asn {asn} from switch";
+                            "switch_slot" => ?switch_slot,
+                            InlineErrorChain::new(&e),
+                        );
+                        continue;
+                    }
+                };
+
+                for (peer_id, exports) in exported {
+                    for ex in exports.iter() {
+                        let export = networking::BgpExported {
+                            peer_id: peer_id.clone(),
+                            switch: switch_slot,
+                            prefix: *ex,
+                        };
+                        result.push(export);
+                    }
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub async fn bgp_message_history(
+        &self,
+        opctx: &OpContext,
+        sel: &networking::BgpRouteSelector,
+    ) -> ListResultVec<networking::SwitchBgpHistory> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let mut result = Vec::new();
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let history = match client
+                .message_history(&MessageHistoryRequest {
+                    asn: sel.asn,
+                    buffer: Some(HistoryBufferSelector::All),
+                    direction: None,
+                    peer: None,
+                })
+                .await
+            {
+                Ok(result) => result.into_inner().by_peer.clone(),
+                Err(e) => {
+                    error!(
+                        self.log, "failed to get bgp history from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
+                    );
+                    continue;
+                }
+            };
+
+            result.push(networking::SwitchBgpHistory {
+                switch: switch_slot,
+                history: history
+                    .into_iter()
+                    .map(|(k, v)| (k, networking::BgpMessageHistory::new(v)))
+                    .collect(),
+            });
+        }
+
+        Ok(result)
+    }
+
+    pub async fn bgp_imported_routes(
+        &self,
+        opctx: &OpContext,
+        _sel: &networking::BgpRouteSelector,
+    ) -> ListResultVec<networking::BgpImported> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let mut result = Vec::new();
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let mut imported: Vec<networking::BgpImported> = Vec::new();
+            match client.get_rib_imported(None, None).await {
+                Ok(result) => {
+                    for (prefix, paths) in result.into_inner().iter() {
+                        let ipnet = match prefix.parse() {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "failed to parse prefix {prefix}: {e}"
+                                );
+                                continue;
+                            }
+                        };
+                        for p in paths.iter() {
+                            let x = networking::BgpImported {
+                                switch: switch_slot,
+                                prefix: ipnet,
+                                id: p
+                                    .bgp
+                                    .as_ref()
+                                    .map(|bgp| bgp.id)
+                                    .unwrap_or(0),
+                                nexthop: p.nexthop,
+                            };
+                            imported.push(x);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        self.log, "failed to get BGP imported from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
+                    );
+                    continue;
+                }
+            };
+
+            result.extend_from_slice(&imported);
+        }
+        Ok(result)
+    }
+}

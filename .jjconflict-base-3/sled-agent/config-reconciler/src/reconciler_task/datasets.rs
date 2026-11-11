@@ -1,0 +1,419 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Module for Omicron datasets.
+//!
+//! This module does not spawn a separate tokio task: our parent reconciler task
+//! owns an [`OmicronDatasets`] and is able to mutate it in place during
+//! reconciliation. However, we do need a [`DatasetTaskHandle`] to perform some
+//! operations. This handle is shared with other "needs to perform dataset
+//! operations" consumers (e.g., inventory requests perform operations to check
+//! the live state of datasets directly from ZFS).
+
+use super::CurrentlyManagedZpools;
+use crate::dataset_serialization_task::DatasetEnsureError;
+use crate::dataset_serialization_task::DatasetEnsureResult;
+use crate::dataset_serialization_task::DatasetTaskError;
+use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::RekeyRequest;
+use crate::dataset_serialization_task::RekeyResult;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use illumos_utils::zone::OmicronZoneConfigExt;
+use illumos_utils::zpool::ZpoolName;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_storage::config::MountConfig;
+use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::disk::Disk;
+use slog::Logger;
+use slog::info;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use trust_quorum_types::types::Epoch;
+
+/// A path which exists within a zpool.
+//
+// This structure is very denormalized: a subset of `path` specifically points
+// to `pool`, so we could instead store `pool` plus the `path`-specific
+// information, then reconstruct `path` as needed. We don't do this mostly for
+// simplicity: production code would need to store both a prefix (coming from
+// `MountConfig`) and a suffix (the specific kind of `path`), and test code
+// would be more painful (it often supplies a nonexistent `zpool` and an
+// unrelated `path`; e.g., to a tempdir).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PathInPool {
+    pool: ZpoolName,
+    path: Utf8PathBuf,
+}
+
+impl PathInPool {
+    /// Construct a path within `pool`.
+    pub(crate) fn new(
+        pool: ZpoolName,
+        mount_config: &MountConfig,
+        mountpoint: &str,
+    ) -> Self {
+        let path = pool.dataset_mountpoint(&mount_config.root, mountpoint);
+        Self { pool, path }
+    }
+
+    /// Testing only: construct an arbitrary `PathInPool` where `path` may be
+    /// unrelated to `pool` entirely (e.g., `pool` may be fake and `path` may
+    /// live in a tmpdir).
+    #[cfg(feature = "testing")]
+    pub(crate) fn new_arbitrary_for_tests(
+        pool: ZpoolName,
+        path: Utf8PathBuf,
+    ) -> Self {
+        Self { pool, path }
+    }
+
+    pub fn pool(&self) -> ZpoolName {
+        self.pool
+    }
+
+    pub fn path(&self) -> &Utf8Path {
+        &self.path
+    }
+
+    pub fn into_path(self) -> Utf8PathBuf {
+        self.path
+    }
+}
+
+/// Information about a managed disk for rekey filtering.
+///
+/// Used by `rekey_for_epoch` to determine which disks need key rotation
+/// based on their cached epoch. Disks with `cached_epoch < target` or
+/// `cached_epoch = None` (unknown) are candidates for rekeying.
+pub(super) struct DiskRekeyInfo<'a> {
+    pub disk: &'a Disk,
+    pub disk_id: PhysicalDiskUuid,
+    pub cached_epoch: Option<Epoch>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum ZoneDatasetDependencyError {
+    #[error("zone config is missing a filesystem pool")]
+    MissingFilesystemPool,
+    #[error(
+        "zone's transient root dataset is not available: {}", .0.full_name(),
+    )]
+    TransientZoneDatasetNotAvailable(DatasetName),
+    #[error("zone's durable dataset is not available: {}", .0.full_name())]
+    DurableDatasetNotAvailable(DatasetName),
+}
+
+#[derive(Debug)]
+pub(super) struct OmicronDatasets {
+    datasets: IdOrdMap<OmicronDataset>,
+    orphaned_datasets: IdOrdMap<OrphanedDataset>,
+    dataset_task: DatasetTaskHandle,
+}
+
+impl OmicronDatasets {
+    #[cfg(test)]
+    pub(super) fn with_datasets<I>(datasets: I) -> Self
+    where
+        I: Iterator<Item = (DatasetConfig, Result<(), DatasetEnsureError>)>,
+    {
+        let dataset_task = DatasetTaskHandle::spawn_noop();
+        let datasets = datasets
+            .map(|(config, result)| OmicronDataset {
+                config,
+                state: match result {
+                    Ok(()) => DatasetState::Ensured,
+                    Err(err) => DatasetState::FailedToEnsure(Arc::new(err)),
+                },
+            })
+            .collect();
+        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
+    }
+
+    pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
+        Self {
+            datasets: IdOrdMap::default(),
+            orphaned_datasets: IdOrdMap::new(),
+            dataset_task,
+        }
+    }
+
+    /// Confirm that any dataset dependencies of `zone` have been ensured
+    /// successfully, returning the path for the zone's filesystem root.
+    pub(super) fn validate_zone_storage(
+        &self,
+        zone: &OmicronZoneConfig,
+        mount_config: &MountConfig,
+    ) -> Result<PathInPool, ZoneDatasetDependencyError> {
+        // Confirm that there's an ensured `TransientZoneRoot` dataset on this
+        // zone's filesystem pool.
+        let Some(filesystem_pool) = zone.filesystem_pool else {
+            // This should never happen: Reconfigurator guarantees all zones
+            // have filesystem pools. `filesystem_pool` is non-optional in
+            // blueprints; we should make it non-optional in `OmicronZoneConfig`
+            // too: https://github.com/oxidecomputer/omicron/issues/8216
+            return Err(ZoneDatasetDependencyError::MissingFilesystemPool);
+        };
+
+        let transient_dataset_name = DatasetName::new(
+            filesystem_pool,
+            DatasetKind::TransientZone { name: zone.zone_name() },
+        );
+
+        // TODO-cleanup It would be nicer if the zone included the filesystem
+        // dataset ID, so we could just do a lookup here instead of searching.
+        // https://github.com/oxidecomputer/omicron/issues/7214
+        if !self.datasets.iter().any(|d| {
+            matches!(d.state, DatasetState::Ensured)
+                && d.config.name == transient_dataset_name
+        }) {
+            return Err(
+                ZoneDatasetDependencyError::TransientZoneDatasetNotAvailable(
+                    transient_dataset_name,
+                ),
+            );
+        }
+
+        let zone_root_path =
+            PathInPool::new(filesystem_pool, &mount_config, ZONE_DATASET);
+
+        // Confirm that the durable dataset for this zone has been ensured, if
+        // it has one.
+        let Some(durable_dataset) = zone.dataset_name() else {
+            return Ok(zone_root_path);
+        };
+
+        // TODO-cleanup As above, if we had an ID we could look up instead of
+        // searching.
+        if !self.datasets.iter().any(|d| {
+            matches!(d.state, DatasetState::Ensured)
+                && d.config.name == durable_dataset
+        }) {
+            return Err(
+                ZoneDatasetDependencyError::DurableDatasetNotAvailable(
+                    durable_dataset,
+                ),
+            );
+        }
+
+        Ok(zone_root_path)
+    }
+
+    pub(super) async fn remove_datasets_if_needed(
+        &mut self,
+        datasets: &IdOrdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        log: &Logger,
+    ) {
+        let mut datasets_to_remove = Vec::new();
+
+        // Make a pass through our in-memory dataset states:
+        //
+        // * Remember any that are no longer present in `datasets`
+        // * Mark any whose parent zpool has disappeared as failed, unless
+        //   they're already in a failed state.
+        for mut dataset in &mut self.datasets {
+            if !datasets.contains_key(&dataset.config.id) {
+                datasets_to_remove.push(dataset.config.id);
+                continue;
+            }
+
+            match &dataset.state {
+                DatasetState::Ensured => {
+                    if !currently_managed_zpools
+                        .contains(dataset.config.name.pool())
+                    {
+                        dataset.state = DatasetState::FailedToEnsure(Arc::new(
+                            DatasetEnsureError::ZpoolNotFound(
+                                *dataset.config.name.pool(),
+                            ),
+                        ));
+                    }
+                }
+                DatasetState::FailedToEnsure(_) => (),
+            }
+        }
+
+        // Actually remove the gone-from-config datasets
+        for dataset_id in datasets_to_remove {
+            self.datasets.remove(dataset_id);
+        }
+
+        // Check against the filesystem for any orphaned datasets and attempt to
+        // destroy them.
+        match self
+            .dataset_task
+            .datasets_destroy_orphans(
+                datasets.clone(),
+                currently_managed_zpools,
+            )
+            .await
+        {
+            Ok(Ok(orphaned)) => {
+                // Accumulate into our set of orphaned datasets. We never remove
+                // entries from this set for monitoring omicron#6177: we want to
+                // report any datasets we _might have deleted_ at any point.
+                // Once we start actually deleting, we should remove this
+                // accumulation and only report the currently-orphaned datasets.
+                let mut newly_orphaned = 0_usize;
+                for orphan in orphaned {
+                    if self.orphaned_datasets.insert_overwrite(orphan).is_none()
+                    {
+                        newly_orphaned += 1;
+                    }
+                }
+                if newly_orphaned > 0 {
+                    info!(
+                        log,
+                        "found {newly_orphaned} newly-orphaned datasets"
+                    );
+                }
+            }
+            Ok(Err(err)) => {
+                warn!(
+                    log,
+                    "failed to check for orphaned datasets";
+                    InlineErrorChain::new(err.as_ref()),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    log, "failed to contact dataset task";
+                    InlineErrorChain::new(&err),
+                );
+            }
+        }
+    }
+
+    pub(super) async fn ensure_datasets_if_needed(
+        &mut self,
+        datasets: IdOrdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        log: &Logger,
+    ) {
+        let results = match self
+            .dataset_task
+            .datasets_ensure(datasets, currently_managed_zpools)
+            .await
+        {
+            Ok(results) => results,
+            Err(err) => {
+                // If we can't contact the dataset task, we leave
+                // `self.datasets` untouched (i.e., reuse whatever datasets we
+                // have from the last time we successfully contacted the dataset
+                // task).
+                warn!(
+                    log, "failed to contact dataset task";
+                    InlineErrorChain::new(&err),
+                );
+                return;
+            }
+        };
+
+        for DatasetEnsureResult { config, result } in results {
+            let state = match result {
+                Ok(()) => DatasetState::Ensured,
+                Err(err) => DatasetState::FailedToEnsure(err),
+            };
+            self.datasets.insert_overwrite(OmicronDataset { config, state });
+        }
+    }
+
+    pub(super) fn has_retryable_error(&self) -> bool {
+        self.datasets.iter().any(|d| match &d.state {
+            DatasetState::Ensured => false,
+            DatasetState::FailedToEnsure(err) => err.is_retryable(),
+        })
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult> {
+        self.datasets
+            .iter()
+            .map(|dataset| {
+                let result = match &dataset.state {
+                    DatasetState::Ensured => {
+                        ConfigReconcilerInventoryResult::Ok
+                    }
+                    DatasetState::FailedToEnsure(err) => {
+                        ConfigReconcilerInventoryResult::Err {
+                            message: InlineErrorChain::new(err).to_string(),
+                        }
+                    }
+                };
+                (dataset.config.id, result)
+            })
+            .collect()
+    }
+
+    pub(crate) fn orphaned_datasets(&self) -> &IdOrdMap<OrphanedDataset> {
+        &self.orphaned_datasets
+    }
+
+    /// Forward rekey requests to the dataset task.
+    pub(super) async fn rekey_datasets(
+        &self,
+        request: RekeyRequest,
+    ) -> Result<RekeyResult, DatasetTaskError> {
+        self.dataset_task.rekey_datasets(request).await
+    }
+}
+
+#[derive(Debug)]
+struct OmicronDataset {
+    config: DatasetConfig,
+    state: DatasetState,
+}
+
+impl IdOrdItem for OmicronDataset {
+    type Key<'a> = DatasetUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.config.id
+    }
+
+    id_upcast!();
+}
+
+#[derive(Debug)]
+enum DatasetState {
+    Ensured,
+    FailedToEnsure(Arc<DatasetEnsureError>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dataset_serialization_task::RekeyResult;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn test_rekey_result_has_failures() {
+        let mut failed = BTreeSet::new();
+        failed.insert(PhysicalDiskUuid::new_v4());
+        let result = RekeyResult { succeeded: BTreeSet::new(), failed };
+        assert!(result.has_failures());
+
+        let mut succeeded = BTreeSet::new();
+        succeeded.insert(PhysicalDiskUuid::new_v4());
+        let result = RekeyResult { succeeded, failed: BTreeSet::new() };
+        assert!(!result.has_failures());
+
+        let result = RekeyResult::default();
+        assert!(!result.has_failures());
+    }
+}

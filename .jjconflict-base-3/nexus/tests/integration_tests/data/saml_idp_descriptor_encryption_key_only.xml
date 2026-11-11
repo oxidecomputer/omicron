@@ -1,0 +1,44 @@
+<md:EntityDescriptor entityID="https://sso.example.org/idp" validUntil="3017-08-30T19:10:29Z"
+    xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
+    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    xmlns:mdrpi="urn:oasis:names:tc:SAML:metadata:rpi"
+    xmlns:mdattr="urn:oasis:names:tc:SAML:metadata:attribute"
+    xmlns:mdui="urn:oasis:names:tc:SAML:metadata:ui"
+    xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+  <md:Extensions>
+    <mdrpi:RegistrationInfo registrationAuthority="https://registrar.example.net"/>
+    <mdrpi:PublicationInfo creationInstant="2017-08-16T19:10:29Z" publisher="https://registrar.example.net"/>
+    <mdattr:EntityAttributes>
+      <saml:Attribute Name="http://registrar.example.net/entity-category" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri">
+        <saml:AttributeValue>https://registrar.example.net/category/self-certified</saml:AttributeValue>
+      </saml:Attribute>
+    </mdattr:EntityAttributes>
+  </md:Extensions>
+  <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:Extensions>
+      <mdui:UIInfo>
+        <mdui:DisplayName xml:lang="en">Example.org</mdui:DisplayName>
+        <mdui:Description xml:lang="en">The identity provider at Example.org</mdui:Description>
+        <mdui:Logo height="32" width="32" xml:lang="en">https://idp.example.org/myicon.png</mdui:Logo>
+      </mdui:UIInfo>
+    </md:Extensions>
+    <md:KeyDescriptor use="encryption">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>MIIB0DCCAXagAwIBAgIUfvG7FgnAf1y/b0t1bJxqTJxrsA0wCgYIKoZIzj0EAwIwRjELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAkNBMRYwFAYDVQQHEw1TYW4gRnJhbmNpc2NvMRIwEAYDVQQDEwlzYW1sLnRlc3QwHhcNMjMwNjA2MTgwMzAwWhcNMjgwNjA0MTgwMzAwWjBGMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDVNhbiBGcmFuY2lzY28xEjAQBgNVBAMTCXNhbWwudGVzdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKd/VM8rcnguEezFNLH2XoCF46tc/9qacSrwPT17BACE6Qi2ptPRi7EJbJ2Ba5rCPKoRvVkW4Ra6N0NjbrmM6yqjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTnBe8+9wrmtOst71d7sjOSQYDDPDAKBggqhkjOPQQDAgNIADBFAiB9u01tz7C8p2W/9P39h5uf8efnYwTWmv+2m1/mvkLsygIhANTcN0dUHioQzz5C0smWnm1PhTXmxICpQzKjAxVhVavn</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.org/SAML2/SSO/Redirect"/>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://idp.example.org/SAML2/SSO/POST"/>
+  </md:IDPSSODescriptor>
+  <md:Organization>
+    <md:OrganizationName xml:lang="en">Example.org Non-Profit Org</md:OrganizationName>
+    <md:OrganizationDisplayName xml:lang="en">Example.org</md:OrganizationDisplayName>
+    <md:OrganizationURL xml:lang="en">https://www.example.org/</md:OrganizationURL>
+  </md:Organization>
+  <md:ContactPerson contactType="technical">
+    <md:SurName>SAML Technical Support</md:SurName>
+    <md:EmailAddress>mailto:technical-support@example.org</md:EmailAddress>
+  </md:ContactPerson>
+</md:EntityDescriptor>

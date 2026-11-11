@@ -1,0 +1,32 @@
+[package]
+name = "gateway-cli"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+omicron-uuid-kinds.workspace = true
+oxide-tokio-rt.workspace= true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+termios.workspace = true
+tokio = { workspace = true, features = [ "io-std", "rt-multi-thread", "macros", "time" ] }
+tokio-tungstenite.workspace = true
+tufaceous-artifact.workspace = true
+uuid.workspace = true
+
+gateway-client.workspace = true
+gateway-messages.workspace = true
+gateway-types.workspace = true
+omicron-workspace-hack.workspace = true
+slog-error-chain.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "oximeter-macro-impl"
+version = "0.1.0"
+authors = ["Benjamin Naecker <ben@oxide.computer>"]
+edition.workspace = true
+license = "MPL-2.0"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = [ "full", "extra-traits" ] }
+omicron-workspace-hack.workspace = true

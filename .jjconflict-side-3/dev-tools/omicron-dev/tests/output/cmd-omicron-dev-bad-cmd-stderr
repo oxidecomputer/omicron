@@ -1,0 +1,5 @@
+error: unrecognized subcommand 'bogus-command'
+
+Usage: omicron-dev <COMMAND>
+
+For more information, try '--help'.

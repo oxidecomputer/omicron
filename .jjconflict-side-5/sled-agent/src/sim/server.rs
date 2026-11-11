@@ -1,0 +1,797 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Library interface to the sled agent
+
+use super::config::Config;
+use super::http_entrypoints::api as http_api;
+use super::sled_agent::SledAgent;
+use super::storage::PantryServer;
+use crate::nexus::{ConvertInto, NexusClient};
+use crate::sim::SimulatedUpstairs;
+use anyhow::{Context, anyhow, bail};
+use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
+use crucible_agent_client::types::State as RegionState;
+use iddqd::IdOrdMap;
+use illumos_utils::zpool::ZpoolName;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
+use internal_dns_types::names::ServiceName;
+use nexus_client::types as NexusTypes;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_lockstep_client::types::{
+    AllowedSourceIps, CrucibleDatasetCreateRequest, RackInitializationRequest,
+    RackNetworkConfig,
+};
+use nexus_types::deployment::{
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    BlueprintZoneImageSource, LastAllocatedSubnetIpOffset, blueprint_zone_type,
+};
+use nexus_types::deployment::{
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    OmicronZoneExternalFloatingAddrs, OmicronZoneExternalFloatingIps,
+};
+use omicron_common::FileKv;
+use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
+use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
+use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::Vni;
+use omicron_common::api::internal::nexus::Certificate;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::backoff::{
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
+};
+use omicron_generation_kinds::{Generation, NexusGeneration};
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv6Net;
+use rand::seq::IndexedRandom;
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::UplinkPorts;
+use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NetworkInterfaceKind;
+use sled_agent_types::inventory::OmicronZoneDataset;
+use slog::{Drain, Logger, info};
+use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
+use std::sync::Arc;
+use transient_dns_server::TransientDnsServer;
+use uuid::Uuid;
+
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
+const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
+const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
+
+/// How [`Server::start`] handles the sled agent's registration with Nexus.
+///
+/// Unless registration is [`NexusRegistration::Manual`], a simulated sled
+/// agent announces itself to Nexus with `sled_agent_put`, retrying until Nexus
+/// accepts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NexusRegistration {
+    /// Wait until Nexus has accepted the registration, so that the sled exists
+    /// in the db's `sled` table by the time [`Server::start`] returns.
+    ///
+    /// If registration fails, [`Server::start`] will return an error.
+    WaitForCompletion,
+    /// Return immediately, retrying registration in the background.
+    ///
+    /// Since registration becomes asynchronous, if it fails [`Server::start`]
+    /// cannot return an error.
+    ///
+    /// Use this in cases where Nexus might not be reachable (for example, a
+    /// sled agent started against a placeholder Nexus address).
+    Background,
+    /// Do not automatically register with Nexus. The caller must register with
+    /// Nexus manually; see [`Server::sled_agent_info`] for a body that can be
+    /// used to register with.
+    Manual,
+}
+
+/// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
+/// server wired up to the sled agent
+pub struct Server {
+    // Configuration used to start server
+    config: Config,
+    log: Logger,
+
+    /// underlying sled agent
+    pub sled_agent: Arc<SledAgent>,
+    /// dropshot server for the API
+    pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
+    /// simulated pantry server
+    pub pantry_server: Option<PantryServer>,
+    /// address of repo depot server
+    pub repo_depot_address: SocketAddr,
+}
+
+impl Server {
+    /// `sled_index` here is to provide an offset so that Crucible regions have
+    /// unique ports in tests that use multiple sled agents.
+    pub async fn start(
+        config: &Config,
+        log: &Logger,
+        nexus_registration: NexusRegistration,
+        simulated_upstairs: &Arc<SimulatedUpstairs>,
+        sled_index: u16,
+    ) -> Result<Server, anyhow::Error> {
+        info!(log, "setting up sled agent server");
+
+        let client_log = log.new(o!("component" => "NexusClient"));
+        let nexus_client = Arc::new(NexusClient::new(
+            &format!("http://{}", config.nexus_address),
+            client_log,
+        ));
+        let sa_log = log.new(o!(
+            "component" => "SledAgent",
+            "server" => config.id.clone().to_string()
+        ));
+        let sled_agent = SledAgent::new_simulated_with_id(
+            &config,
+            sa_log,
+            Arc::clone(&nexus_client),
+            simulated_upstairs.clone(),
+            sled_index,
+        )
+        .await;
+
+        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let http_server = dropshot::ServerBuilder::new(
+            http_api(),
+            sled_agent.clone(),
+            dropshot_log,
+        )
+        .config(config.dropshot.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                sled_agent_api::latest_version(),
+            )
+            .min_version(sled_agent_api::oldest_version()),
+        )))
+        .start()
+        .map_err(|error| anyhow!("initializing server: {}", error))?;
+
+        let repo_depot_address = sled_agent.repo_depot.local_addr();
+        let sled_agent_info = sled_agent_info(
+            config,
+            http_server.local_addr(),
+            repo_depot_address.port(),
+        );
+        match nexus_registration {
+            NexusRegistration::WaitForCompletion => {
+                tokio::spawn(register_with_nexus(
+                    log.clone(),
+                    nexus_client,
+                    config.id,
+                    sled_agent_info,
+                ))
+                .await
+                .context("registering with Nexus")?;
+            }
+            NexusRegistration::Background => {
+                tokio::spawn(register_with_nexus(
+                    log.clone(),
+                    nexus_client,
+                    config.id,
+                    sled_agent_info,
+                ));
+            }
+            NexusRegistration::Manual => {}
+        }
+
+        let mut datasets = vec![];
+        // Create all the Zpools requested by the config, and allocate a single
+        // Crucible dataset for each. This emulates the setup we expect to have
+        // on the physical rack.
+        for zpool in &config.storage.zpools {
+            let physical_disk_id = PhysicalDiskUuid::new_v4();
+            let zpool_id = ZpoolUuid::new_v4();
+            let vendor = "synthetic-vendor".to_string();
+            let serial = format!("synthetic-serial-{zpool_id}");
+            let model = "synthetic-model".to_string();
+            sled_agent.create_external_physical_disk(
+                physical_disk_id,
+                DiskIdentity {
+                    vendor: vendor.clone(),
+                    serial: serial.clone(),
+                    model: model.clone(),
+                },
+            );
+
+            sled_agent.create_zpool(
+                zpool_id,
+                physical_disk_id,
+                zpool.size,
+                zpool.health,
+            );
+            let dataset_id = DatasetUuid::new_v4();
+            let address =
+                sled_agent.create_crucible_dataset(zpool_id, dataset_id);
+
+            datasets.push(CrucibleDatasetCreateRequest {
+                zpool_id,
+                dataset_id,
+                address: address.to_string(),
+            });
+
+            // Whenever Nexus tries to allocate a region, it should complete
+            // immediately. What efficiency!
+            let crucible =
+                sled_agent.get_crucible_dataset(zpool_id, dataset_id);
+            crucible.set_create_callback(Box::new(|_| RegionState::Created))
+        }
+
+        Ok(Server {
+            config: config.clone(),
+            log: log.clone(),
+            sled_agent,
+            http_server,
+            pantry_server: None,
+            repo_depot_address,
+        })
+    }
+
+    /// Return the `SledAgentInfo` that [`Server::start`] uses to register with
+    /// Nexus.
+    ///
+    /// If this simulated Sled Agent was configured with
+    /// [`NexusRegistration::Manual`], callers must register with this or a
+    /// similar body.
+    pub fn sled_agent_info(&self) -> NexusTypes::SledAgentInfo {
+        sled_agent_info(
+            &self.config,
+            self.http_server.local_addr(),
+            self.repo_depot_address.port(),
+        )
+    }
+
+    /// Starts the pantry service
+    pub async fn start_pantry(&mut self) -> &PantryServer {
+        // Create the simulated Pantry
+        let pantry_server = PantryServer::new(
+            self.log.new(o!("kind" => "pantry")),
+            self.config.storage.ip,
+            self.sled_agent.simulated_upstairs.clone(),
+        );
+        self.pantry_server = Some(pantry_server);
+        self.pantry_server.as_ref().unwrap()
+    }
+
+    /// Wait for the given server to shut down
+    ///
+    /// Note that this doesn't initiate a graceful shutdown, so if you call this
+    /// immediately after calling `start()`, the program will block indefinitely
+    /// or until something else initiates a graceful shutdown.
+    pub async fn wait_for_finish(self) -> Result<(), anyhow::Error> {
+        self.http_server.await.map_err(|err| anyhow!(err))
+    }
+}
+
+fn sled_agent_info(
+    config: &Config,
+    sa_address: SocketAddr,
+    repo_depot_port: u16,
+) -> NexusTypes::SledAgentInfo {
+    NexusTypes::SledAgentInfo {
+        sa_address: sa_address.to_string(),
+        repo_depot_port,
+        role: config.sled_role,
+        baseboard: NexusTypes::Baseboard {
+            serial: config.hardware.baseboard.identifier().to_string(),
+            part: config.hardware.baseboard.model().to_string(),
+            revision: config.hardware.baseboard.revision(),
+        },
+        usable_hardware_threads: config.hardware.hardware_threads,
+        usable_physical_ram: NexusTypes::ByteCount::try_from(
+            config.hardware.physical_ram,
+        )
+        .unwrap(),
+        reservoir_size: NexusTypes::ByteCount::try_from(
+            config.hardware.reservoir_ram,
+        )
+        .unwrap(),
+        cpu_family: config.hardware.cpu_family.convert(),
+        generation: Generation::new(),
+        decommissioned: false,
+    }
+}
+
+// Notify the control plane that we're up, and continue trying this until it
+// succeeds. We retry with an randomized, capped exponential backoff.
+//
+// TODO-robustness if this returns a 400 error, we probably want to return a
+// permanent error in the caller.
+async fn register_with_nexus(
+    log: Logger,
+    nexus_client: Arc<NexusClient>,
+    sled_id: SledUuid,
+    sled_agent_info: NexusTypes::SledAgentInfo,
+) {
+    let notify_nexus = || async {
+        debug!(log, "contacting server nexus");
+        nexus_client
+            .sled_agent_put(&sled_id, &sled_agent_info)
+            .await
+            .map_err(BackoffError::transient)
+    };
+    let log_notification_failure = |error, delay| {
+        warn!(log, "failed to contact nexus, will retry in {:?}", delay;
+            "error" => ?error);
+    };
+    retry_notify(
+        retry_policy_internal_service_aggressive(),
+        notify_nexus,
+        log_notification_failure,
+    )
+    .await
+    .expect("Expected an infinite retry loop contacting Nexus");
+}
+
+async fn handoff_to_nexus(
+    log: &Logger,
+    nexus_lockstep_address: SocketAddr,
+    rack_id: RackUuid,
+    request: &RackInitializationRequest,
+) -> Result<(), anyhow::Error> {
+    let nexus_client = nexus_lockstep_client::Client::new(
+        &format!("http://{}", nexus_lockstep_address),
+        log.new(o!("component" => "NexusLockstepClient")),
+    );
+
+    let notify_nexus = || async {
+        nexus_client
+            .rack_initialization_complete(
+                &rack_id.into_untyped_uuid(),
+                &request,
+            )
+            .await
+            .map_err(BackoffError::transient)
+    };
+    let log_failure = |err, _| {
+        info!(log, "Failed to handoff to nexus";
+            InlineErrorChain::new(&err));
+    };
+    retry_notify(
+        retry_policy_internal_service_aggressive(),
+        notify_nexus,
+        log_failure,
+    )
+    .await?;
+    Ok(())
+}
+
+/// RSS-related arguments for the simulated sled agent
+#[derive(Default)]
+pub struct RssArgs {
+    /// Specify the external address of Nexus so that we can include it in
+    /// external DNS
+    pub nexus_external_addr: Option<SocketAddr>,
+    /// Specify the (internal) address of an external DNS server so that Nexus
+    /// will know about it and keep it up to date
+    pub external_dns_internal_addr: Option<SocketAddrV6>,
+    /// Specify the (dns) address of an internal DNS server
+    pub internal_dns_dns_addr: Option<SocketAddrV6>,
+    /// Specify a certificate and associated private key for the initial Silo's
+    /// initial TLS certificates
+    pub tls_certificate: Option<Certificate>,
+}
+
+/// Run an instance of the `Server` which is able to handoff to Nexus.
+///
+/// This starts:
+/// - A Sled Agent
+/// - An Internal DNS server
+/// - A Crucible Pantry
+///
+/// And performs the following actions, similar to the Rack Setup Service:
+/// - Populates the Internal DNS server with records
+/// - Performs handoff to Nexus
+pub async fn run_standalone_server(
+    config: &Config,
+    nexus_lockstep_port: u16,
+    logging: &dropshot::ConfigLogging,
+    rss_args: &RssArgs,
+) -> Result<(), anyhow::Error> {
+    let (drain, registration) = slog_dtrace::with_drain(
+        logging.to_logger("sled-agent").context("initializing logger")?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(anyhow!(msg));
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
+
+    // Start the sled agent
+    let simulated_upstairs = Arc::new(SimulatedUpstairs::new(log.clone()));
+    let mut server = Server::start(
+        config,
+        &log,
+        NexusRegistration::WaitForCompletion,
+        &simulated_upstairs,
+        0,
+    )
+    .await?;
+    info!(log, "sled agent started successfully");
+
+    // Start the Internal DNS server
+    let dns = if let Some(addr) = rss_args.internal_dns_dns_addr {
+        TransientDnsServer::new_with_address(&log, addr.into()).await?
+    } else {
+        TransientDnsServer::new(&log).await?
+    };
+    let mut dns_config_builder = DnsConfigBuilder::new();
+
+    // Start the Crucible Pantry
+    let pantry_server = server.start_pantry().await;
+
+    // Insert SRV and AAAA record for Crucible Pantry
+    let pantry_zone_id = pantry_server.server.app_private().id;
+    let pantry_addr = match pantry_server.addr() {
+        SocketAddr::V6(v6) => v6,
+        SocketAddr::V4(_) => {
+            panic!("pantry address must be IPv6");
+        }
+    };
+    let pantry_zone = dns_config_builder
+        .host_zone(pantry_zone_id, *pantry_addr.ip())
+        .expect("failed to set up DNS");
+    dns_config_builder
+        .service_backend_zone(
+            ServiceName::CruciblePantry,
+            &pantry_zone,
+            pantry_addr.port(),
+        )
+        .expect("failed to set up DNS");
+
+    // Initialize the internal DNS entries
+    let dns_config =
+        dns_config_builder.build_full_config_for_initial_generation();
+    dns.initialize_with_config(&log, &dns_config).await?;
+
+    let all_u2_zpools = server.sled_agent.get_zpools();
+    let get_random_zpool = || {
+        let pool = all_u2_zpools
+            .choose(&mut rand::rng())
+            .expect("No external zpools found, but we need one");
+        ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(pool.id))
+    };
+
+    // Record the internal DNS server as though RSS had provisioned it so
+    // that Nexus knows about it.
+    let http_bound = match dns.dropshot_server.local_addr() {
+        SocketAddr::V4(_) => panic!("did not expect v4 address"),
+        SocketAddr::V6(a) => a,
+    };
+    let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
+    let mut zones = IdOrdMap::new();
+    zones
+        .insert_unique(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::new_v4(),
+            zone_type: BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset: OmicronZoneDataset { pool_name },
+                    http_address: http_bound,
+                    dns_address: match dns.dns_server.sole_local_address()? {
+                        SocketAddr::V4(_) => {
+                            panic!("did not expect v4 address")
+                        }
+                        SocketAddr::V6(a) => a,
+                    },
+                    gz_address: Ipv6Addr::LOCALHOST,
+                    gz_address_index: 0,
+                },
+            ),
+            // Co-locate the filesystem pool with the dataset
+            filesystem_pool: pool_name,
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        })
+        .expect("freshly generated zone IDs are unique");
+
+    let mut internal_services_ipv4_ranges = vec![];
+    let mut internal_services_ipv6_ranges = vec![];
+    let mut macs = MacAddr::iter_system();
+    if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
+        let external_ip = nexus_external_addr.ip();
+        let id = OmicronZoneUuid::new_v4();
+        let private_ip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, *NEXUS_OPTE_IPV4_SUBNET)
+                .context("creating private IP configuration")?;
+
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id,
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address: match config.nexus_address {
+                            SocketAddr::V4(_) => {
+                                panic!("did not expect v4 address")
+                            }
+                            SocketAddr::V6(a) => a,
+                        },
+                        lockstep_port: nexus_lockstep_port,
+                        external_ips:
+                            OmicronZoneExternalFloatingIps::from_single(
+                                from_ipaddr_to_external_floating_ip(
+                                    external_ip,
+                                ),
+                            ),
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: "nexus".parse().unwrap(),
+                            ip_config,
+                            mac: macs.next().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                        },
+                        external_tls: false,
+                        external_dns_servers: vec![],
+                        nexus_generation: NexusGeneration::new(),
+                    },
+                ),
+                filesystem_pool: get_random_zpool(),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
+
+        match external_ip {
+            IpAddr::V4(addr) => {
+                internal_services_ipv4_ranges
+                    .push(IpRange::V4(Ipv4Range { first: addr, last: addr }));
+            }
+            IpAddr::V6(addr) => {
+                internal_services_ipv6_ranges
+                    .push(IpRange::V6(Ipv6Range { first: addr, last: addr }));
+            }
+        }
+    }
+
+    if let Some(external_dns_internal_addr) =
+        rss_args.external_dns_internal_addr
+    {
+        let ip = *external_dns_internal_addr.ip();
+        let id = OmicronZoneUuid::new_v4();
+        let private_ip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, *DNS_OPTE_IPV4_SUBNET)
+                .context("creating private IP configuration")?;
+        let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id,
+                zone_type: BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset: OmicronZoneDataset { pool_name },
+                        http_address: external_dns_internal_addr,
+                        dns_addresses:
+                            OmicronZoneExternalFloatingAddrs::from_single(
+                                from_sockaddr_to_external_floating_addr(
+                                    SocketAddr::V6(external_dns_internal_addr),
+                                ),
+                            ),
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: "external-dns".parse().unwrap(),
+                            ip_config,
+                            mac: macs.next().unwrap(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                        },
+                    },
+                ),
+                // Co-locate the filesystem pool with the dataset
+                filesystem_pool: pool_name,
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
+
+        internal_services_ipv6_ranges
+            .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
+    }
+
+    let recovery_silo = RecoverySiloConfig {
+        silo_name: "demo-silo".parse().unwrap(),
+        user_name: "demo-privileged".parse().unwrap(),
+        // The following is a hash for the password "oxide".  This is
+        // (obviously) only intended for transient deployments in
+        // development with no sensitive data or resources.  You can change
+        // this value to any other supported hash.  The only thing that
+        // needs to be changed with this hash are the instructions given to
+        // individuals running this program who then want to log in as this
+        // user.  For more on what's supported, see the API docs for this
+        // type and the specific constraints in the nexus-passwords crate.
+        //
+        // The hash was generated via:
+        // `cargo run --example argon2 -- --input oxide`.
+        user_password_hash:
+            "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+             ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                .parse()
+                .unwrap(),
+    };
+
+    let mut crucible_datasets = vec![];
+    let physical_disks = server.sled_agent.get_all_physical_disks();
+    let zpools = server.sled_agent.get_zpools();
+    for zpool in &zpools {
+        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id);
+        for (dataset_id, address) in
+            server.sled_agent.get_crucible_datasets(zpool_id)
+        {
+            crucible_datasets.push(CrucibleDatasetCreateRequest {
+                zpool_id,
+                dataset_id,
+                address: address.to_string(),
+            });
+        }
+    }
+
+    let certs = match &rss_args.tls_certificate {
+        Some(c) => vec![c.clone()],
+        None => vec![],
+    };
+
+    let blueprint = {
+        let sled_config =
+            server.sled_agent.omicron_sled_config().unwrap_or_default();
+        let underlay_address = match server.http_server.local_addr() {
+            SocketAddr::V4(_) => {
+                bail!("sled_agent_ip must be v6")
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+
+        let subnet = Ipv6Subnet::new(*underlay_address.ip());
+        let last_allocated_ip_subnet_offset = LastAllocatedSubnetIpOffset::new(
+            zones
+                .iter()
+                .map(|zone| zone.zone_type.underlay_ip())
+                .filter(|ip| subnet.net().contains(*ip))
+                .map(|ip| ip.segments()[7])
+                .max()
+                .expect("no zones are included in the plan"),
+        );
+
+        let inventory =
+            server.sled_agent.inventory(underlay_address.into()).await?;
+        let mut all_sleds = IdOrdMap::new();
+        all_sleds.insert_overwrite(PlannedSledDescription {
+            underlay_address,
+            sled_id: config.id,
+            subnet,
+            last_allocated_ip_subnet_offset,
+            config: SledConfig {
+                disks: sled_config
+                    .disks
+                    .into_iter()
+                    .map(|config| BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: config.identity,
+                        id: config.id,
+                        pool_id: config.pool_id,
+                    })
+                    .collect(),
+                datasets: sled_config
+                    .datasets
+                    .into_iter()
+                    .map(|config| (config.id, config))
+                    .collect(),
+                zones,
+            },
+        });
+
+        let plan = ServicePlan { all_sleds, dns_config: dns_config.clone() };
+        let generation = inventory
+            .ledgered_sled_config
+            .context(
+                "simulated inventory does not have a ledgered sled config",
+            )?
+            .generation;
+        plan.to_blueprint(generation)
+            .context("could not construct initial blueprint")?
+    };
+
+    let mut service_ip_pools = IdOrdMap::new();
+    if let Ok(service_ipv4_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV4_NAME.parse().unwrap(),
+        String::from("IPv4 IP Pool for Oxide Services"),
+        internal_services_ipv4_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
+        }
+    }
+    if let Ok(service_ipv6_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV6_NAME.parse().unwrap(),
+        String::from("IPv6 IP Pool for Oxide Services"),
+        internal_services_ipv6_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
+        }
+    }
+
+    let rack_init_request = RackInitializationRequest {
+        blueprint,
+        physical_disks,
+        zpools,
+        crucible_datasets,
+        service_ip_pools,
+        certs,
+        internal_dns_zone_config: dns_config,
+        external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
+        recovery_silo,
+        rack_network_config: RackNetworkConfig {
+            rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
+            infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            // `UplinkPorts` must be non-empty; the simulated rack doesn't
+            // exercise uplinks, so use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
+            bgp: Vec::new(),
+            bfd: Vec::new(),
+        },
+        allowed_source_ips: AllowedSourceIps::Any,
+        initial_trust_quorum_configuration: None,
+        external_jumbo_frames_opt_in_enabled: false,
+    };
+
+    let mut nexus_lockstep_address = config.nexus_address;
+    nexus_lockstep_address.set_port(nexus_lockstep_port);
+    handoff_to_nexus(
+        &log,
+        nexus_lockstep_address,
+        config.rack_id,
+        &rack_init_request,
+    )
+    .await?;
+    info!(log, "Handoff to Nexus is complete");
+
+    server.wait_for_finish().await
+}

@@ -1,0 +1,1368 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Background task for automatically restarting instances that require it.
+
+use crate::app::background::Activator;
+use crate::app::background::BackgroundTask;
+use crate::app::saga::StartSaga;
+use crate::app::sagas::NexusSaga;
+use crate::app::sagas::instance_start;
+use futures::future::BoxFuture;
+use nexus_db_queries::authn;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::pagination::Paginator;
+use nexus_types::identity::Resource;
+use nexus_types::internal_api::background::InstanceReincarnationStatus;
+use nexus_types::internal_api::background::ReincarnatableInstance;
+use nexus_types::internal_api::background::ReincarnationReason;
+use omicron_common::api::external::Error;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use steno::SagaId;
+use uuid::Uuid;
+
+pub struct InstanceReincarnation {
+    datastore: Arc<DataStore>,
+    sagas: Arc<dyn StartSaga>,
+    /// The maximum number of concurrently executing instance-start sagas.
+    concurrency_limit: NonZeroU32,
+    disabled: bool,
+    /// Activator for the multicast reconciler background task.
+    /// Called after successful instance-start sagas to trigger member state
+    /// transitions ("Joining" → "Joined") for instances with multicast memberships.
+    task_multicast_reconciler: Activator,
+}
+
+const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
+    match NonZeroU32::new(16) {
+        Some(n) => n,
+        None => unreachable!(), // 16 > 0
+    };
+
+type RunningSaga = (Uuid, SagaId, BoxFuture<'static, Result<(), Error>>);
+
+impl BackgroundTask for InstanceReincarnation {
+    fn activate<'a>(
+        &'a mut self,
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value> {
+        Box::pin(async move {
+            let mut status = InstanceReincarnationStatus::default();
+            // /!\ BREAK GLASS IN CASE OF EMERGENCY /!\
+            if self.disabled {
+                status.disabled = true;
+                debug!(
+                    &opctx.log,
+                    "instance reincarnation disabled, doing nothing",
+                );
+                return serde_json::json!(status);
+            }
+
+            let mut running_sagas =
+                Vec::with_capacity(self.concurrency_limit.get() as usize);
+
+            if let Err(error) = self
+                .reincarnate_all(
+                    &opctx,
+                    ReincarnationReason::Failed,
+                    &mut status,
+                    &mut running_sagas,
+                )
+                .await
+            {
+                error!(
+                    opctx.log,
+                    "failed to find all Failed instances in need of \
+                     reincarnation";
+                    "error" => %error,
+                );
+                status
+                    .errors
+                    .push(format!("finding Failed instances: {error}"));
+            }
+
+            if let Err(error) = self
+                .reincarnate_all(
+                    &opctx,
+                    ReincarnationReason::SagaUnwound,
+                    &mut status,
+                    &mut running_sagas,
+                )
+                .await
+            {
+                error!(
+                    opctx.log,
+                    "failed to find all instances with unwound start sagas \
+                     in need of reincarnation";
+                    "error" => %error,
+                );
+                status.errors.push(format!(
+                    "finding instances with unwound start sagas: {error}"
+                ));
+            }
+
+            if let Err(error) = self
+                .reincarnate_all(
+                    &opctx,
+                    ReincarnationReason::SledEvacuation,
+                    &mut status,
+                    &mut running_sagas,
+                )
+                .await
+            {
+                error!(
+                    opctx.log,
+                    "failed to find all instances from a sled evacuation \
+                     in need of reincarnation";
+                    "error" => %error,
+                );
+                status.errors.push(format!(
+                    "finding instances from a sled evacuation: {error}"
+                ));
+            }
+
+            if status.total_errors() > 0 {
+                warn!(
+                    &opctx.log,
+                    "instance reincarnation completed with errors";
+                    "instances_found" => status.total_instances_found(),
+                    "instances_reincarnated" => status.instances_reincarnated.len(),
+                    "instances_changed_state" => status.changed_state.len(),
+                    "query_errors" => status.errors.len(),
+                    "restart_errors" => status.restart_errors.len(),
+                );
+            } else {
+                info!(
+                    &opctx.log,
+                    "instance reincarnation completed successfully";
+                    "instances_found" => status.total_instances_found(),
+                    "instances_reincarnated" => status.instances_reincarnated.len(),
+                    "instances_changed_state" => status.changed_state.len(),
+                );
+            }
+
+            // Activate multicast reconciler if any instances were reincarnated.
+            // This triggers member state transitions ("Joining" → "Joined") for
+            // instances with multicast group memberships.
+            if !status.instances_reincarnated.is_empty() {
+                self.task_multicast_reconciler.activate();
+            }
+
+            serde_json::json!(status)
+        })
+    }
+}
+
+impl InstanceReincarnation {
+    pub(crate) fn new(
+        datastore: Arc<DataStore>,
+        sagas: Arc<dyn StartSaga>,
+        disabled: bool,
+        task_multicast_reconciler: Activator,
+    ) -> Self {
+        Self {
+            datastore,
+            sagas,
+            concurrency_limit: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
+            disabled,
+            task_multicast_reconciler,
+        }
+    }
+
+    async fn reincarnate_all(
+        &mut self,
+        opctx: &OpContext,
+        reason: ReincarnationReason,
+        status: &mut InstanceReincarnationStatus,
+        running_sagas: &mut Vec<RunningSaga>,
+    ) -> anyhow::Result<()> {
+        let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
+
+        let mut paginator = Paginator::new(
+            self.concurrency_limit,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let instances_found = status.instances_found.entry(reason).or_insert(0);
+        let mut sagas_started = 0;
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .datastore
+                .find_reincarnatable_instances(
+                    &opctx,
+                    reason,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p.found_batch(&batch, &|instance| instance.id());
+
+            let found = batch.len();
+            *instances_found += found;
+            if found == 0 {
+                trace!(
+                    opctx.log,
+                    "no more instances in need of reincarnation";
+                    "total_found" => *instances_found,
+                    "reincarnation_reason" => %reason,
+                );
+                break;
+            }
+            for db_instance in batch {
+                let instance_id = db_instance.id();
+                info!(
+                    opctx.log,
+                    "attempting to reincarnate instance...";
+                    "instance_id" => %instance_id,
+                    "reincarnation_reason" => %reason,
+                    "instance_state" => ?db_instance.runtime().nexus_state,
+                    "auto_restart_config" => ?db_instance.auto_restart,
+                    "last_auto_restarted_at" => ?db_instance
+                        .runtime()
+                        .time_last_auto_restarted,
+                );
+
+                let running_saga = async {
+                    let start_reason = match reason {
+                        // We are starting due to a failure
+                        ReincarnationReason::Failed
+                        | ReincarnationReason::SagaUnwound => {
+                            instance_start::Reason::AutoRestart
+                        }
+                        // Nothing bad happened here, the sled is just being
+                        // evacuated
+                        ReincarnationReason::SledEvacuation => {
+                            instance_start::Reason::SledEvacuation
+                        }
+                    };
+                    let dag = instance_start::SagaInstanceStart::prepare(
+                        &instance_start::Params {
+                            db_instance,
+                            serialized_authn: serialized_authn.clone(),
+                            reason: start_reason,
+                        },
+                    )?;
+                    self.sagas.saga_run(dag).await
+                }
+                .await;
+                match running_saga {
+                    Ok((saga_id, completed)) => {
+                        running_sagas.push((instance_id, saga_id, completed));
+                    }
+                    Err(error) => {
+                        const ERR_MSG: &'static str =
+                            "failed to start instance-start saga";
+                        error!(
+                            opctx.log,
+                            "{ERR_MSG} for instance {instance_id}";
+                            "instance_id" => %instance_id,
+                            "reincarnation_reason" => %reason,
+                            "error" => %error,
+                        );
+                        status.restart_errors.push((
+                            ReincarnatableInstance { instance_id, reason },
+                            format!(
+                                "{ERR_MSG} for {reason:?} instance: {error}"
+                            ),
+                        ));
+                    }
+                };
+            }
+
+            sagas_started += running_sagas.len();
+            debug!(
+                opctx.log,
+                "found {reason:?} instances in need of reincarnation";
+                "reincarnation_reason" => %reason,
+                "instances_found" => found,
+                "total_found" => *instances_found,
+                "sagas_started" => running_sagas.len(),
+                "total_sagas_started" => sagas_started,
+            );
+
+            // All sagas started, wait for them to come back before moving on to
+            // the next chunk.
+            // N.B. that although it's tempting to want to query the database
+            // again as soon as one saga completes, so that we're *always*
+            // running `concurrency_limit` sagas in parallel, rather than
+            // running *up to* that many sagas, we ought not to query the
+            // database again until all the sagas we've started have finished.
+            // Otherwise, we may see some instances multiple times, because
+            // their sagas completing is what changes the instance record's
+            // state so that it no longer shows up in the query results.
+            for (instance_id, saga_id, saga) in running_sagas.drain(..) {
+                match saga.await {
+                    // Start saga completed successfully
+                    Ok(_) => {
+                        debug!(
+                            opctx.log,
+                            "welcome back to the realm of the living, \
+                             {instance_id}!";
+                            "instance_id" => %instance_id,
+                            "start_saga_id" => %saga_id,
+                            "reincarnation_reason" => %reason,
+                        );
+                        status.instances_reincarnated.push(
+                            ReincarnatableInstance { instance_id, reason },
+                        );
+                    }
+                    // The instance's state changed in the meantime, that's fine...
+                    Err(err @ Error::Conflict { .. }) => {
+                        debug!(
+                            opctx.log,
+                            "{reason:?} instance {instance_id} changed state \
+                             before it could be reincarnated";
+                            "instance_id" => %instance_id,
+                            "reincarnation_reason" => %reason,
+                            "start_saga_id" => %saga_id,
+                            "error" => err,
+                        );
+                        status.changed_state.push(ReincarnatableInstance {
+                            instance_id,
+                            reason,
+                        });
+                    }
+                    // Start saga failed
+                    Err(error) => {
+                        const ERR_MSG: &'static str = "instance-start saga";
+                        warn!(
+                            opctx.log,
+                            "{ERR_MSG} for instance {instance_id} failed";
+                            "instance_id" => %instance_id,
+                            "reincarnation_reason" => %reason,
+                            "start_saga_id" => %saga_id,
+                            "error" => %error,
+                        );
+                        status.restart_errors.push((
+                            ReincarnatableInstance { instance_id, reason },
+                            format!(
+                                "{ERR_MSG} {saga_id} for instance \
+                                 failed: {error}",
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::app::background::tasks::vmm_stop_for_update::VmmStopForUpdate;
+    use crate::app::sagas::test_helpers;
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use chrono::Utc;
+    use diesel::ExpressionMethods;
+    use nexus_db_lookup::AsyncConnection;
+    use nexus_db_lookup::LookupPath;
+    use nexus_db_model::Generation;
+    use nexus_db_model::InstanceIntendedState;
+    use nexus_db_model::InstanceRuntimeState;
+    use nexus_db_model::InstanceState;
+    use nexus_db_model::Vmm;
+    use nexus_db_model::VmmCpuPlatform;
+    use nexus_db_model::VmmState;
+    use nexus_db_model::to_db_typed_generation;
+    use nexus_db_queries::authz;
+    use nexus_test_utils::ControlPlaneBuilder;
+    use nexus_test_utils::resource_helpers::{
+        create_default_ip_pools, create_project, object_create,
+    };
+    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance;
+    use nexus_types::external_api::instance::InstanceAutoRestartPolicy;
+    use nexus_types::internal_api::background::VmmStopForUpdateStatus;
+    use nexus_types_versions::latest;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_generation_kinds::InstanceStateGeneration;
+    use omicron_generation_kinds::UpdateDispositionGeneration;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
+    use omicron_uuid_kinds::PropolisUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use std::time::Duration;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    const PROJECT_NAME: &str = "reincarnation-station";
+
+    async fn setup_test_project(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+    ) -> authz::Project {
+        create_default_ip_pools(&cptestctx.external_client).await;
+        let project =
+            create_project(&cptestctx.external_client, PROJECT_NAME).await;
+
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let (_, authz_project) = LookupPath::new(opctx, datastore)
+            .project_id(ProjectUuid::from_untyped_uuid(project.identity.id))
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("project must exist");
+        authz_project
+    }
+
+    async fn create_instance(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        name: &str,
+        auto_restart: impl Into<Option<InstanceAutoRestartPolicy>>,
+        state: InstanceState,
+        intent: InstanceIntendedState,
+    ) -> authz::Instance {
+        let auto_restart_policy = auto_restart.into();
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
+        // Use the first chunk of the UUID as the name, to avoid conflicts.
+        // Start with a lower ascii character to satisfy the name constraints.
+        let name = name.parse().unwrap();
+        let instance = object_create::<_, latest::instance::Instance>(
+            &cptestctx.external_client,
+            &instances_url,
+            &instance::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name,
+                    description: "It's an instance".into(),
+                },
+                // In this test, we will "leak" sled resources, since we
+                // munge the database records for the instance without
+                // deleting its VMM (as we want to explicitly activate the
+                // reincarnation task, rather than letting the
+                // `instance-update` saga do so). Therefore, make our
+                // resource requests as small as possible.
+                ncpus: 1i64.try_into().unwrap(),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: "myhostname".try_into().unwrap(),
+                user_data: Vec::new(),
+                network_interfaces:
+                    instance::InstanceNetworkInterfaceAttachment::None,
+                external_ips: Vec::new(),
+                disks: Vec::new(),
+                boot_disk: None,
+                cpu_platform: None,
+                ssh_public_keys: None,
+                start: state == InstanceState::Vmm,
+                auto_restart_policy,
+                anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
+            },
+        )
+        .await;
+
+        let id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+        if state != InstanceState::Vmm && state != InstanceState::NoVmm {
+            put_instance_in_state(cptestctx, opctx, id, state).await;
+        };
+        datastore
+            .instance_set_intended_state(opctx, &authz_instance, intent)
+            .await
+            .unwrap();
+
+        eprintln!(
+            "instance {id}: auto_restart_policy={auto_restart_policy:?}; \
+             state={state:?}; intent={intent}"
+        );
+        authz_instance
+    }
+
+    async fn attach_saga_unwound_vmm(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        let vmm = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: authz_instance.id(),
+                    sled_id: SledUuid::new_v4().into(),
+                    propolis_ip: "10.1.9.42".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::SagaUnwound,
+                    failure_reason: None,
+                    stop_for_update_disposition_generation: None,
+                },
+            )
+            .await
+            .expect("SagaUnwound VMM should be inserted");
+        let vmm_id = vmm.id;
+        let prev_instance = datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .expect("instance must exist");
+        let updated = datastore
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: InstanceStateGeneration::from(
+                        prev_instance.state_generation,
+                    )
+                    .next()
+                    .into(),
+                    nexus_state: InstanceState::Vmm,
+                    propolis_id: Some(vmm_id),
+                    ..prev_instance.runtime()
+                },
+            )
+            .await
+            .expect("instance update should succeed");
+        assert!(updated, "instance {instance_id} was not updated");
+        eprintln!(
+            "instance {instance_id}: attached SagaUnwound active VMM {vmm_id}"
+        );
+    }
+
+    async fn fail_instance_vmm(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        id: InstanceUuid,
+    ) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+
+        let (_, _, _, db_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(id.into_untyped_uuid())
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+
+        let vmm_id: PropolisUuid = PropolisUuid::from_untyped_uuid(
+            db_instance.propolis_id.expect("instance has vmm"),
+        );
+
+        info!(
+            &cptestctx.logctx.log,
+            "failing instance {id} with active vmm id {vmm_id}",
+        );
+
+        let int_client = cptestctx.internal_client();
+
+        let db_vmm = datastore.vmm_fetch(&opctx, &vmm_id).await.unwrap();
+
+        let vmm_state = db_vmm.runtime();
+
+        int_client
+            .cpapi_instances_put(
+                &vmm_id,
+                &nexus_client::types::SledVmmState {
+                    vmm_state: nexus_client::types::VmmRuntimeState {
+                        state: nexus_client::types::VmmState::Failed,
+                        gen_: vmm_state.generation.next(),
+                        time_updated: Utc::now(),
+                    },
+                    migration_in: None,
+                    migration_out: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn put_instance_in_state(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        id: InstanceUuid,
+        state: InstanceState,
+    ) -> authz::Instance {
+        info!(
+            &cptestctx.logctx.log,
+            "putting instance {id} in state {state:?}"
+        );
+
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+        let prev_instance = datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .expect("instance must exist");
+        let propolis_id = if state == InstanceState::Vmm {
+            prev_instance.propolis_id
+        } else {
+            None
+        };
+        datastore
+            .instance_update_runtime(
+                &id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    nexus_state: state,
+                    propolis_id,
+                    generation: InstanceStateGeneration::from(
+                        prev_instance.state_generation,
+                    )
+                    .next()
+                    .into(),
+                    ..prev_instance.runtime()
+                },
+            )
+            .await
+            .expect("instance runtime state should update");
+        authz_instance
+    }
+
+    async fn mark_vmm_stopped_for_update(
+        conn: &AsyncConnection,
+        vmm_id: Uuid,
+        generation: UpdateDispositionGeneration,
+    ) {
+        use nexus_db_schema::schema::vmm::dsl;
+
+        let updated = diesel::update(dsl::vmm)
+            .filter(dsl::id.eq(vmm_id))
+            .set(
+                dsl::stop_for_update_disposition_generation
+                    .eq(Some(to_db_typed_generation(generation))),
+            )
+            .execute_async(conn)
+            .await
+            .expect("VMM should be marked");
+        assert_eq!(updated, 1, "exactly one VMM should be marked");
+    }
+
+    async fn set_time_last_auto_restarted(
+        conn: &AsyncConnection,
+        instance_id: Uuid,
+        time: chrono::DateTime<Utc>,
+    ) {
+        use nexus_db_schema::schema::instance::dsl;
+
+        let updated = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(instance_id))
+            .set(dsl::time_last_auto_restarted.eq(Some(time)))
+            .execute_async(conn)
+            .await
+            .expect("instance should be updated");
+        assert_eq!(updated, 1, "exactly one instance should be updated");
+    }
+
+    // Boilerplate reducer.
+    //
+    // This is a macro so that the `dbg!` has the line number of the place where
+    // the task was activated, rather than the line where we invoke `dbg!` --- it
+    // turns out that a `#[track_caller]` function only affects panic locations,
+    // and not `dbg!`. Ah well.
+    macro_rules! assert_activation_ok {
+        ($result:expr) => {{
+            let activation =
+                serde_json::from_value::<InstanceReincarnationStatus>($result)
+                    .expect("JSON must be correctly shaped");
+            let status = dbg!(activation);
+            assert_eq!(status.errors, Vec::<String>::new());
+            assert_eq!(status.restart_errors, Vec::new());
+            status
+        }};
+    }
+
+    fn failed(instance_id: Uuid) -> ReincarnatableInstance {
+        ReincarnatableInstance {
+            instance_id,
+            reason: ReincarnationReason::Failed,
+        }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_reincarnates_failed_instances(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+            Activator::new(),
+        );
+
+        // Noop test
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.total_instances_found(), 0);
+        assert_eq!(status.instances_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
+
+        // Create an instance in the `Failed` state that's eligible to be
+        // restarted.
+        let instance = create_instance(
+            &cptestctx,
+            &opctx,
+            "my-cool-instance",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::Failed,
+            InstanceIntendedState::Running,
+        )
+        .await;
+
+        // Activate the task again, and check that our instance had an
+        // instance-start saga started.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.total_instances_found(), 1);
+        assert_eq!(status.instances_reincarnated, vec![failed(instance.id())]);
+        assert_eq!(status.changed_state, Vec::new());
+
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+            InstanceState::Vmm,
+        )
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_default_policy_is_reincarnatable(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+            Activator::new(),
+        );
+
+        // Create an instance in the `Failed` state that's eligible to be
+        // restarted.
+        let instance = create_instance(
+            &cptestctx,
+            &opctx,
+            "my-cool-instance",
+            None,
+            InstanceState::Failed,
+            InstanceIntendedState::Running,
+        )
+        .await;
+
+        // Activate the task again, and check that our instance had an
+        // instance-start saga started.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.total_instances_found(), 1);
+        assert_eq!(status.instances_reincarnated, vec![failed(instance.id())]);
+        assert_eq!(status.changed_state, Vec::new());
+
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+            InstanceState::Vmm,
+        )
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_only_reincarnates_eligible_instances(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+            Activator::new(),
+        );
+
+        // Create instances in the `Failed` state that are eligible to be
+        // restarted.
+        let mut will_reincarnate = std::collections::BTreeSet::new();
+        let num_failed = 3;
+        for i in 0..num_failed {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("sotapanna-{i}"),
+                InstanceAutoRestartPolicy::BestEffort,
+                InstanceState::Failed,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            will_reincarnate.insert(failed(instance.id()));
+        }
+        // Create instances with SagaUnwound active VMMs that are eligible to be
+        // reincarnated.
+        let num_saga_unwound = 2;
+        for i in 0..num_saga_unwound {
+            // Make the instance record.
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("sadakagami-{i}"),
+                InstanceAutoRestartPolicy::BestEffort,
+                InstanceState::NoVmm,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            // Now, give the instance an active VMM which is SagaUnwound.
+            attach_saga_unwound_vmm(&cptestctx, &opctx, &instance).await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SagaUnwound,
+            });
+        }
+
+        // Create instances in the `SledEvacuating` state that are eligible to
+        // be reincarnated. When an instance is reincarnated due to its sled
+        // evacuating, the task ignores the auto-restart policy and always
+        // restarts the instance, so we include instances with both policies
+        //
+        // The task should also ignore the cooldown period for these instances,
+        // and their auto-restart timestamp should not change when they are
+        // reincarnated.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let recent_auto_restart = omicron_common::now_db_precision();
+        // For each policy, include an instance that has never been automatically
+        // restarted, and one that is still within the cooldown period.
+        let sled_evacuating_instances = [
+            ("kolankola-0", InstanceAutoRestartPolicy::BestEffort, None),
+            (
+                "kolankola-1",
+                InstanceAutoRestartPolicy::BestEffort,
+                Some(recent_auto_restart),
+            ),
+            ("ekabijin-0", InstanceAutoRestartPolicy::Never, None),
+            (
+                "ekabijin-1",
+                InstanceAutoRestartPolicy::Never,
+                Some(recent_auto_restart),
+            ),
+        ];
+        let num_sled_evacuating = sled_evacuating_instances.len();
+        let mut evacuated_last_auto_restarted =
+            std::collections::BTreeMap::new();
+        for (name, policy, last_auto_restarted) in sled_evacuating_instances {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                name,
+                policy,
+                InstanceState::SledEvacuating,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            if let Some(time) = last_auto_restarted {
+                set_time_last_auto_restarted(&conn, instance.id(), time).await;
+            }
+            evacuated_last_auto_restarted
+                .insert(instance.id(), last_auto_restarted);
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+
+        // Create some instances that will not reincarnate.
+        let mut will_not_reincarnate = std::collections::BTreeSet::new();
+        // Some instances which are `Failed` but don't have policies permitting
+        // them to be reincarnated.
+        for i in 0..3 {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("arahant-{i}"),
+                InstanceAutoRestartPolicy::Never,
+                InstanceState::Failed,
+                InstanceIntendedState::Running,
+            )
+            .await;
+
+            will_not_reincarnate.insert(instance.id());
+        }
+
+        // Some instances which have `SagaUnwound VMMs` but don't have policies
+        // permitting them to be reincarnated.
+        for i in 3..5 {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("arahant-{i}"),
+                InstanceAutoRestartPolicy::Never,
+                InstanceState::NoVmm,
+                InstanceIntendedState::Running,
+            )
+            .await;
+
+            attach_saga_unwound_vmm(&cptestctx, &opctx, &instance).await;
+            will_not_reincarnate.insert(instance.id());
+        }
+
+        // Some instances with policies permitting them to be reincarnated, but
+        // which are not `Failed`.
+        for (i, &state) in
+            [InstanceState::Vmm, InstanceState::NoVmm, InstanceState::Destroyed]
+                .iter()
+                .enumerate()
+        {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("anagami-{i}"),
+                InstanceAutoRestartPolicy::BestEffort,
+                state,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            will_not_reincarnate.insert(instance.id());
+        }
+
+        // Some `Failed` instances with policies permitting them to be
+        // reincarnated, but whose intended state is not `Running`.
+        let failed_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-4",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::Failed,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        will_not_reincarnate.insert(failed_stopped.id());
+        let unwound_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-5",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::NoVmm,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        attach_saga_unwound_vmm(&cptestctx, &opctx, &unwound_stopped).await;
+        will_not_reincarnate.insert(unwound_stopped.id());
+        let evacuating_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-6",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::SledEvacuating,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        will_not_reincarnate.insert(evacuating_stopped.id());
+
+        // Activate the task again, and check that our instance had an
+        // instance-start saga started.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.total_instances_found(), will_reincarnate.len());
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::Failed),
+            Some(&num_failed)
+        );
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SagaUnwound),
+            Some(&num_saga_unwound)
+        );
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SledEvacuation),
+            Some(&num_sled_evacuating)
+        );
+        assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
+        assert_eq!(status.changed_state, Vec::new());
+        assert_eq!(status.errors, Vec::<String>::new());
+        assert_eq!(
+            status.restart_errors,
+            Vec::<(ReincarnatableInstance, String)>::new()
+        );
+
+        for instance in &status.instances_reincarnated {
+            eprintln!("instance {instance} reincarnated");
+            assert!(
+                !will_not_reincarnate.contains(&instance.instance_id),
+                "expected {instance} not to reincarnate! reincarnated: {:?}",
+                status.instances_reincarnated
+            );
+        }
+
+        for instance in will_reincarnate {
+            assert!(
+                status.instances_reincarnated.contains(&instance),
+                "expected {instance} to have reincarnated! reincarnated: {:?}",
+                status.instances_reincarnated
+            );
+
+            let state = test_helpers::instance_wait_for_state(
+                &cptestctx,
+                InstanceUuid::from_untyped_uuid(instance.instance_id),
+                InstanceState::Vmm,
+            )
+            .await;
+
+            let time_last_auto_restarted =
+                state.instance().time_last_auto_restarted;
+            match instance.reason {
+                ReincarnationReason::Failed
+                | ReincarnationReason::SagaUnwound => {
+                    assert!(
+                        time_last_auto_restarted.is_some(),
+                        "expected {instance} to have an auto-restart timestamp",
+                    );
+                }
+                ReincarnationReason::SledEvacuation => {
+                    let found_time_auto_restarted =
+                        evacuated_last_auto_restarted
+                            .get(&instance.instance_id)
+                            .unwrap();
+                    assert_eq!(
+                        time_last_auto_restarted, *found_time_auto_restarted,
+                        "expected the auto-restart timestamp of {instance} to \
+                         be unchanged",
+                    );
+                }
+            }
+        }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_cooldown_on_subsequent_reincarnations(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+            Activator::new(),
+        );
+
+        let instance1 = create_instance(
+            &cptestctx,
+            &opctx,
+            "victor",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::Failed,
+            InstanceIntendedState::Running,
+        )
+        .await;
+        let instance1_id = InstanceUuid::from_untyped_uuid(instance1.id());
+
+        // Use the test-only API to set the cooldown period for instance 1 to ten
+        // seconds, so that we don't have to make the test run for an hour to wait
+        // out the default cooldown.
+        const COOLDOWN_SECS: u64 = 10;
+        datastore
+            .instance_set_auto_restart_cooldown(
+                &opctx,
+                &instance1_id,
+                chrono::TimeDelta::seconds(COOLDOWN_SECS as i64),
+            )
+            .await
+            .expect("we must be able to set the cooldown period");
+
+        let instance2 = create_instance(
+            &cptestctx,
+            &opctx,
+            "frankenstein",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::Vmm,
+            InstanceIntendedState::Running,
+        )
+        .await;
+        let instance2_id = InstanceUuid::from_untyped_uuid(instance2.id());
+
+        // On the first activation, instance 1 should be restarted.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.total_instances_found(), 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            &[failed(instance1_id.into_untyped_uuid())]
+        );
+        assert_eq!(status.changed_state, Vec::new());
+
+        // Now, let's do some state changes:
+        // Pretend instance 1 restarted, and then failed again.
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance1_id,
+            InstanceState::Vmm,
+        )
+        .await;
+
+        fail_instance_vmm(&cptestctx, &opctx, instance1_id).await;
+
+        // Move instance 2 to failed.
+        fail_instance_vmm(&cptestctx, &opctx, instance2_id).await;
+
+        // Wait for any instance updater sagas to complete
+        test_helpers::wait_for_running_sagas(&cptestctx).await;
+
+        // Instance 2 should be started by the instance updater saga
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance2_id,
+            InstanceState::Vmm,
+        )
+        .await;
+
+        // Activate the background task again. Nothing should get restarted,
+        // this call should happen before the cooldown is done so instance 1
+        // still has to wait.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        eprintln!("status: {:?}", status);
+        assert_eq!(status.total_instances_found(), 0);
+
+        // Wait out the cooldown period, and give it another shot. Now, instance
+        // 1 should be restarted again.
+        tokio::time::sleep(Duration::from_secs(COOLDOWN_SECS + 1)).await;
+
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.total_instances_found(), 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            &[failed(instance1_id.into_untyped_uuid())]
+        );
+        assert_eq!(status.changed_state, Vec::new());
+
+        // Instance 1 should be started.
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance1_id,
+            InstanceState::Vmm,
+        )
+        .await;
+    }
+
+    // This test differs from `test_only_reincarnates_eligible_instances` in
+    // that it checks the `SledEvacuating` case more thoroughly. Specifically,
+    // it does this by following the real sequence of events, instead of writing
+    // the `SledEvacuating` state directly to the database. Like a little
+    // integration test. We emulate this sequence, first by marking the VMMs to
+    // be stopped for an update, then running the `vmm_stop_for_update` task to
+    // stop them, verifying the `instance-update` saga changes each instance's
+    // state to `SledEvacuating`, and finally making sure they are successfully
+    // reincarnated.
+    #[tokio::test]
+    async fn test_reincarnates_instances_in_sled_evacuating() {
+        // Test setup
+        let cptestctx = ControlPlaneBuilder::new(
+            "test_reincarnates_instances_in_sled_evacuating",
+        )
+        .customize_nexus_config(&|config| {
+            let tasks = &mut config.pkg.background_tasks;
+            // The `instance-update` saga activates the real
+            // `instance_reincarnation` background task when an instance's state
+            // changes to `SledEvacuating`. Disable that task, so that only the
+            // task created by this test reincarnates instances.
+            tasks.instance_reincarnation.disable = true;
+            // Increase the intervals for background tasks that could modify
+            // VMM records while this test is running.
+            tasks.instance_watcher.period_secs = Duration::from_hours(24);
+            tasks.abandoned_vmm_reaper.period_secs = Duration::from_hours(24);
+            // Disable the `vmm_mark_stop_for_update` and `vmm_stop_for_update`
+            // tasks rather than merely increasing their intervals, since the
+            // task could be activated by the data it depends on.
+            tasks.vmm_mark_stop_for_update.disable = true;
+            tasks.vmm_stop_for_update.disable = true;
+        })
+        .start::<crate::Server>()
+        .await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+            Activator::new(),
+        );
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let generation = UpdateDispositionGeneration::from(1);
+        let mut will_reincarnate = std::collections::BTreeSet::new();
+
+        // Create running instances with different auto-restart policies, and
+        // mark their VMMs to be stopped for an update.
+        for (i, policy) in [
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceAutoRestartPolicy::Never,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let instance = create_instance(
+                &cptestctx,
+                &opctx,
+                &format!("sattakkhattuparama-{i}"),
+                policy,
+                InstanceState::Vmm,
+                InstanceIntendedState::Running,
+            )
+            .await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+            test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+
+            let vmm = test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("instance should have an active VMM");
+            // To avoid complexity, the VMMs are marked directly in the db
+            // instead of running the `vmm_mark_stop_for_update` task
+            mark_vmm_stopped_for_update(&conn, vmm.id, generation).await;
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SledEvacuation,
+            });
+        }
+
+        // The VMMs are marked, but they have not been stopped yet; there is
+        // nothing to reincarnate.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(
+            status.total_instances_found(),
+            0,
+            "unexpected instances found: {:?}",
+            status.instances_found
+        );
+        assert_eq!(
+            status.instances_reincarnated.len(),
+            0,
+            "unexpected instances reincarnated: {:?}",
+            status.instances_reincarnated
+        );
+        assert_eq!(
+            status.changed_state.len(),
+            0,
+            "unexpected instances changed state: {:?}",
+            status.changed_state
+        );
+
+        // Run the `vmm_stop_for_update` task to actually stop the marked VMMs.
+        let mut stop_task = VmmStopForUpdate::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
+        let VmmStopForUpdateStatus::Enabled(stop_status) =
+            stop_task.actually_activate(&opctx).await
+        else {
+            panic!("vmm_stop_for_update task should be enabled");
+        };
+        assert_eq!(
+            stop_status.error_messages.len(),
+            0,
+            "unexpected errors: {:?}",
+            stop_status.error_messages
+        );
+        assert!(
+            stop_status.vmms_failed_to_stop_by_sled.is_empty(),
+            "unexpected vmms failed to stop: {:?}",
+            stop_status.vmms_failed_to_stop_by_sled
+        );
+        // Make sure the amount of VMMs that stopped is the same as the
+        // instances we expect will be reincarnated
+        let stopped_count: usize = stop_status
+            .vmms_stopped_by_sled
+            .iter()
+            .map(|sled| sled.vmm_ids.len())
+            .sum();
+        assert_eq!(stopped_count, will_reincarnate.len());
+
+        // Poke each instance, so sled agent reports the stopped VMM to Nexus.
+        // The `instance-update` saga should change the instance state to
+        // `SledEvacuating`.
+        for instance in &will_reincarnate {
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.instance_id);
+            test_helpers::instance_simulate(&cptestctx, &instance_id).await;
+            test_helpers::instance_wait_for_state(
+                &cptestctx,
+                instance_id,
+                InstanceState::SledEvacuating,
+            )
+            .await;
+        }
+        test_helpers::wait_for_running_sagas(&cptestctx).await;
+
+        // Activate the reincarnation task again. Check that every instance had
+        // an instance-start saga started, regardless of its auto-restart policy
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SledEvacuation),
+            Some(&will_reincarnate.len())
+        );
+        assert_eq!(
+            status
+                .instances_reincarnated
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            will_reincarnate
+        );
+        assert_eq!(
+            status.changed_state.len(),
+            0,
+            "unexpected instances changed state: {:?}",
+            status.changed_state
+        );
+
+        // Instances reincarnate!
+        for instance in will_reincarnate {
+            test_helpers::instance_wait_for_state(
+                &cptestctx,
+                InstanceUuid::from_untyped_uuid(instance.instance_id),
+                InstanceState::Vmm,
+            )
+            .await;
+        }
+
+        cptestctx.teardown().await;
+    }
+}

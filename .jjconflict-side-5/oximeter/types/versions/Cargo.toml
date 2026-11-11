@@ -1,0 +1,28 @@
+[package]
+name = "oximeter-types-versions"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = { workspace = true, features = [ "serde" ] }
+chrono.workspace = true
+float-ord.workspace = true
+num.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+parse-display.workspace = true
+regex.workspace = true
+schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
+serde.workspace = true
+strum.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+rand = { workspace = true, features = ["std_rng"] }
+rstest.workspace = true

@@ -1,0 +1,177 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! # Oxide Control Plane
+//!
+//! The overall architecture for the Oxide Control Plane is described in [RFD
+//! 61](https://61.rfd.oxide.computer/).  This crate implements common facilities
+//! used in the control plane.  Other top-level crates implement pieces of the
+//! control plane (e.g., `omicron_nexus`).
+//!
+//! The best documentation for the control plane is RFD 61 and the rustdoc in
+//! this crate.  Since this crate doesn't provide externally-consumable
+//! interfaces, the rustdoc (generated with `--document-private-items`) is
+//! intended primarily for engineers working on this crate.
+
+// We only use rustdoc for internal documentation, including private items, so
+// it's expected that we'll have links to private items in the docs.
+#![allow(rustdoc::private_intra_doc_links)]
+
+pub mod address;
+pub mod api;
+pub mod backoff;
+pub mod cmd;
+pub mod disk;
+pub mod http_client;
+pub mod policy;
+pub mod resolvable_files;
+pub mod snake_case_result;
+pub mod update;
+pub mod vlan;
+pub mod zpool_name;
+
+/// A type that allows adding file and line numbers to log messages
+/// automatically. It should be instantiated at the root logger of each
+/// executable that desires this functionality, as in the following example.
+/// ```ignore
+///     slog::Logger::root(drain, o!(FileKv))
+/// ```
+pub struct FileKv;
+
+impl slog::KV for FileKv {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        // Only log file information when severity is at least info level
+        if record.level() > slog::Level::Info {
+            return Ok(());
+        }
+        serializer.emit_arguments(
+            "file".into(),
+            &format_args!("{}:{}", record.file(), record.line()),
+        )
+    }
+}
+
+/// Returns the current time, truncated to the previous microsecond.
+///
+/// This exists because the database doesn't store nanosecond-precision, so if
+/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
+/// when round-tripping through the database.  That's rather inconvenient.
+///
+/// To truncate an arbitrary timestamp to database precision, use
+/// [`timestamp_db_precision`].
+pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
+    timestamp_db_precision(chrono::Utc::now())
+}
+
+/// Truncates a [`chrono::DateTime`]`<`[`chrono::Utc`]`>` to the previous
+/// microsecond.
+///
+/// This exists because the database doesn't store nanosecond-precision, so if
+/// we store nanosecond-precision timestamps, then `DateTime`conversion is lossy
+/// when round-tripping through the database.  That's rather inconvenient.
+pub fn timestamp_db_precision(
+    ts: chrono::DateTime<chrono::Utc>,
+) -> chrono::DateTime<chrono::Utc> {
+    let nanosecs = ts.timestamp_subsec_nanos();
+    let micros = ts.timestamp_subsec_micros();
+    let only_nanos = nanosecs - micros * 1000;
+    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
+}
+
+/// Format a [`std::time::Duration`] as a human-readable string
+/// (e.g. `"1h 5m 23ms"`), truncated to millisecond precision.
+pub fn format_duration_ms(duration: std::time::Duration) -> String {
+    // Ignore units smaller than a millisecond.
+    let elapsed = std::time::Duration::from_millis(
+        u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+    );
+    humantime::format_duration(elapsed).to_string()
+}
+
+/// Format a [`chrono::TimeDelta`] as a human-readable string (see
+/// [`format_duration_ms`]).
+pub fn format_time_delta(time_delta: chrono::TimeDelta) -> String {
+    match time_delta.to_std() {
+        Ok(d) => format_duration_ms(d),
+        Err(_) => String::from("<time delta out of range>"),
+    }
+}
+
+pub const OMICRON_DPD_TAG: &str = "omicron";
+
+/// A wrapper struct that does nothing other than elide the inner value from
+/// [`std::fmt::Debug`] output.
+///
+/// We define this within Omicron instead of using one of the many available
+/// crates that do the same thing because it's trivial to do so, and we want the
+/// flexibility to add traits to this type without needing to wait on upstream
+/// to add an optional dependency.
+///
+/// If you want to use this for secrets, consider that it might not do
+/// everything you expect (it does not zeroize memory on drop, nor get in the
+/// way of you removing the inner value from this wrapper struct).
+#[derive(
+    Clone, Copy, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct NoDebug<T>(pub T);
+
+impl<T> std::fmt::Debug for NoDebug<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "..")
+    }
+}
+
+/// Produce an OpenAPI schema describing a hex string of a specific byte length.
+///
+/// Used by versioned sled-agent types to preserve schema compatibility. New
+/// code should use `byte_wrapper::HexArray<N>` which implements `JsonSchema`
+/// directly.
+pub fn hex_schema<const N: usize>(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    use schemars::JsonSchema;
+
+    let mut schema: schemars::schema::SchemaObject =
+        <String>::json_schema(generator).into();
+    schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
+}
+
+/// A simple wrapper around a byte slice that provides a [`std::fmt::Debug`]
+/// impl which writes the bytes as a hex string.
+///
+/// # Example
+///
+/// ```
+/// # use omicron_common::BytesToHexDebug;
+/// assert_eq!(
+///     format!("{:?}", BytesToHexDebug(&[1, 234, 56, 255, 11])),
+///     "01ea38ff0b",
+/// );
+/// assert_eq!(
+///     format!("{:?}", BytesToHexDebug("Hello World!".as_bytes())),
+///     "48656c6c6f20576f726c6421",
+/// );
+/// ```
+pub struct BytesToHexDebug<'a>(pub &'a [u8]);
+
+impl std::fmt::Debug for BytesToHexDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Write;
+        const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+        for b in self.0 {
+            let upper_nib = HEX_CHARS[(b >> 4) as usize] as char;
+            let lower_nib = HEX_CHARS[(b & 0xF) as usize] as char;
+            f.write_char(upper_nib)?;
+            f.write_char(lower_nib)?;
+        }
+        Ok(())
+    }
+}

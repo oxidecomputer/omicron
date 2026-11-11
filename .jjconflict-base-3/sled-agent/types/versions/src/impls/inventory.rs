@@ -1,0 +1,1532 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::{self, Write};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
+
+use camino::Utf8PathBuf;
+use chrono::Utc;
+use iddqd::IdOrdMap;
+use indent_write::fmt::IndentWriter;
+use omicron_common::address::Ip;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::update::OmicronInstallManifestSource;
+use omicron_generation_kinds::{Generation, SledConfigGeneration};
+use omicron_uuid_kinds::MupdateUuid;
+use tufaceous_artifact::ArtifactHash;
+
+use crate::latest::disk::M2Slot;
+use crate::latest::inventory::{
+    BootImageHeader, BootPartitionContents, BootPartitionDetails,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    CurrentUpdateDisposition, ExternalDnsAddrs, FmdHostCase, FmdInventory,
+    FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
+    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    MupdateOverrideInventory, MupdateOverrideNonBootInventory,
+    NetworkInterface, NexusExternalIps, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
+    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
+    RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
+    SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
+    SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
+    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline,
+    ZoneArtifactInventory, ZoneKind, ZoneSnatConfig, ZpoolHealth,
+};
+
+impl ZoneKind {
+    /// The NTP prefix used for both BoundaryNtp and InternalNtp zones and services.
+    pub const NTP_PREFIX: &str = "ntp";
+
+    /// Return a string that is used to construct **zone names**. This string
+    /// is guaranteed to be stable over time.
+    pub fn zone_prefix(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
+            ZoneKind::CockroachDb => "cockroachdb",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible_pantry",
+            ZoneKind::ExternalDns => "external_dns",
+            ZoneKind::InternalDns => "internal_dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string that identifies **zone image filenames** in the install
+    /// dataset.
+    ///
+    /// This method is exactly equivalent to `format!("{}.tar.gz",
+    /// self.zone_prefix())`, but returns `&'static str`s. A unit test ensures
+    /// they stay consistent.
+    pub fn artifact_in_install_dataset(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp.tar.gz",
+            ZoneKind::Clickhouse => "clickhouse.tar.gz",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper.tar.gz",
+            ZoneKind::ClickhouseServer => "clickhouse_server.tar.gz",
+            ZoneKind::CockroachDb => "cockroachdb.tar.gz",
+            ZoneKind::Crucible => "crucible.tar.gz",
+            ZoneKind::CruciblePantry => "crucible_pantry.tar.gz",
+            ZoneKind::ExternalDns => "external_dns.tar.gz",
+            ZoneKind::InternalDns => "internal_dns.tar.gz",
+            ZoneKind::Nexus => "nexus.tar.gz",
+            ZoneKind::Oximeter => "oximeter.tar.gz",
+        }
+    }
+
+    /// Return a string that is used to construct **SMF service names**. This
+    /// string is guaranteed to be stable over time.
+    pub fn service_prefix(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
+            ZoneKind::CockroachDb => "cockroachdb",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible/pantry",
+            ZoneKind::ExternalDns => "external_dns",
+            ZoneKind::InternalDns => "internal_dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string suitable for use **in `Name` instances**. This string
+    /// is guaranteed to be stable over time.
+    ///
+    /// This string uses dashes rather than underscores, as required by `Name`.
+    pub fn name_prefix(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
+            ZoneKind::ClickhouseServer => "clickhouse-server",
+            ZoneKind::CockroachDb => "cockroach",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible-pantry",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string that is used for reporting and error messages. This is
+    /// **not guaranteed** to be stable.
+    ///
+    /// If you're displaying a user-friendly message, prefer this method.
+    pub fn report_str(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp => "boundary_ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
+            ZoneKind::CockroachDb => "cockroach_db",
+            ZoneKind::Crucible => "crucible",
+            ZoneKind::CruciblePantry => "crucible_pantry",
+            ZoneKind::ExternalDns => "external_dns",
+            ZoneKind::InternalDns => "internal_dns",
+            ZoneKind::InternalNtp => "internal_ntp",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string used as an artifact name for control-plane zones.
+    /// This is **not guaranteed** to be stable.
+    ///
+    /// These strings match the `ArtifactId::name`s Nexus constructs when
+    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
+    /// these are chosen by reading the `pkg` value of the `oxide.json` object
+    /// inside each zone image tarball.
+    pub fn artifact_id_name(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp => "ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
+            ZoneKind::CockroachDb => "cockroachdb",
+            ZoneKind::Crucible => "crucible-zone",
+            ZoneKind::CruciblePantry => "crucible-pantry-zone",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::InternalNtp => "ntp",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Map an artifact ID name to the corresponding file name in the install
+    /// dataset.
+    ///
+    /// We don't allow mapping artifact ID names to `ZoneKind` because the map
+    /// isn't bijective -- both internal and boundary NTP zones use the same
+    /// `ntp` artifact. But the artifact ID name and the name in the install
+    /// dataset do form a bijective map.
+    pub fn artifact_id_name_to_install_dataset_file(
+        artifact_id_name: &str,
+    ) -> Option<&'static str> {
+        let zone_kind = match artifact_id_name {
+            "ntp" => ZoneKind::BoundaryNtp,
+            "clickhouse" => ZoneKind::Clickhouse,
+            "clickhouse_keeper" => ZoneKind::ClickhouseKeeper,
+            "clickhouse_server" => ZoneKind::ClickhouseServer,
+            "cockroachdb" => ZoneKind::CockroachDb,
+            "crucible-zone" => ZoneKind::Crucible,
+            "crucible-pantry-zone" => ZoneKind::CruciblePantry,
+            "external-dns" => ZoneKind::ExternalDns,
+            "internal-dns" => ZoneKind::InternalDns,
+            "nexus" => ZoneKind::Nexus,
+            "oximeter" => ZoneKind::Oximeter,
+            _ => return None,
+        };
+        Some(zone_kind.artifact_in_install_dataset())
+    }
+}
+
+impl OmicronZoneType {
+    /// Returns the [`ZoneKind`] corresponding to this variant.
+    pub fn kind(&self) -> ZoneKind {
+        match self {
+            OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
+            OmicronZoneType::ClickhouseKeeper { .. } => {
+                ZoneKind::ClickhouseKeeper
+            }
+            OmicronZoneType::ClickhouseServer { .. } => {
+                ZoneKind::ClickhouseServer
+            }
+            OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
+            OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
+            OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
+            OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
+            OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
+            OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
+            OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
+            OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
+        }
+    }
+
+    /// Does this zone require time synchronization before it is initialized?
+    ///
+    /// This function is somewhat conservative - the set of services
+    /// that can be launched before timesync has completed is intentionally kept
+    /// small, since it would be easy to add a service that expects time to be
+    /// reasonably synchronized.
+    pub fn requires_timesync(&self) -> bool {
+        match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::InternalDns { .. } => false,
+            _ => true,
+        }
+    }
+
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zones have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        match self {
+            OmicronZoneType::BoundaryNtp { address, .. }
+            | OmicronZoneType::Clickhouse { address, .. }
+            | OmicronZoneType::ClickhouseKeeper { address, .. }
+            | OmicronZoneType::ClickhouseServer { address, .. }
+            | OmicronZoneType::CockroachDb { address, .. }
+            | OmicronZoneType::Crucible { address, .. }
+            | OmicronZoneType::CruciblePantry { address }
+            | OmicronZoneType::ExternalDns { http_address: address, .. }
+            | OmicronZoneType::InternalNtp { address }
+            | OmicronZoneType::Nexus { internal_address: address, .. }
+            | OmicronZoneType::Oximeter { address } => *address.ip(),
+            OmicronZoneType::InternalDns {
+                http_address: address,
+                dns_address,
+                ..
+            } => {
+                debug_assert_eq!(address.ip(), dns_address.ip());
+                *address.ip()
+            }
+        }
+    }
+
+    /// Identifies whether this is an NTP zone.
+    pub fn is_ntp(&self) -> bool {
+        matches!(
+            self,
+            OmicronZoneType::BoundaryNtp { .. }
+                | OmicronZoneType::InternalNtp { .. }
+        )
+    }
+
+    /// Identifies whether this is a boundary NTP zone.
+    pub fn is_boundary_ntp(&self) -> bool {
+        matches!(self, OmicronZoneType::BoundaryNtp { .. })
+    }
+
+    /// Identifies whether this is a Nexus zone.
+    pub fn is_nexus(&self) -> bool {
+        matches!(self, OmicronZoneType::Nexus { .. })
+    }
+
+    /// Identifies whether this is a Crucible (not Crucible pantry) zone.
+    pub fn is_crucible(&self) -> bool {
+        matches!(self, OmicronZoneType::Crucible { .. })
+    }
+
+    /// The service vNIC providing external connectivity to this zone.
+    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
+        match self {
+            OmicronZoneType::Nexus { nic, .. }
+            | OmicronZoneType::ExternalDns { nic, .. }
+            | OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
+            _ => None,
+        }
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name. Otherwise, return `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        let (dataset, dataset_kind) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, .. } => {
+                Some((dataset, DatasetKind::Clickhouse))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper))
+            }
+            OmicronZoneType::ClickhouseServer { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseServer))
+            }
+            OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some((dataset, DatasetKind::Cockroach))
+            }
+            OmicronZoneType::Crucible { dataset, .. } => {
+                Some((dataset, DatasetKind::Crucible))
+            }
+            OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::ExternalDns))
+            }
+            OmicronZoneType::InternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::InternalDns))
+            }
+        }?;
+        Some(DatasetName::new(dataset.pool_name, dataset_kind))
+    }
+}
+
+impl OmicronZonesConfig {
+    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
+}
+
+impl OmicronZoneConfig {
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zones have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        self.zone_type.underlay_ip()
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name. Otherwise, return `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.zone_type.dataset_name()
+    }
+}
+
+impl ConfigReconcilerInventory {
+    /// Iterate over all running zones as reported by the last reconciliation
+    /// result.
+    ///
+    /// This includes zones that are both present in `last_reconciled_config`
+    /// and whose status in `zones` indicates "successfully running".
+    pub fn running_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.zones.iter().filter_map(|(zone_id, result)| match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                self.last_reconciled_config.zones.get(zone_id)
+            }
+            ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
+    }
+
+    /// Iterate over all zones contained in the most-recently-reconciled sled
+    /// config and report their status as of that reconciliation.
+    pub fn reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
+        self.zones.iter().filter_map(|(zone_id, result)| {
+            let config = self.last_reconciled_config.zones.get(zone_id)?;
+            Some((config, result))
+        })
+    }
+
+    /// Given a sled config, produce a reconciler result that sled-agent could
+    /// have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`](crate::latest::inventory::Inventory).
+    pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
+        let mut ret = ConfigReconcilerInventory {
+            last_reconciled_config: OmicronSledConfig::default(),
+            external_disks: BTreeMap::new(),
+            datasets: BTreeMap::new(),
+            orphaned_datasets: IdOrdMap::new(),
+            zones: BTreeMap::new(),
+            remove_mupdate_override: None,
+            boot_partitions: BootPartitionContents::debug_assume_success(),
+        };
+        ret.debug_update_assume_success(config);
+        ret
+    }
+
+    /// Given a sled config, update an existing reconciler result to simulate an
+    /// output that sled-agent could have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`](crate::latest::inventory::Inventory).
+    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
+        let external_disks = config
+            .disks
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let datasets = config
+            .datasets
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let zones = config
+            .zones
+            .iter()
+            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let remove_mupdate_override =
+            config.remove_mupdate_override.map(|_| {
+                RemoveMupdateOverrideInventory {
+                boot_disk_result: Ok(
+                    RemoveMupdateOverrideBootSuccessInventory::Removed,
+                ),
+                non_boot_message:
+                    "mupdate override successfully removed on non-boot disks"
+                        .to_owned(),
+            }
+            });
+
+        self.last_reconciled_config = config;
+        self.external_disks = external_disks;
+        self.datasets = datasets;
+        self.orphaned_datasets = IdOrdMap::new();
+        self.zones = zones;
+        self.remove_mupdate_override = remove_mupdate_override;
+    }
+}
+
+impl HostPhase2DesiredContents {
+    /// The artifact hash described by `self`, if it has one.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        match self {
+            Self::CurrentContents => None,
+            Self::Artifact { hash } => Some(*hash),
+        }
+    }
+}
+
+impl OmicronZoneImageSource {
+    /// Return the artifact hash used for the zone image, if the zone's image
+    /// source is from the artifact store.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        if let OmicronZoneImageSource::Artifact { hash } = self {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
+}
+
+impl BootPartitionContents {
+    /// Returns the slot details for the given M.2 slot.
+    pub fn slot_details(
+        &self,
+        slot: M2Slot,
+    ) -> &Result<BootPartitionDetails, String> {
+        match slot {
+            M2Slot::A => &self.slot_a,
+            M2Slot::B => &self.slot_b,
+        }
+    }
+
+    /// Returns a fake `BootPartitionContents` for testing.
+    pub fn debug_assume_success() -> BootPartitionContents {
+        BootPartitionContents {
+            boot_disk: Ok(M2Slot::A),
+            slot_a: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [0; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0a; 32]),
+                artifact_size: 1000,
+            }),
+            slot_b: Ok(BootPartitionDetails {
+                header: BootImageHeader {
+                    flags: 0,
+                    data_size: 1000,
+                    image_size: 1000,
+                    target_size: 1000,
+                    sha256: [1; 32],
+                    image_name: "fake from debug_assume_success()".to_string(),
+                },
+                artifact_hash: ArtifactHash([0x0b; 32]),
+                artifact_size: 1000,
+            }),
+        }
+    }
+}
+
+impl OmicronFileSourceResolverInventory {
+    /// Returns a new, fake inventory for tests.
+    pub fn new_fake() -> OmicronFileSourceResolverInventory {
+        OmicronFileSourceResolverInventory {
+            zone_manifest: ManifestInventory::new_fake(),
+            measurement_manifest: ManifestInventory::new_fake(),
+            mupdate_override: MupdateOverrideInventory::new_fake(),
+        }
+    }
+}
+
+impl ManifestInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> ManifestInventory {
+        ManifestInventory {
+            boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
+            boot_inventory: Ok(ManifestBootInventory::new_fake()),
+            non_boot_status: IdOrdMap::new(),
+        }
+    }
+}
+
+impl ManifestBootInventory {
+    /// Returns a new, empty inventory for tests.
+    ///
+    /// For a more representative selection of real zones, see `representative`
+    /// in `nexus-inventory`.
+    pub fn new_fake() -> ManifestBootInventory {
+        ManifestBootInventory {
+            source: OmicronInstallManifestSource::Installinator {
+                mupdate_id: MupdateUuid::nil(),
+            },
+            artifacts: IdOrdMap::new(),
+        }
+    }
+}
+
+impl MupdateOverrideInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> MupdateOverrideInventory {
+        MupdateOverrideInventory {
+            boot_disk_path: Utf8PathBuf::from(
+                "/fake/path/install/mupdate_override.json",
+            ),
+            boot_override: Ok(None),
+            non_boot_status: IdOrdMap::new(),
+        }
+    }
+}
+
+impl SvcsEnabledNotOnline {
+    /// Returns a fake empty inventory that shows all services as successful
+    /// for tests.
+    pub fn new_fake() -> Self {
+        Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let SvcsEnabledNotOnline { services, errors, time_of_status: _ } = self;
+        services.is_empty() && errors.is_empty()
+    }
+
+    /// Removes all services that are not in the `Maintenance` state.
+    pub fn retain_in_maintenance(&mut self) {
+        self.services
+            .retain(|svc| svc.state == SvcEnabledNotOnlineState::Maintenance);
+    }
+}
+
+/// Display helper for [`OmicronFileSourceResolverInventory`].
+pub struct OmicronFileSourceResolverInventoryDisplay<'a> {
+    inner: &'a OmicronFileSourceResolverInventory,
+}
+
+impl fmt::Display for OmicronFileSourceResolverInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let OmicronFileSourceResolverInventory {
+            zone_manifest,
+            measurement_manifest,
+            mupdate_override,
+        } = self.inner;
+        writeln!(f, "zone manifest:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        write!(indented, "{}", zone_manifest.display())?;
+        let f = indented.into_inner();
+        writeln!(f, "measurement manifest:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        write!(indented, "{}", measurement_manifest.display())?;
+        let f = indented.into_inner();
+        writeln!(f, "mupdate override:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        write!(indented, "{}", mupdate_override.display())?;
+        Ok(())
+    }
+}
+
+impl OmicronFileSourceResolverInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> OmicronFileSourceResolverInventoryDisplay<'_> {
+        OmicronFileSourceResolverInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`ManifestInventory`].
+pub struct ManifestInventoryDisplay<'a> {
+    inner: &'a ManifestInventory,
+}
+
+impl fmt::Display for ManifestInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+        let ManifestInventory {
+            boot_disk_path,
+            boot_inventory,
+            non_boot_status,
+        } = self.inner;
+        writeln!(f, "path on boot disk: {}", boot_disk_path)?;
+        match boot_inventory {
+            Ok(boot_inventory) => {
+                writeln!(f, "boot disk inventory:")?;
+                let mut indented = IndentWriter::new("    ", f);
+                write!(indented, "{}", boot_inventory.display())?;
+                f = indented.into_inner();
+            }
+            Err(error) => {
+                writeln!(
+                    f,
+                    "error obtaining zone manifest on boot disk: {error}"
+                )?;
+            }
+        }
+        if non_boot_status.is_empty() {
+            writeln!(f, "no non-boot disks")?;
+        } else {
+            writeln!(f, "non-boot disk status:")?;
+            for non_boot in non_boot_status {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", non_boot.display())?;
+                f = indented.into_inner();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ManifestInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ManifestInventoryDisplay<'_> {
+        ManifestInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`ManifestBootInventory`].
+pub struct ManifestBootInventoryDisplay<'a> {
+    inner: &'a ManifestBootInventory,
+}
+
+impl fmt::Display for ManifestBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+        let ManifestBootInventory { source, artifacts } = self.inner;
+        writeln!(f, "manifest generated by {}", source)?;
+        if artifacts.is_empty() {
+            writeln!(
+                f,
+                "no artifacts in install dataset (this should only be seen in simulated systems)"
+            )?;
+        } else {
+            writeln!(f, "artifacts in install dataset:")?;
+            for artifact in artifacts {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", artifact.display())?;
+                f = indented.into_inner();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ManifestBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ManifestBootInventoryDisplay<'_> {
+        ManifestBootInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`ZoneArtifactInventory`].
+pub struct ZoneArtifactInventoryDisplay<'a> {
+    inner: &'a ZoneArtifactInventory,
+}
+
+impl fmt::Display for ZoneArtifactInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ZoneArtifactInventory {
+            file_name,
+            path: _,
+            expected_size,
+            expected_hash,
+            status,
+        } = self.inner;
+        write!(
+            f,
+            "{file_name} (expected {expected_size} bytes with hash {expected_hash}): "
+        )?;
+        match status {
+            Ok(()) => write!(f, "ok"),
+            Err(message) => write!(f, "error: {message}"),
+        }
+    }
+}
+
+impl ZoneArtifactInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ZoneArtifactInventoryDisplay<'_> {
+        ZoneArtifactInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`ManifestNonBootInventory`].
+pub struct ManifestNonBootInventoryDisplay<'a> {
+    inner: &'a ManifestNonBootInventory,
+}
+
+impl fmt::Display for ManifestNonBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ManifestNonBootInventory { zpool_id: _, path, is_valid, message } =
+            self.inner;
+        write!(
+            f,
+            "{path} ({}): {message}",
+            if *is_valid { "valid" } else { "invalid" }
+        )
+    }
+}
+
+impl ManifestNonBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ManifestNonBootInventoryDisplay<'_> {
+        ManifestNonBootInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`MupdateOverrideInventory`].
+pub struct MupdateOverrideInventoryDisplay<'a> {
+    inner: &'a MupdateOverrideInventory,
+}
+
+impl fmt::Display for MupdateOverrideInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+        let MupdateOverrideInventory {
+            boot_disk_path,
+            boot_override,
+            non_boot_status,
+        } = self.inner;
+        writeln!(f, "path on boot disk: {boot_disk_path}")?;
+        match boot_override {
+            Ok(Some(boot_override)) => {
+                writeln!(
+                    f,
+                    "override on boot disk: {}",
+                    boot_override.display()
+                )?;
+            }
+            Ok(None) => {
+                writeln!(f, "no override on boot disk")?;
+            }
+            Err(error) => {
+                writeln!(f, "error obtaining override on boot disk: {error}")?;
+            }
+        }
+        if non_boot_status.is_empty() {
+            writeln!(f, "no non-boot disks")?;
+        } else {
+            writeln!(f, "non-boot disk status:")?;
+            for non_boot in non_boot_status {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", non_boot.display())?;
+                f = indented.into_inner();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MupdateOverrideInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MupdateOverrideInventoryDisplay<'_> {
+        MupdateOverrideInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`MupdateOverrideBootInventory`].
+pub struct MupdateOverrideBootInventoryDisplay<'a> {
+    inner: &'a MupdateOverrideBootInventory,
+}
+
+impl fmt::Display for MupdateOverrideBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MupdateOverrideBootInventory { mupdate_override_id } = self.inner;
+        write!(f, "{}", mupdate_override_id)
+    }
+}
+
+impl MupdateOverrideBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MupdateOverrideBootInventoryDisplay<'_> {
+        MupdateOverrideBootInventoryDisplay { inner: self }
+    }
+}
+
+/// Display helper for [`MupdateOverrideNonBootInventory`].
+pub struct MupdateOverrideNonBootInventoryDisplay<'a> {
+    inner: &'a MupdateOverrideNonBootInventory,
+}
+
+impl fmt::Display for MupdateOverrideNonBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MupdateOverrideNonBootInventory {
+            zpool_id: _,
+            path,
+            is_valid,
+            message,
+        } = self.inner;
+        write!(
+            f,
+            "{path} ({}): {message}",
+            if *is_valid { "valid" } else { "invalid" }
+        )
+    }
+}
+
+impl MupdateOverrideNonBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MupdateOverrideNonBootInventoryDisplay<'_> {
+        MupdateOverrideNonBootInventoryDisplay { inner: self }
+    }
+}
+
+impl HostPhase2DesiredSlots {
+    /// Return a `HostPhase2DesiredSlots` with both slots set to
+    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
+    /// to the current contents of either slot".
+    pub const fn current_contents() -> Self {
+        Self {
+            slot_a: HostPhase2DesiredContents::CurrentContents,
+            slot_b: HostPhase2DesiredContents::CurrentContents,
+        }
+    }
+}
+
+impl Default for OmicronSledConfig {
+    fn default() -> Self {
+        Self {
+            generation: SledConfigGeneration::new(),
+            disks: IdOrdMap::default(),
+            datasets: IdOrdMap::default(),
+            zones: IdOrdMap::default(),
+            remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: BTreeSet::new(),
+            update_disposition: OmicronSledUpdateDisposition::Available,
+        }
+    }
+}
+
+impl SingleMeasurementInventory {
+    pub fn display(&self) -> SingleMeasurementInventoryDisplay<'_> {
+        SingleMeasurementInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`SingleMeasurementInventory`]
+pub struct SingleMeasurementInventoryDisplay<'a> {
+    inner: &'a SingleMeasurementInventory,
+}
+
+impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let SingleMeasurementInventory { path, result } = self.inner;
+
+        match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                writeln!(f, "entry {path} ok")?
+            }
+            ConfigReconcilerInventoryResult::Err { message } => {
+                writeln!(f, "entry error : {message}")?
+            }
+        }
+        Ok(())
+    }
+}
+
+/// a displayer for the FMD inventory result on a sled
+pub struct FmdInventoryResultDisplay<'a> {
+    inner: &'a Result<FmdInventory, FmdInventoryError>,
+}
+
+impl<'a> FmdInventoryResultDisplay<'a> {
+    pub fn new(result: &'a Result<FmdInventory, FmdInventoryError>) -> Self {
+        Self { inner: result }
+    }
+}
+
+impl fmt::Display for FmdInventoryResultDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.inner {
+            Ok(inv) => write!(f, "{}", inv.display()),
+            Err(err) => writeln!(f, "FMD collection failed: {err}"),
+        }
+    }
+}
+
+impl FmdInventory {
+    pub fn display(&self) -> FmdInventoryDisplay<'_> {
+        FmdInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdInventory`]
+pub struct FmdInventoryDisplay<'a> {
+    inner: &'a FmdInventory,
+}
+
+impl fmt::Display for FmdInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdInventory { cases, resources } = self.inner;
+        if cases.is_empty() && resources.is_empty() {
+            writeln!(f, "no faults reported")?;
+            return Ok(());
+        }
+        writeln!(f, "cases ({}):", cases.len())?;
+        for case in cases {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", case.display())?;
+        }
+        writeln!(f, "resources ({}):", resources.len())?;
+        for resource in resources {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", resource.display())?;
+        }
+        Ok(())
+    }
+}
+
+impl FmdHostCase {
+    pub fn display(&self) -> FmdHostCaseDisplay<'_> {
+        FmdHostCaseDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdHostCase`]
+pub struct FmdHostCaseDisplay<'a> {
+    inner: &'a FmdHostCase,
+}
+
+impl fmt::Display for FmdHostCaseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdHostCase { uuid, code, url, event } = self.inner;
+        writeln!(f, "case {uuid} ({code})")?;
+        writeln!(f, "  url: {url}")?;
+        // The event payload is the FMD nvlist serialized to JSON. We
+        // intentionally do not interpret it; round-trip pretty-printing
+        // is enough to make it human-readable.
+        if let Some(event) = event {
+            match serde_json::to_string_pretty(event) {
+                Ok(rendered) => {
+                    writeln!(f, "  event:")?;
+                    let mut indent = IndentWriter::new("    ", &mut *f);
+                    writeln!(indent, "{rendered}")?;
+                }
+                Err(_) => writeln!(f, "  event: <unrenderable>")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FmdResource {
+    pub fn display(&self) -> FmdResourceDisplay<'_> {
+        FmdResourceDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdResource`]
+pub struct FmdResourceDisplay<'a> {
+    inner: &'a FmdResource,
+}
+
+impl fmt::Display for FmdResourceDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdResource { uuid, fmri, case_id, faulty, unusable, invisible } =
+            self.inner;
+        writeln!(f, "resource {uuid} (case {case_id})")?;
+        writeln!(f, "  fmri: {fmri}")?;
+        writeln!(
+            f,
+            "  faulty: {faulty:<5}  unusable: {unusable:<5}  invisible: {invisible:<5}"
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("unrecognized zpool health value `{0}`")]
+pub struct ZpoolHealthParseError(pub String);
+
+// TODO-correctness `ZpoolHealth` implements both `FromStr` and `Display`, but
+// they aren't symmetric - we should replace one of these (probably `FromStr`?)
+// with an explicitly-named method.
+impl FromStr for ZpoolHealth {
+    type Err = ZpoolHealthParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ONLINE" => Ok(ZpoolHealth::Online),
+            "DEGRADED" => Ok(ZpoolHealth::Degraded),
+            "FAULTED" => Ok(ZpoolHealth::Faulted),
+            "OFFLINE" => Ok(ZpoolHealth::Offline),
+            "REMOVED" => Ok(ZpoolHealth::Removed),
+            "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
+            _ => Err(ZpoolHealthParseError(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ZpoolHealth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ZpoolHealth::Online => "online",
+            ZpoolHealth::Degraded => "degraded",
+            ZpoolHealth::Faulted => "faulted",
+            ZpoolHealth::Offline => "offline",
+            ZpoolHealth::Removed => "removed",
+            ZpoolHealth::Unavailable => "unavailable",
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl SledCpuFamily {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SledCpuFamily::Unknown => "unknown",
+            SledCpuFamily::AmdMilan => "amd_milan",
+            SledCpuFamily::AmdTurin => "amd_turin",
+            SledCpuFamily::AmdTurinDense => "amd_turin_dense",
+        }
+    }
+}
+
+impl fmt::Display for SledCpuFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl From<SvcEnabledNotOnlineState> for SvcState {
+    fn from(value: SvcEnabledNotOnlineState) -> Self {
+        match value {
+            SvcEnabledNotOnlineState::Degraded => Self::Degraded,
+            SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
+            SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Unrecognized => Self::Unrecognized,
+        }
+    }
+}
+
+impl fmt::Display for SvcState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            SvcState::Uninitialized => "uninitialized",
+            SvcState::Offline => "offline",
+            SvcState::Online => "online",
+            SvcState::Degraded => "degraded",
+            SvcState::Maintenance => "maintenance",
+            SvcState::Disabled => "disabled",
+            SvcState::LegacyRun => "legacy_run",
+            SvcState::Unrecognized => "unrecognized",
+        };
+
+        write!(f, "{state}")
+    }
+}
+
+impl fmt::Display for SvcEnabledNotOnlineState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            SvcEnabledNotOnlineState::Offline => "offline",
+            SvcEnabledNotOnlineState::Degraded => "degraded",
+            SvcEnabledNotOnlineState::Maintenance => "maintenance",
+            SvcEnabledNotOnlineState::Unrecognized => "unrecognized",
+        };
+
+        write!(f, "{state}")
+    }
+}
+
+impl<T: Ip> SourceNatConfig<T> {
+    /// Get the port range.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range(&self) -> std::ops::RangeInclusive<u16> {
+        self.first_port..=self.last_port
+    }
+
+    /// Get the port range as a raw tuple; both values are inclusive.
+    ///
+    /// Guaranteed to be aligned to [`NUM_SOURCE_NAT_PORTS`].
+    pub fn port_range_raw(&self) -> (u16, u16) {
+        self.port_range().into_inner()
+    }
+}
+
+impl SourceNatConfigGeneric {
+    /// Try to convert this to a concrete IPv4 configuration.
+    ///
+    /// Return None if this is an IPv6 configuration.
+    pub fn try_as_ipv4(&self) -> Option<SourceNatConfigV4> {
+        let IpAddr::V4(ip) = self.ip else {
+            return None;
+        };
+        Some(SourceNatConfig {
+            ip,
+            first_port: self.first_port,
+            last_port: self.last_port,
+        })
+    }
+
+    /// Try to convert this to a concrete IPv6 configuration.
+    ///
+    /// Return None if this is an IPv4 configuration.
+    pub fn try_as_ipv6(&self) -> Option<SourceNatConfigV6> {
+        let IpAddr::V6(ip) = self.ip else {
+            return None;
+        };
+        Some(SourceNatConfig {
+            ip,
+            first_port: self.first_port,
+            last_port: self.last_port,
+        })
+    }
+}
+
+impl From<SourceNatConfigV4> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV4) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V4(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
+impl From<SourceNatConfigV6> for SourceNatConfigGeneric {
+    fn from(c: SourceNatConfigV6) -> Self {
+        SourceNatConfig {
+            ip: IpAddr::V6(c.ip),
+            first_port: c.first_port,
+            last_port: c.last_port,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<T> proptest::arbitrary::Arbitrary for SourceNatConfig<T>
+where
+    T: Ip + proptest::arbitrary::Arbitrary,
+    T::Strategy: 'static,
+{
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+
+        let num_possible_first_ports = u16::MAX / NUM_SOURCE_NAT_PORTS + 1;
+        let first_port_strategy = (0u16..num_possible_first_ports)
+            .prop_map(|i| i * NUM_SOURCE_NAT_PORTS);
+
+        (T::arbitrary(), first_port_strategy)
+            .prop_map(|(ip, first_port)| {
+                let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+                Self::new(ip, first_port, last_port)
+                    .expect("Arbitrary impl produces aligned port pairs")
+            })
+            .boxed()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SourceNatConfigError {
+    #[error(
+        "snat port range is not aligned to {NUM_SOURCE_NAT_PORTS}: \
+         ({first_port}, {last_port})"
+    )]
+    UnalignedPortPair { first_port: u16, last_port: u16 },
+}
+
+impl ZoneSnatConfig {
+    /// Return the IPv4 SNAT config, if any.
+    pub fn as_ipv4(&self) -> Option<&SourceNatConfigV4> {
+        match self {
+            ZoneSnatConfig::Ipv4Only(ipv4)
+            | ZoneSnatConfig::DualStack { ipv4, .. } => Some(ipv4),
+            ZoneSnatConfig::Ipv6Only(_) => None,
+        }
+    }
+
+    /// Return the IPv6 SNAT config, if any.
+    pub fn as_ipv6(&self) -> Option<&SourceNatConfigV6> {
+        match self {
+            ZoneSnatConfig::Ipv6Only(ipv6)
+            | ZoneSnatConfig::DualStack { ipv6, .. } => Some(ipv6),
+            ZoneSnatConfig::Ipv4Only(_) => None,
+        }
+    }
+}
+
+impl NexusExternalIps {
+    /// Construct from a single IP address.
+    pub fn from_single(ip: IpAddr) -> Self {
+        Self::new(BTreeSet::from_iter(std::iter::once(ip)))
+            .expect("one IP is always valid")
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<IpAddr> {
+        if self.0.len() == 1 { self.0.into_iter().next() } else { None }
+    }
+
+    /// Iterate over the external IPs.
+    pub fn iter(&self) -> impl Iterator<Item = &IpAddr> {
+        self.0.iter()
+    }
+}
+
+impl From<&NexusExternalIps> for crate::latest::instance::ExternalIpConfig {
+    fn from(ips: &NexusExternalIps) -> Self {
+        external_ip_config_from_ips(ips.iter().copied())
+    }
+}
+
+impl From<&ExternalDnsAddrs> for crate::latest::instance::ExternalIpConfig {
+    fn from(addrs: &ExternalDnsAddrs) -> Self {
+        external_ip_config_from_ips(addrs.0.keys().copied())
+    }
+}
+
+fn external_ip_config_from_ips(
+    ips: impl Iterator<Item = IpAddr>,
+) -> crate::latest::instance::ExternalIpConfig {
+    let mut v4 = BTreeSet::new();
+    let mut v6 = BTreeSet::new();
+    for ip in ips {
+        match ip {
+            IpAddr::V4(ip) => {
+                v4.insert(ip);
+            }
+            IpAddr::V6(ip) => {
+                v6.insert(ip);
+            }
+        }
+    }
+    crate::latest::instance::ExternalIpConfig {
+        v4: (!v4.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v4,
+            ..Default::default()
+        }),
+        v6: (!v6.is_empty()).then(|| crate::latest::instance::ExternalIps {
+            floating_ips: v6,
+            ..Default::default()
+        }),
+    }
+}
+
+impl From<&ZoneSnatConfig> for crate::latest::instance::ExternalIpConfig {
+    fn from(snat: &ZoneSnatConfig) -> Self {
+        let (v4, v6) = match snat {
+            ZoneSnatConfig::Ipv4Only(c) => (Some(*c), None),
+            ZoneSnatConfig::Ipv6Only(c) => (None, Some(*c)),
+            ZoneSnatConfig::DualStack { ipv4, ipv6 } => {
+                (Some(*ipv4), Some(*ipv6))
+            }
+        };
+        Self {
+            v4: v4.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+            v6: v6.map(|snat| crate::latest::instance::ExternalIps {
+                source_nat: Some(snat),
+                ..Default::default()
+            }),
+        }
+    }
+}
+
+impl ExternalDnsAddrs {
+    /// Construct from a single socket address.
+    pub fn from_single(addr: SocketAddr) -> Self {
+        Self(BTreeMap::from([(addr.ip(), addr.port())]))
+    }
+
+    /// If this consists of a single element, return it, or None.
+    ///
+    /// NOTE: This is a temporary method used while inventory supports multiple
+    /// addresses, but `BlueprintZoneType` does not. It should be removed when
+    /// that's fixed.
+    pub fn into_single(self) -> Option<SocketAddr> {
+        if self.0.len() == 1 {
+            self.0
+                .into_iter()
+                .next()
+                .map(|(ip, port)| SocketAddr::new(ip, port))
+        } else {
+            None
+        }
+    }
+
+    /// Iterate over the external addresses.
+    pub fn iter(&self) -> impl Iterator<Item = SocketAddr> {
+        self.0.iter().map(|(ip, port)| SocketAddr::new(*ip, *port))
+    }
+
+    /// Return the "primary" address, either IPv4 or IPv6 in that order.
+    ///
+    /// NOTE: This is a temporary method used while we don't fully support
+    /// multiple IP addresses. It should be removed when that support is done.
+    pub fn temporary_primary_address(&self) -> SocketAddr {
+        self.0
+            .iter()
+            .find_map(|(ip, port)| {
+                if ip.is_ipv4() {
+                    Some(SocketAddr::new(*ip, *port))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.0
+                    .iter()
+                    .next()
+                    .map(|(ip, port)| SocketAddr::new(*ip, *port))
+            })
+            .expect("ExternalDnsAddrs is non-empty by construction")
+    }
+}
+
+impl InstanceManagerStatus {
+    /// Helper (primarily for tests) that constructs an
+    /// [`InstanceManagerStatus`] with the
+    /// [`OmicronSledUpdateDisposition::Available`] disposition and the given
+    /// number of registered VMMs.
+    pub fn available(num_registered_vmms: usize) -> Self {
+        Self {
+            update_disposition: CurrentUpdateDisposition::Known(
+                OmicronSledUpdateDisposition::Available,
+            ),
+            num_registered_vmms,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use std::net::Ipv4Addr;
+    use uuid::Uuid;
+
+    #[test]
+    fn fmd_inventory_result_display_snapshot() {
+        let case_uuid = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_beef,
+        ));
+        let case_uuid_2 = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_b00f,
+        ));
+        let resource_uuid = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0001),
+        );
+        let resource_uuid_2 = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0002),
+        );
+
+        let mut cases = IdOrdMap::new();
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid,
+                code: "JOKE-9001-FAKE".to_string(),
+                url: "http://example.invalid/msg/JOKE-9001-FAKE".to_string(),
+                event: Some(serde_json::json!({
+                    "class": "fault.vibes.off",
+                    "spookiness": 9001,
+                    "suspects": ["casper", "slimer"],
+                })),
+            })
+            .expect("case uuid is unique");
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid_2,
+                code: "BOO-0000-FAKE".to_string(),
+                url: "http://example.invalid/msg/BOO-0000-FAKE".to_string(),
+                event: None,
+            })
+            .expect("case uuid is unique");
+
+        let mut resources = IdOrdMap::new();
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid,
+                fmri: "ghost:///not/a/real/fmri".to_string(),
+                case_id: case_uuid,
+                faulty: true,
+                unusable: false,
+                invisible: false,
+            })
+            .expect("resource uuid is unique");
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid_2,
+                fmri: "ghost:///also/not/a/real/fmri".to_string(),
+                case_id: case_uuid_2,
+                faulty: false,
+                unusable: true,
+                invisible: true,
+            })
+            .expect("resource uuid is unique");
+
+        let ok: Result<FmdInventory, FmdInventoryError> =
+            Ok(FmdInventory { cases, resources });
+        let err: Result<FmdInventory, FmdInventoryError> =
+            Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::FmdError,
+                message: "haunted by an absent fmd daemon".to_string(),
+            });
+
+        let mut out = String::new();
+        out.push_str("--- ok variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&ok).to_string());
+        out.push_str("--- err variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&err).to_string());
+
+        expectorate::assert_contents(
+            "tests/output/fmd_inventory_display.txt",
+            &out,
+        );
+    }
+
+    #[test]
+    fn test_zone_snat_config_as_ip_types() {
+        let ipv4 = SourceNatConfig::new(
+            "10.0.0.1".parse::<Ipv4Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv6 = SourceNatConfig::new(
+            "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv4_only = ZoneSnatConfig::Ipv4Only(ipv4);
+        let ipv6_only = ZoneSnatConfig::Ipv6Only(ipv6);
+        let dual_stack = ZoneSnatConfig::DualStack { ipv4, ipv6 };
+
+        assert_eq!(ipv4_only.as_ipv4().unwrap(), &ipv4);
+        assert!(ipv4_only.as_ipv6().is_none());
+
+        assert!(ipv6_only.as_ipv4().is_none());
+        assert_eq!(ipv6_only.as_ipv6().unwrap(), &ipv6);
+
+        assert_eq!(dual_stack.as_ipv4().unwrap(), &ipv4);
+        assert_eq!(dual_stack.as_ipv6().unwrap(), &ipv6);
+    }
+
+    fn next_hardware_cpu_family(
+        family: sled_hardware_types::SledCpuFamily,
+    ) -> Option<sled_hardware_types::SledCpuFamily> {
+        use sled_hardware_types::SledCpuFamily as HardwareFamily;
+        // Exhaustive match ensures new variants are handled.
+        match family {
+            HardwareFamily::Unknown => Some(HardwareFamily::AmdMilan),
+            HardwareFamily::AmdMilan => Some(HardwareFamily::AmdTurin),
+            HardwareFamily::AmdTurin => Some(HardwareFamily::AmdTurinDense),
+            HardwareFamily::AmdTurinDense => None,
+        }
+    }
+
+    #[test]
+    fn sled_cpu_family_matches_sled_hardware_types() {
+        let hardware_families = std::iter::successors(
+            Some(sled_hardware_types::SledCpuFamily::Unknown),
+            |family| next_hardware_cpu_family(*family),
+        );
+        for hardware_family in hardware_families {
+            let hardware_json = serde_json::to_value(hardware_family)
+                .expect("serialized sled_hardware_types::SledCpuFamily");
+            let family = SledCpuFamily::from(hardware_family);
+            let family_json =
+                serde_json::to_value(family).expect("serialized SledCpuFamily");
+
+            assert_eq!(family_json, hardware_json);
+            assert_eq!(family.to_string(), hardware_family.to_string());
+            assert_eq!(
+                family_json,
+                serde_json::Value::String(family.to_string()),
+            );
+            let round_tripped: SledCpuFamily =
+                serde_json::from_value(family_json)
+                    .expect("deserialized SledCpuFamily");
+            assert_eq!(round_tripped, family);
+        }
+    }
+}

@@ -1,0 +1,343 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Running Omicron (Simulated)
+
+== What is "Simulated Omicron"?
+
+The "Sled-local" component of the control plane - which expects to manage local
+resources - has tight coupling with the illumos Operating System. However, a
+good portion of the control plane (interactions with the database, metrics
+collection, and the console, for example) executes within programs that are
+decoupled from the underlying Sled.
+
+To enable more flexible testing of this software, a "simulated" sled agent is
+provided, capable of running across many platforms (Linux, Mac, illumos). This
+allows developers to test the control plane flows without actually having any
+resources to manage.
+
+If you are interested in running the "real" control plane (which is necessary
+for managing instances, storage, and networking) refer to the non-simulated
+guide at xref:how-to-run.adoc[].
+
+== Installing Prerequisites
+
+First, set up your environment to include executables that will be installed shortly:
+
+[source,text]
+----
+$ source env.sh
+----
+
+Then install prerequisite software with the following script:
+
+[source,text]
+----
+$ ./tools/install_builder_prerequisites.sh
+----
+
+You need to do this once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
+
+== Running
+
+To run anything, you'll need to set up your environment as before:
+
+[source,text]
+----
+$ source env.sh
+----
+
+You don't need to do this again if you just did it.  But you'll need to do it each time you start a new shell session to work in this workspace.
+
+To **run Omicron** you need to run several programs:
+
+* a CockroachDB cluster.  For development, you can use the `db-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
+* a ClickHouse server. You should use the `ch-dev` tool for this, see below, and as with CockroachDB,
+the database files will be deleted when you stop the program.
+* `nexus`: the guts of the control plane
+* `sled-agent-sim`: a simulator for the component that manages a single sled
+* an `external-dns` server
+* `oximeter`, which collects metrics from control plane components
+
+You can run these by hand, but it's easier to use `omicron-dev run-all`.  See below for more on both options.
+
+=== Quick start
+
+. Run `omicron-dev run-all`.  This will run all of these components with a default configuration that should work in a typical development environment.  The database will be stored in a temporary directory.  Logs for all services will go to a single, unified log file.  The tool will print information about reaching Nexus as well as CockroachDB:
++
+[source,text]
+----
+$ cargo xtask omicron-dev run-all
+omicron-dev: setting up all services ...
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log"
+omicron-dev: services are running.
+omicron-dev: nexus external API:    127.0.0.1:12220
+omicron-dev: nexus internal API:    [::1]:12221
+omicron-dev: cockroachdb pid:       7180
+omicron-dev: cockroachdb:           postgresql://root@[::]:54649/omicron?sslmode=disable
+omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpB8FNBT
+omicron-dev: internal DNS HTTP:     http://[::1]:33652
+omicron-dev: internal DNS:          [::1]:37503
+omicron-dev: external DNS name:     oxide-dev.test
+omicron-dev: external DNS HTTP:     http://[::1]:38374
+omicron-dev: external DNS:          [::1]:54342
+----
++
+. If you use CTRL-C to shut this down, it will gracefully terminate CockroachDB and remove the temporary directory:
++
+[source,text]
+----
+^Comicron-dev: caught signal, shutting down and removing temporary directory
+----
+
+=== Running the pieces by hand
+
+There are many reasons it's useful to run the pieces of the stack by hand, especially during development and debugging: to test stopping and starting a component while the rest of the stack remains online; to run one component in a custom environment; to use a custom binary; to use a custom config file; to run under the debugger or with extra tracing enabled; etc.
+
+CAUTION: This process does not currently work.  See https://github.com/oxidecomputer/omicron/issues/4421[omicron#4421] for details.  The pieces here may still be useful for reference.
+
+. Start CockroachDB using `db-dev run`:
++
+[source,text]
+----
+$ cargo xtask db-dev -- run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/db-dev run`
+omicron-dev: using temporary directory for database store (cleaned up on clean exit)
+omicron-dev: will run this to start CockroachDB:
+cockroach start-single-node --insecure --http-addr=:0 --store /var/tmp/omicron_tmp/.tmpM8KpTf/data --listen-addr 127.0.0.1:32221 --listening-url-file /var/tmp/omicron_tmp/.tmpM8KpTf/listen-url
+omicron-dev: temporary directory: /var/tmp/omicron_tmp/.tmpM8KpTf
+*
+* WARNING: ALL SECURITY CONTROLS HAVE BEEN DISABLED!
+*
+* This mode is intended for non-production testing only.
+*
+* In this mode:
+* - Your cluster is open to any client that can access 127.0.0.1.
+* - Intruders with access to your machine or network can observe client-server traffic.
+* - Intruders can log in without password and read or write any data in the cluster.
+* - Intruders can consume all your server's resources and cause unavailability.
+*
+*
+* INFO: To start a secure server without mandating TLS for clients,
+* consider --accept-sql-without-tls instead. For other options, see:
+*
+* - https://go.crdb.dev/issue-v/53404/v20.2
+* - https://www.cockroachlabs.com/docs/v20.2/secure-a-cluster.html
+*
+
+omicron-dev: child process: pid 3815
+omicron-dev: CockroachDB listening at: postgresql://root@127.0.0.1:32221/omicron?sslmode=disable
+omicron-dev: populating database
+*
+* INFO: Replication was disabled for this cluster.
+* When/if adding nodes in the future, update zone configurations to increase the replication factor.
+*
+CockroachDB node starting at 2021-04-13 15:58:59.680359279 +0000 UTC (took 0.4s)
+build:               OSS v20.2.5 @ 2021/03/17 21:00:51 (go1.16.2)
+webui:               http://127.0.0.1:41618
+sql:                 postgresql://root@127.0.0.1:32221?sslmode=disable
+RPC client flags:    cockroach <client cmd> --host=127.0.0.1:32221 --insecure
+logs:                /var/tmp/omicron_tmp/.tmpM8KpTf/data/logs
+temp dir:            /var/tmp/omicron_tmp/.tmpM8KpTf/data/cockroach-temp022560209
+external I/O path:   /var/tmp/omicron_tmp/.tmpM8KpTf/data/extern
+store[0]:            path=/var/tmp/omicron_tmp/.tmpM8KpTf/data
+storage engine:      pebble
+status:              initialized new cluster
+clusterID:           8ab646f0-67f0-484d-8010-e4444fb86336
+nodeID:              1
+omicron-dev: populated database
+----
++
+Note that as the output indicates, this cluster will be available to anybody that can reach 127.0.0.1.
+
+. Start the ClickHouse database server:
++
+[source,text]
+----
+$ cargo xtask ch-dev run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.47s
+     Running `target/debug/omicron-dev ch-run`
+omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
+omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
+----
++
+If you wish to start a ClickHouse replicated cluster instead of a single node, run the following instead:
+[source,text]
+---
+$ cargo xtask ch-dev run --replicated
+    Finished dev [unoptimized + debuginfo] target(s) in 0.31s
+     Running `target/debug/omicron-dev ch-run --replicated`
+omicron-dev: running ClickHouse cluster with configuration files:
+ replicas: /home/{user}/src/omicron/oximeter/db/src/configs/replica_config.xml
+ keepers: /home/{user}/src/omicron/oximeter/db/src/configs/keeper_config.xml
+omicron-dev: ClickHouse cluster is running with PIDs: 1113482, 1113681, 1113387, 1113451, 1113419
+omicron-dev: ClickHouse HTTP servers listening on ports: 8123, 8124
+omicron-dev: using /tmp/.tmpFH6v8h and /tmp/.tmpkUjDji for ClickHouse data storage
+---
+
+. `nexus` requires a configuration file to run.  You can use `nexus/examples/config.toml` to start with.  Build and run it like this:
++
+[source,text]
+----
+$ cargo run --bin=nexus -- nexus/examples/config.toml
+----
+Nexus can also serve the web console. Instructions for downloading (or building) the console's static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:../nexus/src/external_api/console_api.rs[console-specific routes] will 404.
++
+CAUTION: This step does not currently work.  See https://github.com/oxidecomputer/omicron/issues/4421[omicron#4421] for details.
+
+. `dns-server` is run similar to Nexus, except that the bind addresses are specified on the command line:
++
+[source,text]
+----
+$ cargo run --bin=dns-server -- --config-file dns-server/examples/config.toml --http-address [::1]:5353 --dns-addresses [::1]:5354
+----
+. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, the IP:port of `nexus`'s _internal_ interface, and the port of `nexus`'s _lockstep_ interface.  It's recommended that you also provide some arguments specific to RSS (the rack setup service): Nexus's _external_ address and the external DNS server's _internal_ address.  Using default config, this might look like this:
++
+[source,text]
+----
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 [::1]:12221 12232 --rss-nexus-external-addr 127.0.0.1:12220 --rss-external-dns-internal-addr [::1]:5353 --rss-internal-dns-dns-addr [::1]:3535
+----
+
+. `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:
++
+[source,text]
+----
+$ cargo run --bin=oximeter run --id $(uuidgen) --address [::1]:12223 -- oximeter/collector/config.toml
+Dec 02 18:00:01.062 INFO starting oximeter server
+Dec 02 18:00:01.062 DEBG creating ClickHouse client
+Dec 02 18:00:01.068 DEBG initializing ClickHouse database, component: clickhouse-client, collector_id: 1da65e5b-210c-4859-a7d7-200c1e659972, component: oximeter-agent
+Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, local_addr: [::1]:12223, component: dropshot
+...
+----
+
+=== Using both `omicron-dev run-all` and running Nexus manually
+
+While it's often useful to run _some_ part of the stack by hand (see above), if you only want to run your own Nexus, one option is to run `omicron-dev run-all` first to get a whole simulated stack up, then run a second Nexus by hand with a custom config file.
+
+To do this, first run `omicron-dev run-all`:
+
+[source,text]
+----
+$ cargo xtask omicron-dev run-all
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
+     Running `target/debug/omicron-dev run-all`
+omicron-dev: setting up all services ... 
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.0.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.0.log"
+DB URL: postgresql://root@[::1]:43256/omicron?sslmode=disable
+DB address: [::1]:43256
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.2.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.2.log"
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.3.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.3.log"
+omicron-dev: services are running.
+omicron-dev: nexus external API:    127.0.0.1:12220
+omicron-dev: nexus internal API:    [::1]:12221
+omicron-dev: cockroachdb pid:       29769
+omicron-dev: cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable
+omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpikyLO8
+omicron-dev: internal DNS HTTP:     http://[::1]:39841
+omicron-dev: internal DNS:          [::1]:54025
+omicron-dev: external DNS name:     oxide-dev.test
+omicron-dev: external DNS HTTP:     http://[::1]:63482
+omicron-dev: external DNS:          [::1]:45276
+omicron-dev:   e.g. `dig @::1 -p 45276 test-suite-silo.sys.oxide-dev.test`
+omicron-dev: management gateway:    http://[::1]:49188 (switch0)
+omicron-dev: management gateway:    http://[::1]:39352 (switch1)
+omicron-dev: silo name:             test-suite-silo
+omicron-dev: privileged user name:  test-privileged
+----
+
+You'll need to note:
+
+* the TCP ports for the two management gateways (`49188` and `39352` here for switch0 and switch1, respectively)
+* the TCP port for internal DNS  (`54025` here)
+* the TCP port in the CockroachDB URL (`43256` here)
+
+Next, you'll need to customize the Nexus configuration file.  Start with nexus/examples/config-second.toml (_not_ nexus/examples/config.toml, which uses various values that conflict with what `omicron-dev run-all` uses).  You should only need to modify the block at the **bottom** of the file:
+
+[source,toml]
+----
+################################################################################
+# INSTRUCTIONS: To run Nexus against an existing stack started with            #
+# `omicron-dev run-all`, you should only have to modify values in this 	       #
+# section. 								       #
+# 									       #
+# Modify the port numbers below based on the output of `omicron-dev run-all`   #
+################################################################################
+
+[mgd]
+# Look for "management gateway:    http://[::1]:49188 (switch0)"
+# The "http://" does not go in this string -- just the socket address.
+switch0.address = "[::1]:49188"
+
+# Look for "management gateway:    http://[::1]:39352 (switch1)"
+# The "http://" does not go in this string -- just the socket address.
+switch1.address = "[::1]:39352"
+
+[deployment.internal_dns]
+# Look for "internal DNS:          [::1]:54025"
+# and adjust the port number below.
+address = "[::1]:54025"
+# You should not need to change this.
+type = "from_address"
+
+[deployment.database]
+# Look for "cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable"
+# and adjust the port number below.
+url = "postgresql://root@[::1]:43256/omicron?sslmode=disable"
+# You should not need to change this.
+type = "from_url"
+################################################################################
+----
+
+So it's:
+
+* Copy the example config file: `cp nexus/examples/config-second.toml config-second.toml`
+* Edit as described above: `vim config-second.toml`
+* Start Nexus like above, but with this config file: `cargo run --bin=nexus -- config-second.toml`
+
+=== Using the stack
+
+Once everything is up and running, you can use the system in a few ways:
+
+* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults with `omicron-dev run-all`, you can reach the console at `http://127.0.0.1:12220/projects`.  If you ran a second Nexus using the `config-second.toml` config file, it will be on port `12222` instead (because that config file specifies port 12222).  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
+* Use the xref:cli.adoc[`oxide` CLI].
+
+You can authenticate using a username of `test-privileged` and a password of `oxide`.
+
+If the console endpoints are returning a 404 run `cargo xtask download console`.
+
+Initiate a cli login using
+
+[source,text]
+----
+$ oxide auth login --host http://localhost:12220
+----
+
+== Running with TLS
+
+When you run the above, you will wind up with Nexus listening on HTTP (with no TLS) on its external address.  This is convenient for debugging, but not representative of a real system.  If you want to run it with TLS, you need to tweak the above procedure slightly:
+
+1. You'll need to use the "Running the pieces by hand" section.  `omicron-dev run-all` does not currently provide a way to do this (because it doesn't have a way to specify a certificate to be used during rack initialization).
+2. Acquire a TLS certificate.  The easiest approach is to use `cert-dev create` to create a self-signed certificate.  However you get one, it should be valid for the domain corresponding to your recovery Silo.  When you run the pieces by hand, this would be `demo-silo.sys.oxide-dev.test`.  If you want a certificate you can use for multiple Silos, make it a wildcard certificate.  Here's an example:
++
+[source,text]
+----
+$ cargo xtask cert-dev create demo- '*.sys.oxide-dev.test'
+wrote certificate to demo-cert.pem
+wrote private key to demo-key.pem
+----
+3. Modify your Nexus configuration file to include `tls = true`.  See `./nexus/examples/config.toml` for an example.  This property is present but commented-out in that file.  If you're running on standard port 80 (which is not usually the case in development), you may also want to change the `deployment.dropshot_external.bind_address` port to 443.
+4. When you run `sled-agent-sim`, pass the `--rss-tls-cert` and `--rss-tls-key` options as well.  These should refer to the files created by `cert-dev create` above.  (They can be any PEM-formatted x509 certificate and associated private key.)
+5. Usually at this point you'll be using a self-signed certificate for a domain that's not publicly resolvable with DNS.  This makes it hard to use standard clients.  Fortunately, `curl` does have flags to make this easy.  Continuing with this example, assuming your Nexus HTTPS server is listening on 127.0.0.1:12220 and your Silo's DNS name is `demo-silo.sys.oxide-dev.test`:
++
+[source,text]
+----
+$ curl -i --resolve test-suite-silo.sys.oxide-dev.test:12220:127.0.0.1 --cacert /path/to/your/certificate.pem https://test-suite-silo.sys.oxide-dev.test:12220
+----
++
+The Oxide CLI supports identical flags.

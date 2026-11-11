@@ -1,0 +1,119 @@
+#
+# Oxide API: example configuration file
+#
+
+# Maximum number of host phase2 trampoline images we're willing to cache. Note
+# that this value is specified in terms of _number of images_, not bytes, and
+# our cache is in-memory. We expect this value to be small in production,
+# potentially even 1 (i.e., only keep the most-recently-uploaded image).
+host_phase2_recovery_image_cache_max_images = 1
+
+[dropshot]
+default_request_body_max_bytes = 1048576
+
+[switch]
+# Which interface is connected to our local sidecar SP (i.e., the SP that acts
+# as our contact to the ignition controller)?
+local_ignition_controller_interface = "fake-switch0"
+
+[switch.rpc_retry_config]
+# When sending UDP RPC packets to an SP (other than to reset it), how many total
+# attempts do we make before giving up?
+max_attempts_general = 5
+
+# When sending UDP RPC packets to an SP (to reset it), how many total attempts
+# do we make before giving up?
+max_attempts_reset = 30
+
+# sleep time between UDP RPC resends (up to `max_attempts_*`)
+per_attempt_timeout_millis = 2000
+
+# Possible locations where MGS could be running.
+#
+# The `name` of each location description will appear in logs and in the
+# remainder of the `[switch.*]` configuration to define port mappings.
+#
+# The `local_sled` of each location description specifies the `slot` of the
+# `SpIdentifier` for the sled on which this MGS is running. (The
+# `SpIdentifier::typ` value is implicitly `SpType::Sled`.)
+#
+# `allow_local_sp_reset` determines whether MGS will accept a request to
+# perform an SP reset on its own local sled/switch. This is dangerous during SP
+# updates, because the "reset" operation involves a watchdog that requires MGS
+# to send a "disarm the watchdog" message _after_ the reset, which it can't do
+# if it just powered itself off. In production, we set this to `false` for both
+# sleds; this means a scrimlet's SP can only be reset via MGS on the _other_
+# scrimlet. (We allow this to be `true` in tests and other dev environments
+# where rejecting reset attempts is too restrictive.)
+[[switch.location.description]]
+name = "switch0"
+local_sled = 0
+allow_local_sp_reset = true
+
+[[switch.location.description]]
+name = "switch1"
+local_sled = 1
+allow_local_sp_reset = true
+
+# `[[switch.location.determination]]` is a list of switch ports we should
+# contact in order to determine our location; each port defines a subset of
+# `[switch.location.names]` which are the possible location(s) of this MGS
+# instance if the message was received on the given SP port. When MGS starts, it
+# will send a discovery message on each port listed in this section, collect the
+# responses, and determine its location via the intersection of the names listed
+# below (for all ports which returned a successful response). This process can
+# fail if too few SPs respond (leaving us with 2 or more possible locations) or
+# if there is a miscabling that results in an unsolvable system (e.g.,
+# determination 0 reports "switch0" and determination 1 reports "switch1").
+[[switch.location.determination]]
+interfaces = ["fake-sled0", "fake-sled1", "fake-psc0"]
+sp_port_1 = ["switch0"]
+sp_port_2 = ["switch1"]
+
+# `[[switch.port.*]]` defines the local data link address (in RFD 250 terms, the
+# interface configured to use VLAN tag  assigned to the given port) and the
+# logical ID of the remote SP ("sled 7", "switch 1", etc.), which must have an
+# entry for each member of `[switch.location]` above.
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-switch0"
+addr = "[::1]:33300"
+ereport-addr = "[::1]:44400"
+ignition-target = 1
+location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled0"
+addr = "[::1]:33310"
+ereport-addr = "[::1]:44410"
+ignition-target = 2
+location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled1"
+addr = "[::1]:33320"
+ereport-addr = "[::1]:44420"
+ignition-target = 3
+location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-psc0"
+addr = "[::1]:33330"
+ereport-addr = "[::1]:44430"
+ignition-target = 4
+location = { switch0 = ["power", 0], switch1 = ["power", 0] }
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

@@ -1,0 +1,234 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! sled-agent's handle to the Rack Setup Service it spawns
+
+use bootstrap_agent_lockstep_types::RssStep;
+use omicron_common::backoff::BackoffError;
+use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_local;
+use sled_agent_bootstrap_common::RssContext;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
+use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_rack_setup::LocalBootstrapAgent;
+use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_rack_setup::RackSetupService;
+use sled_agent_rack_setup::SetupServiceError;
+use sled_agent_types::sled::StartSledAgentRequest;
+use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
+use std::net::SocketAddrV6;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
+use tokio::task::JoinSet;
+
+/// Executes the rack setup service until it has completed
+pub(super) async fn run_rss(
+    ctx: RssContext,
+    config: RackInitializeRequestParams,
+    step_tx: watch::Sender<RssStep>,
+) -> Result<(), SetupServiceError> {
+    let (tx, rx) =
+        rss_channel(ctx.sprockets_config.clone(), ctx.measurements.clone());
+
+    let log = ctx.base_log.new(o!("component" => "BootstrapAgentRssHandler"));
+    let rss = RackSetupService::new(ctx, config, tx, step_tx);
+    rx.await_local_rss_request(&log).await;
+    rss.join().await
+}
+
+// Send a message to start a sled agent via bootstrap agent client
+async fn initialize_sled_agent(
+    log: &Logger,
+    bootstrap_addr: SocketAddrV6,
+    sprockets_config: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
+    request: &StartSledAgentRequest,
+) -> Result<(), SprocketsClientError> {
+    let client = SprocketsClient::new(
+        bootstrap_addr,
+        sprockets_config,
+        measurements,
+        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
+    );
+
+    let sled_agent_initialize = || async {
+        client
+            .start_sled_agent(request)
+            .await
+            .map_err(BackoffError::transient)?;
+
+        Ok::<(), BackoffError<SprocketsClientError>>(())
+    };
+
+    let log_failure = |error, _| {
+        warn!(log, "failed to start sled agent"; "error" => ?error);
+    };
+    retry_notify(retry_policy_local(), sled_agent_initialize, log_failure)
+        .await?;
+    info!(log, "Peer agent initialized"; "peer" => %bootstrap_addr);
+    Ok(())
+}
+
+// RSS needs to send requests (and receive responses) to and from its local sled
+// agent over some communication channel. Currently RSS lives in-process with
+// sled-agent, so we can use tokio channels. If we move out-of-process we'll
+// need to switch to something like Unix domain sockets. We'll wrap the
+// communication in the types below to avoid using tokio channels directly and
+// leave a breadcrumb for where the work will need to be done to switch the
+// communication mechanism.
+fn rss_channel(
+    sprockets: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
+) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
+    let (tx, rx) = mpsc::channel(32);
+    (
+        BootstrapAgentHandle { inner: tx },
+        BootstrapAgentHandleReceiver { inner: rx, sprockets, measurements },
+    )
+}
+
+type InnerInitRequest = Vec<(SocketAddrV6, StartSledAgentRequest)>;
+
+#[derive(Debug)]
+struct Request {
+    kind: RequestKind,
+    tx: oneshot::Sender<Result<(), String>>,
+}
+
+#[derive(Debug)]
+enum RequestKind {
+    Init(InnerInitRequest),
+}
+
+pub(crate) struct BootstrapAgentHandle {
+    inner: mpsc::Sender<Request>,
+}
+
+impl LocalBootstrapAgent for BootstrapAgentHandle {
+    async fn initialize_sleds(
+        self,
+        requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
+    ) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+
+        // IPC will require real error handling, but we know the sled-agent task
+        // will not close the channel until we do and that it will always send a
+        // response, so unwrapping here is fine.
+        //
+        // Moving from channels to IPC will happen as a part of
+        // https://github.com/oxidecomputer/omicron/issues/820.
+        self.inner
+            .send(Request { kind: RequestKind::Init(requests), tx })
+            .await
+            .unwrap();
+        rx.await.unwrap()
+    }
+}
+
+struct BootstrapAgentHandleReceiver {
+    inner: mpsc::Receiver<Request>,
+    sprockets: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
+}
+
+impl BootstrapAgentHandleReceiver {
+    // Wait for a request from RSS telling us to initialize or reset all sled agents
+    // via the bootstrap client.
+    async fn await_local_rss_request(mut self, log: &Logger) {
+        let Request { kind, tx } = match self.inner.recv().await {
+            Some(requests) => requests,
+            None => {
+                warn!(log, "Failed receiving local requests from RSS",);
+                return;
+            }
+        };
+
+        match kind {
+            RequestKind::Init(requests) => {
+                // Convert the vec of requests into a `JoinSet` containing all
+                // of the initialization requests, allowing them to run
+                // concurrently.
+
+                let s = self.sprockets.clone();
+                let m = self.measurements.clone();
+                let mut futs = requests
+                    .into_iter()
+                    .map(|(bootstrap_addr, request)| {
+                        let value = s.clone();
+                        let measurements_value = m.clone();
+                        let log = log.new(
+                            // Since we must clone the logger in order to spawn
+                            // the task anyway, may as well include the target
+                            // sled on every log line from the task!
+                            o!("target_sled" => bootstrap_addr.to_string()),
+                        );
+                        async move {
+                            info!(
+                                log, "Received initialization request from RSS";
+                                "request" => ?request,
+                            );
+
+                            initialize_sled_agent(
+                                &log,
+                                bootstrap_addr,
+                                value,
+                                measurements_value,
+                                &request,
+                            )
+                            .await
+                            .map_err(|err| {
+                                format!(
+                                    "Failed to initialize sled agent at {}: {}",
+                                    bootstrap_addr, err
+                                )
+                            })?;
+
+                            info!(log, "Initialized sled agent");
+
+                            Ok(())
+                        }
+                    })
+                    .collect::<JoinSet<_>>();
+
+                // Wait for all initialization requests to complete, but stop on the
+                // first error.
+                //
+                // We `.unwrap()` when sending a result on `tx` (either in this
+                // loop or afterwards if all requests succeed), which is okay because we
+                // know RSS is waiting for our response (i.e., we can only panic if RSS
+                // already panicked itself). When we move RSS
+                // out-of-process, tracked by
+                // https://github.com/oxidecomputer/omicron/issues/820, we'll have to
+                // replace these channels with IPC, which will also eliminiate these
+                // unwraps.
+                while let Some(join_result) = futs.join_next().await {
+                    let result = join_result
+                        .map_err(|e| {
+                            // Since we don't ever abort the spawned tasks, and
+                            // we compile with panic="abort", we *should* never
+                            // see a `JoinError` here, and could alternatively
+                            // just `expect()` the outer result, but...this
+                            // seems nicer than doing that.
+                            format!("spawned task failed unexpectedly: {e}")
+                        })
+                        .flatten();
+                    if result.is_err() {
+                        tx.send(result).unwrap();
+                        // N.B. that `return`ing here will drop the `JoinSet`,
+                        // and abort all the spawned tasks.
+                        return;
+                    }
+                }
+            }
+        }
+
+        // All requests succeeded; inform RSS of completion.
+        tx.send(Ok(())).unwrap();
+    }
+}

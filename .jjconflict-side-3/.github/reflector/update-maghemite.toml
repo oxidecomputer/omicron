@@ -1,0 +1,19 @@
+# Reflector configuration (oxidecompuer/reflector)
+
+# When the listener configured below activates, run .github/workflows/update-maghemite.yml
+# targeting main
+
+workflow = "update-maghemite.yml"
+branch = "main"
+
+# Request an installation token when running this workflow
+
+requires_token = true
+
+# Triggers a maghemite update when the job indicating that the commit is ready for release completes
+
+[[on]]
+repository = "oxidecomputer/maghemite"
+event = "check_run"
+action = "completed"
+check = "omicron-merge"

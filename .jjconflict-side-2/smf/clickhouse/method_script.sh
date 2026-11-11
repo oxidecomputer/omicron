@@ -1,0 +1,25 @@
+#!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+
+set -x
+set -o errexit
+set -o pipefail
+
+. /lib/svc/share/smf_include.sh
+
+LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
+LISTEN_PORT="$(svcprop -c -p config/listen_port "${SMF_FMRI}")"
+DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
+
+args=(
+"--config-file" "/opt/oxide/clickhouse/config.xml"
+"--"
+"--path" "${DATASTORE}"
+"--listen_host" "$LISTEN_ADDR"
+"--http_port" "$LISTEN_PORT"
+)
+
+exec /opt/oxide/clickhouse/clickhouse server "${args[@]}" &

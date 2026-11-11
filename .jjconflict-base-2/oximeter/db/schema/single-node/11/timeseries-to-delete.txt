@@ -1,0 +1,9 @@
+switch_table:capacity
+switch_table:collisions
+switch_table:delete_misses
+switch_table:deletes
+switch_table:exhaustion
+switch_table:inserts
+switch_table:occupancy
+switch_table:update_misses
+switch_table:updates

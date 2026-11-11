@@ -1,0 +1,40 @@
+from: blueprint 4f8f07c8-830a-4176-a957-a3f4c59e47d5
+to:   blueprint 7dcfbc72-1882-4c24-b6d9-1894b64cb85c
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ CLICKHOUSE CLUSTER CONFIG:
+*   generation:::::::::::::::::::::::::::::::::::::   3 -> 4
+    max used server id:::::::::::::::::::::::::::::   2 (unchanged)
+*   max used keeper id:::::::::::::::::::::::::::::   3 -> 4
+    cluster name:::::::::::::::::::::::::::::::::::   oximeter_cluster (unchanged)
+    cluster secret:::::::::::::::::::::::::::::::::   a168cd10-6fe4-4630-9a92-881b2930f880 (unchanged)
+*   highest seen keeper leader committed log index:   1 -> 3
+
+    clickhouse keepers generation 3 -> 4:
+    ------------------------------------------------
+    zone id                                keeper id
+    ------------------------------------------------
+    1ebe8f2c-fed2-42e2-b3ac-de2ef077fce3   0        
+    3eb5f2ea-66b8-4231-a2b8-3eba0c68435a   2        
++   80fe75f5-7c6c-43e3-83d6-c65855316f08   4        
+
+    clickhouse servers generation 3 -> 4:
+    ------------------------------------------------
+    zone id                                server id
+    ------------------------------------------------
+    6b8f7543-73c6-408a-b374-ab56994cd602   1        
+    6ba8cfab-4f45-41d3-817f-86243ddee7f4   2        
+

@@ -1,0 +1,101 @@
+format_version = 1
+
+[target]
+name = "bfd_session"
+description = "A Bidirectional Forwarding Protocol (BFD) session"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname", "rack_id", "sled_id", "peer" ] },
+]
+
+[[metrics]]
+name = "control_packet_send_failures"
+description = "Total number of failures to send a control packets to a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "control_packets_sent"
+description = "Total number of control packets sent to a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "control_packets_received"
+description = "Total number of control packets received from a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "message_receive_error"
+description = "Total number of failures to receive a BFD packet from the internal dispatcher"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "timeout_expired"
+description = "Total number of expired timeouts waiting for a BFD packet from the internal dispatcher"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_down"
+description = """\
+Total number of times the BFD session has entered the down state, \
+whether because the peer could not be reached, or because \
+the session was marked administratively down.\
+"""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_init"
+description = "Total number of times the BFD session has entered the init state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_up"
+description = "Total number of times the BFD session has entered the up state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "The hostname of the machine running the BFD session"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack running the BFD session"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled running the BFD session"
+
+[fields.peer]
+type = "ip_addr"
+description = "Address of the BFD session peer"

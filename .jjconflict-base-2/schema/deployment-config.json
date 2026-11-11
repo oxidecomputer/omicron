@@ -1,0 +1,236 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeploymentConfig",
+  "type": "object",
+  "required": [
+    "database",
+    "external_dns_servers",
+    "id",
+    "internal_dns",
+    "rack_id"
+  ],
+  "properties": {
+    "database": {
+      "description": "DB configuration.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Database"
+        }
+      ]
+    },
+    "external_dns_servers": {
+      "description": "External DNS servers Nexus can use to resolve external hosts.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "ip"
+      }
+    },
+    "external_http_clients": {
+      "description": "Configuration for HTTP clients to external services.",
+      "default": {
+        "treat_loopback_as_external": "no"
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ExternalHttpClientConfig"
+        }
+      ]
+    },
+    "id": {
+      "description": "Uuid of the Nexus instance",
+      "allOf": [
+        {
+          "$ref": "#/definitions/OmicronZoneUuid"
+        }
+      ]
+    },
+    "internal_dns": {
+      "description": "Describes how Nexus should find internal DNS servers for bootstrapping.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/InternalDns"
+        }
+      ]
+    },
+    "rack_id": {
+      "description": "Uuid of the Rack where Nexus is executing.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/RackUuid"
+        }
+      ]
+    },
+    "record_db_claim_backtraces": {
+      "description": "By default, we capture backtraces when claiming a connection from the DB pool, but setting this flag to `false` will disable that behavior.\n\nThis flag is intended as an escape hatch in case we ever encounter an unexpected pathological case where capturing backtraces is slow enough to be an issue.\n\nNote that we probably shouldn't need a default here, but I'm leaving it for now just to be safe in case there are any update-related corner cases where this might matter. We can remove this in a future release.",
+      "default": true,
+      "type": "boolean"
+    }
+  },
+  "definitions": {
+    "Database": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_dns"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "url"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_url"
+              ]
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "ExternalHttpClientConfig": {
+      "description": "Configuration for HTTP clients to external services.",
+      "type": "object",
+      "properties": {
+        "interface": {
+          "description": "If present, bind all TCP connections for external HTTP clients on the specified interface name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "treat_loopback_as_external": {
+          "description": "Whether external HTTP clients are permitted to make requests to loopback addresses (and names in the special-use \"localhost.\" zone).\n\nExternal HTTP clients normally refuse to make requests to any address that isn't external to the rack, including loopback addresses. Test environments, however, run their \"external\" servers on localhost, so the test suite needs a way to turn that off.",
+          "default": "no",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TreatLoopbackAsExternal"
+            }
+          ]
+        }
+      }
+    },
+    "InternalDns": {
+      "description": "The mechanism Nexus should use to contact the internal DNS servers.",
+      "oneOf": [
+        {
+          "description": "Nexus should infer the DNS server addresses from this subnet.\n\nThis is a more common usage for production.",
+          "type": "object",
+          "required": [
+            "subnet",
+            "type"
+          ],
+          "properties": {
+            "subnet": {
+              "$ref": "#/definitions/Ipv6Subnet"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_subnet"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Nexus should use precisely the following address.\n\nThis is less desirable in production, but can give value in test scenarios.",
+          "type": "object",
+          "required": [
+            "address",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_address"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Ipv6Net": {
+      "title": "An IPv6 subnet",
+      "description": "An IPv6 subnet, including prefix and subnet mask",
+      "examples": [
+        "fd12:3456::/64"
+      ],
+      "type": "string",
+      "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$",
+      "x-rust-type": {
+        "crate": "oxnet",
+        "path": "oxnet::Ipv6Net",
+        "version": "0.1.0"
+      }
+    },
+    "Ipv6Subnet": {
+      "description": "Wraps an [`Ipv6Net`] with a compile-time prefix length.",
+      "type": "object",
+      "required": [
+        "net"
+      ],
+      "properties": {
+        "net": {
+          "$ref": "#/definitions/Ipv6Net"
+        }
+      }
+    },
+    "OmicronZoneUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::OmicronZoneUuid",
+        "version": "*"
+      }
+    },
+    "RackUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::RackUuid",
+        "version": "*"
+      }
+    },
+    "TreatLoopbackAsExternal": {
+      "description": "Whether HTTP clients for external services permit requests to loopback addresses.\n\nThis is an enum rather than a `bool`, so that if you want to turn on the test-only config, you have to type the string \"yes_for_test_purposes_only\" in the config file so you know what you're doing.",
+      "oneOf": [
+        {
+          "description": "Loopback addresses are considered \"external\". This must only be used in test environments.",
+          "type": "string",
+          "enum": [
+            "yes_for_test_purposes_only"
+          ]
+        },
+        {
+          "description": "Loopback addresses are rejected (the default).",
+          "type": "string",
+          "enum": [
+            "no"
+          ]
+        }
+      ]
+    }
+  }
+}

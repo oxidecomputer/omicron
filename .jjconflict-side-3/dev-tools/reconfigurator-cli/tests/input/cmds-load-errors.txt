@@ -1,0 +1,20 @@
+# Error cases for `load`.
+
+# `load` with no globs.  inputs is empty, so read_series fails with
+# "found no inputs containing a valid target blueprint id".
+load
+
+# A literal path that doesn't exist.  glob expansion yields zero matches, so
+# again `inputs` ends up empty.
+load no-such-file.out
+
+# A glob in a missing directory.  Same outcome: zero matches.
+load nowhere/*.out
+
+# An existing file that's not JSON.
+load /dev/null
+
+# Loading into a non-empty system without wiping first.
+load-example --nsleds 3 --ndisks-per-sled 3
+save fresh.out
+load fresh.out

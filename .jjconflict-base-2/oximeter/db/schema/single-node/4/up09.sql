@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_u64 MODIFY COLUMN datum Nullable(UInt64)

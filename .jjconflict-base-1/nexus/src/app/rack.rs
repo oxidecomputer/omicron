@@ -1,0 +1,894 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Rack management
+
+use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
+use crate::internal_api::params::RackInitializationRequest;
+use internal_dns_types::names::DNS_ZONE;
+use ipnetwork::{IpNetwork, Ipv6Network};
+use nexus_db_lookup::LookupPath;
+use nexus_db_model::DnsGroup;
+use nexus_db_model::INFRA_LOT;
+use nexus_db_model::InitialDnsGroup;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_db_queries::db::datastore::RackInit;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::certificate;
+use nexus_types::external_api::hardware;
+use nexus_types::external_api::multirack::UnadoptedRack;
+use nexus_types::external_api::networking;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::silo;
+use nexus_types::inventory::SpType;
+use nexus_types::silo::silo_dns_name;
+use omicron_common::address::{
+    Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets,
+};
+use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
+use oxnet::IpNet;
+use sled_agent_types::early_networking::LldpAdminStatus;
+
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::num::NonZeroU32;
+use std::str::FromStr;
+use uuid::Uuid;
+
+impl super::Nexus {
+    pub(crate) async fn racks_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::Rack> {
+        self.db_datastore.rack_list(&opctx, pagparams).await
+    }
+
+    pub(crate) async fn rack_lookup(
+        &self,
+        opctx: &OpContext,
+        rack_id: &RackUuid,
+    ) -> LookupResult<db::model::Rack> {
+        let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
+            .rack_id(*rack_id)
+            .fetch()
+            .await?;
+        Ok(db_rack)
+    }
+
+    /// Marks the rack as initialized with information supplied by RSS.
+    ///
+    /// This function is a no-op if the rack has already been initialized.
+    pub(crate) async fn rack_initialize(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        request: RackInitializationRequest,
+        blueprint_execution_enabled: bool,
+    ) -> Result<(), Error> {
+        let log = &opctx.log;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let physical_disks: Vec<_> = request
+            .physical_disks
+            .into_iter()
+            .map(|disk| {
+                db::model::PhysicalDisk::from_parts(
+                    disk.id,
+                    disk.vendor,
+                    disk.serial,
+                    disk.model,
+                    disk.variant.into(),
+                    disk.sled_id,
+                )
+            })
+            .collect();
+
+        let zpools: Vec<_> = request
+            .zpools
+            .into_iter()
+            .map(|pool| {
+                db::model::Zpool::new(
+                    pool.id,
+                    pool.sled_id,
+                    pool.physical_disk_id,
+                    CONTROL_PLANE_STORAGE_BUFFER.into(),
+                )
+            })
+            .collect();
+
+        let datasets: Vec<_> = request
+            .crucible_datasets
+            .into_iter()
+            .map(|dataset| {
+                db::model::CrucibleDataset::new(
+                    dataset.dataset_id,
+                    dataset.zpool_id,
+                    dataset.address,
+                )
+            })
+            .collect();
+
+        let tls_certificates: Vec<_> = request
+            .certs
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| {
+                // The indexes that appear in user-visible names for these
+                // certificates start from one (e.g., certificate names
+                // "default-1", "default-2", etc).
+                let i = i + 1;
+                certificate::CertificateCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from(format!("default-{i}")).unwrap(),
+                        description: format!(
+                            "x.509 certificate #{i} initialized at rack install"
+                        ),
+                    },
+                    cert: c.cert,
+                    key: c.key,
+                    service: certificate::ServiceUsingCertificate::ExternalApi,
+                }
+            })
+            .collect();
+
+        let dns_zone = request
+            .internal_dns_zone_config
+            .zones
+            .into_iter()
+            .find(|z| z.zone_name == DNS_ZONE)
+            .ok_or_else(|| {
+                Error::invalid_request(
+                    "expected initial DNS config to include control plane zone",
+                )
+            })?;
+
+        // sled-agent, in service of RSS, has configured internal DNS. We record
+        // its reported initial DNS config in this `InitialDnsGroup`. sled-agent
+        // has not configured external DNS at all, so create a similar external
+        // `InitialDnsGroup` and initialize it in accordance with the initial
+        // system blueprint.
+
+        let internal_dns = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            &dns_zone.zone_name,
+            &self.id.to_string(),
+            "rack setup",
+            dns_zone.records,
+        );
+
+        let external_dns = InitialDnsGroup::new(
+            DnsGroup::External,
+            request.external_dns_zone_name.as_str(),
+            &self.id.to_string(),
+            "rack setup",
+            HashMap::new(),
+        );
+
+        let silo_name = &request.recovery_silo.silo_name;
+
+        let mut dns_update = DnsVersionUpdateBuilder::new(
+            DnsGroup::External,
+            format!("create silo: {:?}", silo_name.as_str()),
+            self.id.to_string(),
+        );
+        let silo_dns_name = silo_dns_name(silo_name);
+        let recovery_silo_fq_dns_name =
+            format!("{silo_dns_name}.{}", request.external_dns_zone_name);
+
+        let external_dns_config =
+            nexus_types::deployment::execution::blueprint_external_dns_config(
+                &request.blueprint,
+                vec![silo_name],
+                request.external_dns_zone_name,
+                request.blueprint.nexus_generation,
+            );
+        for (name, records) in external_dns_config.records.into_iter() {
+            dns_update.add_name(name, records)?;
+        }
+
+        // We're providing an update to the initial `external_dns` group we
+        // defined above; also bump RSS's blueprint's `external_dns_version` to
+        // match this update.
+        let mut blueprint = request.blueprint;
+        blueprint.external_dns_version = blueprint.external_dns_version.next();
+
+        // Fill in the CockroachDB metadata for the initial blueprint, and set
+        // the `cluster.preserve_downgrade_option` setting ahead of blueprint
+        // execution.
+        let cockroachdb_settings = self
+            .datastore()
+            .cockroachdb_settings(opctx)
+            .await
+            .internal_context(
+                "fetching cockroachdb settings for rack initialization",
+            )?;
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            if cockroachdb_settings.preserve_downgrade.is_empty() {
+                // Set the option to the current policy in both the database and
+                // the blueprint.
+                self.datastore()
+                    .cockroachdb_setting_set_string(
+                        opctx,
+                        cockroachdb_settings.state_fingerprint.clone(),
+                        "cluster.preserve_downgrade_option",
+                        CockroachDbClusterVersion::NEWLY_INITIALIZED
+                            .to_string(),
+                    )
+                    .await
+                    .internal_context(
+                        "setting `cluster.preserve_downgrade_option` \
+                        for rack initialization",
+                    )?;
+                CockroachDbClusterVersion::NEWLY_INITIALIZED
+            } else {
+                // `cluster.preserve_downgrade_option` is set, so fill in the
+                // blueprint with the current value. This branch should never
+                // be hit during normal rack initialization; it's here for
+                // eventual test cases where `cluster.preserve_downgrade_option`
+                // is set by a test harness prior to rack initialization.
+                CockroachDbClusterVersion::from_str(
+                    &cockroachdb_settings.preserve_downgrade,
+                )
+                .map_err(|_| {
+                    Error::internal_error(&format!(
+                        "database has `cluster.preserve_downgrade_option` \
+                        set to invalid version {}",
+                        cockroachdb_settings.preserve_downgrade
+                    ))
+                })?
+            }
+            .into();
+        blueprint.cockroachdb_fingerprint =
+            cockroachdb_settings.state_fingerprint;
+
+        // Administrators of the Recovery Silo are automatically made
+        // administrators of the Fleet.
+        let mapped_fleet_roles = BTreeMap::from([(
+            policy::SiloRole::Admin,
+            BTreeSet::from([policy::FleetRole::Admin]),
+        )]);
+
+        let recovery_silo = silo::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: request.recovery_silo.silo_name,
+                description: "built-in recovery Silo".to_string(),
+            },
+            // The recovery silo is initialized with no allocated capacity given
+            // it's not intended to be used to deploy workloads. Operators can
+            // add capacity after the fact if they want to use it for that
+            // purpose.
+            quotas: silo::SiloQuotasCreate::empty(),
+            identity_mode: silo::SiloIdentityMode::LocalOnly,
+            admin_group_name: None,
+            tls_certificates,
+            mapped_fleet_roles,
+        };
+
+        let rack_network_config = &request.rack_network_config;
+
+        // The `rack` row is created with the rack ID we know when Nexus starts,
+        // but we didn't know the rack subnet until now. Set it.
+        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
+        rack.rack_subnet =
+            Some(IpNet::from(rack_network_config.rack_subnet).into());
+        self.datastore().update_rack_subnet(opctx, &rack).await?;
+
+        // TODO
+        // configure rack networking / boundary services here
+        // Currently calling some of the apis directly, but should we be using
+        // sagas going forward via self.sagas.saga_execute()? Note that
+        // this may not be available within this scope.
+        info!(log, "Recording Rack Network Configuration");
+        let address_lot_name = Name::from_str(INFRA_LOT).map_err(|e| {
+            Error::internal_error(&format!(
+                "unable to use `initial-infra` as `Name`: {e}"
+            ))
+        })?;
+        let identity = IdentityMetadataCreateParams {
+            name: address_lot_name.clone(),
+            description: "initial infrastructure ip address lot".to_string(),
+        };
+
+        let kind = networking::AddressLotKind::Infra;
+
+        let first_address = rack_network_config.infra_ip_first;
+        let last_address = rack_network_config.infra_ip_last;
+        let ipv4_block =
+            networking::AddressLotBlockCreate { first_address, last_address };
+
+        let blocks = vec![ipv4_block];
+
+        let address_lot_params =
+            networking::AddressLotCreate { identity, kind, blocks };
+
+        match self
+            .db_datastore
+            .address_lot_create(opctx, &address_lot_params)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => match e {
+                Error::ObjectAlreadyExists { type_name: _, object_name: _ } => {
+                    Ok(())
+                }
+                _ => Err(e),
+            },
+        }?;
+
+        let mut bgp_configs = HashMap::new();
+
+        for bgp_config in &rack_network_config.bgp {
+            bgp_configs.insert(bgp_config.asn, bgp_config.clone());
+
+            let bgp_config_name: Name =
+                format!("as{}", bgp_config.asn).parse().unwrap();
+
+            let announce_set_name: Name =
+                format!("as{}-announce", bgp_config.asn).parse().unwrap();
+
+            let address_lot_name: Name =
+                format!("as{}-lot", bgp_config.asn).parse().unwrap();
+
+            match self
+                .db_datastore
+                .address_lot_create(
+                    &opctx,
+                    &networking::AddressLotCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: address_lot_name,
+                            description: format!(
+                                "Address lot for announce set in as {}",
+                                bgp_config.asn
+                            ),
+                        },
+                        kind: networking::AddressLotKind::Infra,
+                        blocks: bgp_config
+                            .originate
+                            .iter()
+                            .map(|ipnet| (*ipnet).into())
+                            .collect(),
+                    },
+                )
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to create address lot for BGP as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
+
+            match self
+                .db_datastore
+                .bgp_create_announce_set(
+                    &opctx,
+                    &networking::BgpAnnounceSetCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: announce_set_name.clone(),
+                            description: format!(
+                                "Announce set for AS {}",
+                                bgp_config.asn
+                            ),
+                        },
+                        announcement: bgp_config
+                            .originate
+                            .iter()
+                            .map(|ipnet| networking::BgpAnnouncementCreate {
+                                address_lot_block: NameOrId::Name(
+                                    format!("as{}", bgp_config.asn)
+                                        .parse()
+                                        .unwrap(),
+                                ),
+                                network: *ipnet,
+                            })
+                            .collect(),
+                    },
+                )
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to create bgp announce set for as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
+
+            let (.., authz_bgp_announce_set) = self
+                .bgp_announce_set_lookup(
+                    opctx,
+                    announce_set_name.clone().into(),
+                )?
+                .lookup_for(authz::Action::Read)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unable to lookup announce set for as {}: {e}",
+                        bgp_config.asn
+                    ))
+                })?;
+
+            match self
+                .db_datastore
+                .bgp_config_create(
+                    &opctx,
+                    db::model::BgpConfig::from_config_create(
+                        &networking::BgpConfigCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: bgp_config_name,
+                                description: format!(
+                                    "BGP config for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            asn: bgp_config.asn,
+                            bgp_announce_set_id: announce_set_name.into(),
+                            vrf: None,
+                            shaper: bgp_config.shaper.clone(),
+                            checker: bgp_config.checker.clone(),
+                            max_paths: bgp_config.max_paths,
+                        },
+                        authz_bgp_announce_set.id(),
+                    ),
+                )
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to set bgp config for as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
+        }
+
+        for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()
+        {
+            let uplink_name = format!("default-uplink{idx}");
+            let name = Name::from_str(&uplink_name).unwrap();
+
+            let identity = IdentityMetadataCreateParams {
+                name: name.clone(),
+                description: "initial uplink configuration".to_string(),
+            };
+
+            let port_config = networking::SwitchPortConfigCreate {
+                geometry: networking::SwitchPortGeometry::Qsfp28x1,
+            };
+
+            let mut port_settings_params =
+                networking::SwitchPortSettingsCreate {
+                    identity,
+                    port_config,
+                    groups: vec![],
+                    links: vec![],
+                    interfaces: vec![],
+                    routes: vec![],
+                    bgp_peers: vec![],
+                    addresses: vec![],
+                };
+
+            let addresses: Vec<networking::Address> = uplink_config
+                .addresses
+                .iter()
+                .map(|a| networking::Address {
+                    address_lot: NameOrId::Name(address_lot_name.clone()),
+                    // TODO-cleanup Extend stronger types out to the external
+                    // API (omicron#9832).
+                    address: a
+                        .address
+                        .ip_net_squashing_addrconf_to_unspecified(),
+                    vlan_id: a.vlan_id,
+                })
+                .collect();
+
+            let link_name =
+                Name::from_str("phy0").expect("interface name should be valid");
+
+            port_settings_params.addresses.push(networking::AddressConfig {
+                link_name: link_name.clone(),
+                addresses,
+            });
+
+            let routes: Vec<networking::Route> = uplink_config
+                .routes
+                .iter()
+                .map(|r| networking::Route {
+                    dst: r.destination,
+                    gw: r.nexthop,
+                    vid: r.vlan_id,
+                    rib_priority: r.rib_priority,
+                })
+                .collect();
+
+            port_settings_params.routes.push(networking::RouteConfig {
+                link_name: link_name.clone(),
+                routes,
+            });
+
+            let peers: Vec<networking::BgpPeer> = uplink_config
+                .bgp_peers
+                .iter()
+                .map(|r| networking::BgpPeer {
+                    bgp_config: NameOrId::Name(
+                        format!("as{}", r.asn).parse().unwrap(),
+                    ),
+                    addr: r.addr,
+                    hold_time: r.hold_time() as u32,
+                    idle_hold_time: r.idle_hold_time() as u32,
+                    delay_open: r.delay_open() as u32,
+                    connect_retry: r.connect_retry() as u32,
+                    keepalive: r.keepalive() as u32,
+                    remote_asn: r.remote_asn,
+                    min_ttl: r.min_ttl,
+                    md5_auth_key: r.md5_auth_key.clone(),
+                    multi_exit_discriminator: r.multi_exit_discriminator,
+                    local_pref: r.local_pref,
+                    enforce_first_as: r.enforce_first_as,
+                    communities: r.communities.clone(),
+                    allowed_import: r.allowed_import.clone(),
+                    allowed_export: r.allowed_export.clone(),
+                    vlan_id: r.vlan_id,
+                })
+                .collect();
+
+            port_settings_params.bgp_peers.push(networking::BgpPeerConfig {
+                link_name: link_name.clone(),
+                peers,
+            });
+
+            let lldp = match &uplink_config.lldp {
+                None => networking::LldpLinkConfigCreate {
+                    enabled: false,
+                    ..Default::default()
+                },
+                Some(l) => networking::LldpLinkConfigCreate {
+                    enabled: l.status == LldpAdminStatus::Enabled,
+                    link_name: l.port_id.clone(),
+                    link_description: l.port_description.clone(),
+                    chassis_id: l.chassis_id.clone(),
+                    system_name: l.system_name.clone(),
+                    system_description: l.system_description.clone(),
+                    management_ip: match &l.management_addrs {
+                        Some(a) if !a.is_empty() => Some(a[0]),
+                        _ => None,
+                    },
+                },
+            };
+
+            let link = networking::LinkConfigCreate {
+                link_name: link_name.clone(),
+                //TODO https://github.com/oxidecomputer/omicron/issues/2274
+                mtu: 1500,
+                fec: uplink_config.uplink_port_fec,
+                speed: uplink_config.uplink_port_speed,
+                autoneg: uplink_config.autoneg,
+                lldp,
+                tx_eq: uplink_config.tx_eq,
+            };
+
+            port_settings_params.links.push(link);
+
+            match self
+                .db_datastore
+                .switch_port_settings_create(
+                    opctx,
+                    &port_settings_params,
+                    None,
+                    uplink_config.allow_ddm_traffic,
+                )
+                .await
+            {
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),
+                Err(e) => Err(e),
+            }?;
+
+            let port_settings_id = self
+                .db_datastore
+                .switch_port_settings_get_id(
+                    opctx,
+                    nexus_db_model::Name(name.clone()),
+                )
+                .await?;
+
+            let switch_port_id = self
+                .db_datastore
+                .switch_port_get_id(
+                    opctx,
+                    rack_id,
+                    uplink_config.switch,
+                    Name::from_str(&uplink_config.port).unwrap().into(),
+                )
+                .await?;
+
+            self.db_datastore
+                .switch_port_set_settings_id(
+                    opctx,
+                    switch_port_id,
+                    Some(port_settings_id),
+                    db::datastore::UpdatePrecondition::Null,
+                )
+                .await?;
+        } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
+        // record port speed
+
+        self.db_datastore
+            .rack_set_initialized(
+                opctx,
+                RackInit {
+                    rack_subnet: IpNet::from(rack_network_config.rack_subnet)
+                        .into(),
+                    rack_id,
+                    blueprint,
+                    blueprint_execution_enabled,
+                    physical_disks,
+                    zpools,
+                    datasets,
+                    service_ip_pools: request.service_ip_pools,
+                    internal_dns,
+                    external_dns,
+                    recovery_silo,
+                    recovery_silo_fq_dns_name,
+                    recovery_user_id: request.recovery_silo.user_name,
+                    recovery_user_password_hash: request
+                        .recovery_silo
+                        .user_password_hash
+                        .into(),
+                    dns_update,
+                    allowed_source_ips: request.allowed_source_ips,
+                    initial_trust_quorum_configuration: request
+                        .initial_trust_quorum_configuration,
+                },
+            )
+            .await?;
+
+        // Persist the fleet-wide jumbo-frames opt-in. The singleton row was
+        // seeded by the schema migration; we update it here in case RSS shipped
+        // a non-default value.
+        if request.external_jumbo_frames_opt_in_enabled {
+            self.db_datastore
+                .system_networking_settings_update(opctx, true)
+                .await?;
+        }
+
+        // Note: Service firewall rules are propagated on a best-effort basis
+        // in Server::start() via attempt_ip_allowlist_plumbing(). OPTE's
+        // default-deny policy ensures Nexus remains unreachable until the
+        // rules are plumbed; the background task retries if the attempt fails.
+
+        // We've potentially updated the list of DNS servers and the DNS
+        // configuration for both internal and external DNS, plus the Silo
+        // certificates and target blueprint.  Activate the relevant background
+        // tasks.
+        for task in &[
+            &self.background_tasks.task_internal_dns_config,
+            &self.background_tasks.task_internal_dns_servers,
+            &self.background_tasks.task_external_dns_config,
+            &self.background_tasks.task_external_dns_servers,
+            &self.background_tasks.task_external_endpoints,
+            &self.background_tasks.task_inventory_collection,
+            &self.background_tasks.task_blueprint_loader,
+        ] {
+            self.background_tasks.activate(task);
+        }
+
+        Ok(())
+    }
+
+    /// Awaits the initialization of the rack.
+    ///
+    /// This will occur by either:
+    /// 1. RSS invoking the internal API, handing off responsibility, or
+    /// 2. Re-reading a value from the DB, if the rack has already been
+    ///    initialized.
+    ///
+    /// See RFD 278 for additional context.
+    pub(crate) async fn await_rack_initialization(&self, opctx: &OpContext) {
+        loop {
+            let result = self.rack_lookup(&opctx, &self.rack_id).await;
+            match result {
+                Ok(rack) => {
+                    if rack.initialized {
+                        match rack_subnet(rack.rack_subnet) {
+                            Ok(subnet) => {
+                                info!(self.log, "Rack initialized");
+                                let subnet =
+                                    Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(
+                                        subnet,
+                                    );
+                                // If the subnets were already set, the new
+                                // value is identical, so the `Err` is benign.
+                                let _ = self
+                                    .underlay_subnets
+                                    .set(UnderlaySubnets::new(subnet));
+                                return;
+                            }
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "Rack claims to be initialized, but rack subnet is invalid!: {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    info!(
+                        self.log,
+                        "Still waiting for rack initialization: {:?}", rack
+                    );
+                }
+                Err(e) => {
+                    warn!(self.log, "Cannot look up rack: {}", e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
+
+    /// Return the list of sleds that are inserted into an initialized rack
+    /// but not yet initialized as part of a rack.
+    //
+    // TODO-multirack: We currently limit sleds to a single rack and we also
+    // retrieve the `rack_uuid` from the Nexus instance used.
+    pub(crate) async fn sled_list_uninitialized(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<hardware::UninitializedSled> {
+        debug!(self.log, "Getting latest collection");
+        // Grab the SPs from the last collection
+        let collection =
+            self.db_datastore.inventory_get_latest_collection(opctx).await?;
+
+        // There can't be any uninitialized sleds we know about
+        // if there is no inventory.
+        let Some(collection) = collection else {
+            return Ok(vec![]);
+        };
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Descending,
+            // TODO: This limit is only suitable for a single sled cluster
+            limit: NonZeroU32::new(32).unwrap(),
+        };
+
+        debug!(self.log, "Listing sleds");
+        let sleds = self
+            .db_datastore
+            .sled_list(opctx, &pagparams, SledFilter::InService)
+            .await?;
+
+        let mut uninitialized_sleds: Vec<hardware::UninitializedSled> =
+            collection
+                .sps
+                .into_iter()
+                .filter_map(|(k, v)| {
+                    if v.sp_type == SpType::Sled {
+                        Some(hardware::UninitializedSled {
+                            baseboard: hardware::Baseboard {
+                                serial: k.serial_number.clone(),
+                                part: k.part_number.clone(),
+                                revision: v.baseboard_revision,
+                            },
+                            rack_id: self.rack_id.into_untyped_uuid(),
+                            cubby: v.sp_slot,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+        let sled_baseboards: BTreeSet<hardware::Baseboard> =
+            sleds.into_iter().map(db::model::Sled::into_baseboard).collect();
+
+        // Retain all sleds that exist but are not in the sled table
+        uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
+        Ok(uninitialized_sleds)
+    }
+
+    /// List racks that have been discovered via inventory but which have not
+    /// yet been adopted into this regional cluster.
+    ///
+    /// Results are sorted by rack ID in ascending order, and `pagparams` is
+    /// applied to that ordering.
+    pub(crate) async fn rack_list_unadopted(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<UnadoptedRack> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        // Note that this API is sourced from the inventory system, so it may
+        // take some time between when a new rack joins the underlay network and
+        // when that rack appears in this API output, since we won't be able to
+        // see it here until the inventory collection is refreshed. However, the
+        // results returned by this API *are* filtered so that racks which have
+        // joined the cluster do not appear in the response, hence the
+        // "unadopted" naming scheme instead of the "discovered" naming scheme
+        // used in the corresponding inventory data.
+
+        // First grab the latest inventory collection:
+        let coll = self.inventory_load_rx().borrow().clone();
+
+        let Some(coll) = coll.filter(|c| !c.discovered_racks.is_empty()) else {
+            // If we don't have any discovered racks in inventory (or haven't
+            // collected inventory at all yet, in the None case), we don't need
+            // to bother filtering out anything and can save a DB query and some
+            // other work by just short circuiting out here.
+            return Ok(Vec::new());
+        };
+
+        // Next, get all existing adopted rack IDs from the `rack` table so
+        // that we know which racks we should filter out of the discovered
+        // rack list due to them already having been adopted.
+        //
+        // We may want to properly paginate this query at some point instead
+        // of just using [`DataPageParams::max_page()`], but that may be
+        // overkill considering we're only grabbing IDs and there is an
+        // upper bound of how many racks can be in a single regional
+        // cluster.
+        let adopted_rack_ids = self
+            .datastore()
+            .rack_id_list(opctx, &DataPageParams::max_page())
+            .await?;
+
+        // Finally, use the pagination parameters to determine the correct
+        // subset of the unadopted racks to return:
+        let last_seen =
+            pagparams.marker.map(|uuid| RackUuid::from_untyped_uuid(*uuid));
+        let limit = usize::try_from(u32::from(pagparams.limit))
+            .expect("u32 should fit in usize on all supported platforms");
+
+        Ok(coll
+            .discovered_racks
+            .iter()
+            .filter(|rack| !adopted_rack_ids.contains(&rack.rack_id))
+            .filter(|rack| Some(rack.rack_id) > last_seen)
+            .take(limit)
+            .cloned()
+            .map(UnadoptedRack::from)
+            .collect())
+    }
+}
+
+pub fn rack_subnet(
+    rack_subnet: Option<IpNetwork>,
+) -> Result<Ipv6Network, Error> {
+    match rack_subnet {
+        Some(IpNetwork::V6(subnet)) => Ok(subnet),
+        Some(IpNetwork::V4(_)) => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not IPv6".into(),
+            });
+        }
+        None => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not set".into(),
+            });
+        }
+    }
+}

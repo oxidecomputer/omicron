@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bafcbc817cff65814a6f3233f1ef3d6c36f75c37ad35175d17d1c8484a734034 # shrinks to input = _ProptestOpsArgs { initial: {(0, '$', ""): "", (0, ' ', ""): ""}, ops: [] }

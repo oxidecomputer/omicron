@@ -1,0 +1,450 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::HashMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use sled_agent_types::disk::DiskIdentity;
+use sled_hardware_types::Baseboard;
+use slog::{Logger, info};
+
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "illumos")] {
+        mod illumos;
+        pub use illumos::*;
+    } else {
+        mod non_illumos;
+        pub use non_illumos::*;
+    }
+}
+
+pub mod cleanup;
+pub mod disk;
+pub use disk::*;
+pub mod softnpu;
+pub mod underlay;
+
+/// Failure while probing for switch hardware at startup.
+#[derive(Debug, thiserror::Error)]
+pub enum SwitchDetectError {
+    #[error("failed to walk device tree")]
+    DevInfo(#[source] anyhow::Error),
+
+    #[error("{path} still busy after {attempts} open attempts")]
+    Busy { path: String, attempts: usize },
+
+    #[error("opening {path}")]
+    Open {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("writing Tversion to {path}")]
+    Write {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("reading Rversion from {path}")]
+    Read {
+        path: String,
+        #[source]
+        err: std::io::Error,
+    },
+
+    #[error("{path} did not answer Tversion within {after:?}")]
+    Timeout { path: String, after: std::time::Duration },
+
+    #[error("malformed Rversion from {path}: {reason}")]
+    Protocol { path: String, reason: String },
+}
+
+// The type of networking 'ASIC' the Dendrite service is expected to manage
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DendriteAsic {
+    TofinoAsic,
+    TofinoStub,
+    SoftNpuZone,
+    SoftNpuPropolisDevice,
+}
+
+impl std::fmt::Display for DendriteAsic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                DendriteAsic::TofinoAsic => "tofino_asic",
+                DendriteAsic::TofinoStub => "tofino_stub",
+                DendriteAsic::SoftNpuZone => "soft_npu_zone",
+                DendriteAsic::SoftNpuPropolisDevice =>
+                    "soft_npu_propolis_device",
+            }
+        )
+    }
+}
+
+/// Whether physical or virtual NICs are present in the system.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum DataLinks {
+    /// Virtual NICs are present. This is the case for development environments,
+    /// or any Oxide sled running outside of a rack.
+    Virtual { devices: Vec<String> },
+    /// Physical NICs are present, with device names like `cxgbeN`. This is the
+    /// case for Oxide compute sleds running inside of a rack.
+    Physical,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ExternalDisks {
+    Hardcoded {
+        /// Use the provided file-backed vdevs
+        vdevs: Vec<String>,
+
+        /// Inject these raw disks during device polling
+        disks: Vec<UnparsedDisk>,
+    },
+
+    /// Detect physical external disks connected to the sled.
+    DetectPhysical,
+}
+
+/// Configuration for forcing a sled to run as a Scrimlet or compute Sled
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SledMode {
+    /// Run as a compute sled unless a Tofino ASIC is present, in which case
+    /// run as a Scrimlet
+    Auto,
+    /// Force sled to run as a Gimlet
+    Sled,
+    /// Force sled to run as a Scrimlet
+    Scrimlet { asic: DendriteAsic },
+}
+
+/// Accounting for high watermark memory usage for various system purposes
+#[derive(Clone)]
+pub struct MemoryReservations {
+    log: Logger,
+    hardware_manager: HardwareManager,
+    /// The amount of memory expected to be used if "control plane" services all
+    /// running on this sled. "control plane" here refers to services that have
+    /// roughly fixed memory use given differing sled hardware configurations.
+    /// DNS (internal, external), Nexus, Cockroach, or ClickHouse are all
+    /// examples of "control plane" here.
+    ///
+    /// This is a pessimistic overestimate; it is unlikely
+    /// (and one might say undesirable) that all such services are colocated on
+    /// a sled, and (as described in RFD 413) the budgeting for each service's
+    /// RAM must include headroom for those services potentially forking and
+    /// bursting required swap or resident pages.
+    //
+    // XXX: This is really something we should be told by Nexus, perhaps after
+    // starting with this conservative estimate to get the sled started.
+    control_plane_earmark_bytes: u64,
+    // XXX: Crucible involves some amount of memory in support of the volumes it
+    // manages. We should collect zpool size and estimate the memory that would
+    // be used if all available storage was dedicated to Crucible volumes. For
+    // now this is part of the control plane earmark.
+}
+
+impl MemoryReservations {
+    pub fn new(
+        log: Logger,
+        hardware_manager: HardwareManager,
+        control_plane_earmark_mib: Option<u32>,
+    ) -> MemoryReservations {
+        const MIB: u64 = 1024 * 1024;
+        let control_plane_earmark_bytes =
+            u64::from(control_plane_earmark_mib.unwrap_or(0)) * MIB;
+
+        Self { log, hardware_manager, control_plane_earmark_bytes }
+    }
+
+    /// Compute the amount of physical memory that could be set aside for the
+    /// VMM reservoir.
+    ///
+    /// The actual VMM reservoir will be smaller than this amount, and is either
+    /// a fixed amount of memory specified by `ReservoirMode::Size` or
+    /// a percentage of this amount specified by `ReservoirMode::Percentage`.
+    pub fn vmm_eligible(&self) -> u64 {
+        let hardware_physical_ram_bytes =
+            self.hardware_manager.usable_physical_ram_bytes();
+        // Don't like hardcoding a struct size from the host OS here like
+        // this, maybe we shuffle some bits around before merging.. On the
+        // other hand, the last time page_t changed was illumos-gate commit
+        // a5652762e5 from 2006.
+        const PAGE_T_SIZE: u64 = 120;
+        let max_page_t_bytes =
+            self.hardware_manager.usable_physical_pages() * PAGE_T_SIZE;
+
+        let vmm_eligible = hardware_physical_ram_bytes
+            - max_page_t_bytes
+            - self.control_plane_earmark_bytes;
+
+        info!(
+            self.log,
+            "Calculated eligible VMM reservoir size";
+            "vmm_eligible" => %vmm_eligible,
+            "physical_ram_bytes" => %hardware_physical_ram_bytes,
+            "max_page_t_bytes" => %max_page_t_bytes,
+            "control_plane_earmark_bytes" => %self.control_plane_earmark_bytes,
+        );
+
+        vmm_eligible
+    }
+}
+
+/// Detects the current sled's CPU family using the CPUID instruction.
+///
+/// TODO: Ideally we would call into libtopo and pass along the information
+/// identified there. See
+/// <https://github.com/oxidecomputer/omicron/issues/8732>.
+///
+/// Everything here is duplicative with CPU identification done by the kernel.
+/// You'll even find a very similar (but much more comprehensive) AMD family
+/// mapping at `amd_revmap` in `usr/src/uts/intel/os/cpuid_subr.c`. But
+/// sled-agent does not yet know about libtopo, getting topo snapshots, walking
+/// them, or any of that, so the parsing is performed again here.
+#[cfg(target_arch = "x86_64")]
+pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::SledCpuFamily {
+    use core::arch::x86_64::__cpuid_count;
+    use sled_hardware_types::SledCpuFamily;
+
+    // Read leaf 0 to figure out the processor's vendor and whether leaf 1
+    // (which contains family, model, and stepping information) is available.
+    let leaf_0 = __cpuid_count(0, 0);
+
+    info!(log, "read CPUID leaf 0 to detect CPU vendor"; "values" => ?leaf_0);
+
+    // If leaf 1 is unavailable, there's no way to figure out what family this
+    // processor belongs to.
+    if leaf_0.eax < 1 {
+        return SledCpuFamily::Unknown;
+    }
+
+    // Check the vendor ID string in ebx/ecx/edx.
+    match (leaf_0.ebx, leaf_0.ecx, leaf_0.edx) {
+        // "AuthenticAMD"; see AMD APM volume 3 (March 2024) section E.3.1.
+        (0x68747541, 0x444D4163, 0x69746E65) => {}
+        _ => return SledCpuFamily::Unknown,
+    }
+
+    // Feature detection after this point is AMD-specific - if we find ourselves
+    // supporting other CPU vendors we'll want to split this out accordingly.
+
+    // Per AMD APM volume 3 (March 2024) section E.3.2, the processor family
+    // number is computed as follows:
+    //
+    // - Read bits 11:8 of leaf 1 eax to get the "base" family value. If this
+    //   value is less than 0xF, the family value is equal to the base family
+    //   value.
+    // - If the base family value is 0xF, eax[27:20] contains the "extended"
+    //   family value, and the actual family value is the sum of the base and
+    //   the extended values.
+    let leaf_1 = __cpuid_count(1, 0);
+    let mut family = (leaf_1.eax & 0x00000F00) >> 8;
+    if family == 0xF {
+        family += (leaf_1.eax & 0x0FF00000) >> 20;
+    }
+
+    // Also from the APM volume 3 section E.3.2, the processor model number is
+    // computed as follows:
+    //
+    // - Read bits 7:4 of leaf 1 eax to get the "base" model value.
+    // - If the "base" family value is less than 0xF, the "base" model stands.
+    //   Otherwise, four additional bits of the model come from eax[19:16].
+    //
+    // If the computed family number is 0xF or greater, that implies the "base"
+    // family was 0xF or greater as well.
+    let mut model = (leaf_1.eax & 0x000000F0) >> 4;
+    if family >= 0xF {
+        model |= (leaf_1.eax & 0x000F0000) >> 12;
+    }
+
+    info!(
+        log,
+        "read CPUID leaf 1 to detect CPU family";
+        "leaf1.eax" => format_args!("{:#08x}", leaf_1.eax),
+        "leaf1.ebx" => format_args!("{:#08x}", leaf_1.ebx),
+        "leaf1.ecx" => format_args!("{:#08x}", leaf_1.ecx),
+        "leaf1.edx" => format_args!("{:#08x}", leaf_1.edx),
+        "parsed_family" => format_args!("{family:#x}"),
+        "parsed_model" => format_args!("{model:#x}"),
+    );
+
+    // Match on the family/model ranges we've detected. Notably client parts are
+    // reported as if they were their server counterparts; the feature parity is
+    // close enough that guests probably won't run into issues. This lowers
+    // friction for testing migrations where the control plane would need to
+    // tell what hosts could be compatible with a VMM's CPU platform.
+    //
+    // TODO(?): Exhaustively check that client parts support all CPU features of
+    // the corresponding Oxide CPU platform before doing this "as-if" reporting.
+    // Lab systems built out of client parts may have hardware which support all
+    // features in the corresponding instance CPU platform, but have individual
+    // features disabled in the BIOS or by client part microcode. This can
+    // result in funky situations, like an Oxide CPU platform advertising CPU
+    // features that lab systems don't support. This is unlikely, but take
+    // AVX512 as an example: users can often disable AVX512 entirely on Zen 5
+    // BIOSes. In this case a VM on a 9000-series Ryzen will be told those
+    // instructions are available only for the guest to get #UD at runtime.
+    match family {
+        0x19 if model <= 0x0F => {
+            // This covers both Milan and Zen 3-based Threadrippers. I don't
+            // have a 5000-series Threadripper on hand to test but I believe
+            // they are feature-compatible.
+            SledCpuFamily::AmdMilan
+        }
+        0x19 if model >= 0x10 && model <= 0x1F => {
+            // This covers both Genoa and Zen 4-based Threadrippers. Again,
+            // don't have a comparable Threadripper to test here.
+            //
+            // We intend to expose Turin and Milan as families a guest can
+            // choose, skipping the Zen 4 EPYC parts. So, round this down to
+            // Milan; if we're here it's a lab system and the alternative is
+            // "unknown".
+            SledCpuFamily::AmdMilan
+        }
+        0x19 if model >= 0x20 && model <= 0x2F => {
+            // These are client Zen 3 parts aka Vermeer. Feature-wise, they are
+            // missing INVLPGB from Milan, but are otherwise close, and we don't
+            // expose INVLPGB to guests currently anyway.
+            SledCpuFamily::AmdMilan
+        }
+        0x19 if model >= 0x60 && model <= 0x6F => {
+            // These are client Zen 4 parts aka Raphael. Similar to the above
+            // with Genoa and Vermeer, round these down to Milan in support of
+            // lab clusters instead of calling them unknown.
+            SledCpuFamily::AmdMilan
+        }
+        0x1A if model <= 0x0F => SledCpuFamily::AmdTurin,
+        0x1A if model >= 0x10 && model <= 0x1F => {
+            // These are Turin Dense. From a CPU feature perspective they're
+            // equivalently capable to Turin, but they are physically distinct
+            // and sled operators should be able to see that.
+            SledCpuFamily::AmdTurinDense
+        }
+        0x1A if model >= 0x40 && model <= 0x4F => {
+            // These are client Zen 5 parts aka Granite Ridge. Won't be in a
+            // rack, but plausibly in a lab cluster. Like other non-server
+            // parts, these don't have INVLPGB, which we don't expose to guests.
+            // They should otherwise be a sufficient stand-in for Turin.
+            SledCpuFamily::AmdTurin
+        }
+        // Remaining family/model ranges in known families are likely mobile
+        // parts and intentionally rolled up into "Unknown." There, it's harder
+        // to predict what features out of the corresponding CPU platform would
+        // actually be present. It's also less likely that someone has a laptop
+        // or APU as part of a development cluster!
+        //
+        // Other families are, of course, unknown.
+        _ => SledCpuFamily::Unknown,
+    }
+}
+
+/// A snapshot of information about the underlying Tofino device.
+///
+/// This snapshot tells us whether there is a tofino visible to Illumos and
+/// accessible to us in userspace.  We would expect both to be true or both to
+/// be false, except transiently (e.g., during a tofino reset).
+///
+/// Note: this doesn't specifically tell us whether there is a sidecar connected
+/// to the system, but it tells us if there is a sidecar we can use.  The
+/// distinction largely comes down to whether the driver has successfully
+/// recognized the device and initialized itself.  The three-way relationship
+/// between PCI hotplug, device driver management, and zones is fragile enough
+/// that we can get stuck in a state that requires a gimlet reboot to fix.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct TofinoSnapshot {
+    // Is there a Tofino ASIC visible in the device tree
+    exists: bool,
+    // Are we able to access the ASIC through the device driver
+    available: bool,
+}
+
+// Describes a view of the Tofino switch.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // only instantiated on illumos
+enum TofinoView {
+    // The view of the Tofino switch exactly matches the snapshot of hardware.
+    Real(TofinoSnapshot),
+    // The Tofino switch has been "stubbed out", and the underlying hardware is
+    // being ignored.
+    Stub { active: bool },
+}
+
+// A cached copy of "our latest view of what hardware exists".
+//
+// This struct can be expanded arbitrarily, as it's useful for the Sled Agent
+// to perceive hardware.
+//
+// Q: Why bother caching this information at all? Why not rely on devinfo for
+//    all queries?
+//
+// A: Keeping an in-memory representation allows us to immediately answer
+//    questions about the hardware without needing to poll devinfo on demand. We
+//    also keep a `HardwareView` in a watch channel, allowing consumers to
+//    cheaply watch for any changes to the in-memory view.
+#[derive(Debug, Clone)]
+pub struct HardwareView {
+    tofino: TofinoView,
+    disks: HashMap<DiskIdentity, UnparsedDisk>,
+    baseboard: Baseboard,
+    online_processor_count: u32,
+    usable_physical_pages: u64,
+    usable_physical_ram_bytes: u64,
+    cpu_family: sled_hardware_types::SledCpuFamily,
+}
+
+impl HardwareView {
+    pub fn baseboard(&self) -> Baseboard {
+        self.baseboard.clone()
+    }
+
+    pub fn cpu_family(&self) -> sled_hardware_types::SledCpuFamily {
+        self.cpu_family
+    }
+
+    pub fn online_processor_count(&self) -> u32 {
+        self.online_processor_count
+    }
+
+    pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
+        self.disks.clone()
+    }
+
+    pub fn into_disks(self) -> HashMap<DiskIdentity, UnparsedDisk> {
+        self.disks
+    }
+
+    pub fn usable_physical_pages(&self) -> u64 {
+        self.usable_physical_pages
+    }
+
+    pub fn usable_physical_ram_bytes(&self) -> u64 {
+        self.usable_physical_ram_bytes
+    }
+
+    pub fn is_scrimlet(&self) -> bool {
+        match &self.tofino {
+            TofinoView::Real(TofinoSnapshot { exists, .. }) => *exists,
+            TofinoView::Stub { active } => *active,
+        }
+    }
+
+    pub fn is_scrimlet_asic_available(&self) -> bool {
+        match &self.tofino {
+            TofinoView::Real(TofinoSnapshot { available, .. }) => *available,
+            TofinoView::Stub { active } => *active,
+        }
+    }
+}

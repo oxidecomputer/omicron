@@ -1,0 +1,25 @@
+[package]
+name = "omicron-generation-kinds"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+# The dependencies and features are written so as to make it easy for no-std
+# code to import omicron-generation-kinds. All the features below are turned on
+# within omicron, except for `testing`, which is only turned on by crates that
+# need `proptest::Arbitrary` impls for generation numbers.
+
+[dependencies]
+oxide-generation = { workspace = true, features = ["daft01"] }
+oxide-generation-macros.workspace = true
+
+[features]
+default = ["std"]
+serde = ["oxide-generation/serde"]
+schemars08 = ["oxide-generation/schemars08", "std"]
+slog2 = ["oxide-generation/slog2"]
+std = ["oxide-generation/std"]
+testing = ["oxide-generation/proptest1"]

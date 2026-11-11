@@ -1,0 +1,2 @@
+# Ensure that we can pipe command output to a shell command
+show ! grep DNS

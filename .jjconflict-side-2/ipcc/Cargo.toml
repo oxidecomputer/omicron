@@ -1,0 +1,22 @@
+[package]
+name = "ipcc"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+ciborium.workspace = true
+omicron-uuid-kinds.workspace = true
+serde.workspace = true
+tufaceous-artifact.workspace = true
+thiserror.workspace = true
+omicron-workspace-hack.workspace = true
+libipcc.workspace = true
+slog-error-chain.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true

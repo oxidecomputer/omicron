@@ -1,0 +1,338 @@
+schema for pagination parameters: scan parameters, scan by name only
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ScanByName",
+  "description": "Scan parameters for resources that support scanning by name only",
+  "type": "object",
+  "properties": {
+    "sort_by": {
+      "default": "name_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/NameSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "NameSortMode": {
+      "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        }
+      ]
+    }
+  }
+}
+schema for pagination parameters: scan parameters, scan by id only
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ScanById_for_Null",
+  "description": "Scan parameters for resources that support scanning by id only",
+  "type": "object",
+  "properties": {
+    "sort_by": {
+      "default": "id_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/IdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "IdSortMode": {
+      "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
+      ]
+    }
+  }
+}
+schema for pagination parameters: scan parameters, scan by name or id
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ScanByNameOrId_for_Null",
+  "description": "Scan parameters for resources that support scanning by name or id",
+  "type": "object",
+  "properties": {
+    "sort_by": {
+      "default": "name_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/NameOrIdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "NameOrIdSortMode": {
+      "description": "Supported set of sort modes for scanning by name or id",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        },
+        {
+          "description": "Sort in decreasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_descending"
+          ]
+        },
+        {
+          "description": "Sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
+      ]
+    }
+  }
+}
+schema for pagination parameters: page selector, scan by name only
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PageSelector_for_ScanByName_and_Name",
+  "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
+  "type": "object",
+  "required": [
+    "last_seen"
+  ],
+  "properties": {
+    "last_seen": {
+      "description": "value of the marker field last seen by the client",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Name"
+        }
+      ]
+    },
+    "sort_by": {
+      "default": "name_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/NameSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "Name": {
+      "title": "A name unique within the parent collection",
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+      "type": "string",
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$"
+    },
+    "NameSortMode": {
+      "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        }
+      ]
+    }
+  }
+}
+schema for pagination parameters: page selector, scan by id only
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PageSelector_for_ScanById_for_Null_and_Uuid",
+  "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
+  "type": "object",
+  "required": [
+    "last_seen"
+  ],
+  "properties": {
+    "last_seen": {
+      "description": "value of the marker field last seen by the client",
+      "type": "string",
+      "format": "uuid"
+    },
+    "sort_by": {
+      "default": "id_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/IdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "IdSortMode": {
+      "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
+      ]
+    }
+  }
+}
+schema for pagination parameters: page selector, scan by name or id
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PageSelector_for_ScanByNameOrId_for_Null_and_NameOrId",
+  "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
+  "type": "object",
+  "required": [
+    "last_seen"
+  ],
+  "properties": {
+    "last_seen": {
+      "description": "value of the marker field last seen by the client",
+      "allOf": [
+        {
+          "$ref": "#/definitions/NameOrId"
+        }
+      ]
+    },
+    "sort_by": {
+      "default": "name_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/NameOrIdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "Name": {
+      "title": "A name unique within the parent collection",
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+      "type": "string",
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$"
+    },
+    "NameOrId": {
+      "oneOf": [
+        {
+          "title": "id",
+          "allOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            }
+          ]
+        },
+        {
+          "title": "name",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Name"
+            }
+          ]
+        }
+      ]
+    },
+    "NameOrIdSortMode": {
+      "description": "Supported set of sort modes for scanning by name or id",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_ascending"
+          ]
+        },
+        {
+          "description": "Sort in decreasing order of \"name\"",
+          "type": "string",
+          "enum": [
+            "name_descending"
+          ]
+        },
+        {
+          "description": "Sort in increasing order of \"id\"",
+          "type": "string",
+          "enum": [
+            "id_ascending"
+          ]
+        }
+      ]
+    }
+  }
+}
+schema for pagination parameters: page selector, scan by time and id
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PageSelector_for_ScanByTimeAndId_for_Null_and_Tuple_of_DateTime_and_Uuid",
+  "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
+  "type": "object",
+  "required": [
+    "last_seen"
+  ],
+  "properties": {
+    "last_seen": {
+      "description": "value of the marker field last seen by the client",
+      "type": "array",
+      "items": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "string",
+          "format": "uuid"
+        }
+      ],
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "sort_by": {
+      "default": "time_and_id_ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/TimeAndIdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "TimeAndIdSortMode": {
+      "description": "Supported set of sort modes for scanning by timestamp and ID",
+      "oneOf": [
+        {
+          "description": "Sort in increasing order of timestamp and ID, i.e., earliest first",
+          "type": "string",
+          "enum": [
+            "time_and_id_ascending"
+          ]
+        },
+        {
+          "description": "Sort in increasing order of timestamp and ID, i.e., most recent first",
+          "type": "string",
+          "enum": [
+            "time_and_id_descending"
+          ]
+        }
+      ]
+    }
+  }
+}

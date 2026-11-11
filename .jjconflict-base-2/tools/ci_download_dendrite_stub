@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+echo -e "\e[0;33m$0 is deprecated; running: cargo xtask download dendrite-stub\e[0m"
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 42
+exec cargo xtask download dendrite-stub

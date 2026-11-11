@@ -1,0 +1,331 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Interface for making API requests to a Sled Agent
+
+use async_trait::async_trait;
+use omicron_uuid_kinds::PropolisUuid;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use std::convert::TryFrom;
+use uuid::Uuid;
+
+pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
+progenitor::generate_api!(
+    spec = "../../openapi/sled-agent/sled-agent-latest.json",
+    interface = Positional,
+    inner_type = slog::Logger,
+    hooks = Expected,
+    derives = [schemars::JsonSchema, PartialEq],
+    patch = {
+        OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
+    },
+    crates = {
+        "byte-wrapper" = "0.2.0",
+        "iddqd" = "*",
+        "omicron-uuid-kinds" = "*",
+        "oxnet" = "0.1.0",
+    },
+    replace = {
+        ArtifactConfig = sled_agent_types::artifact::ArtifactConfig,
+        ArtifactConfigGeneration = omicron_generation_kinds::ArtifactConfigGeneration,
+        AttachedSubnet = sled_agent_types_versions::latest::attached_subnet::AttachedSubnet,
+        AttachedSubnetKind = sled_agent_types_versions::latest::attached_subnet::AttachedSubnetKind,
+        AttachedSubnets = sled_agent_types_versions::latest::attached_subnet::AttachedSubnets,
+        Attestation = sled_agent_types_versions::latest::rot::Attestation,
+        Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
+        BaseboardId = sled_hardware_types::BaseboardId,
+        BfdPeerConfig = sled_agent_types_versions::latest::early_networking::BfdPeerConfig,
+        BgpConfig = sled_agent_types_versions::latest::early_networking::BgpConfig,
+        BgpPeerConfig = sled_agent_types_versions::latest::early_networking::BgpPeerConfig,
+        ByteCount = omicron_common::api::external::ByteCount,
+        CertificateChain = sled_agent_types_versions::latest::rot::CertificateChain,
+        CommitRequest = trust_quorum_types::messages::CommitRequest,
+        CommitStatus = trust_quorum_types::status::CommitStatus,
+        ConfigReconcilerInventory = sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory,
+        CoordinatorStatus = trust_quorum_types::status::CoordinatorStatus,
+        DatasetConfig = sled_agent_types_versions::latest::disk::DatasetConfig,
+        DatasetKind = omicron_common::api::internal::shared::DatasetKind,
+        DiskIdentity = sled_agent_types::disk::DiskIdentity,
+        DiskVariant = sled_agent_types::disk::DiskVariant,
+        Epoch = trust_quorum_types::types::Epoch,
+        ExternalIp = sled_agent_types_versions::latest::probes::ExternalIp,
+        ExternalIpConfig = sled_agent_types_versions::latest::instance::ExternalIpConfig,
+        ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
+        ExternalIpv4Config = sled_agent_types_versions::latest::instance::ExternalIpv4Config,
+        ExternalIpv6Config = sled_agent_types_versions::latest::instance::ExternalIpv6Config,
+        FmdHostCase = sled_agent_types_versions::latest::inventory::FmdHostCase,
+        FmdInventory = sled_agent_types_versions::latest::inventory::FmdInventory,
+        FmdInventoryError = sled_agent_types_versions::latest::inventory::FmdInventoryError,
+        FmdInventoryErrorKind = sled_agent_types_versions::latest::inventory::FmdInventoryErrorKind,
+        FmdResource = sled_agent_types_versions::latest::inventory::FmdResource,
+        Generation = omicron_generation_kinds::Generation,
+        Hostname = omicron_common::api::external::Hostname,
+        ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
+        Inventory = sled_agent_types_versions::latest::inventory::Inventory,
+        InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
+        InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,
+        IpKind = sled_agent_types_versions::latest::probes::IpKind,
+        LinkFec = sled_agent_types_versions::latest::early_networking::LinkFec,
+        LinkSpeed = sled_agent_types_versions::latest::early_networking::LinkSpeed,
+        LldpAdminStatus = sled_agent_types_versions::latest::early_networking::LldpAdminStatus,
+        LldpPortConfig = sled_agent_types_versions::latest::early_networking::LldpPortConfig,
+        LrtqUpgradeMsg = trust_quorum_types::messages::LrtqUpgradeMsg,
+        MacAddr = omicron_common::api::external::MacAddr,
+        ManifestBootInventory = sled_agent_types_versions::latest::inventory::ManifestBootInventory,
+        ManifestInventory = sled_agent_types_versions::latest::inventory::ManifestInventory,
+        ManifestNonBootInventory = sled_agent_types_versions::latest::inventory::ManifestNonBootInventory,
+        MaxPathConfig = sled_agent_types_versions::latest::early_networking::MaxPathConfig,
+        Measurement = sled_agent_types_versions::latest::rot::Measurement,
+        MeasurementLog = sled_agent_types_versions::latest::rot::MeasurementLog,
+        MigrationRuntimeState = sled_agent_types_versions::latest::instance::MigrationRuntimeState,
+        MigrationState = sled_agent_types_versions::latest::instance::MigrationState,
+        MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
+        MupdateOverrideInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideInventory,
+        MupdateOverrideNonBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideNonBootInventory,
+        Name = omicron_common::api::external::Name,
+        NetworkInterface = sled_agent_types_versions::latest::inventory::NetworkInterface,
+        NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
+        Nonce = sled_agent_types_versions::latest::rot::Nonce,
+        OmicronPhysicalDiskConfig = sled_agent_types::disk::OmicronPhysicalDiskConfig,
+        OmicronSledConfig = sled_agent_types_versions::latest::inventory::OmicronSledConfig,
+        OmicronZoneConfig = sled_agent_types_versions::latest::inventory::OmicronZoneConfig,
+        OmicronZoneDataset = sled_agent_types_versions::latest::inventory::OmicronZoneDataset,
+        OmicronZoneImageSource = sled_agent_types_versions::latest::inventory::OmicronZoneImageSource,
+        OmicronZoneType = sled_agent_types_versions::latest::inventory::OmicronZoneType,
+        OmicronZonesConfig = sled_agent_types_versions::latest::inventory::OmicronZonesConfig,
+        OrphanedDataset = sled_agent_types_versions::latest::inventory::OrphanedDataset,
+        PortConfig = sled_agent_types_versions::latest::early_networking::PortConfig,
+        PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
+        ProbeCreate = sled_agent_types_versions::latest::probes::ProbeCreate,
+        ProbeSet = sled_agent_types_versions::latest::probes::ProbeSet,
+        RackNetworkConfig = sled_agent_types_versions::latest::early_networking::RackNetworkConfig,
+        ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
+        ResolvedVpcFirewallRule = sled_agent_types_versions::latest::instance::ResolvedVpcFirewallRule,
+        ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
+        ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        Rot = sled_agent_types_versions::latest::rot::Rot,
+        RouteConfig = sled_agent_types_versions::latest::early_networking::RouteConfig,
+        RouterId = omicron_common::api::internal::shared::RouterId,
+        RouterLifetimeConfig = sled_agent_types_versions::latest::early_networking::RouterLifetimeConfig,
+        RouterTarget = omicron_common::api::internal::shared::RouterTarget,
+        RouterVersion = omicron_common::api::internal::shared::RouterVersion,
+        ServiceZoneNatEntries = sled_agent_types_versions::latest::system_networking::ServiceZoneNatEntries,
+        ServiceZoneNatEntry = sled_agent_types_versions::latest::system_networking::ServiceZoneNatEntry,
+        Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
+        SingleMeasurementInventory = sled_agent_types_versions::latest::inventory::SingleMeasurementInventory,
+        SledAgentInfo = sled_agent_types_versions::latest::multirack::SledAgentInfo,
+        SledRegistrationInfo = sled_agent_types_versions::latest::inventory::SledRegistrationInfo,
+        SledRole = sled_agent_types_versions::latest::inventory::SledRole,
+        SledVmmState = sled_agent_types_versions::latest::instance::SledVmmState,
+        SourceNatConfigGeneric = sled_agent_types_versions::latest::inventory::SourceNatConfigGeneric,
+        SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
+        SystemNetworkingConfig = sled_agent_types_versions::latest::system_networking::SystemNetworkingConfig,
+        Threshold = trust_quorum_types::types::Threshold,
+        TrustQuorumCoordinatorStatusResponse = sled_agent_types_versions::latest::trust_quorum::TrustQuorumCoordinatorStatusResponse,
+        TrustQuorumMembers = trust_quorum_types::membership::TrustQuorumMembers,
+        TxEqConfig = sled_agent_types_versions::latest::early_networking::TxEqConfig,
+        UplinkAddressConfig = sled_agent_types_versions::latest::early_networking::UplinkAddressConfig,
+        VmmRuntimeState = sled_agent_types_versions::latest::instance::VmmRuntimeState,
+        VmmState = sled_agent_types_versions::latest::instance::VmmState,
+        Vni = omicron_common::api::external::Vni,
+        VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
+        WriteNetworkConfigRequest = sled_agent_types_versions::latest::system_networking::WriteNetworkConfigRequest,
+        ZoneArtifactInventory = sled_agent_types_versions::latest::inventory::ZoneArtifactInventory,
+        ZpoolKind = omicron_common::zpool_name::ZpoolKind,
+        ZpoolName = omicron_common::zpool_name::ZpoolName,
+    }
+);
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
+
+impl omicron_common::api::external::ClientError for types::Error {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+}
+
+impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
+    fn from(s: omicron_common::api::external::L4PortRange) -> Self {
+        Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::HostIdentifier>
+    for types::HostIdentifier
+{
+    fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
+        use omicron_common::api::internal::nexus::HostIdentifier::*;
+        match s {
+            Ip(net) => Self::Ip(net),
+            Vpc(vni) => Self::Vpc(vni),
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleAction>
+    for types::VpcFirewallRuleAction
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleAction) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleAction::*;
+        match s {
+            Allow => Self::Allow,
+            Deny => Self::Deny,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleDirection>
+    for types::VpcFirewallRuleDirection
+{
+    fn from(
+        s: omicron_common::api::external::VpcFirewallRuleDirection,
+    ) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleDirection::*;
+        match s {
+            Inbound => Self::Inbound,
+            Outbound => Self::Outbound,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleStatus>
+    for types::VpcFirewallRuleStatus
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleStatus) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleStatus::*;
+        match s {
+            Enabled => Self::Enabled,
+            Disabled => Self::Disabled,
+        }
+    }
+}
+
+impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
+    for types::VpcFirewallRuleProtocol
+{
+    fn from(s: omicron_common::api::external::VpcFirewallRuleProtocol) -> Self {
+        use omicron_common::api::external::VpcFirewallRuleProtocol::*;
+        match s {
+            Tcp => Self::Tcp,
+            Udp => Self::Udp,
+            Icmp(v) => Self::Icmp(v),
+            Icmp6(v) => Self::Icmp6(v),
+        }
+    }
+}
+
+// TODO-cleanup This is icky; can we move these methods to a separate client so
+// we don't need to add this header by hand?
+// https://github.com/oxidecomputer/omicron/issues/8900
+trait ApiVersionHeader {
+    fn api_version_header(self, api_version: &'static str) -> Self;
+}
+
+impl ApiVersionHeader for reqwest::RequestBuilder {
+    fn api_version_header(self, api_version: &'static str) -> Self {
+        self.header("api-version", api_version)
+    }
+}
+
+/// Exposes additional [`Client`] interfaces for use by the test suite. These
+/// are bonus endpoints, not generated in the real client.
+#[async_trait]
+pub trait TestInterfaces {
+    async fn vmm_single_step(&self, id: PropolisUuid);
+    async fn vmm_finish_transition(&self, id: PropolisUuid);
+    /// Essentially like `vmm_finish_transition`, but returns an error instead
+    /// of panicking if the request fails. Useful when the VMM may have been
+    /// removed.
+    async fn try_vmm_finish_transition(
+        &self,
+        id: PropolisUuid,
+    ) -> Result<(), reqwest::Error>;
+    async fn vmm_simulate_migration_source(
+        &self,
+        id: PropolisUuid,
+        params: SimulateMigrationSource,
+    );
+}
+
+#[async_trait]
+impl TestInterfaces for Client {
+    async fn vmm_single_step(&self, id: PropolisUuid) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{}/vmms/{}/poke-single-step", baseurl, id);
+        client
+            .post(url)
+            .api_version_header(Client::api_version())
+            .send()
+            .await
+            .expect("instance_single_step() failed unexpectedly");
+    }
+
+    async fn vmm_finish_transition(&self, id: PropolisUuid) {
+        self.try_vmm_finish_transition(id)
+            .await
+            .expect("instance_finish_transition() failed unexpectedly");
+    }
+
+    async fn try_vmm_finish_transition(
+        &self,
+        id: PropolisUuid,
+    ) -> Result<(), reqwest::Error> {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{}/vmms/{}/poke", baseurl, id);
+        client
+            .post(url)
+            .api_version_header(Client::api_version())
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    async fn vmm_simulate_migration_source(
+        &self,
+        id: PropolisUuid,
+        params: SimulateMigrationSource,
+    ) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{baseurl}/vmms/{id}/sim-migration-source");
+        client
+            .post(url)
+            .api_version_header(Client::api_version())
+            .json(&params)
+            .send()
+            .await
+            .expect("instance_simulate_migration_source() failed unexpectedly");
+    }
+}
+
+/// Parameters to the `/instances/{id}/sim-migration-source` test API.
+///
+/// This message type is not included in the OpenAPI spec, because this API
+/// exists only in test builds.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SimulateMigrationSource {
+    /// The ID of the migration out of the instance's current active VMM.
+    pub migration_id: Uuid,
+    /// What migration result (success or failure) to simulate.
+    pub result: SimulatedMigrationResult,
+}
+
+/// The result of a simulated migration out from an instance's current active
+/// VMM.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub enum SimulatedMigrationResult {
+    /// Simulate a successful migration out.
+    Success,
+    /// Simulate a failed migration out.
+    ///
+    /// # Note
+    ///
+    /// This is not currently implemented by the simulated sled-agent.
+    Failure,
+}

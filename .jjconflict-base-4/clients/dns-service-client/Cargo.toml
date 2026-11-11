@@ -1,0 +1,21 @@
+[package]
+name = "dns-service-client"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono.workspace = true
+expectorate.workspace = true
+http.workspace = true
+internal-dns-types-versions.workspace = true
+progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
+reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+omicron-workspace-hack.workspace = true

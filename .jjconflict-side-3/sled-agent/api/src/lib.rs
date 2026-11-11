@@ -1,0 +1,1971 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::BTreeMap;
+
+use camino::Utf8PathBuf;
+use dropshot::{
+    Body, ClientErrorStatusCode, FreeformBody, Header, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    Query, RequestContext, StreamingBody, TypedBody,
+};
+use dropshot_api_manager_types::api_versions;
+use omicron_common::api::internal::shared::{
+    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
+};
+use sled_agent_types_versions::{
+    latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
+    v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
+    v50, v51, v52, v53, v55,
+};
+use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
+
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (64, TRUST_QUORUM_MEMBERS),
+    (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
+    (62, ADD_SLED_REGISTRATION_INFO),
+    (61, TRUST_QUORUM_NULLABLE_RESPONSES),
+    (60, ADD_MULTIRACK_JOIN_SERVICE_STATUS),
+    (59, INSTANCE_ATTACHED_SUBNETS_MAP),
+    (58, BYTE_WRAPPER_0_2_BUMP),
+    (57, ADD_RACK_ID_TO_INVENTORY),
+    (56, ADD_MULTIRACK_JOIN_COMPLETE),
+    (55, ARTIFACT_HASH_SCHEMA),
+    (54, ADD_LOG_TIME_RANGE),
+    (53, ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY),
+    (52, TYPED_ARTIFACT_CONFIG_GENERATION),
+    (51, MULTIPLE_ZONE_EXTERNAL_IPS),
+    (50, TYPED_SLED_CONFIG_GENERATION),
+    (49, ADD_UPDATE_DISPOSITION),
+    (48, ALLOW_DDM_TRAFFIC),
+    (47, BGP_PEER_SRC_ADDR),
+    (46, MODIFY_SVC_STATE_ENUM),
+    (45, REMOVE_UPLINK_ENSURE),
+    (44, PROPOLIS_NVME_VWC),
+    (43, INVENTORY_BASEBOARD_ID),
+    (42, NON_EMPTY_UPLINK_PORTS),
+    (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
+    (40, ADD_FMD_TO_INVENTORY),
+    (39, BOOTSTORE_SERVICE_NAT_GENERATION),
+    (38, RENAME_PORT_FEC_SPEED_TO_LINK_FEC_SPEED),
+    (37, MODIFY_SVC_ENABLED_NOT_ONLINE_STATE),
+    (36, DROPSHOT_FREEFORM_BODY_DESC),
+    (35, INLINE_ROUTER_PEER_IP_ADDR),
+    (34, MODIFY_SVCS_TYPES),
+    (33, BOOTSTORE_SERVICE_NAT),
+    (32, MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL),
+    (31, ADD_ICMPV6_FIREWALL_SUPPORT),
+    (30, STRONGER_BGP_UNNUMBERED_TYPES),
+    (29, ADD_VSOCK_COMPONENT),
+    (28, MODIFY_SERVICES_IN_INVENTORY),
+    (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
+    (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
+    (25, BOOTSTORE_VERSIONING),
+    (24, ADD_ZPOOL_HEALTH_TO_INVENTORY),
+    // Versions before this have been retired. We no longer support them in any
+    // server, nor expect them from any client.
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
+
+// Host OS images are just over 800 MiB currently; set this to 2 GiB to give
+// some breathing room.
+const HOST_OS_IMAGE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
+// The largest TUF repository artifact is in fact the host OS image. (TODO: or
+// at least, it will be when we split up the composite control plane artifact;
+// tracked by issue #4411.)
+const UPDATE_ARTIFACT_MAX_BYTES: usize = HOST_OS_IMAGE_MAX_BYTES;
+// TODO This was the previous API-wide max; what is the largest support bundle
+// we expect to need to store?
+const SUPPORT_BUNDLE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+#[dropshot::api_description]
+pub trait SledAgentApi {
+    type Context;
+
+    /// List all zone bundles that exist, even for now-deleted zones.
+    #[endpoint {
+        method = GET,
+        path = "/zones/bundles",
+    }]
+    async fn zone_bundle_list_all(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<latest::zone_bundle::ZoneBundleFilter>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::zone_bundle::ZoneBundleMetadata>>,
+        HttpError,
+    >;
+
+    /// List the zone bundles that are available for a running zone.
+    #[endpoint {
+        method = GET,
+        path = "/zones/bundles/{zone_name}",
+    }]
+    async fn zone_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        params: Path<latest::zone_bundle::ZonePathParam>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::zone_bundle::ZoneBundleMetadata>>,
+        HttpError,
+    >;
+
+    /// Fetch the binary content of a single zone bundle.
+    #[endpoint {
+        method = GET,
+        path = "/zones/bundles/{zone_name}/{bundle_id}",
+    }]
+    async fn zone_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        params: Path<latest::zone_bundle::ZoneBundleId>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
+
+    /// Delete a zone bundle.
+    #[endpoint {
+        method = DELETE,
+        path = "/zones/bundles/{zone_name}/{bundle_id}",
+    }]
+    async fn zone_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        params: Path<latest::zone_bundle::ZoneBundleId>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Return utilization information about all zone bundles.
+    #[endpoint {
+        method = GET,
+        path = "/zones/bundle-cleanup/utilization",
+    }]
+    async fn zone_bundle_utilization(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            BTreeMap<Utf8PathBuf, latest::zone_bundle::BundleUtilization>,
+        >,
+        HttpError,
+    >;
+
+    /// Return context used by the zone-bundle cleanup task.
+    #[endpoint {
+        method = GET,
+        path = "/zones/bundle-cleanup/context",
+    }]
+    async fn zone_bundle_cleanup_context(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::zone_bundle::CleanupContext>, HttpError>;
+
+    /// Update context used by the zone-bundle cleanup task.
+    #[endpoint {
+        method = PUT,
+        path = "/zones/bundle-cleanup/context",
+    }]
+    async fn zone_bundle_cleanup_context_update(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::zone_bundle::CleanupContextUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Trigger a zone bundle cleanup.
+    #[endpoint {
+        method = POST,
+        path = "/zones/bundle-cleanup",
+    }]
+    async fn zone_bundle_cleanup(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            std::collections::BTreeMap<
+                Utf8PathBuf,
+                latest::zone_bundle::CleanupCount,
+            >,
+        >,
+        HttpError,
+    >;
+
+    /// List the zones that are currently managed by the sled agent.
+    #[endpoint {
+        method = GET,
+        path = "/zones",
+    }]
+    async fn zones_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// List all support bundles within a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}"
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundleListPathParam>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::support_bundle::SupportBundleMetadata>>,
+        HttpError,
+    >;
+
+    /// Starts creation of a support bundle within a particular dataset
+    ///
+    /// Callers should transfer chunks of the bundle with
+    /// "support_bundle_transfer", and then call "support_bundle_finalize"
+    /// once the bundle has finished transferring.
+    ///
+    /// If a support bundle was previously created without being finalized
+    /// successfully, this endpoint will reset the state.
+    ///
+    /// If a support bundle was previously created and finalized successfully,
+    /// this endpoint will return metadata indicating that it already exists.
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_start_creation(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+    ) -> Result<
+        HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    >;
+
+    /// Transfers a chunk of a support bundle within a particular dataset
+    #[endpoint {
+        method = PUT,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/transfer",
+        request_body_max_bytes = SUPPORT_BUNDLE_MAX_BYTES,
+    }]
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        query_params: Query<
+            latest::support_bundle::SupportBundleTransferQueryParams,
+        >,
+        body: StreamingBody,
+    ) -> Result<
+        HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    >;
+
+    /// Finalizes the creation of a support bundle
+    ///
+    /// If the requested hash matched the bundle, the bundle is created.
+    /// Otherwise, an error is returned.
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+        query_params: Query<
+            latest::support_bundle::SupportBundleFinalizeQueryParams,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn support_bundle_finalize_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::support_bundle::SupportBundlePathParam>,
+        query_params: Query<
+            v1::support_bundle::SupportBundleFinalizeQueryParams,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    > {
+        Self::support_bundle_finalize(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// Fetch a support bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<latest::support_bundle::RangeRequestHeaders>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<latest::support_bundle::RangeRequestHeaders>,
+        path_params: Path<latest::support_bundle::SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch the index (list of files within a support bundle)
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<latest::support_bundle::RangeRequestHeaders>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about a support bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<latest::support_bundle::RangeRequestHeaders>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<latest::support_bundle::RangeRequestHeaders>,
+        path_params: Path<latest::support_bundle::SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about the list of files within a support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"
+    }]
+    async fn support_bundle_head_index(
+        rqctx: RequestContext<Self::Context>,
+        headers: Header<latest::support_bundle::RangeRequestHeaders>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Delete a support bundle from a particular dataset
+    #[endpoint {
+        method = DELETE,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::support_bundle::SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn omicron_config_put_v51(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v51::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn omicron_config_put_v50(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v50::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put_v51(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_ADD_UPDATE_DISPOSITION..VERSION_TYPED_SLED_CONFIG_GENERATION,
+    }]
+    async fn omicron_config_put_v49(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v49::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put_v50(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "omicron_config_put",
+        method = PUT,
+        path = "/omicron-config",
+        versions = ..VERSION_ADD_UPDATE_DISPOSITION,
+    }]
+    async fn omicron_config_put_v14(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v14::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put_v49(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_INSTANCE_ATTACHED_SUBNETS_MAP..
+    }]
+    async fn vmm_register(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_PROPOLIS_NVME_VWC..VERSION_INSTANCE_ATTACHED_SUBNETS_MAP
+    }]
+    async fn vmm_register_v44(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v44::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(
+            rqctx,
+            path_params,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "duplicate attached subnet in instance sled-local \
+                         configuration: {}",
+                        InlineErrorChain::new(&err),
+                    ),
+                )
+            })?,
+        )
+        .await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..VERSION_PROPOLIS_NVME_VWC
+    }]
+    async fn vmm_register_v41(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v41::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register_v44(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL..VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU
+    }]
+    async fn vmm_register_v32(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v32::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register_v41(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..VERSION_MAKE_ALL_EXTERNAL_IP_FIELDS_OPTIONAL
+    }]
+    async fn vmm_register_v31(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v31::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register_v32(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_VSOCK_COMPONENT..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT
+    }]
+    async fn vmm_register_v29(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v29::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register_v31(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = ..VERSION_ADD_VSOCK_COMPONENT
+    }]
+    async fn vmm_register_v18(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v18::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register_v29(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}"
+    }]
+    async fn vmm_unregister(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+    ) -> Result<
+        HttpResponseOk<latest::instance::VmmUnregisterResponse>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/state",
+    }]
+    async fn vmm_put_state(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<latest::instance::VmmPutStateResponse>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/vmms/{propolis_id}/state",
+    }]
+    async fn vmm_get_state(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/external-ip",
+    }]
+    async fn vmm_put_external_ip(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::InstanceExternalIpBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/external-ip",
+    }]
+    async fn vmm_delete_external_ip(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::InstanceExternalIpBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/multicast-group",
+    }]
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/multicast-group",
+    }]
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+    }]
+    async fn artifact_config_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::artifact::ArtifactConfig>, HttpError>;
+
+    #[endpoint {
+        operation_id = "artifact_config_get",
+        method = GET,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_get_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactConfig>, HttpError> {
+        Self::artifact_config_get(rqctx)
+            .await
+            .map(|response| response.map(v1::artifact::ArtifactConfig::from))
+    }
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts-config",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+    }]
+    async fn artifact_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::artifact::ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "artifact_config_put",
+        method = PUT,
+        path = "/artifacts-config",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_config_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::artifact::ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::artifact_config_put(rqctx, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        method = GET,
+        path = "/artifacts",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..,
+    }]
+    async fn artifact_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::artifact::ArtifactListResponse>, HttpError>;
+
+    #[endpoint {
+        operation_id = "artifact_list",
+        method = GET,
+        path = "/artifacts",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactListResponse>, HttpError>
+    {
+        Self::artifact_list(rqctx).await.map(|response| {
+            response.map(v1::artifact::ArtifactListResponse::from)
+        })
+    }
+
+    #[endpoint {
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn artifact_copy_from_depot(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::artifact::ArtifactPathParam>,
+        query_params: Query<latest::artifact::ArtifactQueryParam>,
+        body: TypedBody<latest::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<latest::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn artifact_copy_from_depot_v52(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v52::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot(
+            rqctx,
+            path_params.map(Into::into),
+            query_params,
+            body,
+        )
+        .await
+    }
+
+    #[endpoint {
+        operation_id = "artifact_copy_from_depot",
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot",
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_copy_from_depot_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: TypedBody<v1::artifact::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::artifact::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    > {
+        Self::artifact_copy_from_depot_v52(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn artifact_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::artifact::ArtifactPathParam>,
+        query_params: Query<latest::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<latest::artifact::ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = VERSION_TYPED_ARTIFACT_CONFIG_GENERATION..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn artifact_put_v52(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v52::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put(
+            rqctx,
+            path_params.map(Into::into),
+            query_params,
+            body,
+        )
+        .await
+    }
+
+    #[endpoint {
+        operation_id = "artifact_put",
+        method = PUT,
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
+        versions = ..VERSION_TYPED_ARTIFACT_CONFIG_GENERATION,
+    }]
+    async fn artifact_put_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::artifact::ArtifactPathParam>,
+        query_params: Query<v1::artifact::ArtifactQueryParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactPutResponse>, HttpError>
+    {
+        Self::artifact_put_v52(
+            rqctx,
+            path_params,
+            query_params.map(Into::into),
+            body,
+        )
+        .await
+    }
+
+    /// Take a snapshot of a disk that is attached to an instance
+    #[endpoint {
+        method = POST,
+        path = "/vmms/{propolis_id}/disks/{disk_id}/snapshot",
+    }]
+    async fn vmm_issue_disk_snapshot_request(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::instance::VmmIssueDiskSnapshotRequestPathParam,
+        >,
+        body: TypedBody<latest::instance::VmmIssueDiskSnapshotRequestBody>,
+    ) -> Result<
+        HttpResponseOk<latest::instance::VmmIssueDiskSnapshotRequestResponse>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vpc/{vpc_id}/firewall/rules",
+        versions = VERSION_ADD_ICMPV6_FIREWALL_SUPPORT..,
+    }]
+    async fn vpc_firewall_rules_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VpcPathParam>,
+        body: TypedBody<latest::firewall_rules::VpcFirewallRulesEnsureBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_put",
+        method = PUT,
+        path = "/vpc/{vpc_id}/firewall/rules",
+        versions = ..VERSION_ADD_ICMPV6_FIREWALL_SUPPORT,
+    }]
+    async fn vpc_firewall_rules_put_v11(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VpcPathParam>,
+        body: TypedBody<v11::firewall_rules::VpcFirewallRulesEnsureBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body =
+            body.map(v31::firewall_rules::VpcFirewallRulesEnsureBody::from);
+        Self::vpc_firewall_rules_put(rqctx, path_params, body).await
+    }
+
+    /// Create a mapping from a virtual NIC to a physical host
+    // Keep interface_id to maintain parity with the simulated sled agent, which
+    // requires interface_id on the path.
+    #[endpoint {
+        method = PUT,
+        path = "/v2p/",
+    }]
+    async fn set_v2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<VirtualNetworkInterfaceHost>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete a mapping from a virtual NIC to a physical host
+    // Keep interface_id to maintain parity with the simulated sled agent, which
+    // requires interface_id on the path.
+    #[endpoint {
+        method = DELETE,
+        path = "/v2p/",
+    }]
+    async fn del_v2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<VirtualNetworkInterfaceHost>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// List v2p mappings present on sled
+    // Used by nexus background task
+    #[endpoint {
+        method = GET,
+        path = "/v2p/",
+    }]
+    async fn list_v2p(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_UPLINK_ENSURE,
+    }]
+    async fn uplink_ensure(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<latest::uplink::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // This endpoint has been removed, but we still have to provide an
+        // implementation in case we're called by an old client.
+        //
+        // Nexus's `sync_switch_configuration` used to call this endpoint to
+        // induce us to update SMF properties of services within the switch
+        // zone. Now, `sync_switch_configuration` only pushes config to the
+        // bootstore, and the scrimlet reconcilers automatically update those
+        // properties. During a live update, we may be updated before Nexus, so
+        // may receive this request after we've transitioned to the scrimlet
+        // reconcilers system, but Nexus still thinks it needs to tell us to do
+        // this explicitly. We have nothing to do in that case - just claim
+        // success.
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = ..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn uplink_ensure_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::uplink::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::uplink_ensure(
+            rqctx,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
+
+    // -------------------------------------------------------------------------
+    // WARNING WARNING WARNING
+    //
+    // When adding new versions of `write_network_bootstore_config`, DO NOT
+    // provide a default implementation for the old version to convert the
+    // request to the latest type and forward the call to the latest method.
+    // Doing so can result in a broken update, because it can induce this
+    // sequence:
+    //
+    // 1. One scrimlet is updated; its sled agent is now running the new
+    //    version.
+    // 2. Nexus (still running the old version) sends a
+    //    `write_network_bootstore_config_vN()` request to the updated scrimlet.
+    // 3. The scrimlet converts the from-old-Nexus `vN` request to the latest
+    //    bootstore format and tells the bootstore to replicate it.
+    // 4. Other sleds, which have NOT YET been updated, will now see the new
+    //    version and be unable to deserialize it.
+    //
+    // We'll only hit this bad sequence if something in the underlying
+    // `EarlyNetworkConfigBody` body changes that causes Nexus to send a new
+    // config. That's not something we expect to be common in the middle of an
+    // update, but it's certainly possible!
+    //
+    // Instead, sled-agent needs to implement the old versions of this endpoint,
+    // and ensure they still do the same thing they did in the previous release
+    // (i.e., faithfully serialize the _old_ format into the bootstore). The
+    // latest version does _not_ use the `latest::*` type alias to be a gentle
+    // stumbling block toward this comment.
+    //
+    // This pattern opens the door for the opposite problem, too: what if we
+    // forget to add a new `write_network_bootstore_config_v*` endpoint when
+    // adding a new `WriteNetworkConfigRequest` type? `sled-agent-client` uses a
+    // `replace` directive pointed to `latest`, which will silently do the wrong
+    // thing: it will allow calling the most recent
+    // `write_network_bootstore_config_v*` endpoint defined here even though
+    // these types explicitly do not use the `latest` alias. To guard against
+    // this, the `static_assert_latest_write_network_config_type()` function
+    // below contains a compile-time check that the `latest` alias matches a
+    // specific version: when adding a new `write_network_bootstore_config_v*`
+    // endpoint, also update this assertion.
+    // -------------------------------------------------------------------------
+    fn static_assert_latest_write_network_config_type() {
+        static_assertions::assert_type_eq_all!(
+            v48::system_networking::WriteNetworkConfigRequest,
+            latest::system_networking::WriteNetworkConfigRequest
+        );
+    }
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_ALLOW_DDM_TRAFFIC..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v48(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_ALLOW_DDM_TRAFFIC,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v47(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v47::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..VERSION_BGP_PEER_SRC_ADDR,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v42(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_SERVICE_NAT_GENERATION..VERSION_NON_EMPTY_UPLINK_PORTS,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v39(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_SERVICE_NAT..VERSION_BOOTSTORE_SERVICE_NAT_GENERATION,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v33(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v33::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_BOOTSTORE_SERVICE_NAT,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v30(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v30::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v26(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_VERSIONING..VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL,
+    }]
+    async fn write_network_bootstore_config_v25(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = ..VERSION_BOOTSTORE_VERSIONING,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Add a sled to a rack that was already initialized via RSS
+    #[endpoint {
+        method = PUT,
+        path = "/sleds",
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..,
+    }]
+    async fn sled_add(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::sled::AddSledRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_add",
+        method = PUT,
+        path = "/sleds",
+        versions = ..VERSION_NON_EMPTY_UPLINK_PORTS,
+    }]
+    async fn sled_add_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::sled::AddSledRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::sled_add(rqctx, body.map(Into::into)).await
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..,
+    }]
+    async fn inventory(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..VERSION_ADD_RACK_ID_TO_INVENTORY,
+    }]
+    async fn inventory_v55(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v55::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v55::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn inventory_v53(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v53::inventory::Inventory>, HttpError> {
+        Self::inventory_v55(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v53::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MULTIPLE_ZONE_EXTERNAL_IPS..VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY,
+    }]
+    async fn inventory_v51(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v51::inventory::Inventory>, HttpError> {
+        Self::inventory_v53(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v51::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_TYPED_SLED_CONFIG_GENERATION..VERSION_MULTIPLE_ZONE_EXTERNAL_IPS,
+    }]
+    async fn inventory_v50(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v50::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inv) = Self::inventory_v51(rqctx).await?;
+        v50::inventory::Inventory::try_from(inv)
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_UPDATE_DISPOSITION..VERSION_TYPED_SLED_CONFIG_GENERATION,
+    }]
+    async fn inventory_v49(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v49::inventory::Inventory>, HttpError> {
+        Self::inventory_v50(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v49::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVC_STATE_ENUM..VERSION_ADD_UPDATE_DISPOSITION,
+    }]
+    async fn inventory_v46(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v46::inventory::Inventory>, HttpError> {
+        Self::inventory_v49(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v46::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_INVENTORY_BASEBOARD_ID..VERSION_MODIFY_SVC_STATE_ENUM,
+    }]
+    async fn inventory_v43(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v43::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory_v46(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_FMD_TO_INVENTORY..VERSION_INVENTORY_BASEBOARD_ID,
+    }]
+    async fn inventory_v40(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v40::inventory::Inventory>, HttpError> {
+        Self::inventory_v43(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v40::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVC_ENABLED_NOT_ONLINE_STATE..VERSION_ADD_FMD_TO_INVENTORY,
+    }]
+    async fn inventory_v37(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v37::inventory::Inventory>, HttpError> {
+        Self::inventory_v40(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v37::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SVCS_TYPES..VERSION_MODIFY_SVC_ENABLED_NOT_ONLINE_STATE,
+    }]
+    async fn inventory_v34(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v34::inventory::Inventory>, HttpError> {
+        Self::inventory_v37(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v34::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MODIFY_SERVICES_IN_INVENTORY..VERSION_MODIFY_SVCS_TYPES,
+    }]
+    async fn inventory_v28(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v28::inventory::Inventory>, HttpError> {
+        Self::inventory_v34(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v28::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY..VERSION_MODIFY_SERVICES_IN_INVENTORY,
+    }]
+    async fn inventory_v24(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v24::inventory::Inventory>, HttpError> {
+        Self::inventory_v28(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v24::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = ..VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY,
+    }]
+    async fn inventory_v22(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v22::inventory::Inventory>, HttpError> {
+        Self::inventory_v24(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v22::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch sled identifiers
+    #[endpoint {
+        method = GET,
+        path = "/sled-identifiers",
+    }]
+    async fn sled_identifiers(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError>;
+
+    /// Get the internal state of the local bootstore node
+    #[endpoint {
+        method = GET,
+        path = "/bootstore/status",
+    }]
+    async fn bootstore_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::bootstore::BootstoreStatus>, HttpError>;
+
+    /// Get the current versions of VPC routing rules.
+    #[endpoint {
+        method = GET,
+        path = "/vpc-routes",
+    }]
+    async fn list_vpc_routes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError>;
+
+    /// Update VPC routing rules.
+    #[endpoint {
+        method = PUT,
+        path = "/vpc-routes",
+    }]
+    async fn set_vpc_routes(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<Vec<ResolvedVpcRouteSet>>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update per-NIC IP address <-> internet gateway mappings.
+    #[endpoint {
+        method = PUT,
+        path = "/eip-gateways",
+    }]
+    async fn set_eip_gateways(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ExternalIpGatewayMap>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zoneadm-info",
+    }]
+    async fn support_zoneadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/ipadm-info",
+    }]
+    async fn support_ipadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/dladm-info",
+    }]
+    async fn support_dladm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/nvmeadm-info",
+    }]
+    async fn support_nvmeadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pargs-info",
+    }]
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pstack-info",
+    }]
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pfiles-info",
+    }]
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zfs-info",
+    }]
+    async fn support_zfs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zpool-info",
+    }]
+    async fn support_zpool_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/health-check",
+    }]
+    async fn support_health_check(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    /// This endpoint returns a list of known zones on a sled that have service
+    /// logs that can be collected into a support bundle.
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/zones",
+    }]
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's logs organized by service.
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/download/{zone}",
+        versions = VERSION_ADD_LOG_TIME_RANGE..,
+    }]
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's logs organized by service.
+    #[endpoint {
+        operation_id = "support_logs_download",
+        method = GET,
+        path = "/support/logs/download/{zone}",
+        versions = ..VERSION_ADD_LOG_TIME_RANGE,
+    }]
+    async fn support_logs_download_v1(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<Body>, HttpError> {
+        Self::support_logs_download(
+            request_context,
+            path_params,
+            query_params.map(Into::into),
+        )
+        .await
+    }
+
+    /// A debugging endpoint only used by `omdb` that allows us to test
+    /// restarting the switch zone without restarting sled-agent. See
+    /// <https://github.com/oxidecomputer/omicron/issues/8480> for context.
+    #[endpoint {
+        method = GET,
+        path = "/debug/switch-zone-policy",
+    }]
+    async fn debug_operator_switch_zone_policy_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::debug::OperatorSwitchZonePolicy>,
+        HttpError,
+    >;
+
+    /// A debugging endpoint only used by `omdb` that allows us to test
+    /// restarting the switch zone without restarting sled-agent. See
+    /// <https://github.com/oxidecomputer/omicron/issues/8480> for context.
+    ///
+    /// Setting the switch zone policy is asynchronous and inherently racy with
+    /// the standard process of starting the switch zone. If the switch zone is
+    /// in the process of being started or stopped when this policy is changed,
+    /// the new policy may not take effect until that transition completes.
+    #[endpoint {
+        method = PUT,
+        path = "/debug/switch-zone-policy",
+    }]
+    async fn debug_operator_switch_zone_policy_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::debug::OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the entire set of probe zones on this sled.
+    ///
+    /// Probe zones are used to debug networking configuration. They look
+    /// similar to instances, in that they have an OPTE port on a VPC subnet and
+    /// external addresses, but no actual VM.
+    #[endpoint {
+        method = PUT,
+        path = "/probes",
+    }]
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::probes::ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Create a local storage dataset
+    #[endpoint {
+        operation_id = "local_storage_dataset_ensure",
+        method = POST,
+        path = "/local-storage",
+    }]
+    async fn local_storage_dataset_ensure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::dataset::LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete a local storage dataset
+    #[endpoint {
+        operation_id = "local_storage_dataset_delete",
+        method = DELETE,
+        path = "/local-storage",
+    }]
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::dataset::LocalStorageDatasetDeleteRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/configuration",
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
+    }]
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::latest::messages::ReconfigureMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_reconfigure",
+        method = POST,
+        path = "/trust-quorum/configuration",
+        versions = ..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_reconfigure_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::v1::messages::ReconfigureMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::trust_quorum_reconfigure(
+            request_context,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/upgrade",
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::latest::messages::LrtqUpgradeMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        operation_id = "trust_quorum_upgrade_from_lrtq",
+        method = POST,
+        path = "/trust-quorum/upgrade",
+        versions = ..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::v1::messages::LrtqUpgradeMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::trust_quorum_upgrade_from_lrtq(
+            request_context,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
+
+    /// Commit a trust quorum configuration
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/commit",
+    }]
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
+    }]
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            latest::trust_quorum::TrustQuorumCoordinatorStatusResponse,
+        >,
+        HttpError,
+    >;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_coordinator_status",
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions = ..VERSION_TRUST_QUORUM_NULLABLE_RESPONSES,
+    }]
+    async fn trust_quorum_coordinator_status_v13(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            trust_quorum_types_versions::v1::status::CoordinatorStatus,
+        >,
+        HttpError,
+    > {
+        // These versions were declared as returning an
+        // Option<CoordinatorStatus>, but their corresponding OpenAPI documents
+        // indicated that the CoordinatorStatus response was non-nullable. (This
+        // is a Dropshot bug; see omicron#11623). We've since changed this API
+        // to return a non-nullable CoordinatorStatus, making the API match the
+        // immutable blessed documents. But that leaves open the question of how
+        // None can be represented on the wire. We return a 404 -- old clients
+        // will receive it as an error and will handle it reasonably well.
+        use latest::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+
+        Self::trust_quorum_coordinator_status(request_context).await?.try_map(
+            |response| match response {
+                TrustQuorumCoordinatorStatusResponse::Coordinating {
+                    status,
+                } => Ok(status),
+                TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                    latest_config_epoch: _,
+                } => Err(HttpError::for_client_error(
+                    None,
+                    ClientErrorStatusCode::NOT_FOUND,
+                    "this node is not currently coordinating a trust \
+                     quorum reconfiguration"
+                        .to_string(),
+                )),
+            },
+        )
+    }
+
+    /// Attempt to prepare and commit a trust quorum configuration
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/prepare-and-commit",
+    }]
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<trust_quorum_types::messages::PrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
+
+    /// Proxy a commit operation to another trust quorum node
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/proxy/commit",
+    }]
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Proxy a prepare-and-commit operation to another trust quorum node
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/proxy/prepare-and-commit",
+    }]
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::ProxyPrepareAndCommitRequest>,
+    ) -> Result<
+        HttpResponseOk<trust_quorum_types::status::CommitStatus>,
+        HttpError,
+    >;
+
+    /// Proxy a status request to another trust quorum node
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/proxy/status",
+    }]
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        query_params: Query<sled_hardware_types::BaseboardId>,
+    ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
+
+    /// Get the status of this trust quorum node
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/status",
+    }]
+    async fn trust_quorum_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<trust_quorum_types::status::NodeStatus>, HttpError>;
+
+    /// Get the current network config from trust quorum
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/network-config",
+        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
+    }]
+    async fn trust_quorum_network_config_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::trust_quorum::TrustQuorumNetworkConfigResponse>,
+        HttpError,
+    >;
+
+    /// Get the current network config from trust quorum
+    #[endpoint {
+        operation_id = "trust_quorum_network_config_get",
+        method = GET,
+        path = "/trust-quorum/network-config",
+        versions = ..VERSION_TRUST_QUORUM_NULLABLE_RESPONSES,
+    }]
+    async fn trust_quorum_network_config_get_v15(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v15::trust_quorum::TrustQuorumNetworkConfig>,
+        HttpError,
+    > {
+        // See the comment in trust_quorum_coordinator_status_v13.
+        Self::trust_quorum_network_config_get(request_context).await?.try_map(
+            |response| {
+                response.config.ok_or_else(|| {
+                    HttpError::for_client_error(
+                        None,
+                        ClientErrorStatusCode::NOT_FOUND,
+                        "this node does not have a trust quorum network \
+                         config"
+                            .to_string(),
+                    )
+                })
+            },
+        )
+    }
+
+    /// Update the network config in trust quorum
+    #[endpoint {
+        method = PUT,
+        path = "/trust-quorum/network-config",
+    }]
+    async fn trust_quorum_network_config_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::trust_quorum::TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the subnets attached to an instance.
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/attached-subnets",
+    }]
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete all subnets attached to an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets",
+    }]
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Attach a subnet to an instance.
+    #[endpoint {
+        method = POST,
+        path = "/vmms/{propolis_id}/attached-subnets",
+    }]
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Detach a subnet from an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets/{subnet}",
+    }]
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::attached_subnet::VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Return the set of measurments recorded by the RoT.
+    #[endpoint {
+        method = GET,
+        path = "/rot/{rot}/measurement-log",
+    }]
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+    ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
+
+    /// Return the certificate chain for the attestation signer from the RoT.
+    #[endpoint {
+        method = GET,
+        path = "/rot/{rot}/certificate-chain",
+    }]
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+    ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
+
+    /// Return attestation over recorded measurments and nonce from the RoT.
+    #[endpoint {
+        method = POST,
+        path = "/rot/{rot}/attest",
+    }]
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+        body: TypedBody<latest::rot::Nonce>,
+    ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    /// Returns the final bootstore generation written by the multirack join
+    /// service. Repeated requests return the same generation.
+    ///
+    /// Returns 409 Conflict if this request arrives while a new networking
+    /// configuration was accepted but not written. Returns 410 Gone if
+    /// sled-agent restarted after a completed join.
+    #[endpoint {
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_MULTIRACK_JOIN_COMPLETE_GENERATION..,
+    }]
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinCompleteResponse>,
+        HttpError,
+    >;
+
+    /// Report that this sled's multirack join is complete.
+    ///
+    /// Sent by Nexus once it has observed this sled on the underlay network.
+    #[endpoint {
+        operation_id = "multirack_join_complete",
+        method = PUT,
+        path = "/multirack-join-complete",
+        versions = VERSION_ADD_MULTIRACK_JOIN_COMPLETE..VERSION_MULTIRACK_JOIN_COMPLETE_GENERATION,
+    }]
+    async fn multirack_join_complete_v56(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::multirack_join_complete(request_context)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+    }
+
+    /// Return the status of this sled's multirack join service.
+    ///
+    /// Returns a 404 if no multirack join service is running, or a 409 if the
+    /// service is running but has not yet determined its status.
+    #[endpoint {
+        method = GET,
+        path = "/multirack-join-service-status",
+        versions = VERSION_ADD_MULTIRACK_JOIN_SERVICE_STATUS..,
+    }]
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::multirack::MultirackJoinServiceStatus>,
+        HttpError,
+    >;
+
+    /// Return this sled's registration identity.
+    ///
+    /// Nexus calls this method synchronously while handling this sled's
+    /// `sled_agent_put`.
+    #[endpoint {
+        method = GET,
+        path = "/sled-registration-info",
+        versions = VERSION_ADD_SLED_REGISTRATION_INFO..,
+    }]
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::inventory::SledRegistrationInfo>,
+        HttpError,
+    >;
+}

@@ -1,0 +1,9 @@
+#
+# wicketd config file
+#
+
+[log]
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"

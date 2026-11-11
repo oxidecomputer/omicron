@@ -1,0 +1,134 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use super::impl_enum_type;
+use nexus_types::external_api::instance;
+use serde::Deserialize;
+use serde::Serialize;
+use std::fmt;
+
+impl_enum_type!(
+    InstanceStateEnum:
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        strum::VariantArray,
+    )]
+    pub enum InstanceState;
+
+    // Enum values
+    Creating => b"creating"
+    NoVmm => b"no_vmm"
+    Vmm => b"vmm"
+    Failed => b"failed"
+    Destroyed => b"destroyed"
+    SledEvacuating => b"sled_evacuating"
+);
+
+impl InstanceState {
+    /// Instance states where there is not currently a VMM incarnating this
+    /// instance, but might be in the future.
+    //
+    // This constant is used to specify the states in which an instance is
+    // allowed to have changes applied to it (e.g. updating cpu/memory). So, at
+    // first glance, it would seem that `InstanceState::SledEvacuating` also
+    // belongs here, as an instance in this state does not have a VMM either.
+    // The caveat here is that when the instance is in this state, the instance
+    // is being restarted. There is a high chance of a race between the user
+    // applying an update to the instance and the system starting a saga to
+    // start this instance again. For now, we play it safe and do not allow
+    // changes to an instance while in this state. In the future, if we feel
+    // safe, we may want to change this.
+    pub const NOT_INCARNATED_STATES: &'static [InstanceState] =
+        &[InstanceState::NoVmm, InstanceState::Creating, InstanceState::Failed];
+
+    pub fn state(&self) -> instance::InstanceState {
+        instance::InstanceState::from(*self)
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            InstanceState::Creating => "creating",
+            InstanceState::NoVmm => "no_VMM",
+            InstanceState::Vmm => "VMM",
+            InstanceState::Failed => "failed",
+            InstanceState::Destroyed => "destroyed",
+            InstanceState::SledEvacuating => "sled_evacuating",
+        }
+    }
+
+    pub const ALL_STATES: &'static [Self] =
+        <Self as strum::VariantArray>::VARIANTS;
+}
+
+impl fmt::Display for InstanceState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+impl From<InstanceState> for instance::InstanceState {
+    fn from(value: InstanceState) -> Self {
+        use instance::InstanceState as Output;
+        match value {
+            InstanceState::Creating => Output::Creating,
+            InstanceState::NoVmm => Output::Stopped,
+            InstanceState::Vmm => Output::Running,
+            InstanceState::Failed => Output::Failed,
+            InstanceState::Destroyed => Output::Destroyed,
+            InstanceState::SledEvacuating => Output::Rebooting,
+        }
+    }
+}
+
+impl std::str::FromStr for InstanceState {
+    type Err = InstanceStateParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for &v in Self::ALL_STATES {
+            if s.eq_ignore_ascii_case(v.label()) {
+                return Ok(v);
+            }
+        }
+
+        Err(InstanceStateParseError(()))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct InstanceStateParseError(());
+
+impl fmt::Display for InstanceStateParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "expected one of [")?;
+        let mut variants = InstanceState::ALL_STATES.iter();
+        if let Some(v) = variants.next() {
+            write!(f, "{v}")?;
+            for v in variants {
+                write!(f, ", {v}")?;
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+impl std::error::Error for InstanceStateParseError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_str_roundtrips() {
+        for &variant in InstanceState::ALL_STATES {
+            assert_eq!(Ok(dbg!(variant)), dbg!(variant.to_string().parse()));
+        }
+    }
+}

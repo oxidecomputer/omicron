@@ -1,0 +1,44 @@
+# Load example system
+# This is a legacy test; new tests shouldn't need to set a seed
+
+load-example --nsleds 3 --ndisks-per-sled 3 --seed test_set_mgs_updates
+blueprint-show ad97e762-7bf1-45a6-a98f-60afb7e491c0
+
+# Configure an MGS-managed update to one of the SPs.
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 set-sp-update serial2 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 1.1.0 sp 1.0.0 1.0.1
+blueprint-show cca24b71-09b5-4042-9185-b33e9f2ebba0
+blueprint-diff ad97e762-7bf1-45a6-a98f-60afb7e491c0 cca24b71-09b5-4042-9185-b33e9f2ebba0
+# diff in the reverse direction.  Should show one removal.
+blueprint-diff cca24b71-09b5-4042-9185-b33e9f2ebba0 ad97e762-7bf1-45a6-a98f-60afb7e491c0
+
+# Change that configuration.  It should replace the previous one.
+# This also exercises versions that are not semver.
+blueprint-edit cca24b71-09b5-4042-9185-b33e9f2ebba0 set-sp-update serial2 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 newest sp newer older
+blueprint-show 5bf974f3-81f9-455b-b24e-3099f765664c
+blueprint-diff cca24b71-09b5-4042-9185-b33e9f2ebba0 5bf974f3-81f9-455b-b24e-3099f765664c
+# diff in the reverse direction.  Should still show one modification.
+blueprint-diff 5bf974f3-81f9-455b-b24e-3099f765664c cca24b71-09b5-4042-9185-b33e9f2ebba0
+
+# Configure an MGS-managed update to a different SP.
+# This should *not* replace the existing one.
+# This also exercises the special "invalid" string for a version number.
+blueprint-edit 5bf974f3-81f9-455b-b24e-3099f765664c set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 three sp two invalid
+blueprint-show 1b837a27-3be1-4fcb-8499-a921c839e1d0
+blueprint-diff 5bf974f3-81f9-455b-b24e-3099f765664c 1b837a27-3be1-4fcb-8499-a921c839e1d0
+
+# Delete one of these updates.
+blueprint-edit 1b837a27-3be1-4fcb-8499-a921c839e1d0 delete-sp-update serial2
+blueprint-show 3682a71b-c6ca-4b7e-8f84-16df80c85960
+blueprint-diff 1b837a27-3be1-4fcb-8499-a921c839e1d0 3682a71b-c6ca-4b7e-8f84-16df80c85960
+
+# test help output
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 help
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 set-sp-update help
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 three --help
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 three sp --help
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 delete-sp-update help
+
+# test error case: no such serial
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 set-sp-update not-a-serial e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 1.1.0 sp 1.0.0 1.0.1
+# test error case: bad hash
+blueprint-edit ad97e762-7bf1-45a6-a98f-60afb7e491c0 set-sp-update serial0 bogus-hash 1.1.0 sp 1.0.0 1.0.1

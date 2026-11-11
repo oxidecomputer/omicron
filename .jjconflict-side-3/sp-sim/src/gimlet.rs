@@ -1,0 +1,1401 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::HostFlashHashPolicy;
+use crate::Responsiveness;
+use crate::SimulatedSp;
+use crate::config::GimletConfig;
+use crate::config::SpCommonConfig;
+use crate::device_descriptions::DeviceDescriptions;
+use crate::ereport::EreportState;
+use crate::helpers::read_dummy_rot_page;
+use crate::helpers::rot_boot_info;
+use crate::helpers::rot_state_v2;
+use crate::pmbus_rails::PmbusRails;
+use crate::sensors::Sensors;
+use crate::server::SimSpHandler;
+use crate::server::UdpServer;
+use crate::sp;
+use crate::task_dumps::TaskDumps;
+use crate::update::BaseboardKind;
+use crate::update::SimSpUpdate;
+use crate::vpd::BaseboardVpd;
+use crate::vpd::ComponentVpds;
+use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
+use gateway_messages::ComponentAction;
+use gateway_messages::ComponentActionResponse;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
+use gateway_messages::Header;
+use gateway_messages::HostBootfailPayloadData;
+use gateway_messages::HostInfoRequest;
+use gateway_messages::HostPanicPayloadData;
+use gateway_messages::MgsRequest;
+use gateway_messages::MgsResponse;
+use gateway_messages::PmbusStatus;
+use gateway_messages::PowerRailName;
+use gateway_messages::PowerStateTransition;
+use gateway_messages::PowerStateWithReason;
+use gateway_messages::RotBootInfo;
+use gateway_messages::RotRequest;
+use gateway_messages::RotResponse;
+use gateway_messages::SpComponent;
+use gateway_messages::SpError;
+use gateway_messages::SpPort;
+use gateway_messages::SpRequest;
+use gateway_messages::SpStateV2;
+use gateway_messages::StateChangeReason;
+use gateway_messages::ignition::{self, LinkEvents};
+use gateway_messages::sp_impl::Sender;
+use gateway_messages::sp_impl::SpHandler;
+use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
+use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
+use gateway_messages::{MessageKind, version};
+use gateway_types::component::SpState;
+use sled_agent_types::disk::M2Slot;
+use slog::{Logger, debug, error, info, warn};
+use slog_error_chain::InlineErrorChain;
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::iter;
+use std::net::{SocketAddr, SocketAddrV6};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::select;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::watch;
+use tokio::task::{self, JoinHandle};
+
+pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
+
+/// Baseboard model used for simulated Gimlets.
+///
+/// Set to "i86pc", the same illumos platform identifier that real hardware reports,
+/// so simulated sleds can match with simulated SPs in inventory.
+pub const FAKE_GIMLET_MODEL: &str = "i86pc";
+
+// Type alias for the remote end of an MGS serial console connection.
+type AttachedMgsSerialConsole =
+    Arc<Mutex<Option<(SpComponent, Sender<SpPort>)>>>;
+
+/// Current power state and, if in A0, which M2 slot was active at the time
+/// we transitioned to A0. (This represents what disk the OS would attempt to
+/// boot from, if we were a real SP connected to a real sled.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GimletPowerState {
+    A2,
+    A0(M2Slot),
+}
+
+impl From<GimletPowerState> for PowerState {
+    fn from(value: GimletPowerState) -> Self {
+        match value {
+            GimletPowerState::A2 => Self::A2,
+            GimletPowerState::A0(_) => Self::A0,
+        }
+    }
+}
+
+pub struct Gimlet {
+    sp: sp::Handle<Handler>,
+    serial_console_addrs: HashMap<String, SocketAddrV6>,
+    serial_console_tasks: Vec<JoinHandle<()>>,
+    power_state_rx: Option<watch::Receiver<GimletPowerState>>,
+}
+
+impl Drop for Gimlet {
+    fn drop(&mut self) {
+        // default join handle drop behavior is to detach; we want to abort
+        for task in &self.serial_console_tasks {
+            task.abort();
+        }
+    }
+}
+
+#[async_trait]
+impl SimulatedSp for Gimlet {
+    async fn state(&self) -> SpState {
+        SpState::from(self.sp.handler().await.unwrap().sp_state_impl())
+    }
+
+    fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
+        self.sp.local_addr(port)
+    }
+
+    fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
+        self.sp.local_ereport_addr(port)
+    }
+
+    async fn set_responsiveness(&self, r: Responsiveness) {
+        self.sp.set_responsiveness(r).await
+    }
+
+    async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
+        self.sp.handler().await?.update_state.last_sp_update_data()
+    }
+
+    async fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
+        self.sp.handler().await?.update_state.last_rot_update_data()
+    }
+
+    async fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>> {
+        self.sp.handler().await?.update_state.host_phase1_data(slot)
+    }
+
+    async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
+        let Some(handler) = self.sp.handler().await else {
+            return gateway_messages::UpdateStatus::None;
+        };
+
+        handler.update_state.status()
+    }
+
+    fn power_state_changes(&self) -> usize {
+        self.sp.power_state_changes()
+    }
+
+    fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
+        self.sp.responses_sent_count()
+    }
+
+    async fn install_udp_accept_semaphore(
+        &self,
+    ) -> mpsc::UnboundedSender<usize> {
+        self.sp.install_udp_accept_semaphore().await
+    }
+
+    async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
+        self.sp.ereport_restart(restart).await
+    }
+
+    async fn ereport_append(
+        &self,
+        ereport: crate::config::Ereport,
+    ) -> gateway_ereport_messages::Ena {
+        self.sp.ereport_append(ereport).await
+    }
+}
+
+impl Gimlet {
+    pub async fn spawn(
+        gimlet: &GimletConfig,
+        phase1_hash_policy: HostFlashHashPolicy,
+        log: Logger,
+    ) -> Result<Self> {
+        info!(log, "setting up simulated gimlet");
+
+        let baseboard_vpd =
+            BaseboardVpd::from_config(&gimlet.common, FAKE_GIMLET_MODEL)?;
+        let attached_mgs = Arc::new(Mutex::new(None));
+
+        let mut incoming_console_tx = HashMap::new();
+        let mut serial_console_addrs = HashMap::new();
+        let mut serial_console_tasks = Vec::new();
+
+        // Weird case - if we don't have any network config, we're only being
+        // created to simulate an RoT, so go ahead and return without actually
+        // starting a simulated SP.
+        let Some(network_config) = &gimlet.common.network_config else {
+            return Ok(Self {
+                sp: sp::Handle::rot_only(),
+                serial_console_addrs,
+                serial_console_tasks,
+                power_state_rx: None,
+            });
+        };
+
+        // bind to our two local "KSZ" ports
+        let servers = UdpServer::bind_pair(network_config, &log).await?;
+
+        let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
+        let ereport_servers = match &gimlet.common.ereport_network_config {
+            Some(cfg) => Some(UdpServer::bind_pair(cfg, &ereport_log).await?),
+            None => None,
+        };
+        let update_state = SimSpUpdate::new(
+            BaseboardKind::Gimlet,
+            gimlet.common.no_stage0_caboose,
+            phase1_hash_policy,
+            gimlet.common.cabooses.clone(),
+        );
+        let ereport_state = {
+            let cfg = gimlet.common.ereport_config.clone();
+            EreportState::new(cfg, &baseboard_vpd, &update_state, ereport_log)
+        };
+
+        for component_config in &gimlet.common.components {
+            let id = component_config.id.as_str();
+            let component = SpComponent::try_from(id)
+                .map_err(|_| anyhow!("component id {:?} too long", id))?;
+
+            if let Some(addr) = component_config.serial_console {
+                let listener = TcpListener::bind(addr)
+                    .await
+                    .with_context(|| format!("failed to bind to {}", addr))?;
+                info!(
+                    log, "bound fake serial console to TCP port";
+                    "addr" => %addr,
+                    "component" => ?component,
+                );
+
+                serial_console_addrs.insert(
+                    component
+                        .as_str()
+                        .with_context(|| "non-utf8 component")?
+                        .to_string(),
+                    listener
+                        .local_addr()
+                        .with_context(
+                            || "failed to get local address of bound socket",
+                        )
+                        .and_then(|addr| match addr {
+                            SocketAddr::V4(addr) => {
+                                bail!("bound IPv4 address {}", addr)
+                            }
+                            SocketAddr::V6(addr) => Ok(addr),
+                        })?,
+                );
+
+                let (tx, rx) = mpsc::unbounded_channel();
+                incoming_console_tx.insert(component, tx);
+
+                let serial_console = SerialConsoleTcpTask::new(
+                    component,
+                    listener,
+                    rx,
+                    [
+                        Arc::clone(servers[0].socket()),
+                        Arc::clone(servers[1].socket()),
+                    ],
+                    Arc::clone(&attached_mgs),
+                    log.new(slog::o!("serial-console" => id.to_string())),
+                );
+                serial_console_tasks.push(task::spawn(async move {
+                    serial_console.run().await
+                }));
+            }
+        }
+        let (power_state, power_state_rx) =
+            watch::channel(GimletPowerState::A0(M2Slot::A));
+        let handler = Handler::new(
+            gimlet.common.clone(),
+            baseboard_vpd,
+            attached_mgs,
+            incoming_console_tx,
+            power_state,
+            log,
+            update_state,
+        );
+        let sp =
+            sp::Handle::spawn(servers, ereport_servers, ereport_state, handler);
+
+        Ok(Self {
+            sp,
+            serial_console_addrs,
+            serial_console_tasks,
+            power_state_rx: Some(power_state_rx),
+        })
+    }
+
+    pub fn power_state_rx(&self) -> Option<watch::Receiver<GimletPowerState>> {
+        self.power_state_rx.clone()
+    }
+
+    pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
+        self.serial_console_addrs.get(component).copied()
+    }
+
+    /// Set the policy for simulating host phase 1 flash hashing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `Gimlet` was created with only an RoT instead of a full
+    /// SP + RoT complex.
+    pub async fn set_phase1_hash_policy(&self, policy: HostFlashHashPolicy) {
+        self.sp
+            .handler()
+            .await
+            .expect("gimlet was created with SP config")
+            .update_state
+            .set_phase1_hash_policy(policy)
+    }
+}
+
+struct SerialConsoleTcpTask {
+    listener: TcpListener,
+    incoming_serial_console: UnboundedReceiver<Vec<u8>>,
+    socks: [Arc<UdpSocket>; 2],
+    attached_mgs: AttachedMgsSerialConsole,
+    serial_console_tx_offset: u64,
+    component: SpComponent,
+    log: Logger,
+    request_message_id: Cell<u32>,
+}
+
+impl SerialConsoleTcpTask {
+    fn new(
+        component: SpComponent,
+        listener: TcpListener,
+        incoming_serial_console: UnboundedReceiver<Vec<u8>>,
+        socks: [Arc<UdpSocket>; 2],
+        attached_mgs: AttachedMgsSerialConsole,
+        log: Logger,
+    ) -> Self {
+        Self {
+            listener,
+            incoming_serial_console,
+            socks,
+            attached_mgs,
+            serial_console_tx_offset: 0,
+            component,
+            log,
+            request_message_id: Cell::new(0),
+        }
+    }
+
+    fn next_request_message_id(&self) -> u32 {
+        let id = self.request_message_id.get();
+        self.request_message_id.set(id.wrapping_add(1));
+        id
+    }
+
+    async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
+        let (component, sender) = match *self.attached_mgs.lock().unwrap() {
+            Some((component, sender)) => (component, sender),
+            None => {
+                info!(
+                    self.log,
+                    "No attached MGS; discarding serial console data"
+                );
+                return Ok(());
+            }
+        };
+
+        if component != self.component {
+            info!(
+                self.log,
+                "MGS is attached to a different component; \
+                 discarding serial console data"
+            );
+            return Ok(());
+        }
+
+        let sock = match sender.vid {
+            SpPort::One => &self.socks[0],
+            SpPort::Two => &self.socks[1],
+        };
+
+        let mut out = [0; gateway_messages::MAX_SERIALIZED_SIZE];
+        let mut remaining = data;
+        while !remaining.is_empty() {
+            let message = Message {
+                header: Header {
+                    version: version::CURRENT,
+                    message_id: self.next_request_message_id(),
+                },
+                kind: MessageKind::SpRequest(SpRequest::SerialConsole {
+                    component: self.component,
+                    offset: self.serial_console_tx_offset,
+                }),
+            };
+            let (n, written) = gateway_messages::serialize_with_trailing_data(
+                &mut out,
+                &message,
+                &[remaining],
+            );
+            sock.send_to(&out[..n], sender.addr).await?;
+            remaining = &remaining[written..];
+            self.serial_console_tx_offset += written as u64;
+        }
+
+        Ok(())
+    }
+
+    async fn run(mut self) {
+        loop {
+            // wait for incoming connections, discarding any serial console
+            // packets received while we don't have one
+            let (conn, addr) = loop {
+                select! {
+                    try_conn = self.listener.accept() => {
+                        match try_conn {
+                            Ok((conn, addr)) => break (conn, addr),
+                            Err(err) => {
+                                warn!(self.log, "error accepting TCP connection"; InlineErrorChain::new(&err));
+                                continue;
+                            }
+                        }
+                    }
+                    _ = self.incoming_serial_console.recv() => {
+                        info!(self.log, "dropping incoming serial console packet (no attached TCP connection)");
+                        continue;
+                    }
+                };
+            };
+
+            info!(
+                self.log,
+                "accepted serial console TCP connection from {}", addr
+            );
+            match self.drive_tcp_connection(conn).await {
+                Ok(()) => {
+                    info!(self.log, "closing serial console TCP connection")
+                }
+                Err(err) => {
+                    error!(
+                        self.log,
+                        "serial TCP connection failed";
+                        "err" => %err,
+                    )
+                }
+            }
+        }
+    }
+
+    async fn drive_tcp_connection(
+        &mut self,
+        mut conn: TcpStream,
+    ) -> Result<()> {
+        let mut buf = [0; 512];
+
+        // copy serial console data in both directions
+        loop {
+            select! {
+                res = conn.read(&mut buf) => {
+                    let n = res?;
+                    if n == 0 {
+                        return Ok(());
+                    }
+                    self
+                        .send_serial_console(&buf[..n])
+                        .await
+                        .with_context(||"UDP send error")?;
+                }
+                incoming = self.incoming_serial_console.recv() => {
+                    // we can only get `None` if the tx half was dropped,
+                    // which means we're in the process of shutting down
+                    let data = match incoming {
+                        Some(data) => data,
+                        None => return Ok(()),
+                    };
+
+                    conn
+                        .write_all(&data)
+                        .await
+                        .with_context(|| "TCP write error")?;
+                }
+            }
+        }
+    }
+}
+
+struct Handler {
+    log: Logger,
+    common: SpCommonConfig,
+    baseboard_vpd: BaseboardVpd,
+    device_descriptions: DeviceDescriptions,
+
+    attached_mgs: AttachedMgsSerialConsole,
+    incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
+    power_state: watch::Sender<GimletPowerState>,
+    power_state_changes: Arc<AtomicUsize>,
+    startup_options: StartupOptions,
+    update_state: SimSpUpdate,
+    reset_pending: Option<SpComponent>,
+    sensors: Sensors,
+    component_vpds: ComponentVpds,
+    pmbus_rails: PmbusRails,
+
+    // To simulate an SP reset, we should (after doing whatever housekeeping we
+    // need to track the reset) intentionally _fail_ to respond to the request,
+    // simulating a `-> !` function on the SP that triggers a reset. To provide
+    // this, our caller will pass us a function to call if they should ignore
+    // whatever result we return and fail to respond at all.
+    should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
+    task_dumps: TaskDumps,
+}
+
+impl Handler {
+    fn new(
+        common: SpCommonConfig,
+        baseboard_vpd: BaseboardVpd,
+        attached_mgs: AttachedMgsSerialConsole,
+        incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
+        power_state: watch::Sender<GimletPowerState>,
+        log: Logger,
+        update_state: SimSpUpdate,
+    ) -> Self {
+        let components = &common.components;
+        let device_descriptions =
+            DeviceDescriptions::from_component_configs(components);
+        let sensors = Sensors::from_component_configs(components);
+        let component_vpds = ComponentVpds::from_component_configs(components)
+            .expect("component VPD configuration should be valid");
+        let pmbus_rails = match PmbusRails::from_component_configs(components) {
+            Ok(rails) => rails,
+            Err(e) => {
+                panic!("invalid PMBus rail configuration for Gimlet SP: {e}");
+            }
+        };
+
+        Self {
+            log,
+            common,
+            baseboard_vpd,
+            sensors,
+            component_vpds,
+            device_descriptions,
+            attached_mgs,
+            pmbus_rails,
+            incoming_serial_console,
+            startup_options: StartupOptions::empty(),
+            update_state,
+            reset_pending: None,
+            power_state,
+            should_fail_to_respond_signal: None,
+            task_dumps: TaskDumps::default(),
+            power_state_changes: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn sp_state_impl(&self) -> SpStateV2 {
+        SpStateV2 {
+            hubris_archive_id: [0; 8],
+            serial_number: self.baseboard_vpd.padded_serial_number(),
+            model: self.baseboard_vpd.padded_part_number(),
+            revision: 0,
+            base_mac_address: [0; 6],
+            power_state: (*self.power_state.borrow()).into(),
+            rot: Ok(rot_state_v2(self.update_state.rot_state())),
+        }
+    }
+
+    fn set_power_state_impl(
+        &mut self,
+        power_state: PowerState,
+    ) -> PowerStateTransition {
+        let modified =
+            self.power_state.send_if_modified(|stored_power_state| {
+                if power_state == (*stored_power_state).into() {
+                    return false;
+                }
+                *stored_power_state = match power_state {
+                    PowerState::A0 => {
+                        let slot = self
+                            .update_state
+                            .component_get_active_slot(
+                                SpComponent::HOST_CPU_BOOT_FLASH,
+                            )
+                            .expect(
+                                "can always get active slot for \
+                                 valid component",
+                            );
+                        let slot = M2Slot::from_mgs_firmware_slot(slot)
+                            .expect("sp-sim ensures host slot is always valid");
+                        GimletPowerState::A0(slot)
+                    }
+                    // `A1` is a transitory state that we can't even observe on
+                    // real devices as of
+                    // https://github.com/oxidecomputer/hubris/pull/2107. Our
+                    // tests really care about "host powered on" (A0) or "host
+                    // powered off" (A2), so just squish the transitory state
+                    // down to "host powered off".
+                    PowerState::A1 | PowerState::A2 => GimletPowerState::A2,
+                };
+                true
+            });
+
+        if modified {
+            self.power_state_changes.fetch_add(1, Ordering::Relaxed);
+            PowerStateTransition::Changed
+        } else {
+            PowerStateTransition::Unchanged
+        }
+    }
+}
+
+impl SpHandler for Handler {
+    type BulkIgnitionStateIter = iter::Empty<IgnitionState>;
+    type BulkIgnitionLinkEventsIter = iter::Empty<LinkEvents>;
+    type VLanId = SpPort;
+
+    fn ensure_request_trusted(
+        &mut self,
+        kind: MgsRequest,
+        _sender: Sender<Self::VLanId>,
+    ) -> Result<MgsRequest, SpError> {
+        Ok(kind)
+    }
+
+    fn ensure_response_trusted(
+        &mut self,
+        kind: MgsResponse,
+        _sender: Sender<Self::VLanId>,
+    ) -> Option<MgsResponse> {
+        Some(kind)
+    }
+
+    fn discover(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+    ) -> Result<DiscoverResponse, SpError> {
+        debug!(
+            &self.log,
+            "received discover; sending response";
+            "sender" => ?sender,
+        );
+        Ok(DiscoverResponse { sp_port: sender.vid })
+    }
+
+    fn num_ignition_ports(&mut self) -> Result<u32, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn ignition_state(
+        &mut self,
+        target: u8,
+    ) -> Result<gateway_messages::IgnitionState, SpError> {
+        warn!(
+            &self.log,
+            "received ignition state request; not supported by gimlet";
+            "target" => target,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn bulk_ignition_state(
+        &mut self,
+        offset: u32,
+    ) -> Result<Self::BulkIgnitionStateIter, SpError> {
+        warn!(
+            &self.log,
+            "received bulk ignition state request; not supported by gimlet";
+            "offset" => offset,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn ignition_link_events(
+        &mut self,
+        target: u8,
+    ) -> Result<LinkEvents, SpError> {
+        warn!(
+            &self.log,
+            "received ignition link events request; not supported by gimlet";
+            "target" => target,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn bulk_ignition_link_events(
+        &mut self,
+        offset: u32,
+    ) -> Result<Self::BulkIgnitionLinkEventsIter, SpError> {
+        warn!(
+            &self.log,
+            "received bulk ignition link events request; not supported by gimlet";
+            "offset" => offset,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    /// If `target` is `None`, clear link events for all targets.
+    fn clear_ignition_link_events(
+        &mut self,
+        target: Option<u8>,
+        transceiver_select: Option<ignition::TransceiverSelect>,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received clear ignition link events request; not supported by gimlet";
+            "target" => ?target,
+            "transceiver_select" => ?transceiver_select,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn ignition_command(
+        &mut self,
+        target: u8,
+        command: gateway_messages::IgnitionCommand,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received ignition command; not supported by gimlet";
+            "target" => target,
+            "command" => ?command,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn serial_console_attach(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+        component: SpComponent,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console attach request";
+            "sender" => ?sender,
+            "component" => ?component,
+        );
+
+        let mut attached_mgs = self.attached_mgs.lock().unwrap();
+        if attached_mgs.is_some() {
+            return Err(SpError::SerialConsoleAlreadyAttached);
+        }
+
+        *attached_mgs = Some((component, sender));
+        Ok(())
+    }
+
+    fn serial_console_write(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<u64, SpError> {
+        debug!(
+            &self.log,
+            "received serial console packet";
+            "sender" => ?sender,
+            "len" => data.len(),
+            "offset" => offset,
+        );
+
+        let component = self
+            .attached_mgs
+            .lock()
+            .unwrap()
+            .map(|(component, _sender)| component)
+            .ok_or(SpError::SerialConsoleNotAttached)?;
+
+        let incoming_serial_console = self
+            .incoming_serial_console
+            .get(&component)
+            .ok_or(SpError::RequestUnsupportedForComponent)?;
+
+        // should we sanity check `offset`? for now just assume everything
+        // comes in order; we're just a simulator anyway
+        //
+        // if the receiving half is gone, we're in the process of shutting down;
+        // ignore errors here
+        let _ = incoming_serial_console.send(data.to_vec());
+
+        Ok(offset + data.len() as u64)
+    }
+
+    fn serial_console_keepalive(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+    ) -> std::result::Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console keepalive";
+            "sender" => ?sender,
+        );
+
+        let component = self
+            .attached_mgs
+            .lock()
+            .unwrap()
+            .map(|(component, _sender)| component)
+            .ok_or(SpError::SerialConsoleNotAttached)?;
+
+        let _incoming_serial_console = self
+            .incoming_serial_console
+            .get(&component)
+            .ok_or(SpError::RequestUnsupportedForComponent)?;
+
+        Ok(())
+    }
+
+    fn serial_console_detach(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console detach request";
+            "sender" => ?sender,
+        );
+        *self.attached_mgs.lock().unwrap() = None;
+        Ok(())
+    }
+
+    fn serial_console_break(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console break";
+            "sender" => ?sender,
+        );
+        let component = self
+            .attached_mgs
+            .lock()
+            .unwrap()
+            .map(|(component, _sender)| component)
+            .ok_or(SpError::SerialConsoleNotAttached)?;
+
+        let incoming_serial_console = self
+            .incoming_serial_console
+            .get(&component)
+            .ok_or(SpError::RequestUnsupportedForComponent)?;
+
+        // if the receiving half is gone, we're in the process of shutting down;
+        // ignore errors here
+        _ = incoming_serial_console.send(b"*** serial break ***".to_vec());
+
+        Ok(())
+    }
+
+    fn send_host_nmi(&mut self) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received host NMI request; not supported by simulated gimlet";
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn sp_state(&mut self) -> Result<SpStateV2, SpError> {
+        let state = self.sp_state_impl();
+        debug!(
+            &self.log, "received state request";
+            "reply-state" => ?state,
+        );
+        Ok(state)
+    }
+
+    fn sp_update_prepare(
+        &mut self,
+        update: gateway_messages::SpUpdatePrepare,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received SP update prepare request";
+            "update" => ?update,
+        );
+        self.update_state.sp_update_prepare(
+            update.id,
+            update.sp_image_size.try_into().unwrap(),
+        )
+    }
+
+    fn component_update_prepare(
+        &mut self,
+        update: gateway_messages::ComponentUpdatePrepare,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received component update prepare request";
+            "update" => ?update,
+        );
+
+        self.update_state.component_update_prepare(
+            update.component,
+            update.id,
+            update.total_size.try_into().unwrap(),
+            update.slot,
+        )
+    }
+
+    fn update_status(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<gateway_messages::UpdateStatus, SpError> {
+        debug!(
+            &self.log,
+            "received update status request";
+            "component" => ?component,
+        );
+        Ok(self.update_state.status())
+    }
+
+    fn update_chunk(
+        &mut self,
+        chunk: gateway_messages::UpdateChunk,
+        chunk_data: &[u8],
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received update chunk";
+            "offset" => chunk.offset,
+            "length" => chunk_data.len(),
+        );
+        self.update_state.ingest_chunk(chunk, chunk_data)
+    }
+
+    fn update_abort(
+        &mut self,
+        update_component: SpComponent,
+        update_id: gateway_messages::UpdateId,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received update abort";
+            "component" => ?update_component,
+            "id" => ?update_id,
+        );
+        self.update_state.abort(update_id)
+    }
+
+    fn power_state(&mut self) -> Result<PowerState, SpError> {
+        let power_state = *self.power_state.borrow();
+        debug!(
+            &self.log, "received power state";
+            "power_state" => ?power_state,
+        );
+        Ok(power_state.into())
+    }
+
+    fn power_state_with_reason(
+        &mut self,
+    ) -> Result<PowerStateWithReason, SpError> {
+        let power_state = self.power_state()?;
+
+        debug!(
+            &self.log, "received power state with reason";
+            "power_state" => ?power_state,
+        );
+
+        Ok(PowerStateWithReason {
+            state: power_state,
+            reason: StateChangeReason::Other,
+            since: 1,
+        })
+    }
+
+    fn set_power_state(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+        power_state: PowerState,
+    ) -> Result<PowerStateTransition, SpError> {
+        let transition = self.set_power_state_impl(power_state);
+
+        debug!(
+            &self.log, "received set power state";
+            "sender" => ?sender,
+            "power_state" => ?power_state,
+            "transition" => ?transition,
+        );
+
+        Ok(transition)
+    }
+
+    fn reset_component_prepare(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received reset prepare request";
+            "component" => ?component,
+        );
+        if component == SpComponent::SP_ITSELF || component == SpComponent::ROT
+        {
+            self.reset_pending = Some(component);
+            Ok(())
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
+    }
+
+    fn reset_component_trigger(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received reset trigger request";
+            "component" => ?component,
+        );
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
+                self.update_state.sp_reset();
+                // When the SP resets, the host also resets; emulate this
+                // behavior by tracking a power state transition to A2 and back.
+                self.set_power_state_impl(PowerState::A2);
+                self.set_power_state_impl(PowerState::A0);
+                self.reset_pending = None;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
+    }
+
+    fn num_devices(&mut self) -> u32 {
+        self.device_descriptions.num_devices()
+    }
+
+    fn device_description(
+        &mut self,
+        index: BoundsChecked,
+    ) -> DeviceDescription<'static> {
+        self.device_descriptions.device_description(index)
+    }
+
+    fn num_component_details(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<u32, SpError> {
+        let num_details =
+            self.sensors.num_component_details(&component).unwrap_or(0);
+        debug!(
+            &self.log, "asked for number of component details";
+            "component" => ?component,
+            "num_details" => num_details
+        );
+        Ok(num_details)
+    }
+
+    fn component_details(
+        &mut self,
+        component: SpComponent,
+        index: BoundsChecked,
+    ) -> ComponentDetails {
+        let Some(sensor_details) =
+            self.sensors.component_details(&component, index)
+        else {
+            unreachable!(
+                "this is a gimlet, so it should have no port status details"
+            );
+        };
+        debug!(
+            &self.log, "asked for component details for a sensor";
+            "component" => ?component,
+            "index" => index.0,
+            "details" => ?sensor_details
+        );
+        sensor_details
+    }
+
+    fn component_clear_status(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to clear status (not supported for sim components)";
+            "component" => ?component,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn component_get_active_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        debug!(
+            &self.log, "asked for component active slot";
+            "component" => ?component,
+        );
+        self.update_state.component_get_active_slot(component)
+    }
+
+    fn component_set_active_slot(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+        persist: bool,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "asked to set component active slot";
+            "component" => ?component,
+            "slot" => slot,
+            "persist" => persist,
+        );
+        self.update_state.component_set_active_slot(component, slot, persist)
+    }
+
+    fn component_get_persistent_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> std::result::Result<u16, SpError> {
+        debug!(
+            &self.log, "asked for component persistent slot";
+            "component" => ?component,
+        );
+        self.update_state.component_get_persistent_slot(component)
+    }
+
+    fn component_action(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+        component: SpComponent,
+        action: ComponentAction,
+    ) -> Result<ComponentActionResponse, SpError> {
+        warn!(
+            &self.log, "asked to perform component action (not supported for sim components)";
+            "sender" => ?sender,
+            "component" => ?component,
+            "action" => ?action,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn get_startup_options(&mut self) -> Result<StartupOptions, SpError> {
+        debug!(
+            &self.log, "asked for startup options";
+            "options" => ?self.startup_options,
+        );
+        Ok(self.startup_options)
+    }
+
+    fn set_startup_options(
+        &mut self,
+        startup_options: StartupOptions,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "setting for startup options";
+            "options" => ?startup_options,
+        );
+        self.startup_options = startup_options;
+        Ok(())
+    }
+
+    fn mgs_response_error(&mut self, message_id: u32, err: MgsError) {
+        warn!(
+            &self.log, "received MGS error response";
+            "message_id" => message_id,
+            "err" => ?err,
+        );
+    }
+
+    fn mgs_response_host_phase2_data(
+        &mut self,
+        sender: Sender<Self::VLanId>,
+        message_id: u32,
+        hash: [u8; 32],
+        offset: u64,
+        data: &[u8],
+    ) {
+        debug!(
+            &self.log, "received host phase 2 data from MGS";
+            "sender" => ?sender,
+            "message_id" => message_id,
+            "hash" => ?hash,
+            "offset" => offset,
+            "data_len" => data.len(),
+        );
+    }
+
+    fn set_ipcc_key_lookup_value(
+        &mut self,
+        key: u8,
+        value: &[u8],
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received IPCC key/value; not supported by simulated gimlet";
+            "key" => key,
+            "value" => ?value,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_component_caboose_value(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+        key: [u8; 4],
+        buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        self.update_state.get_component_caboose_value(component, slot, key, buf)
+    }
+
+    fn component_get_vpd(
+        &mut self,
+        component: SpComponent,
+        buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        self.component_vpds.component_get_vpd(&component, buf)
+    }
+
+    fn read_sensor(
+        &mut self,
+        request: gateway_messages::SensorRequest,
+    ) -> std::result::Result<gateway_messages::SensorResponse, SpError> {
+        self.sensors.read_sensor(request).map_err(SpError::Sensor)
+    }
+
+    fn current_time(&mut self) -> std::result::Result<u64, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn read_rot(
+        &mut self,
+        request: RotRequest,
+        buf: &mut [u8],
+    ) -> std::result::Result<RotResponse, SpError> {
+        read_dummy_rot_page(BaseboardKind::Gimlet, request, buf)
+    }
+
+    fn vpd_lock_status_all(
+        &mut self,
+        _buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn reset_component_trigger_with_watchdog(
+        &mut self,
+        component: SpComponent,
+        _time_ms: u32,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received reset trigger with watchdog request";
+            "component" => ?component,
+        );
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
+                self.update_state.sp_reset();
+                // When the SP resets, the host also resets; emulate this
+                // behavior by tracking a power state transition to A2 and back.
+                self.set_power_state_impl(PowerState::A2);
+                self.set_power_state_impl(PowerState::A0);
+                self.reset_pending = None;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
+    }
+
+    fn disable_component_watchdog(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+    fn component_watchdog_supported(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+
+    fn versioned_rot_boot_info(
+        &mut self,
+        version: u8,
+    ) -> Result<RotBootInfo, SpError> {
+        rot_boot_info(
+            self.update_state.rot_state(),
+            self.common.old_rot_state,
+            version,
+        )
+    }
+
+    fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
+        self.task_dumps.get_task_dump_count()
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        index: u32,
+        key: [u8; 16],
+    ) -> Result<DumpTask, SpError> {
+        self.task_dumps.task_dump_read_start(index, key)
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        key: [u8; 16],
+        seq: u32,
+        buf: &mut [u8],
+    ) -> Result<Option<DumpSegment>, SpError> {
+        self.task_dumps.task_dump_read_continue(key, seq, buf)
+    }
+
+    fn read_host_flash(
+        &mut self,
+        _slot: u16,
+        _addr: u32,
+        _buf: &mut [u8],
+    ) -> Result<(), SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn start_host_flash_hash(&mut self, slot: u16) -> Result<(), SpError> {
+        self.update_state.start_host_flash_hash(slot)
+    }
+
+    fn get_host_flash_hash(&mut self, slot: u16) -> Result<[u8; 32], SpError> {
+        self.update_state.get_host_flash_hash(slot)
+    }
+
+    fn get_pmbus_status(
+        &mut self,
+        rail: &PowerRailName,
+    ) -> Result<PmbusStatus, SpError> {
+        self.pmbus_rails.pmbus_status(rail)
+    }
+
+    fn get_host_panic_payload(
+        &mut self,
+        _request: Option<HostInfoRequest>,
+        _len: u32,
+        _trailing_tx_buf: &mut [u8],
+    ) -> Result<HostPanicPayloadData, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_bootfail_payload(
+        &mut self,
+        _request: Option<HostInfoRequest>,
+        _len: u32,
+        _trailing_tx_buf: &mut [u8],
+    ) -> Result<HostBootfailPayloadData, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+}
+
+impl SimSpHandler for Handler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        signal: Box<dyn FnOnce() + Send>,
+    ) {
+        self.should_fail_to_respond_signal = Some(signal);
+    }
+
+    fn power_state_changes(&self) -> &Arc<AtomicUsize> {
+        &self.power_state_changes
+    }
+}

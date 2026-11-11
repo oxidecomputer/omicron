@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='wicketd'>
+
+<service name='oxide/wicketd' type='service' version='1'>
+  <create_default_instance enabled='true' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='switch_zone_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/switch_zone_setup:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --commission-address %{config/commission-address} --mgs-address %{config/mgs-address} --nexus-proxy-address %{config/nexus-proxy-address} --baseboard-part %{config/baseboard-part} --baseboard-serial %{config/baseboard-serial} --bootstrap-agent-lockstep-address %{config/bootstrap-agent-lockstep-address} --read-smf-config &amp;'
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <!--
+    This refresh method only exists to support changing `config/rack-subnet`,
+    and makes a couple critical assumptions:
+
+      * `config/address` is not changing
+      * the dropshot server listening at `config/address` is not configured
+        for TLS
+
+    both of which are fine for our standard wicketd deployment, which only
+    listens on a `::1` (IPv6 localhost) address without TLS. If any of the
+    above assumptions are violated, the `reload-config` endpoint we hit
+    here will return an error (either directly, if we attempt to change
+    `config/address`, or indirectly because we tried to post via http but
+    it expected https).
+  -->
+  <exec_method type='method' name='refresh'
+      exec='/opt/oxide/wicketd/bin/wicketd refresh-config /var/svc/manifest/site/wicketd/config.toml --address %{config/address}'
+      timeout_seconds='0' />
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <property_group name='config' type='application'>
+    <propval name='address' type='astring' value='unknown' />
+    <propval name='artifact-address' type='astring' value='unknown' />
+    <propval name='baseboard-part' type='astring' value='unknown' />
+    <propval name='baseboard-serial' type='astring' value='unknown' />
+    <propval name='commission-address' type='astring' value='unknown' />
+    <propval name='mgs-address' type='astring' value='unknown' />
+    <propval name='nexus-proxy-address' type='astring' value='unknown' />
+    <propval name='bootstrap-agent-lockstep-address' type='astring' value='unknown' />
+    <!--
+      In a standard deployment, this will remain `unknown` until rack setup
+      is complete, at which point it will be populated. Prior to this being
+      populated, the `nexus-proxy-address` server will reject incoming
+      connections.
+    -->
+    <propval name='rack-subnet' type='astring' value='unknown' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Wicketd</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Technician Port Management Service</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

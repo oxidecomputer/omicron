@@ -1,0 +1,478 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::BTreeMap;
+use std::str::FromStr;
+
+use crate::typed_generation::DbTypedGeneration;
+use crate::{ByteCount, SemverVersion, typed_uuid::DbTypedUuid};
+use chrono::{DateTime, Utc};
+use diesel::sql_types::{Jsonb, Text};
+use diesel::{deserialize::FromSql, serialize::ToSql};
+use iddqd::{IdHashItem, id_upcast};
+use nexus_db_schema::schema::{
+    tuf_artifact, tuf_artifact_file, tuf_artifact_tag, tuf_repo,
+    tuf_repo_artifact, tuf_repo_metadata, tuf_trust_root,
+};
+use nexus_types::external_api::update as update_types;
+use omicron_common::api::external;
+use omicron_generation_kinds::{
+    ArtifactConfigGeneration, ArtifactConfigGenerationKind,
+};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::TufArtifactKind;
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufTrustRootKind;
+use omicron_uuid_kinds::TufTrustRootUuid;
+use omicron_uuid_kinds::TypedUuid;
+use parse_display::Display;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use tufaceous_artifact::{
+    ArtifactHash as ExternalArtifactHash, ArtifactVersion,
+};
+
+/// A description of a TUF update: a repo, along with the artifacts it
+/// contains.
+#[derive(Debug, Clone)]
+pub struct TufRepoDescription {
+    /// The repository.
+    pub repo: TufRepo,
+
+    /// The artifacts.
+    pub artifacts: Vec<TufArtifactDescription>,
+
+    /// The metadata.
+    pub metadata: Vec<TufMetadataEntry>,
+}
+
+impl TufRepoDescription {
+    /// Creates a new `TufRepoDescription` from an
+    /// [`nexus_types::tuf_repo::TufRepoDescription`].
+    pub fn new(
+        description: nexus_types::tuf_repo::TufRepoDescription,
+        generation_added: ArtifactConfigGeneration,
+    ) -> Result<Self, external::ByteCountRangeError> {
+        let id = TypedUuid::new_v4().into();
+        Ok(Self {
+            repo: TufRepo {
+                id,
+                time_created: Utc::now(),
+                time_pruned: None,
+                sha256: description.hash.into(),
+                system_version: description.system_version.into(),
+                file_name: description.file_name,
+            },
+            artifacts: description
+                .artifacts
+                .into_iter()
+                .map(|artifact| {
+                    TufArtifactDescription::new(artifact, generation_added)
+                })
+                .collect::<Result<_, _>>()?,
+            metadata: description
+                .metadata
+                .into_iter()
+                .map(|(key, value)| TufMetadataEntry {
+                    tuf_repo_id: id,
+                    key,
+                    value,
+                })
+                .collect(),
+        })
+    }
+}
+
+impl From<TufRepoDescription> for nexus_types::tuf_repo::TufRepoDescription {
+    fn from(description: TufRepoDescription) -> Self {
+        Self {
+            artifacts: description
+                .artifacts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            metadata: description
+                .metadata
+                .into_iter()
+                .map(|TufMetadataEntry { key, value, .. }| (key, value))
+                .collect(),
+            system_version: description.repo.system_version.into(),
+            hash: description.repo.sha256.into(),
+            file_name: description.repo.file_name,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TufArtifactDescription {
+    pub artifact: TufArtifact,
+
+    // `TufArtifactFile`, minus `sha256`
+    pub version: DbArtifactVersion,
+    pub artifact_size: ByteCount,
+
+    // `Vec<TufArtifactTag>`, minus `tuf_artifact_id`
+    pub tags: BTreeMap<String, String>,
+}
+
+impl TufArtifactDescription {
+    /// Creates a new `TufArtifactDescription` from an
+    /// [`tufaceous_artifact::Artifact`].
+    pub fn new(
+        artifact: tufaceous_artifact::Artifact,
+        generation_added: ArtifactConfigGeneration,
+    ) -> Result<Self, external::ByteCountRangeError> {
+        let id = TypedUuid::new_v4().into();
+        Ok(Self {
+            artifact: TufArtifact {
+                id,
+                time_created: Utc::now(),
+                sha256: artifact.hash.into(),
+                generation_added: generation_added.into(),
+            },
+            version: artifact.version.into(),
+            artifact_size: ByteCount(artifact.length.try_into()?),
+            tags: artifact.tags,
+        })
+    }
+
+    pub fn from_db_untagged(
+        artifact: TufArtifact,
+        file: TufArtifactFile,
+    ) -> Self {
+        Self {
+            artifact,
+            // `file.sha256` is ignored
+            version: file.version,
+            artifact_size: file.artifact_size,
+            tags: BTreeMap::new(),
+        }
+    }
+
+    pub fn to_db_file(&self) -> TufArtifactFile {
+        TufArtifactFile {
+            sha256: self.artifact.sha256,
+            version: self.version.clone(),
+            artifact_size: self.artifact_size,
+        }
+    }
+
+    pub fn into_db(
+        self,
+    ) -> (TufArtifact, TufArtifactFile, impl Iterator<Item = TufArtifactTag>)
+    {
+        let id = self.artifact.id;
+        let sha256 = self.artifact.sha256;
+        (
+            self.artifact,
+            TufArtifactFile {
+                sha256,
+                version: self.version,
+                artifact_size: self.artifact_size,
+            },
+            self.tags.into_iter().map(move |(key, value)| TufArtifactTag {
+                tuf_artifact_id: id,
+                key,
+                value,
+            }),
+        )
+    }
+}
+
+impl From<TufArtifactDescription> for tufaceous_artifact::Artifact {
+    fn from(description: TufArtifactDescription) -> Self {
+        tufaceous_artifact::Artifact {
+            version: description.version.into(),
+            tags: description.tags,
+            hash: description.artifact.sha256.0,
+            length: description.artifact_size.0.to_bytes(),
+        }
+    }
+}
+
+impl IdHashItem for TufArtifactDescription {
+    type Key<'a> = &'a DbTypedUuid<TufArtifactKind>;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.artifact.id
+    }
+
+    id_upcast!();
+}
+
+/// A record representing an uploaded TUF repository.
+#[derive(
+    Queryable, Identifiable, Insertable, Clone, Debug, Selectable, AsChangeset,
+)]
+#[diesel(table_name = tuf_repo)]
+pub struct TufRepo {
+    pub id: DbTypedUuid<TufRepoKind>,
+    pub time_created: DateTime<Utc>,
+    pub time_pruned: Option<DateTime<Utc>>,
+    // XXX: We're overloading ArtifactHash here to also mean the hash of the
+    // repository zip itself.
+    pub sha256: ArtifactHash,
+    pub system_version: SemverVersion,
+    pub file_name: String,
+}
+
+impl TufRepo {
+    /// Returns the repository's ID.
+    pub fn id(&self) -> TypedUuid<TufRepoKind> {
+        self.id.into()
+    }
+}
+
+impl From<TufRepo> for update_types::TufRepo {
+    fn from(repo: TufRepo) -> update_types::TufRepo {
+        update_types::TufRepo {
+            hash: repo.sha256.into(),
+            system_version: repo.system_version.into(),
+            file_name: repo.file_name,
+            time_created: repo.time_created,
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, AsChangeset)]
+#[diesel(table_name = tuf_artifact)]
+pub struct TufArtifact {
+    pub id: DbTypedUuid<TufArtifactKind>,
+    pub time_created: DateTime<Utc>,
+    pub sha256: ArtifactHash,
+    pub generation_added: DbTypedGeneration<ArtifactConfigGenerationKind>,
+}
+
+impl TufArtifact {
+    /// Returns the artifact's ID.
+    pub fn id(&self) -> TypedUuid<TufArtifactKind> {
+        self.id.into()
+    }
+}
+
+#[derive(
+    Queryable, Insertable, Clone, Debug, PartialEq, Selectable, AsChangeset,
+)]
+#[diesel(table_name = tuf_artifact_file)]
+pub struct TufArtifactFile {
+    pub sha256: ArtifactHash,
+    pub version: DbArtifactVersion,
+    pub artifact_size: ByteCount,
+}
+
+impl IdHashItem for TufArtifactFile {
+    type Key<'a> = &'a ArtifactHash;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.sha256
+    }
+
+    id_upcast!();
+}
+
+/// Artifact version in the database: a freeform identifier.
+#[derive(
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+)]
+#[diesel(sql_type = Text)]
+#[serde(transparent)]
+#[display("{0}")]
+pub struct DbArtifactVersion(pub ArtifactVersion);
+
+NewtypeFrom! { () pub struct DbArtifactVersion(ArtifactVersion); }
+NewtypeDeref! { () pub struct DbArtifactVersion(ArtifactVersion); }
+
+impl ToSql<Text, diesel::pg::Pg> for DbArtifactVersion {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        <String as ToSql<Text, diesel::pg::Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl FromSql<Text, diesel::pg::Pg> for DbArtifactVersion {
+    fn from_sql(
+        bytes: diesel::pg::PgValue<'_>,
+    ) -> diesel::deserialize::Result<Self> {
+        let s = <String as FromSql<Text, diesel::pg::Pg>>::from_sql(bytes)?;
+        s.parse::<ArtifactVersion>()
+            .map(DbArtifactVersion)
+            .map_err(|e| e.into())
+    }
+}
+
+/// A many-to-many relationship between [`TufRepo`] and [`TufArtifact`].
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = tuf_repo_artifact)]
+pub struct TufRepoArtifact {
+    pub tuf_repo_id: DbTypedUuid<TufRepoKind>,
+    pub tuf_artifact_id: DbTypedUuid<TufArtifactKind>,
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = tuf_artifact_tag)]
+pub struct TufArtifactTag {
+    pub tuf_artifact_id: DbTypedUuid<TufArtifactKind>,
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = tuf_repo_metadata)]
+pub struct TufMetadataEntry {
+    pub tuf_repo_id: DbTypedUuid<TufRepoKind>,
+    pub key: String,
+    pub value: String,
+}
+
+/// A wrapper around tufaceous-artifact's
+/// [`ArtifactHash`](ExternalArtifactHash), supported by Diesel.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(sql_type = Text)]
+#[serde(transparent)]
+pub struct ArtifactHash(pub ExternalArtifactHash);
+
+NewtypeFrom! { () pub struct ArtifactHash(ExternalArtifactHash); }
+NewtypeDeref! { () pub struct ArtifactHash(ExternalArtifactHash); }
+
+impl fmt::Display for ArtifactHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl ToSql<Text, diesel::pg::Pg> for ArtifactHash {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        <String as ToSql<Text, diesel::pg::Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl FromSql<Text, diesel::pg::Pg> for ArtifactHash {
+    fn from_sql(
+        bytes: diesel::pg::PgValue<'_>,
+    ) -> diesel::deserialize::Result<Self> {
+        let s = <String as FromSql<Text, diesel::pg::Pg>>::from_sql(bytes)?;
+        ExternalArtifactHash::from_str(&s)
+            .map(ArtifactHash)
+            .map_err(|e| e.into())
+    }
+}
+
+/// A trusted TUF root roles, used to verify TUF repo signatures.
+#[derive(Clone, Debug, Queryable, Insertable, Selectable)]
+#[diesel(table_name = tuf_trust_root)]
+pub struct TufTrustRoot {
+    pub id: DbTypedUuid<TufTrustRootKind>,
+    pub time_created: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+    pub root_role: DbTufSignedRootRole,
+}
+
+impl TufTrustRoot {
+    pub fn new(root_role: update_types::TufSignedRootRole) -> TufTrustRoot {
+        TufTrustRoot {
+            id: TufTrustRootUuid::new_v4().into(),
+            time_created: Utc::now(),
+            time_deleted: None,
+            root_role: DbTufSignedRootRole(root_role),
+        }
+    }
+
+    pub fn id(&self) -> TufTrustRootUuid {
+        self.id.into()
+    }
+}
+
+impl From<TufTrustRoot> for update_types::UpdatesTrustRoot {
+    fn from(trust_root: TufTrustRoot) -> update_types::UpdatesTrustRoot {
+        update_types::UpdatesTrustRoot {
+            id: trust_root.id.into_untyped_uuid(),
+            time_created: trust_root.time_created,
+            root_role: trust_root.root_role.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, AsExpression, FromSqlRow)]
+#[diesel(sql_type = Jsonb)]
+pub struct DbTufSignedRootRole(pub update_types::TufSignedRootRole);
+
+impl ToSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        <serde_json::Value as ToSql<Jsonb, diesel::pg::Pg>>::to_sql(
+            &serde_json::to_value(self.0.clone())?,
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl FromSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
+    fn from_sql(
+        bytes: diesel::pg::PgValue<'_>,
+    ) -> diesel::deserialize::Result<Self> {
+        let value =
+            <serde_json::Value as FromSql<Jsonb, diesel::pg::Pg>>::from_sql(
+                bytes,
+            )?;
+        serde_json::from_value(value)
+            .map(DbTufSignedRootRole)
+            .map_err(|e| e.into())
+    }
+}
+
+// The following isn't a real model in the sense that it represents DB data,
+// but it is the return type of a datastore function. The main reason we can't
+// just use the view for this like we do with TufRepoUploadStatus is that
+// TufRepoDescription has a bit more info in it that we rely on in code outside
+// of the external API, like tests and internal APIs
+
+/// The return value of the tuf repo insert function
+pub struct TufRepoUpload {
+    pub recorded: TufRepoDescription,
+    pub status: update_types::TufRepoUploadStatus,
+}
+
+impl From<TufRepoUpload> for update_types::TufRepoUpload {
+    fn from(upload: TufRepoUpload) -> Self {
+        update_types::TufRepoUpload {
+            repo: upload.recorded.repo.into(),
+            status: upload.status,
+        }
+    }
+}

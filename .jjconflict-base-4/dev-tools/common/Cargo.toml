@@ -1,0 +1,14 @@
+[package]
+name = "dev-tools-common"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+# Please read the note in `dev-tools/xtask/Cargo.toml` before adding a new
+# dependency!
+[dependencies]
+camino.workspace = true
+serde.workspace = true

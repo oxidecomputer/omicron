@@ -1,0 +1,183 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Disk related types shared among crates
+
+use camino::{Utf8Path, Utf8PathBuf};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+
+use crate::api::internal::shared::DatasetKindParseError;
+use crate::zpool_name::ZpoolName;
+
+pub use crate::api::internal::shared::DatasetKind;
+
+#[derive(
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Clone,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+)]
+pub struct DatasetName {
+    // A unique identifier for the Zpool on which the dataset is stored.
+    pool_name: ZpoolName,
+    // A name for the dataset within the Zpool.
+    kind: DatasetKind,
+}
+
+impl DatasetName {
+    pub fn new(pool_name: ZpoolName, kind: DatasetKind) -> Self {
+        Self { pool_name, kind }
+    }
+
+    pub fn into_parts(self) -> (ZpoolName, DatasetKind) {
+        (self.pool_name, self.kind)
+    }
+
+    pub fn pool(&self) -> &ZpoolName {
+        &self.pool_name
+    }
+
+    pub fn kind(&self) -> &DatasetKind {
+        &self.kind
+    }
+
+    /// Returns the full name of the dataset, as would be returned from
+    /// "zfs get" or "zfs list".
+    ///
+    /// If this dataset should be encrypted, this automatically adds the
+    /// "crypt" dataset component.
+    pub fn full_name(&self) -> String {
+        // Currently, we encrypt all datasets except Crucible.
+        //
+        // Crucible already performs encryption internally, and we
+        // avoid double-encryption.
+        if self.kind.dataset_should_be_encrypted() {
+            self.full_encrypted_name()
+        } else {
+            self.full_unencrypted_name()
+        }
+    }
+
+    /// Returns the mountpoint of the dataset.
+    ///
+    /// If this dataset is delegated to a non-global zone, returns "/data".
+    ///
+    /// If this dataset is intended for the global zone and should be encrypted,
+    /// this automatically adds the "crypt" dataset component.
+    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+        if self.kind.zoned() {
+            Utf8PathBuf::from("/data")
+        } else {
+            self.pool_name.dataset_mountpoint(
+                root,
+                &if self.kind.dataset_should_be_encrypted() {
+                    format!("crypt/{}", self.kind)
+                } else {
+                    self.kind.to_string()
+                },
+            )
+        }
+    }
+
+    fn full_encrypted_name(&self) -> String {
+        format!("{}/crypt/{}", self.pool_name, self.kind)
+    }
+
+    fn full_unencrypted_name(&self) -> String {
+        format!("{}/{}", self.pool_name, self.kind)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetNameParseError {
+    #[error("missing '/' separator in dataset name {0}")]
+    MissingSlash(String),
+    #[error("could not parse zpool name {zpool}: {err}")]
+    ParseZpoolName { zpool: String, err: String },
+    #[error("could not parse dataset kind {kind}")]
+    ParseDatasetKind {
+        kind: String,
+        #[source]
+        err: DatasetKindParseError,
+    },
+    #[error("expected `crypt/` for kind {kind:?} in dataset name {name}")]
+    MissingCryptInName { kind: DatasetKind, name: String },
+    #[error("unexpected `crypt/` for kind {kind:?} in dataset name {name}")]
+    UnexpectedCryptInName { kind: DatasetKind, name: String },
+}
+
+impl FromStr for DatasetName {
+    type Err = DatasetNameParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (pool_name, remainder) = s.split_once('/').ok_or_else(|| {
+            DatasetNameParseError::MissingSlash(s.to_string())
+        })?;
+
+        let pool_name = ZpoolName::from_str(pool_name).map_err(|err| {
+            DatasetNameParseError::ParseZpoolName {
+                zpool: pool_name.to_string(),
+                err,
+            }
+        })?;
+
+        let (kind_str, name_has_crypt) =
+            if let Some(remainder) = remainder.strip_prefix("crypt/") {
+                (remainder, true)
+            } else {
+                (remainder, false)
+            };
+
+        let kind = DatasetKind::from_str(kind_str).map_err(|err| {
+            DatasetNameParseError::ParseDatasetKind {
+                kind: kind_str.to_string(),
+                err,
+            }
+        })?;
+
+        match (kind.dataset_should_be_encrypted(), name_has_crypt) {
+            (true, true) | (false, false) => Ok(Self { pool_name, kind }),
+            (true, false) => Err(DatasetNameParseError::MissingCryptInName {
+                kind,
+                name: s.to_string(),
+            }),
+            (false, true) => {
+                Err(DatasetNameParseError::UnexpectedCryptInName {
+                    kind,
+                    name: s.to_string(),
+                })
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use test_strategy::proptest;
+
+    #[proptest]
+    fn parse_dataset_name(pool_id: [u8; 16], kind: DatasetKind) {
+        let pool_id = ZpoolUuid::from_bytes(pool_id);
+        for pool in
+            [ZpoolName::new_internal(pool_id), ZpoolName::new_external(pool_id)]
+        {
+            let dataset_name = DatasetName::new(pool, kind.clone());
+            let s = dataset_name.full_name();
+            match DatasetName::from_str(&s) {
+                Ok(d) => assert_eq!(d, dataset_name),
+                Err(err) => panic!("failed to parse dataset name {s}: {err}"),
+            }
+        }
+    }
+}

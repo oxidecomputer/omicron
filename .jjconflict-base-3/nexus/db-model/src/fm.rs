@@ -1,0 +1,135 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Types for representing fault management situation reports (sitreps) in the
+//! database.
+//!
+//! The fault management sitrep, and the ways in which it is represented in
+//! CRDB, is described in detail in [RFD
+//! 603](https://rfd.shared.oxide.computer/rfd/0603).
+//!
+//! These types are used when inserting and reading sitreps in CRDB; when in
+//! use, the sitrep is represented as a [`nexus_types::fm::Sitrep`]. See the
+//! documentation in [`nexus_types::fm`] for more information, and the
+//! [crate-level documentation](crate) for general conventions.
+
+use crate::SqlU32;
+use crate::typed_generation::DbTypedGeneration;
+use crate::typed_uuid::DbTypedUuid;
+use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
+use omicron_generation_kinds::{
+    SitrepAlertGenerationKind, SitrepSupportBundleGenerationKind,
+};
+use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
+
+mod alert_request;
+pub use alert_request::*;
+mod case;
+pub use case::*;
+mod config;
+pub use config::*;
+mod diagnosis_engine;
+pub use diagnosis_engine::*;
+mod fact_certificate;
+pub use fact_certificate::*;
+mod fact_physical_disk;
+pub use fact_physical_disk::*;
+mod fact_saga;
+pub use fact_saga::*;
+mod rendezvous_created;
+pub use rendezvous_created::*;
+mod support_bundle_request;
+pub use support_bundle_request::*;
+mod sitrep_analysis_report;
+pub use sitrep_analysis_report::*;
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_sitrep)]
+pub struct SitrepMetadata {
+    pub id: DbTypedUuid<SitrepKind>,
+    pub parent_sitrep_id: Option<DbTypedUuid<SitrepKind>>,
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub time_created: DateTime<Utc>,
+    pub creator_id: DbTypedUuid<OmicronZoneKind>,
+    pub comment: String,
+    pub next_inv_min_time_started: DateTime<Utc>,
+    pub alert_generation: DbTypedGeneration<SitrepAlertGenerationKind>,
+    pub support_bundle_generation:
+        DbTypedGeneration<SitrepSupportBundleGenerationKind>,
+}
+
+impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
+    fn from(db_meta: SitrepMetadata) -> Self {
+        let SitrepMetadata {
+            id,
+            parent_sitrep_id,
+            inv_collection_id,
+            creator_id,
+            comment,
+            time_created,
+            next_inv_min_time_started,
+            alert_generation,
+            support_bundle_generation,
+        } = db_meta;
+        Self {
+            id: id.into(),
+            parent_sitrep_id: parent_sitrep_id.map(Into::into),
+            inv_collection_id: inv_collection_id.into(),
+            creator_id: creator_id.into(),
+            next_inv_min_time_started,
+            comment,
+            time_created,
+            alert_generation: alert_generation.into(),
+            support_bundle_generation: support_bundle_generation.into(),
+        }
+    }
+}
+
+impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
+    fn from(db_meta: nexus_types::fm::SitrepMetadata) -> Self {
+        let nexus_types::fm::SitrepMetadata {
+            id,
+            parent_sitrep_id,
+            inv_collection_id,
+            creator_id,
+            comment,
+            time_created,
+            next_inv_min_time_started,
+            alert_generation,
+            support_bundle_generation,
+        } = db_meta;
+        Self {
+            id: id.into(),
+            parent_sitrep_id: parent_sitrep_id.map(Into::into),
+            inv_collection_id: inv_collection_id.into(),
+            creator_id: creator_id.into(),
+            comment,
+            time_created,
+            next_inv_min_time_started,
+            alert_generation: alert_generation.into(),
+            support_bundle_generation: support_bundle_generation.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = fm_sitrep_history)]
+pub struct SitrepVersion {
+    pub version: SqlU32,
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    pub time_made_current: DateTime<Utc>,
+}
+
+impl From<SitrepVersion> for nexus_types::fm::SitrepVersion {
+    fn from(db_version: SitrepVersion) -> Self {
+        let SitrepVersion { sitrep_id, version, time_made_current } =
+            db_version;
+        Self {
+            id: sitrep_id.into(),
+            version: version.into(),
+            time_made_current,
+        }
+    }
+}

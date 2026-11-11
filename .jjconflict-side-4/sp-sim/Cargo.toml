@@ -1,0 +1,46 @@
+[package]
+name = "sp-sim"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+gateway-ereport-messages.workspace = true
+gateway-messages.workspace = true
+gateway-types.workspace = true
+hex = { workspace = true, features = [ "serde" ] }
+hubtools.workspace = true
+iddqd.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
+serde.workspace = true
+ciborium.workspace = true
+ciborium-ll.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+sled-agent-types.workspace = true
+slog.workspace = true
+slog-dtrace.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+toml.workspace = true
+omicron-workspace-hack.workspace = true
+nix.workspace = true
+uuid.workspace = true
+zerocopy.workspace = true
+slog-error-chain.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true
+
+[[bin]]
+name = "sp-sim"

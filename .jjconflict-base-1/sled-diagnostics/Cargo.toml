@@ -1,0 +1,40 @@
+[package]
+name = "sled-diagnostics"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+cfg-if.workspace = true
+chrono.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
+futures.workspace = true
+illumos-utils.workspace = true
+jiff.workspace = true
+libc.workspace = true
+omicron-workspace-hack.workspace = true
+once_cell.workspace = true
+oxlog.workspace = true
+parallel-task-set.workspace = true
+rand.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+zfs-test-harness.workspace = true
+zip = { workspace = true, features = ["jiff-02"] }
+zstd.workspace = true
+
+[dev-dependencies]
+omicron-common.workspace = true
+omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
+sled-agent-types.workspace = true
+sled-storage = { workspace = true, features = ["testing"] }

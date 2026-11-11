@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc dae3bb9081ff9f94d9c588fb2d535df1ef72b8af5169dc8bc5072ee99e6ee72b # shrinks to input = _ProptestReadValidHostPhase2Args { data: [], block_size: 512 }

@@ -1,0 +1,95 @@
+format_version = 1
+
+[target]
+name = "sled_data_link"
+description = "A network data link on a compute sled"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "kind", "link_name", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "zone_name" ] },
+]
+
+[fields.kind]
+type = "string"
+description = "The kind or class of the data link"
+
+[fields.link_name]
+type = "string"
+description = "Name of the data link"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the link's rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the link's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the link's sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.zone_name]
+type = "string"
+description = "Name of the zone owning the link"
+
+[[metrics]]
+name = "bytes_sent"
+description = "Number of bytes sent on the link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "bytes_received"
+description = "Number of bytes received on the link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_sent"
+description = "Number of packets sent on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_received"
+description = "Number of packets received on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "errors_sent"
+description = "Number of errors encountered when sending on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "errors_received"
+description = "Number of errors encountered when receiving on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]

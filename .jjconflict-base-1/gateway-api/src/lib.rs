@@ -1,0 +1,721 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! HTTP API for the gateway service.
+
+use dropshot::{
+    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query,
+    RequestContext, TypedBody, UntypedBody, WebsocketEndpointResult,
+    WebsocketUpgrade,
+};
+use dropshot_api_manager_types::api_versions;
+use gateway_types_versions::{latest, v1};
+
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (8, REJECT_LOCAL_SWITCH_RESETS),
+    (7, BYTE_WRAPPER_0_2_BUMP),
+    (6, ARTIFACT_HASH_SCHEMA),
+    (5, RACK_ID),
+    (4, COMPONENT_VPD),
+    (3, NEWTYPE_UUID_BUMP),
+    (2, COSMO),
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
+
+/// This endpoint is used to upload SP and ROT Hubris archives as well as phase 1 host OS
+/// images. The phase 1 image is 32 MiB, driven by the QSPI flash on hardware.
+const SP_COMPONENT_UPDATE_MAX_BYTES: usize = 64 * 1024 * 1024;
+/// The host phase 2 recovery image is currently (Dec 2024) ~130 MiB.
+const HOST_PHASE2_MAX_BYTES: usize = 512 * 1024 * 1024;
+
+#[dropshot::api_description]
+pub trait GatewayApi {
+    type Context;
+
+    /// Get info on an SP
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}",
+    }]
+    async fn sp_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::component::SpState>, HttpError>;
+
+    /// Get host startup options for a sled
+    ///
+    /// This endpoint will currently fail for any `SpType` other than
+    /// `SpType::Sled`.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/startup-options",
+    }]
+    async fn sp_startup_options_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::host::HostStartupOptions>, HttpError>;
+
+    /// Set host startup options for a sled
+    ///
+    /// This endpoint will currently fail for any `SpType` other than
+    /// `SpType::Sled`.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/startup-options",
+    }]
+    async fn sp_startup_options_set(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+        body: TypedBody<latest::host::HostStartupOptions>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Read the current value of a sensor by ID
+    ///
+    /// Sensor IDs come from the host topo tree.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/sensor/{sensor_id}/value",
+    }]
+    async fn sp_sensor_read_value(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::sensor::PathSpSensorId>,
+    ) -> Result<HttpResponseOk<latest::sensor::SpSensorReading>, HttpError>;
+
+    /// List components of an SP
+    ///
+    /// A component is a distinct entity under an SP's direct control. This
+    /// lists all those components for a given SP.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component",
+    }]
+    async fn sp_component_list(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::component::SpComponentList>, HttpError>;
+
+    /// Get info for an SP component
+    ///
+    /// This can be useful, for example, to poll the state of a component if
+    /// another interface has changed the power state of a component or updated
+    /// a component.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}",
+    }]
+    async fn sp_component_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<
+        HttpResponseOk<Vec<latest::component_details::SpComponentDetails>>,
+        HttpError,
+    >;
+
+    /// Get the caboose of an SP component
+    ///
+    /// Not all components have a caboose.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/caboose",
+    }]
+    async fn sp_component_caboose_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        query_params: Query<latest::caboose::ComponentCabooseSlot>,
+    ) -> Result<HttpResponseOk<latest::caboose::SpComponentCaboose>, HttpError>;
+
+    /// Clear status of a component
+    ///
+    /// For components that maintain event counters (e.g., the sidecar
+    /// `monorail`), this will reset the event counters to zero.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/clear-status",
+    }]
+    async fn sp_component_clear_status(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the currently-active slot for an SP component
+    ///
+    /// Note that the meaning of "current" in "currently-active" may vary
+    /// depending on the component: for example, it may mean "the
+    /// actively-running slot" or "the slot that will become active the next
+    /// time the component is booted".
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/active-slot",
+    }]
+    async fn sp_component_active_slot_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<
+        HttpResponseOk<latest::component::SpComponentFirmwareSlot>,
+        HttpError,
+    >;
+
+    /// Set the currently-active slot for an SP component
+    ///
+    /// Note that the meaning of "current" in "currently-active" may vary
+    /// depending on the component: for example, it may mean "the
+    /// actively-running slot" or "the slot that will become active the next
+    /// time the component is booted".
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/active-slot",
+    }]
+    async fn sp_component_active_slot_set(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        query_params: Query<latest::component::SetComponentActiveSlotParams>,
+        body: TypedBody<latest::component::SpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Upgrade into a websocket connection attached to the given SP
+    /// component's serial console.
+    //
+    // # Notes
+    //
+    // This is a websocket endpoint; normally we'd expect to use
+    // `dropshot::channel` with `protocol = WEBSOCKETS` instead of
+    // `dropshot::endpoint`, but `dropshot::channel` doesn't allow us to return
+    // an error _before_ upgrading the connection, and we want to bail out ASAP
+    // if the SP doesn't allow us to attach.
+    //
+    // Therefore, we use `dropshot::endpoint` with the special argument type
+    // `WebsocketUpgrade`: this inserts the correct marker for progenitor to
+    // know this is a websocket endpoint, and it allows us to call
+    // `WebsocketUpgrade::handle()` (the method `dropshot::channel` would call
+    // for us to upgrade the connection) by hand after our error checking.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/serial-console/attach",
+    }]
+    async fn sp_component_serial_console_attach(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        websocket: WebsocketUpgrade,
+    ) -> WebsocketEndpointResult;
+
+    /// Detach the websocket connection attached to the given SP component's
+    /// serial console, if such a connection exists.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/serial-console/detach",
+    }]
+    async fn sp_component_serial_console_detach(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Reset an SP component (possibly the SP itself).
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/reset",
+        versions = VERSION_REJECT_LOCAL_SWITCH_RESETS..,
+    }]
+    async fn sp_component_reset(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<
+        HttpResponseUpdatedNoContent,
+        latest::update::SpComponentResetError,
+    >;
+
+    /// Reset an SP component (possibly the SP itself).
+    #[endpoint {
+        operation_id = "sp_component_reset",
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/reset",
+        versions = ..VERSION_REJECT_LOCAL_SWITCH_RESETS,
+    }]
+    async fn sp_component_reset_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseUpdatedNoContent, v1::update::SpComponentResetError>
+    {
+        Self::sp_component_reset(rqctx, path).await.map_err(From::from)
+    }
+
+    /// Update an SP component
+    ///
+    /// Update a component of an SP according to its specific update mechanism.
+    /// This interface is generic for all component types, but resolves to a
+    /// mechanism specific to the given component type. This may fail for a
+    /// variety of reasons including the update bundle being invalid or
+    /// improperly specified or due to an error originating from the SP itself.
+    ///
+    /// Note that not all components may be updated; components without known
+    /// update mechanisms will return an error without any inspection of the
+    /// update bundle.
+    ///
+    /// Updating the SP itself is done via the component name `sp`.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/update",
+        request_body_max_bytes = SP_COMPONENT_UPDATE_MAX_BYTES,
+    }]
+    async fn sp_component_update(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        query_params: Query<latest::update::ComponentUpdateIdSlot>,
+        body: UntypedBody,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the status of an update being applied to an SP component
+    ///
+    /// Getting the status of an update to the SP itself is done via the
+    /// component name `sp`.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/update-status",
+    }]
+    async fn sp_component_update_status(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::update::SpUpdateStatus>, HttpError>;
+
+    /// Start computing the hash of a given slot of a component.
+    ///
+    /// This endpoint is only valid for the `host-boot-flash` component.
+    ///
+    /// Computing the hash takes several seconds; callers should poll for results
+    /// using `sp_component_hash_firmware_get()`. In general they should call
+    /// `sp_component_hash_firmware_get()` first anyway, as the hashes are
+    /// cached in the SP and may already be ready.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
+    }]
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get a computed hash of a given slot of a component.
+    ///
+    /// This endpoint is only valid for the `host-boot-flash` component.
+    ///
+    /// Computing the hash takes several seconds; this endpoint returns the
+    /// current status. If the status is `HashNotStarted`, callers should start
+    /// hashing using `sp_component_hash_firmware_start()`. If the status is
+    /// `HashInProgress`, callers should wait a bit then call this endpoint
+    /// again.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
+    }]
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponentFirmwareSlot>,
+    ) -> Result<
+        HttpResponseOk<latest::host::ComponentFirmwareHashStatus>,
+        HttpError,
+    >;
+
+    /// Abort any in-progress update an SP component
+    ///
+    /// Aborting an update to the SP itself is done via the component name
+    /// `sp`.
+    ///
+    /// On a successful return, the update corresponding to the given UUID will
+    /// no longer be in progress (either aborted or applied).
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/update-abort",
+    }]
+    async fn sp_component_update_abort(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        body: TypedBody<latest::update::UpdateAbortBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the vital product data (VPD) identity of a component.
+    ///
+    /// Not all components have VPD. This endpoint will return an error if the
+    /// requested component does not advertise the `HAS_VPD` DeviceCapability
+    /// bit.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/vpd",
+        versions = VERSION_COMPONENT_VPD..,
+    }]
+    async fn sp_component_vpd_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::component_vpd::ComponentVpd>, HttpError>;
+
+    /// Read the CMPA from a root of trust.
+    ///
+    /// This endpoint is only valid for the `rot` component.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/cmpa",
+    }]
+    async fn sp_rot_cmpa_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::rot::RotCmpa>, HttpError>;
+
+    /// Read the requested CFPA slot from a root of trust.
+    ///
+    /// This endpoint is only valid for the `rot` component.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/cfpa",
+    }]
+    async fn sp_rot_cfpa_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        params: TypedBody<latest::rot::GetCfpaParams>,
+    ) -> Result<HttpResponseOk<latest::rot::RotCfpa>, HttpError>;
+
+    /// Read the RoT boot state from a root of trust
+    ///
+    /// This endpoint is only valid for the `rot` component.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/rot-boot-info",
+    }]
+    async fn sp_rot_boot_info(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+        params: TypedBody<latest::rot::GetRotBootInfoParams>,
+    ) -> Result<HttpResponseOk<latest::rot::RotState>, HttpError>;
+
+    /// Get the number of task dumps present on an SP
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/task-dump",
+    }]
+    async fn sp_task_dump_count(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<u32>, HttpError>;
+
+    /// Read a single task dump from an SP
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/task-dump/{task_dump_index}",
+    }]
+    async fn sp_task_dump_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::task_dump::PathSpTaskDumpIndex>,
+    ) -> Result<HttpResponseOk<latest::task_dump::TaskDump>, HttpError>;
+
+    /// List SPs via Ignition
+    ///
+    /// Retreive information for all SPs via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition",
+        versions = VERSION_COSMO..
+    }]
+    async fn ignition_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<latest::ignition::SpIgnitionInfo>>, HttpError>;
+
+    /// List SPs via Ignition
+    ///
+    /// Retreive information for all SPs via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition",
+        operation_id = "ignition_list",
+        versions = VERSION_INITIAL..VERSION_COSMO
+    }]
+    async fn ignition_list_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v1::ignition::SpIgnitionInfo>>, HttpError>
+    {
+        Ok(Self::ignition_list(rqctx)
+            .await?
+            .map(|v| v.into_iter().map(Into::into).collect()))
+    }
+
+    /// Get SP info via Ignition
+    ///
+    /// Retreive information for an SP via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition/{type}/{slot}",
+        versions = VERSION_COSMO..
+    }]
+    async fn ignition_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::ignition::SpIgnitionInfo>, HttpError>;
+
+    /// Get SP info via Ignition
+    ///
+    /// Retreive information for an SP via the Ignition controller. This is
+    /// lower latency and has fewer possible failure modes than querying the SP
+    /// over the management network.
+    #[endpoint {
+        method = GET,
+        path = "/ignition/{type}/{slot}",
+        operation_id = "ignition_get",
+        versions = VERSION_INITIAL..VERSION_COSMO
+    }]
+    async fn ignition_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+    ) -> Result<HttpResponseOk<v1::ignition::SpIgnitionInfo>, HttpError> {
+        Ok(Self::ignition_get(rqctx, path).await?.map(Into::into))
+    }
+
+    /// Send an ignition command targeting a specific SP.
+    ///
+    /// This endpoint can be used to transition a target between A2 and A3 (via
+    /// power-on / power-off) or reset it.
+    ///
+    /// The management network traffic caused by requests to this endpoint is
+    /// between this MGS instance and its local ignition controller, _not_ the
+    /// SP targeted by the command.
+    #[endpoint {
+        method = POST,
+        path = "/ignition/{type}/{slot}/{command}",
+    }]
+    async fn ignition_command(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::ignition::PathSpIgnitionCommand>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the current power state of a sled via its SP.
+    ///
+    /// Note that if the sled is in A3, the SP is powered off and will not be able
+    /// to respond; use the ignition control endpoints for those cases.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/power-state",
+    }]
+    async fn sp_power_state_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::component::PowerState>, HttpError>;
+
+    /// Set the current power state of a sled via its SP.
+    ///
+    /// Note that if the sled is in A3, the SP is powered off and will not be
+    /// able to respond; use the ignition control endpoints for those cases.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/power-state",
+    }]
+    async fn sp_power_state_set(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+        body: TypedBody<latest::component::PowerState>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Set the installinator image ID the sled should use for recovery.
+    ///
+    /// This value can be read by the host via IPCC; see the `ipcc` crate.
+    #[endpoint {
+        method = PUT,
+        path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn sp_installinator_image_id_set(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+        body: TypedBody<latest::update::InstallinatorImageId>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn sp_installinator_image_id_set_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+        body: TypedBody<v1::update::InstallinatorImageId>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::sp_installinator_image_id_set(rqctx, path, body.map(Into::into))
+            .await
+    }
+
+    /// Clear any previously-set installinator image ID on the target sled.
+    #[endpoint {
+        method = DELETE,
+        path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+    }]
+    async fn sp_installinator_image_id_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the most recent host phase2 request we've seen from the target SP.
+    ///
+    /// This method can be used as an indirect progress report for how far along a
+    /// host is when it is booting via the MGS -> SP -> UART recovery path. This
+    /// path is used to install the trampoline image containing installinator to
+    /// recover a sled.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/host-phase2-progress",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn sp_host_phase2_progress_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseOk<latest::update::HostPhase2Progress>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/host-phase2-progress",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn sp_host_phase2_progress_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2Progress>, HttpError> {
+        Self::sp_host_phase2_progress_get(rqctx, path).await.map(
+            |HttpResponseOk(progress)| {
+                HttpResponseOk(v1::update::HostPhase2Progress::from(progress))
+            },
+        )
+    }
+
+    /// Clear the most recent host phase2 request we've seen from the target SP.
+    #[endpoint {
+        method = DELETE,
+        path = "/sp/{type}/{slot}/host-phase2-progress",
+    }]
+    async fn sp_host_phase2_progress_delete(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Upload a host phase2 image that can be served to recovering hosts via the
+    /// host/SP control uart.
+    ///
+    /// MGS caches this image in memory and is limited to a small, fixed number of
+    /// images (potentially 1). Uploading a new image may evict the
+    /// least-recently-requested image if our cache is already full.
+    #[endpoint {
+        method = POST,
+        path = "/recovery/host-phase2",
+        request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+    }]
+    async fn recovery_host_phase2_upload(
+        rqctx: RequestContext<Self::Context>,
+        body: UntypedBody,
+    ) -> Result<
+        HttpResponseOk<latest::update::HostPhase2RecoveryImageId>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        method = POST,
+        path = "/recovery/host-phase2",
+        request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn recovery_host_phase2_upload_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: UntypedBody,
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2RecoveryImageId>, HttpError>
+    {
+        Self::recovery_host_phase2_upload(rqctx, body).await.map(
+            |HttpResponseOk(image_id)| {
+                HttpResponseOk(v1::update::HostPhase2RecoveryImageId::from(
+                    image_id,
+                ))
+            },
+        )
+    }
+
+    /// Get the identifier for the switch this MGS instance is connected to.
+    ///
+    /// Note that most MGS endpoints behave identically regardless of which
+    /// scrimlet the MGS instance is running on; this one, however, is
+    /// intentionally different. This endpoint is _probably_ only useful for
+    /// clients communicating with MGS over localhost (i.e., other services in
+    /// the switch zone) who need to know which sidecar they are connected to.
+    #[endpoint {
+        method = GET,
+        path = "/local/switch-id",
+    }]
+    async fn sp_local_switch_id(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::component::SpIdentifier>, HttpError>;
+
+    /// Get the complete list of SP identifiers this MGS instance is configured to
+    /// find and communicate with.
+    ///
+    /// Note that unlike most MGS endpoints, this endpoint does not send any
+    /// communication on the management network.
+    #[endpoint {
+        method = GET,
+        path = "/local/all-sp-ids",
+    }]
+    async fn sp_all_ids(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<latest::component::SpIdentifier>>, HttpError>;
+
+    /// Returns the rack UUID of the rack this management gateway service is
+    /// located in.
+    ///
+    /// All service processors accessed via this gateway can be assumed to be
+    /// located in the rack with this ID.
+    ///
+    /// If the rack UUID has not yet been set (i.e. because RSS has not yet
+    /// run), this endpoint returns a 503 Service Unavailable error.
+    #[endpoint {
+            method = GET,
+            path = "/local/rack-id",
+            versions = VERSION_RACK_ID..
+        }]
+    async fn rack_id_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::local::RackId>, HttpError>;
+
+    /// Request ereports from the target service processor.
+    ///
+    /// Query parameters provide the ENAs of the initial ereport in the returned
+    /// tranche, the SP's restart ID that the control plane believes is current,
+    /// and the (optional) last committed ENA.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/ereports"
+    }]
+    async fn sp_ereports_ingest(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSp>,
+        query: Query<ereport_types::EreportQuery>,
+    ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError>;
+}

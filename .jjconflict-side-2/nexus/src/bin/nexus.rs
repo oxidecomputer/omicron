@@ -1,0 +1,82 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Executable program to run Nexus, the heart of the control plane
+
+// TODO
+// - Server hostname
+// - Disable signals?
+// - General networking and runtime tuning for availability and security: see
+//   omicron#2184, omicron#2414.
+
+use anyhow::Context;
+use anyhow::anyhow;
+use camino::Utf8PathBuf;
+use clap::Parser;
+use nexus_config::NexusConfig;
+use omicron_common::FileKv;
+use omicron_common::cmd::CmdError;
+use omicron_common::cmd::fatal;
+use omicron_debug_dropbox::DebugDropbox;
+use omicron_nexus::run_server;
+use slog::debug;
+use slog::error;
+
+#[derive(Debug, Parser)]
+#[clap(name = "nexus", about = "See README.adoc for more information")]
+struct Args {
+    #[clap(name = "CONFIG_FILE_PATH", action)]
+    config_file_path: Option<Utf8PathBuf>,
+}
+
+fn main() {
+    if let Err(cmd_error) = oxide_tokio_rt::run(do_run()) {
+        fatal(cmd_error);
+    }
+}
+
+async fn do_run() -> Result<(), CmdError> {
+    let args = Args::parse();
+
+    let config_path = match args.config_file_path {
+        Some(path) => path,
+        None => {
+            use clap::CommandFactory;
+
+            eprintln!("{}", Args::command().render_help());
+            return Err(CmdError::Usage(
+                "CONFIG_FILE_PATH is required".to_string(),
+            ));
+        }
+    };
+    let config = NexusConfig::from_file(config_path)
+        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+
+    use slog::Drain;
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .pkg
+            .log
+            .to_logger("nexus")
+            .context("initializing logger")
+            .map_err(CmdError::Failure)?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return Err(CmdError::Failure(anyhow!(msg)));
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
+
+    let debug_dropbox = DebugDropbox::for_non_global_non_switch_zone(&log)
+        .await
+        .context("creating debug dropbox")
+        .map_err(CmdError::Failure)?;
+
+    run_server(&config, log, debug_dropbox)
+        .await
+        .map_err(|err| CmdError::Failure(anyhow!(err)))
+}

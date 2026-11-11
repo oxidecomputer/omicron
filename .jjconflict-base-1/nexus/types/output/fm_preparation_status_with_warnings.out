@@ -1,0 +1,8 @@
+/!\ non-fatal errors preparing analysis inputs:
+      > ereports: ereport 1 is invalid
+      > ereports: ereport 2 is also invalid
+      > silo_certificates: certificate 1 cannot be served
+    input preparation took 125ms
+      ereports:          120ms
+      in_service_disks:  8ms
+      silo_certificates: 3ms

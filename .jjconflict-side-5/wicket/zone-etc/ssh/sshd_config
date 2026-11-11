@@ -1,0 +1,49 @@
+# This file is deployed to the switch zone as /etc/ssh/sshd_config.
+
+# TODO: port
+
+#Port 22
+#AddressFamily any
+#ListenAddress 0.0.0.0
+#ListenAddress ::
+
+# General server hardening
+
+PasswordAuthentication no
+PermitEmptyPasswords no
+PubkeyAuthentication no
+PermitListen none
+PermitOpen none
+PermitTunnel no
+PermitUserRC no
+PermitRootLogin no
+AuthorizedKeysFile none
+AllowAgentForwarding no
+AllowTcpForwarding no
+PrintMotd no
+
+# Enable the SFTP sub-system. This allows clients such as scp(1) to use
+# SFTP rather than the legacy scp/rcp protocol, which is deprecated. SFTP has
+# been the default protocol for OpenSSH's scp(1) since April 2022.
+Subsystem sftp internal-sftp
+
+#
+# Allow the user to pass through a limited set of environment variables for
+# locale and shell preferences:
+#
+AcceptEnv LANG LC_* OXIDE_PREF_*
+
+AllowUsers wicket support
+
+# Allow "wicket" to log in without a password, and constrain it to the captive
+# shell
+Match User wicket
+        PermitEmptyPasswords yes
+        PasswordAuthentication yes
+        AuthenticationMethods none
+        ForceCommand /opt/oxide/wicket/bin/wicket
+
+Match User support
+        PubkeyAuthentication yes
+        AuthenticationMethods publickey
+        AuthorizedKeysFile /opt/oxide/support/authorized_keys

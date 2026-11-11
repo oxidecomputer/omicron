@@ -1,0 +1,39 @@
+format_version = 1
+
+[target]
+name = "ddm_router"
+description = "A Delay-Driven Multipath (DDM) router"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname", "rack_id", "sled_id" ] },
+]
+
+[[metrics]]
+name = "originated_tunnel_endpoints"
+description = "Current number of tunnel endpoints this router advertises"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "originated_underlay_prefixes"
+description = "Current number of prefixes on the underlay network this router advertises"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "The hostname of the machine running the DDM router"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack running the DDM router"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled running the DDM router"

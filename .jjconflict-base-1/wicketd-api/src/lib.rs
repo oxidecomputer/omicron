@@ -1,0 +1,368 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use bootstrap_agent_lockstep_types::RackOperationStatus;
+use dropshot::HttpError;
+use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
+use dropshot::Path;
+use dropshot::RequestContext;
+use dropshot::TypedBody;
+use gateway_client::types::IgnitionCommand;
+use iddqd::IdOrdMap;
+use schemars::JsonSchema;
+use semver::Version;
+use serde::Deserialize;
+use serde::Serialize;
+use sled_hardware_types::BaseboardId;
+use std::collections::BTreeSet;
+use std::net::Ipv6Addr;
+use wicket_common::artifact::ArtifactId;
+use wicket_common::inventory::RackV1Inventory;
+use wicket_common::inventory::SpIdentifier;
+use wicket_common::inventory::SpType;
+use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
+use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
+use wicket_common::preflight_check;
+use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
+use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
+use wicket_common::rack_update::AbortUpdateOptions;
+use wicket_common::rack_update::ClearUpdateStateOptions;
+use wicket_common::rack_update::StartUpdateOptions;
+use wicket_common::update_events::EventReport;
+use wicket_common::update_events::SpEventReport;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
+use wicketd_commission_types::update::UpdateTargets;
+
+#[dropshot::api_description]
+pub trait WicketdApi {
+    type Context;
+
+    /// Get wicketd's current view of all sleds visible on the bootstrap network.
+    #[endpoint {
+        method = GET,
+        path = "/bootstrap-sleds"
+    }]
+    async fn get_bootstrap_sleds(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BootstrapSledIps>, HttpError>;
+
+    /// Get the current status of the user-provided (or system-default-provided, in
+    /// some cases) RSS configuration.
+    #[endpoint {
+        method = GET,
+        path = "/rack-setup/config"
+    }]
+    async fn get_rss_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError>;
+
+    /// Get the current status of the multirack join configuration.
+    #[endpoint {
+        method = GET,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn get_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<CurrentMultirackJoinUserConfig>, HttpError>;
+
+    /// Upload a configuration for joining this rack into an existing regional
+    /// cluster.
+    ///
+    /// A multirack join configuration is mutually exclusive with an RSS config.
+    #[endpoint {
+        method = PUT,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn put_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinConfigBaseUserInput>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // -- BGP authentication key management
+
+    /// Return information about BGP authentication keys, including checking
+    /// validity of keys.
+    ///
+    /// Produces an error if the rack setup config wasn't set, or if any of the
+    /// requested key IDs weren't found.
+    #[endpoint(
+        method = GET,
+        path = "/rack-setup/config/bgp/auth-key"
+    )]
+    async fn get_bgp_auth_key_info(
+        rqctx: RequestContext<Self::Context>,
+        // A bit weird for a GET request to have a TypedBody, but there's no other
+        // nice way to transmit this information as a batch.
+        params: TypedBody<GetBgpAuthKeyParams>,
+    ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
+
+    /// Query current state of rack setup.
+    #[endpoint {
+        method = GET,
+        path = "/rack-setup"
+    }]
+    async fn get_rack_setup_state(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
+
+    /// A status endpoint used to report high level information known to
+    /// wicketd.
+    ///
+    /// This endpoint can be polled to see if there have been state changes in
+    /// the system that are useful to report to wicket.
+    ///
+    /// Wicket, and possibly other callers, will retrieve the changed
+    /// information, with follow up calls.
+    #[endpoint {
+        method = GET,
+        path = "/inventory"
+    }]
+    async fn get_inventory(
+        rqctx: RequestContext<Self::Context>,
+        body_params: TypedBody<GetInventoryParams>,
+    ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError>;
+
+    /// An endpoint used to report all available artifacts and event reports.
+    ///
+    /// The order of the returned artifacts is unspecified, and may change between
+    /// calls even if the total set of artifacts has not.
+    #[endpoint {
+        method = GET,
+        path = "/artifacts-and-event-reports",
+    }]
+    async fn get_artifacts_and_event_reports(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError>;
+
+    /// Report the configured baseboard details.
+    #[endpoint {
+        method = GET,
+        path = "/baseboard",
+    }]
+    async fn get_baseboard(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError>;
+
+    /// An endpoint to start updating one or more sleds, switches and PSCs.
+    #[endpoint {
+        method = POST,
+        path = "/update",
+    }]
+    async fn post_start_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<StartUpdateParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// An endpoint to get the status of any update being performed or recently
+    /// completed on a single SP.
+    #[endpoint {
+        method = GET,
+        path = "/update/{type}/{slot}",
+    }]
+    async fn get_update_sp(
+        rqctx: RequestContext<Self::Context>,
+        target: Path<SpIdentifier>,
+    ) -> Result<HttpResponseOk<EventReport>, HttpError>;
+
+    /// Forcibly cancels a running update.
+    ///
+    /// This is a potentially dangerous operation, but one that is sometimes
+    /// required. A machine reset might be required after this operation completes.
+    #[endpoint {
+        method = POST,
+        path = "/abort-update/{type}/{slot}",
+    }]
+    async fn post_abort_update(
+        rqctx: RequestContext<Self::Context>,
+        target: Path<SpIdentifier>,
+        opts: TypedBody<AbortUpdateOptions>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Resets update state for a sled.
+    ///
+    /// Use this to clear update state after a failed update.
+    #[endpoint {
+        method = POST,
+        path = "/clear-update-state",
+    }]
+    async fn post_clear_update_state(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<ClearUpdateStateParams>,
+    ) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError>;
+
+    /// Send an ignition command targeting a specific SP.
+    ///
+    /// This endpoint acts as a proxy to the MGS endpoint performing the same
+    /// function, allowing wicket to communicate exclusively with wicketd (even
+    /// though wicketd adds no meaningful functionality here beyond what MGS
+    /// offers).
+    #[endpoint {
+        method = POST,
+        path = "/ignition/{type}/{slot}/{command}",
+    }]
+    async fn post_ignition_command(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpIgnitionCommand>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Start a preflight check for uplink configuration.
+    #[endpoint {
+        method = POST,
+        path = "/preflight/uplink",
+    }]
+    async fn post_start_preflight_uplink_check(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<PreflightUplinkCheckOptions>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the report for the most recent (or still running) preflight uplink
+    /// check.
+    #[endpoint {
+        method = GET,
+        path = "/preflight/uplink",
+    }]
+    async fn get_preflight_uplink_report(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<preflight_check::EventReport>, HttpError>;
+
+    /// Instruct wicketd to reload its SMF config properties.
+    ///
+    /// The only expected client of this endpoint is `curl` from wicketd's SMF
+    /// `refresh` method, but other clients hitting it is harmless.
+    #[endpoint {
+        method = POST,
+        path = "/reload-config",
+    }]
+    async fn post_reload_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledIp {
+    pub baseboard: BaseboardId,
+    pub ip: Ipv6Addr,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledIps {
+    pub sleds: Vec<BootstrapSledIp>,
+}
+
+// This is a summary of the subset of `RackInitializeRequest` that is sensitive;
+// we only report a summary instead of returning actual data.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfigSensitive {
+    pub num_external_certificates: usize,
+    pub recovery_silo_password_set: bool,
+    // We define GetBgpAuthKeyInfoResponse in wicket-common and use a
+    // progenitor replace directive for it, because we don't want typify to
+    // turn the BTreeMap into a HashMap. Use the same struct here to piggyback
+    // on that.
+    pub bgp_auth_keys: GetBgpAuthKeyInfoResponse,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfig {
+    pub sensitive: CurrentRssUserConfigSensitive,
+    pub insensitive: CurrentRssUserConfigInsensitive,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct GetBgpAuthKeyParams {
+    /// Checks that these keys are valid.
+    pub check_valid: BTreeSet<BgpAuthKeyId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GetInventoryParams {
+    /// Refresh the state of these SPs from MGS prior to returning (instead of
+    /// returning cached data).
+    pub force_refresh: Vec<SpIdentifier>,
+}
+
+/// The response to a `get_inventory` call: the inventory known to wicketd, or a
+/// notification that data is unavailable.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "data")]
+pub enum GetInventoryResponse {
+    Response { inventory: RackV1Inventory },
+    Unavailable,
+}
+
+/// The response to a `get_artifacts` call: the system version, and the list of
+/// all artifacts currently held by wicketd.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetArtifactsAndEventReportsResponse {
+    pub system_version: Option<Version>,
+
+    /// List of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository.
+    pub artifacts: Vec<ArtifactId>,
+
+    pub event_reports: IdOrdMap<SpEventReport>,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub struct StartUpdateParams {
+    /// The SP identifiers to start the update with.
+    pub targets: UpdateTargets,
+
+    /// Options for the update.
+    pub options: StartUpdateOptions,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub struct ClearUpdateStateParams {
+    /// The SP identifiers to clear the update state for.
+    pub targets: UpdateTargets,
+
+    /// Options for clearing update state
+    pub options: ClearUpdateStateOptions,
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetBaseboardResponse {
+    pub baseboard: BaseboardId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PathSpIgnitionCommand {
+    #[serde(rename = "type")]
+    pub type_: SpType,
+    pub slot: u16,
+    pub command: IgnitionCommand,
+}
+
+/// Options provided to the preflight uplink check.
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreflightUplinkCheckOptions {
+    /// DNS name to query.
+    pub dns_name_to_query: Option<String>,
+}

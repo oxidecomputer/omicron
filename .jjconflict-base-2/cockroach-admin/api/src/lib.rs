@@ -1,0 +1,113 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use cockroach_admin_types_versions::latest;
+use dropshot::{
+    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
+    TypedBody,
+};
+use dropshot_api_manager_types::api_versions;
+
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (2, NEWTYPE_UUID_BUMP),
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
+
+#[dropshot::api_description]
+pub trait CockroachAdminApi {
+    type Context;
+
+    /// Initialize the CockroachDB cluster.
+    ///
+    /// This performs both the base-level `cockroach init` and installs the
+    /// Omicron schema. It should be idempotent, but we haven't heavily tested
+    /// that. We test that this endpoint can safely be called multiple times,
+    /// but haven't tested calling it concurrently (either multiple simultaneous
+    /// requests to the same cockroach node, or sending simultaneous requests to
+    /// different cockroach nodes, both of which would rely on `cockroach init`
+    /// itself being safe to call concurrently). In practice, only RSS calls
+    /// this endpoint and it does so serially; as long as we don't change that,
+    /// the existing testing should be sufficient.
+    #[endpoint {
+        method = POST,
+        path = "/cluster/init",
+    }]
+    async fn cluster_init(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the status of all nodes in the CRDB cluster.
+    #[endpoint {
+        method = GET,
+        path = "/node/status",
+    }]
+    async fn node_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::node::ClusterNodeStatus>, HttpError>;
+
+    /// Get the CockroachDB node ID of the local cockroach instance.
+    #[endpoint {
+        method = GET,
+        path = "/node/id",
+    }]
+    async fn local_node_id(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::node::LocalNodeId>, HttpError>;
+
+    /// Decommission a node from the CRDB cluster.
+    #[endpoint {
+        method = POST,
+        path = "/node/decommission",
+    }]
+    async fn node_decommission(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::node::NodeId>,
+    ) -> Result<HttpResponseOk<latest::node::NodeDecommission>, HttpError>;
+
+    /// Proxy to CockroachDB's /_status/vars endpoint
+    //
+    // Dropshot isn't happy about the "_status" portion of the path; it fails
+    // the linter. Instead, I'm adding the prefix "proxy" to make it clear these
+    // are "intended-to-be-proxied" endpoints, rather than exact matches for the
+    // CRDB HTTP interface paths.
+    #[endpoint {
+        method = GET,
+        path = "/proxy/status/vars",
+    }]
+    async fn status_vars(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError>;
+
+    /// Proxy to CockroachDB's /_status/nodes endpoint
+    #[endpoint {
+        method = GET,
+        path = "/proxy/status/nodes",
+    }]
+    async fn status_nodes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError>;
+}

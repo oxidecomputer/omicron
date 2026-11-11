@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='clickhouse_server'>
+
+  <service name='oxide/clickhouse_server' type='service' version='1'>
+  <create_default_instance enabled='false' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
+  <dependency name='clickhouse-admin-server' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/clickhouse-admin-server:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse_server/clickhouse server --config %{config/config_path} &amp;'
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='config' type='application'>
+    <propval name='config_path' type='astring' value='unknown' />
+  </property_group>
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>ClickHouse Server</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Oxide's Metrics Database</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

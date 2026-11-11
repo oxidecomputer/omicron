@@ -1,0 +1,7 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Ensure that we can pipe command output to a shell command
+> show ! grep DNS
+configured external DNS zone name: oxide.example
+internal DNS generations: 
+external DNS generations: 
+

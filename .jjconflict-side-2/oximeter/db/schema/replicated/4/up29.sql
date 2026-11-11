@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_cumulativef64_local MODIFY COLUMN datum Nullable(Float64)

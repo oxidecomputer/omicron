@@ -1,0 +1,75 @@
+///`authz` type for a resource of type OrganizationUsed to uniquely identify a resource of type Organization across renames, moves, etc., and to do authorization checks (see  [`crate::context::OpContext::authorize()`]).  See [`crate::authz`] module-level documentation for more information.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Organization {
+    parent: Fleet,
+    key: Uuid,
+    lookup_type: LookupType,
+}
+impl Organization {
+    /// Makes a new `authz` struct for this resource with the given
+    /// `parent`, unique key `key`, looked up as described by
+    /// `lookup_type`
+    pub fn new(parent: Fleet, key: Uuid, lookup_type: LookupType) -> Organization {
+        Organization {
+            parent,
+            key: key.into(),
+            lookup_type,
+        }
+    }
+    /// A version of `new` that takes the primary key type directly.
+    /// This is only different from [`Self::new`] if this resource
+    /// uses a different input key type.
+    pub fn with_primary_key(
+        parent: Fleet,
+        key: Uuid,
+        lookup_type: LookupType,
+    ) -> Organization {
+        Organization {
+            parent,
+            key,
+            lookup_type,
+        }
+    }
+    pub fn id(&self) -> Uuid {
+        self.key.clone().into()
+    }
+    /// Describes how to register this type with Oso
+    pub(super) fn init() -> Init {
+        use oso::PolarClass;
+        Init {
+            polar_snippet: "",
+            polar_class: Organization::get_polar_class(),
+        }
+    }
+}
+impl Eq for Organization {}
+impl PartialEq for Organization {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+impl oso::PolarClass for Organization {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |r: &Organization, actor: AuthenticatedActor, role: String| { false },
+            )
+            .add_attribute_getter("fleet", |r: &Organization| r.parent.clone())
+    }
+}
+impl ApiResource for Organization {
+    fn parent(&self) -> Option<&dyn AuthorizedResource> {
+        Some(&self.parent)
+    }
+    fn resource_type(&self) -> ResourceType {
+        ResourceType::Organization
+    }
+    fn lookup_type(&self) -> &LookupType {
+        &self.lookup_type
+    }
+    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
+        None
+    }
+}

@@ -1,0 +1,13 @@
+[dropshot]
+# 100 MiB.  This ought to be large enough for a while, but not so large that
+# we'll use tons of memory parsing incoming HTTP requests.
+default_request_body_max_bytes = 104857600
+
+[log]
+# Show log messages of this level and more severe
+level = "info"
+mode = "stderr-terminal"
+
+[storage]
+storage_path = "./dns-storage"
+keep_old_generations = 3

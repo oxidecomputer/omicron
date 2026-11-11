@@ -1,0 +1,10 @@
+{
+  "column_names": [
+    "count()"
+  ],
+  "rows": [
+    [
+      12
+    ]
+  ]
+}
