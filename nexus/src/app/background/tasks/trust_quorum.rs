@@ -368,7 +368,6 @@ async fn prepare(
     let outcome = record_prepare_status(
         opctx,
         datastore,
-        config,
         status.config,
         status.acked_prepares,
     )
@@ -391,26 +390,13 @@ async fn prepare(
 async fn record_prepare_status(
     opctx: &OpContext,
     datastore: &DataStore,
-    config: NexusTrustQuorumConfig,
     coordinator_config: trust_quorum_types::configuration::Configuration,
     acked_prepares: BTreeSet<BaseboardId>,
 ) -> Result<TqPrepareStatusOutcome, Error> {
     let outcome = datastore
         .tq_update_prepare_status(opctx, coordinator_config, acked_prepares)
         .await?;
-
-    match outcome {
-        // TODO: This still commits using the possibly-stale config loaded
-        // before the prepare update. In particular, it is possible for digests
-        // to be present but secrets to be missing. It should use the returned
-        // one.
-        TqPrepareStatusOutcome::Committing { config: _ } => {
-            Ok(TqPrepareStatusOutcome::Committing { config: Box::new(config) })
-        }
-        TqPrepareStatusOutcome::StillPreparing => {
-            Ok(TqPrepareStatusOutcome::StillPreparing)
-        }
-    }
+    Ok(outcome)
 }
 
 #[derive(Debug)]
@@ -1045,7 +1031,6 @@ mod tests {
         let outcome = record_prepare_status(
             opctx,
             datastore,
-            loaded_config,
             collecting_shares.clone(),
             BTreeSet::new(),
         )
@@ -1063,12 +1048,10 @@ mod tests {
         //
         // * secrets are known
         // * enough members have acked
-        let loaded_config =
-            load_config(opctx, datastore, rack_id, Epoch(2)).await;
         let secrets =
             EncryptedRackSecrets::new(Salt([7; 32]), vec![1, 2, 3, 4].into());
         let preparing = Configuration {
-            encrypted_rack_secrets: Some(secrets),
+            encrypted_rack_secrets: Some(secrets.clone()),
             ..collecting_shares.clone()
         };
         let min_acks = loaded_config.threshold.0 as usize
@@ -1078,7 +1061,6 @@ mod tests {
         let outcome = record_prepare_status(
             opctx,
             datastore,
-            loaded_config,
             preparing.clone(),
             acked.clone(),
         )
@@ -1091,30 +1073,24 @@ mod tests {
             }
         };
 
-        // BUG: the commit config is the one loaded *before* the update, so it
-        // has digests but no secrets and every member unacked. The next
-        // commit fixes this.
+        // commit_config is the one written by the update, so it has the
+        // expected secrets, and the acked members are prepared.
         assert_eq!(
-            commit_config.state,
-            TrustQuorumConfigState::Preparing,
-            "commit config is still Preparing (this is a BUG)",
+            *commit_config,
+            load_config(opctx, datastore, rack_id, Epoch(2)).await
         );
+        assert_eq!(commit_config.state, TrustQuorumConfigState::Committing);
         let commit_wire_config = Configuration::try_from(&*commit_config)
             .expect("commit config has share digests");
-        assert_eq!(
-            commit_wire_config.encrypted_rack_secrets, None,
-            "commit config does not have secrets (this is a BUG)"
-        );
-        assert_eq!(
-            commit_wire_config, collecting_shares,
-            "commit config matches the first activation's status (this is a BUG)",
-        );
+        assert_eq!(commit_wire_config.encrypted_rack_secrets, Some(secrets));
+        assert_eq!(commit_wire_config, preparing);
         for (id, member) in &commit_config.members {
-            assert_eq!(
-                member.state,
-                TrustQuorumMemberState::Unacked,
-                "member {id} is unacked (this is a BUG)"
-            );
+            let expected = if acked.contains(id) {
+                TrustQuorumMemberState::Prepared
+            } else {
+                TrustQuorumMemberState::Unacked
+            };
+            assert_eq!(member.state, expected, "member {id}");
         }
 
         db.terminate().await;
