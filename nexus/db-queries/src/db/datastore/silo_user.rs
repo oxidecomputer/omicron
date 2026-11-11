@@ -550,7 +550,7 @@ impl DataStore {
                         .await?;
                 }
 
-                // delete the user's role assignments
+                // Delete role assignments.
                 self.role_assignment_delete_by_identity_on_connection(
                     &conn,
                     model::IdentityType::SiloUser,

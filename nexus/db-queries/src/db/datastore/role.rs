@@ -108,9 +108,6 @@ impl DataStore {
     /// Delete all role assignments held by the given identity, on any
     /// resource. Used when deleting users and groups so that deleted
     /// identities don't linger in policies.
-    ///
-    /// Returns the raw diesel error so this can run inside a transaction;
-    /// callers outside one should map it with `public_error_from_diesel`.
     pub(super) async fn role_assignment_delete_by_identity_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -131,9 +128,6 @@ impl DataStore {
     /// Delete all role assignments on the given resource, held by any
     /// identity. Used when deleting resources that have policies (silos,
     /// projects) so their assignments don't outlive them.
-    ///
-    /// Returns the raw diesel error so this can run inside a transaction;
-    /// callers outside one should map it with `public_error_from_diesel`.
     pub(super) async fn role_assignment_delete_by_resource_on_connection<
         T: authz::ApiResourceWithRoles,
     >(

@@ -514,9 +514,7 @@ impl DataStore {
 
                 // Delete all role assignments on the silo, including those
                 // held by users from other silos (typically fleet admins).
-                // The count is bounded by MAX_ROLE_ASSIGNMENTS_PER_RESOURCE,
-                // so unlike the per-identity cleanup below, this can run in
-                // the transaction.
+                // The count is bounded by MAX_ROLE_ASSIGNMENTS_PER_RESOURCE.
                 self.role_assignment_delete_by_resource_on_connection(
                     &conn, authz_silo,
                 )
