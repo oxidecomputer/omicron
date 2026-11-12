@@ -2178,8 +2178,8 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         changes: &PendingUpdateDispositionChanges,
     ) -> Result<(), Error> {
-        for (&sled_id, &kind) in changes.iter() {
-            self.sled_set_update_disposition_kind(sled_id, kind)?;
+        for change in changes.iter() {
+            self.sled_set_update_disposition_kind(change.sled_id, change.kind)?;
         }
         Ok(())
     }
