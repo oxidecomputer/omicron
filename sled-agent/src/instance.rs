@@ -3070,7 +3070,9 @@ impl UngracefulTermGraceTime {
     }
 
     fn disarm(&mut self) {
-        self.stop_timeout = None;
+        if self.stop_req_method != InstanceShutdownPolicy::HardOff {
+            self.stop_timeout = None;
+        }
     }
 
     async fn stop_timeout_completed(&mut self) -> Duration {
