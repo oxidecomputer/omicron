@@ -1654,18 +1654,33 @@ impl DataStore {
     ) -> Result<Vec<HwBaseboardId>, TransactionError<Error>> {
         use nexus_db_schema::schema::hw_baseboard_id::dsl;
 
-        let (parts, serials): (Vec<_>, Vec<_>) = members
-            .into_iter()
-            .map(|m| (m.part_number, m.serial_number))
-            .collect();
-
-        dsl::hw_baseboard_id
-            .filter(dsl::part_number.eq_any(parts))
-            .filter(dsl::serial_number.eq_any(serials))
+        // Diesel can't compare a tuple of columns with IN. Instead, use
+        // a disjunctive normal form expression (OR of ANDs).
+        //
+        // Other options:
+        //
+        // * Separate IN filters on each column would match their cross product.
+        // * A hand-written SQL query fragment seems excessive given this
+        //   alternative exists.
+        let mut query = dsl::hw_baseboard_id
             .select(HwBaseboardId::as_select())
-            .load_async(conn)
-            .await
-            .map_err(TransactionError::Database)
+            .into_boxed();
+        let mut any_members = false;
+        for member in members {
+            any_members = true;
+            query = query.or_filter(
+                dsl::part_number
+                    .eq(member.part_number)
+                    .and(dsl::serial_number.eq(member.serial_number)),
+            );
+        }
+        if !any_members {
+            // With no members, the query would match every row, so handle that
+            // as a special case.
+            return Ok(Vec::new());
+        }
+
+        query.load_async(conn).await.map_err(TransactionError::Database)
     }
 
     async fn tq_get_latest_config_conn(
@@ -1951,6 +1966,57 @@ mod tests {
         assert_ne!(e1, e2);
         assert_ne!(e1, e3);
         assert_ne!(e2, e3);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_lookup_hw_baseboard_ids_matches_exact_pairs() {
+        let logctx =
+            test_setup_log("test_lookup_hw_baseboard_ids_matches_exact_pairs");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let hw = |part: &str, serial: &str| HwBaseboardId {
+            id: Uuid::new_v4(),
+            part_number: part.to_string(),
+            serial_number: serial.to_string(),
+        };
+        let a1 = hw("part-a", "serial-1");
+        let a2 = hw("part-a", "serial-2");
+        {
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
+            diesel::insert_into(dsl::hw_baseboard_id)
+                .values(vec![a1.clone(), a2.clone()])
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        // If we filtered the columns separately, we'd also return
+        // part-a:serial-2.
+        let requested = [
+            BaseboardId::from(a1.clone()),
+            BaseboardId {
+                part_number: "part-b".to_string(),
+                serial_number: "serial-2".to_string(),
+            },
+        ];
+        let found = DataStore::lookup_hw_baseboard_ids_conn(
+            &conn,
+            requested.into_iter(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(found, vec![a1]);
+
+        let found =
+            DataStore::lookup_hw_baseboard_ids_conn(&conn, std::iter::empty())
+                .await
+                .unwrap();
+        assert_eq!(found, Vec::new());
 
         db.terminate().await;
         logctx.cleanup_successful();
