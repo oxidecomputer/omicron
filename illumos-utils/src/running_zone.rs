@@ -430,7 +430,7 @@ impl RunningZone {
     ///
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
-        if self.inner.has_stopped {
+        if self.inner.has_been_removed {
             return Ok(());
         }
 
@@ -441,7 +441,7 @@ impl RunningZone {
             .halt_and_remove_logged(&log, &name)
             .await
             .map_err(|err| err.to_string())?;
-        self.inner.has_stopped = true;
+        self.inner.has_been_removed = true;
         Ok(())
     }
 
@@ -622,9 +622,9 @@ pub struct InstalledZone {
     // API to underlying zone commands
     zones_api: DebugIgnore<Arc<dyn crate::zone::Api>>,
 
-    // If `true`, this zone has been successfully stopped, and dropping the
+    // If `true`, this zone has been successfully removed, and dropping the
     // `InstalledZone` does not need to halt and remove it.
-    has_stopped: bool,
+    has_been_removed: bool,
 }
 
 impl InstalledZone {
@@ -682,7 +682,7 @@ impl Drop for InstalledZone {
     fn drop(&mut self) {
         // If this zone has already been stopped successfully, we don't need to
         // try to halt and remove it a second time.
-        if self.has_stopped {
+        if self.has_been_removed {
             return;
         }
 
@@ -953,7 +953,7 @@ impl<'a> ZoneBuilder<'a> {
                 opte_ports: self.opte_ports?,
                 links: self.links?,
                 zones_api: DebugIgnore(zones_api),
-                has_stopped: false,
+                has_been_removed: false,
             };
             let xml_path = iz.site_profile_xml_path().parent()?.to_path_buf();
             std::fs::create_dir_all(&xml_path)
@@ -1061,7 +1061,7 @@ impl<'a> ZoneBuilder<'a> {
             opte_ports,
             links,
             zones_api: DebugIgnore(zones_api),
-            has_stopped: false,
+            has_been_removed: false,
         })
     }
 }
