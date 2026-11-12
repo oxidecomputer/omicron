@@ -7,6 +7,7 @@
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use slog::{Logger, warn};
+use std::time::Duration;
 
 // TODO(https://www.illumos.org/issues/13837): This is a hack;
 // remove me when when fixed. Ideally, the ".synchronous()" argument
@@ -30,6 +31,13 @@ pub async fn wait_for_service<'a>(
     fmri: &str,
     log: Logger,
 ) -> Result<(), Error> {
+    // Okay, so...all timeouts are arbitrary, right? The important thing here is
+    // that if the service isn't coming up, we should eventually give up and
+    // return an error, instead of waiting forever. Assuming that a service that
+    // can't start within ten minutes isn't going to start seems fairly
+    // reasonable?
+    const TIMEOUT: Duration = Duration::from_mins(10);
+
     let name = smf::PropertyName::new("restarter", "state").unwrap();
 
     let log_notification_failure = |error, delay| {
@@ -43,7 +51,7 @@ pub async fn wait_for_service<'a>(
         );
     };
     backoff::retry_notify(
-        backoff::retry_policy_local(),
+        backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
             let mut p = smf::Properties::new();
             let properties =
@@ -84,6 +92,8 @@ pub async fn wait_for_service<'a>(
     )
     .await
     .map_err(|e| Error::InternalError {
-        internal_message: format!("Failed to wait for service: {}", e),
+        internal_message: format!(
+            "service {fmri:?} did not reach \"online\" within {TIMEOUT:?}: {e}",
+        ),
     })
 }
