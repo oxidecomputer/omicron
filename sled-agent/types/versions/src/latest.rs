@@ -238,6 +238,8 @@ pub mod multirack {
     pub use crate::v60::multirack::MultirackJoinServiceStatus;
     pub use crate::v60::multirack::SledAgentInfo;
     pub use crate::v60::multirack::SledAgentStartState;
+
+    pub use crate::v63::multirack::MultirackJoinCompleteResponse;
 }
 
 pub mod probes {

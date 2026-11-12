@@ -15,7 +15,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
-use crate::rot::{RotAttestationHandle, RotAttestationTask};
+use crate::rot::RotAttestor;
 use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
@@ -405,6 +405,20 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinGenerationUnavailable,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::GONE,
+                err.to_string(),
+            ),
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinPendingConfigUpdate,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)
@@ -500,7 +514,7 @@ struct SledAgentInner {
     nexus_notifier: NexusNotifierHandle,
 
     // A handle to the RoT for attestation requests.
-    rot_attestor: RotAttestationHandle,
+    rot_attestor: RotAttestor,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -853,9 +867,7 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
-        // Spawn a background task for handling RoT attestation operations
-        let rot_attest_handle =
-            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+        let rot_attestor = RotAttestor::new(&log, &config.sprockets.attest)?;
 
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
@@ -880,7 +892,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_notifier: nexus_notifier_handle,
-                rot_attestor: rot_attest_handle,
+                rot_attestor,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 trust_quorum: long_running_task_handles.trust_quorum.clone(),
@@ -955,7 +967,7 @@ impl SledAgent {
         &self,
         rot: Rot,
         remote_addr: SocketAddr,
-    ) -> Result<&RotAttestationHandle, HttpError> {
+    ) -> Result<&RotAttestor, HttpError> {
         // We currently only support the LPC55 RoT
         let Rot::Oxide = rot;
         // And we only serve sled-local clients
@@ -1743,10 +1755,15 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Complete a multirack join operation
-    pub(crate) fn complete_multirack_join(&self) -> Result<(), Error> {
-        self.inner.multirack_join_accessor.complete_multirack_join()?;
-        Ok(())
+    /// Complete a multirack join operation and return the final bootstore
+    /// generation
+    pub(crate) async fn complete_multirack_join(&self) -> Result<u64, Error> {
+        let generation = self
+            .inner
+            .multirack_join_accessor
+            .complete_multirack_join()
+            .await?;
+        Ok(generation)
     }
 
     pub(crate) fn multirack_join_service_status(

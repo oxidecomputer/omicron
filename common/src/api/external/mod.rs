@@ -1001,6 +1001,7 @@ pub enum ResourceType {
     PhysicalDisk,
     Probe,
     ProbeNetworkInterface,
+    Problem,
     Project,
     ProjectImage,
     Rack,
