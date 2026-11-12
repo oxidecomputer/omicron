@@ -556,7 +556,7 @@ enum NoVmmReason {
     Failed,
     /// The active VMM was stopped because its sled is being evacuated for an
     /// update.
-    StoppedForUpdate,
+    SledEvacuating,
     /// The active VMM stopped while the instance was intended to be running,
     /// was not migrating, and its sled was not being evacuated. In this case,
     /// we believe the guest must have shut itself down and the VMM process
@@ -622,7 +622,7 @@ impl UpdatesRequired {
                             "propolis_id" => %active_vmm.id,
                             "update_disposition_generation" => ?generation,
                         );
-                        no_vmm_reason = NoVmmReason::StoppedForUpdate;
+                        no_vmm_reason = NoVmmReason::SledEvacuating;
                     } else if snapshot.migration.is_none() {
                         // The active VMM was destroyed while we were not
                         // migrating out, or destroying it intentionally for an
@@ -865,7 +865,7 @@ impl UpdatesRequired {
             // is intended to be running, then the new instance state should be
             // `SledEvacuating`. This way, it will appear as `Rebooting` in the
             // external API, and will be eligible to be automatically restarted.
-            Some(NoVmmReason::StoppedForUpdate)
+            Some(NoVmmReason::SledEvacuating)
                 if current_intent == InstanceIntendedState::Running =>
             {
                 new_runtime.nexus_state = InstanceState::SledEvacuating;
@@ -873,7 +873,7 @@ impl UpdatesRequired {
             // If, on the other hand, the active VMM stopped for a sled update,
             // but the instance is no longer intended to be running, then the
             // new instance state should be `NoVmm` (`Stopped`).
-            Some(NoVmmReason::StoppedForUpdate) => {
+            Some(NoVmmReason::SledEvacuating) => {
                 new_runtime.nexus_state = InstanceState::NoVmm;
             }
             // If the guest shut itself down, record that in the intended state,
@@ -2588,7 +2588,7 @@ mod test {
         // Make sure we are still actually testing the expected update saga...
         assert_eq!(
             real_params.update.no_vmm_reason,
-            Some(NoVmmReason::StoppedForUpdate),
+            Some(NoVmmReason::SledEvacuating),
             "the update should be for a VMM stopped for a sled evacuation. if \
              this is no longer the case, this test is no longer testing the \
              right thing!",
