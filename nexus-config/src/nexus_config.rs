@@ -150,6 +150,22 @@ pub enum InternalDns {
     FromAddress { address: SocketAddr },
 }
 
+/// Nexus config struct for values known only at deployment time.
+///
+/// Note the [`JsonSchema`] derive is just for `test_deployment_config_schema`,
+/// which is there to guard us against accidentally changing this struct without
+/// giving the proper care and consideration.
+///
+/// We skip adding the Dropshot config fields to the schema because
+/// [`ConfigDropshot`] doesn't implement [`JsonSchema`]; this isn't ideal, but
+/// we can at least lean on the `dropshot` crate's semver adherance to avoid
+/// accidental changes to the underlying config formats for those fields.
+///
+/// Deliberate changes to this struct require careful consideration to avoid
+/// breaking anything on update, and existing TOML example/test config files in
+/// this repo should also be updated accordingly. Once this has been done, the
+/// expected output for `test_deployment_config_schema` can be updated by
+/// running the test with `EXPECTORATE=overwrite`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
@@ -166,11 +182,10 @@ pub struct DeploymentConfig {
     /// configs that were created before this field was added. In production we
     /// always expect this port to be constant, but we need to be able to
     /// override it when running tests.
-    #[schemars(skip)]
     #[serde(default = "default_techport_external_server_port")]
     pub techport_external_server_port: u16,
     /// Dropshot configuration for the external API server.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[schemars(skip)]
     pub dropshot_external: ConfigDropshotWithTls,
     /// Additional addresses to listen on for the external API.
     ///
@@ -178,14 +193,13 @@ pub struct DeploymentConfig {
     /// of these addresses, reusing all other settings (TLS, request limits,
     /// etc.) from `dropshot_external`. This is mainly used to serve the
     /// external API on both IPv4 and IPv6 addresses.
-    #[schemars(skip)]
     #[serde(default)]
     pub dropshot_external_additional_addresses: Vec<SocketAddr>,
     /// Dropshot configuration for internal API server.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[schemars(skip)]
     pub dropshot_internal: ConfigDropshot,
     /// Dropshot configuration for lockstep API server.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[schemars(skip)]
     pub dropshot_lockstep: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
