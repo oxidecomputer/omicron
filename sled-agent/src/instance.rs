@@ -172,15 +172,30 @@ async fn wait_for_http_server(
     // server that has a reasonable chance of starting.
     const TIMEOUT: Duration = Duration::from_mins(10);
 
-    let log_notification_failure = |error, delay| {
-        warn!(
-            log,
-            "failed to await http server ({}), will retry in {:?}", error, delay;
-            "error" => ?error
-        );
+    let log_notification_failure = |error, requests, elapsed| {
+        // Don't start spamming the log until we've waited a reasonable amount
+        // of time first.
+        const DONT_FREAK_OUT_FOR: Duration = Duration::from_mins(1);
+        if elapsed <= DONT_FREAK_OUT_FOR {
+            debug!(
+                log,
+                "propolis HTTP server has not yet accepted a request after \
+                 {elapsed:?}, will retry...";
+                "error" => InlineErrorChain::new(&error),
+                "requests_sent" => requests,
+            )
+        } else {
+            warn!(
+                log,
+                "propolis HTTP server has still not yet accepted a request \
+                 after {elapsed:?}, will continue retrying...";
+                "error" => InlineErrorChain::new(&error),
+                "requests_sent" => requests,
+            );
+        }
     };
 
-    backoff::retry_notify(
+    backoff::retry_notify_ext(
         backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
             // This request is nonsensical - we don't expect an instance to
