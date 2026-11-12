@@ -7,6 +7,7 @@
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use omicron_generation_kinds::SledConfigGeneration;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -68,6 +69,13 @@ pub enum LedgerNewConfigError {
         current: SledConfigGeneration,
         requested: SledConfigGeneration,
     },
+    #[error(
+        "wicket auth generation out of date (got {requested}, have {current})"
+    )]
+    WicketSshAuthGenerationOutdated {
+        current: WicketSshAuthGeneration,
+        requested: WicketSshAuthGeneration,
+    },
     #[error("sled config changed with the same generation ({generation})")]
     ConfigurationChanged { generation: SledConfigGeneration },
     #[error("failed to commit sled config to ledger")]
@@ -84,6 +92,9 @@ impl From<LedgerNewConfigError> for HttpError {
                 HttpError::for_unavail(None, message)
             }
             LedgerNewConfigError::GenerationOutdated { .. }
+            | LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                ..
+            }
             | LedgerNewConfigError::ConfigurationChanged { .. }
             | LedgerNewConfigError::ValidationFailed(_) => {
                 HttpError::for_bad_request(None, message)
@@ -418,6 +429,7 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
             // generation to check.
             CurrentSledConfig::WaitingForInitialConfig => (),
             CurrentSledConfig::Ledgered(omicron_sled_config) => {
+                // Reject stale configs.
                 if new_config.generation < omicron_sled_config.generation {
                     info!(
                         self.log,
@@ -430,9 +442,35 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
                         current: omicron_sled_config.generation,
                         requested: new_config.generation,
                     });
-                } else if new_config.generation
-                    == omicron_sled_config.generation
+                }
+
+                // Also reject configs that contain a stale `wicket_ssh_auth`.
+                // (This should be impossible: if the generation of the overall
+                // config is newer, the inner auth setting should never go
+                // backwards. But it's easy to check as a safeguard anyway.)
+                if new_config.wicket_ssh_auth.generation
+                    < omicron_sled_config.wicket_ssh_auth.generation
                 {
+                    info!(
+                        self.log,
+                        "rejecting config request due to \
+                         out-of-date wicket SSH auth generation";
+                        "current-gen" =>
+                            %omicron_sled_config.wicket_ssh_auth.generation,
+                        "request-gen" =>
+                            %new_config.wicket_ssh_auth.generation,
+                    );
+                    return Err(
+                        LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                            current: omicron_sled_config
+                                .wicket_ssh_auth
+                                .generation,
+                            requested: new_config.wicket_ssh_auth.generation,
+                        },
+                    );
+                }
+
+                if new_config.generation == omicron_sled_config.generation {
                     if *new_config != *omicron_sled_config {
                         warn!(
                             self.log,
@@ -700,6 +738,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::WicketSshAuth;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::time::Duration;
@@ -894,6 +933,7 @@ mod tests {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::initial(),
         }
     }
 
@@ -1040,6 +1080,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reject_old_wicket_ssh_auth_generation() {
+        let logctx =
+            dev::test_setup_log("reject_old_wicket_ssh_auth_generation");
+
+        // Set up the ledger task with an initial config (with a wicket SSH auth
+        // generation > `WicketSshAuthGeneration::new()`, so we can test sending
+        // a lower generation).
+        let mut sled_config = make_nonempty_sled_config();
+        sled_config.wicket_ssh_auth.generation =
+            WicketSshAuthGeneration::new().next();
+
+        let test_harness =
+            TestHarness::with_initial_config(logctx.log.clone(), &sled_config)
+                .await;
+
+        // Try to send a lower generation; the task should reject this.
+        sled_config.wicket_ssh_auth.generation = WicketSshAuthGeneration::new();
+        let err = test_harness
+            .task_handle
+            .set_new_config(sled_config)
+            .await
+            .expect("no ledger task error")
+            .expect_err("new config should be rejected");
+
+        match err {
+            LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                ..
+            } => (),
+            _ => panic!("unexpected error {}", InlineErrorChain::new(&err)),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn reject_config_changed_without_generation_bump() {
         const TEST_NAME: &str =
             "reject_configs_referencing_nonexistent_artifacts";
@@ -1099,6 +1174,7 @@ mod tests {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::initial(),
         };
 
         // The ledger task should reject this config due to a missing artifact.

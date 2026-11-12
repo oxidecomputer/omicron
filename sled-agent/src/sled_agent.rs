@@ -86,6 +86,7 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     Inventory, OmicronSledConfig, SledRegistrationInfo, SledRole,
+    WicketSshAuthStatus,
 };
 use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
@@ -1431,6 +1432,11 @@ impl SledAgent {
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,
+            // TODO omicron#11821 We don't yet manage the wicket SSH auth status
+            // of the switch zone, so report the trivial status (even though
+            // this is slightly wrong if we actually _do_ have a switch zone;
+            // we'll fix this as the feature work lands).
+            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
         })
     }
 
