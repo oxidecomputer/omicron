@@ -39,6 +39,7 @@ mod ereporter_restart_order_v2;
 mod ereporter_restart_rack_id;
 mod inv_service_processor_rack_id;
 mod inventory_zone_multiple_external_ips;
+mod multicast_member_parent_kind;
 mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
@@ -94,6 +95,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(add_rack_id_to_inv_sled_agent);
     register!(support_bundle_sp_components);
     register!(drop_multicast_deleted_state);
+    register!(multicast_member_parent_kind);
 
     map
 }

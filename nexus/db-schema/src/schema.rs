@@ -3207,6 +3207,7 @@ table! {
         version_removed -> Nullable<Int8>,
         multicast_ip -> Inet,
         source_ips -> Array<Inet>,
+        parent_kind -> crate::enums::MulticastGroupMemberParentKindEnum,
     }
 }
 

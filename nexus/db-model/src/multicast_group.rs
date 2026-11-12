@@ -93,7 +93,7 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::multicast as multicast_types;
 use omicron_common::api::external::{self, IdentityMetadata};
-use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, ProbeUuid, SledKind};
 
 use crate::typed_uuid::DbTypedUuid;
 use crate::{Generation, Name, SqlU8, Vni, impl_enum_type};
@@ -118,6 +118,16 @@ impl_enum_type!(
     Joining => b"joining"
     Joined => b"joined"
     Left => b"left"
+);
+
+impl_enum_type!(
+    MulticastGroupMemberParentKindEnum:
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, JsonSchema)]
+    pub enum MulticastGroupMemberParentKind;
+
+    Instance => b"instance"
+    Probe => b"probe"
 );
 
 impl std::fmt::Display for MulticastGroupState {
@@ -228,6 +238,7 @@ pub struct MulticastGroupMemberValues {
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    pub parent_kind: MulticastGroupMemberParentKind,
     // version_added and version_removed are omitted - database assigns these
     // via DEFAULT nextval()
 }
@@ -271,6 +282,8 @@ pub struct MulticastGroupMember {
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    /// Discriminator for `parent_id`.
+    pub parent_kind: MulticastGroupMemberParentKind,
 }
 
 // Conversions to external API views
@@ -279,6 +292,16 @@ impl TryFrom<MulticastGroupMember> for multicast_types::MulticastGroupMember {
     type Error = external::Error;
 
     fn try_from(member: MulticastGroupMember) -> Result<Self, Self::Error> {
+        let instance_id = match member.parent_ref() {
+            MemberParentRef::Instance(id) => id.into_untyped_uuid(),
+            MemberParentRef::Probe(id) => {
+                return Err(external::Error::internal_error(&format!(
+                    "multicast group member {} has probe parent {id}, \
+                     which has no instance view",
+                    member.id
+                )));
+            }
+        };
         Ok(multicast_types::MulticastGroupMember {
             identity: IdentityMetadata {
                 id: member.id,
@@ -293,7 +316,7 @@ impl TryFrom<MulticastGroupMember> for multicast_types::MulticastGroupMember {
             },
             multicast_group_id: member.external_group_id,
             multicast_ip: member.multicast_ip.ip(),
-            instance_id: member.parent_id,
+            instance_id,
             source_ips: member
                 .source_ips
                 .into_iter()
@@ -353,7 +376,7 @@ impl MulticastGroupMember {
         id: Uuid,
         external_group_id: Uuid,
         multicast_ip: IpNetwork,
-        parent_id: Uuid,
+        parent: MemberParentRef,
         sled_id: Option<DbTypedUuid<SledKind>>,
         source_ips: Vec<IpNetwork>,
     ) -> Self {
@@ -364,13 +387,70 @@ impl MulticastGroupMember {
             time_deleted: None,
             external_group_id,
             multicast_ip,
-            parent_id,
+            parent_id: parent.as_uuid(),
+            parent_kind: parent.kind(),
             sled_id,
             state: MulticastGroupMemberState::Joining,
             source_ips,
             // Placeholder - will be overwritten by database sequence on insert
             version_added: Generation::new(),
             version_removed: None,
+        }
+    }
+
+    /// Reconstruct the typed [`MemberParentRef`] from the persisted
+    /// `(parent_id, parent_kind)` tuple.
+    ///
+    /// Note: This is the inverse of the split performed in
+    /// [`MulticastGroupMember::new`].
+    pub fn parent_ref(&self) -> MemberParentRef {
+        match self.parent_kind {
+            MulticastGroupMemberParentKind::Instance => {
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    self.parent_id,
+                ))
+            }
+            MulticastGroupMemberParentKind::Probe => MemberParentRef::Probe(
+                ProbeUuid::from_untyped_uuid(self.parent_id),
+            ),
+        }
+    }
+}
+
+/// Typed parent of a multicast group member.
+///
+/// Multicast group members' parent resource can either be an instance or a
+/// probe (used for testing and debugging network connectivity). This
+/// discriminator is persisted on the member row as `parent_kind` (see
+/// [`MulticastGroupMemberParentKind`]). This follows the pattern from
+/// [`NetworkInterfaceKind`].
+///
+/// [`NetworkInterfaceKind`]: crate::NetworkInterfaceKind
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MemberParentRef {
+    /// Member is owned by an instance.
+    Instance(InstanceUuid),
+    /// Member is owned by a probe.
+    Probe(ProbeUuid),
+}
+
+impl MemberParentRef {
+    /// Extract the untyped parent UUID.
+    pub fn as_uuid(&self) -> Uuid {
+        match self {
+            MemberParentRef::Instance(id) => id.into_untyped_uuid(),
+            MemberParentRef::Probe(id) => id.into_untyped_uuid(),
+        }
+    }
+
+    /// Map this parent resource to its persisted
+    /// [`MulticastGroupMemberParentKind`] discriminator.
+    pub fn kind(&self) -> MulticastGroupMemberParentKind {
+        match self {
+            MemberParentRef::Instance(_) => {
+                MulticastGroupMemberParentKind::Instance
+            }
+            MemberParentRef::Probe(_) => MulticastGroupMemberParentKind::Probe,
         }
     }
 }
