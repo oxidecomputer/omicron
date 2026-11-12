@@ -2522,13 +2522,13 @@ mod test {
     // restart it. Previously, the decision to advance the state to
     // `SledEvacuating` was made from the snapshot taken by the
     // `start_instance_update` saga, but the state is not actually written until
-    // the `siu_commit_instance_update` node in the "real" update saga.
+    // the `siu_commit_instance_updates` node in the "real" update saga.
     //
     // If the instance is stopped by an external API request after the state
-    // snapshot is read snapshot but before `siu_commit_instance_update`, the
-    // instance should come to rest in `NoVmm` (externally `Stopped`) rather
-    // than `SledEvacuating` (externally `Rebooting`). The user request to stop
-    // the instance should be honored.
+    // snapshot is read, but before `siu_commit_instance_updates`, the instance
+    // should come to rest in `NoVmm` (externally `Stopped`) rather than
+    // `SledEvacuating` (externally `Rebooting`). The user request to stop the
+    // instance should be honored.
     #[nexus_test(server = crate::Server)]
     async fn test_sled_evacuating_update_races_with_instance_stop(
         cptestctx: &ControlPlaneTestContext,
@@ -2582,8 +2582,7 @@ mod test {
         // Because the state snapshot is read in the `start_instance_update`
         // saga, which is separate from the `instance_update` saga, we can
         // simulate the race deterministically. The `make_real_params` function
-        // in `setup_active_vmm_destroyed` test simulates the construction of
-        // the params to the actual update saga.
+        // simulates the construction of the params to the actual update saga.
         let real_params = make_real_params(cptestctx, &opctx, params).await;
         // Make sure we are still actually testing the expected update saga...
         assert_eq!(
