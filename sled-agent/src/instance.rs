@@ -36,7 +36,6 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
-use opte_ioctl::OpteHdl;
 use oxnet::IpNet;
 use propolis_api_types::instance::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
@@ -2612,8 +2611,9 @@ impl InstanceRunner {
             if !opte_ports.is_empty() {
                 // TODO-john need to restrict access to only the ports
                 // associated with this zone
-                devices
-                    .push(zone::Device { name: OpteHdl::XDE_CTL.to_string() });
+                devices.push(zone::Device {
+                    name: illumos_utils::opte::XDE_CTL_DEVICE.to_string(),
+                });
             }
 
             // ... and any delegated zvols.
