@@ -39,6 +39,32 @@ fn test_sled_agent_sim_no_args() {
         &stderr_text,
     );
 }
+
+/// `sled-agent-sim` requires that the Helios RoT alias key and cert chain be
+/// provided together.
+#[test]
+fn test_sled_agent_sim_helios_rot_partial_args() {
+    for flag in ["--helios-rot-alias-key", "--helios-rot-cert-chain"] {
+        let exec = Exec::cmd(path_to_sled_agent_sim()).args(&[
+            flag,
+            "/nonexistent.pem",
+            "1c6e8e94-7a3a-4b9e-9a51-3f7d4e2b8c10",
+            "[::1]:0",
+            "[::1]:12345",
+            "0",
+        ]);
+        let (exit_status, _stdout_text, stderr_text) = run_command(exec);
+        assert_exit_code(exit_status, EXIT_USAGE, &stderr_text);
+        assert!(
+            stderr_text.contains(
+                "--helios-rot-alias-key and --helios-rot-cert-chain must be \
+                 specified together"
+            ),
+            "unexpected stderr for {flag}: {stderr_text}"
+        );
+    }
+}
+
 /// name of the "sled-agent" executable
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
 

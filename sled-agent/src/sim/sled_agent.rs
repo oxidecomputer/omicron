@@ -11,6 +11,7 @@ use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
+use crate::config::HeliosRotConfig;
 use crate::instance_manager::VmmRegistrationDisallowedReason;
 use crate::nexus::NexusClient;
 use crate::rot::RotAttestor;
@@ -171,6 +172,8 @@ pub struct SledAgent {
     scrimlet_reconcilers: ScrimletReconcilers,
     /// Mock impl of the sled's RoT attestation endpoint
     rot_attestor: Option<RotAttestor>,
+    /// The simulated Helios RoT, if configured.
+    helios_rot: Option<RotAttestor>,
 }
 
 /// A queue of pending pauses for one of the simulated sled-agent's VMM
@@ -423,6 +426,20 @@ impl SledAgent {
             None
         };
 
+        let helios_rot = config
+            .helios_rot
+            .as_ref()
+            .map(|rot| {
+                RotAttestor::new_helios(
+                    &log,
+                    &HeliosRotConfig::Local {
+                        priv_key: rot.priv_key.clone(),
+                        cert_chain: rot.cert_chain.clone(),
+                    },
+                )
+            })
+            .transpose()?;
+
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
@@ -509,6 +526,7 @@ impl SledAgent {
             network_config_tx,
             scrimlet_reconcilers,
             rot_attestor,
+            helios_rot,
         }))
     }
 
@@ -528,13 +546,12 @@ impl SledAgent {
         self.support_logs.lock().unwrap().keys().cloned().collect()
     }
 
-    /// Returns the mock RoT, or `None` if RoT artifacts were not configured.
-    /// Only the Oxide RoT is simulated; requests for the Helios RoT always
-    /// return `None`.
+    /// Returns the mock for the requested RoT, or `None` if that RoT was not
+    /// configured.
     pub(super) fn rot_attestor(&self, rot: Rot) -> Option<&RotAttestor> {
         match rot {
             Rot::Oxide => self.rot_attestor.as_ref(),
-            Rot::Helios => None,
+            Rot::Helios => self.helios_rot.as_ref(),
         }
     }
 

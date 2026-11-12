@@ -15,8 +15,8 @@ use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    Config, ConfigHardware, ConfigRot, ConfigStorage, ConfigZpool, SimMode,
-    ZpoolConfig, run_standalone_server,
+    Config, ConfigHardware, ConfigHeliosRot, ConfigRot, ConfigStorage,
+    ConfigZpool, SimMode, ZpoolConfig, run_standalone_server,
 };
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -113,6 +113,18 @@ struct Args {
     #[clap(long, name = "ROT_LOG_FILE", action)]
     /// hubpack serialized measurement log for the mock RoT.
     rot_log: Option<Utf8PathBuf>,
+
+    #[clap(long, name = "HELIOS_ROT_ALIAS_KEY_PEM_FILE", action)]
+    /// If this flag and HELIOS_ROT_CERT_CHAIN_PEM_FILE are specified, the
+    /// simulated sled agent will provide a mock Helios RoT that signs
+    /// attestations with this PKCS#8 P-384 private key.
+    helios_rot_alias_key: Option<Utf8PathBuf>,
+
+    #[clap(long, name = "HELIOS_ROT_CERT_CHAIN_PEM_FILE", action)]
+    /// If this flag and HELIOS_ROT_ALIAS_KEY_PEM_FILE are specified, the
+    /// simulated sled agent will provide a mock Helios RoT that reports this
+    /// certificate chain for its alias key.
+    helios_rot_cert_chain: Option<Utf8PathBuf>,
 }
 
 fn main() {
@@ -135,6 +147,20 @@ async fn do_run() -> Result<(), CmdError> {
             )));
         }
     };
+
+    let helios_rot =
+        match (args.helios_rot_alias_key, args.helios_rot_cert_chain) {
+            (None, None) => None,
+            (Some(priv_key), Some(cert_chain)) => {
+                Some(ConfigHeliosRot { priv_key, cert_chain })
+            }
+            _ => {
+                return Err(CmdError::Usage(String::from(
+                    "--helios-rot-alias-key and --helios-rot-cert-chain must \
+                     be specified together",
+                )));
+            }
+        };
 
     let config = Config {
         dropshot: ConfigDropshot {
@@ -164,6 +190,7 @@ async fn do_run() -> Result<(), CmdError> {
             },
         },
         rot,
+        helios_rot,
         ..Config::for_testing(
             args.uuid,
             args.rack_id,

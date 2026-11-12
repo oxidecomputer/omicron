@@ -82,6 +82,17 @@ pub struct ConfigRot {
     pub log: Utf8PathBuf,
 }
 
+/// Configuration for a simulated Helios RoT, backed by the mock implementation
+/// of the `HeliosRot` trait.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigHeliosRot {
+    /// Path to the PEM-encoded PKCS#8 P-384 private key used to sign
+    /// attestations.
+    pub priv_key: Utf8PathBuf,
+    /// Path to the PEM-encoded certificate chain for the signing key.
+    pub cert_chain: Utf8PathBuf,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
@@ -105,6 +116,10 @@ pub struct Config {
     /// left unimplemented
     #[serde(default)]
     pub rot: Option<ConfigRot>,
+    /// configuration for the simulated Helios RoT; if unset, the Helios RoT
+    /// endpoints are unimplemented
+    #[serde(default)]
+    pub helios_rot: Option<ConfigHeliosRot>,
 }
 
 pub enum ZpoolConfig {
@@ -196,6 +211,7 @@ impl Config {
             },
             sled_role,
             rot: None,
+            helios_rot: None,
         }
     }
 }
