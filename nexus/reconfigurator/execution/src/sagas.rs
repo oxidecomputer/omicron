@@ -215,6 +215,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::{
         BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
         BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
@@ -334,6 +335,7 @@ mod test {
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
@@ -399,6 +401,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -459,6 +462,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint2,
+            ReflectsCollection::Indeterminate,
             "test suite",
             PlannerRng::from_entropy(),
         )

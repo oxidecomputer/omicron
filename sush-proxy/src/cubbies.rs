@@ -7,7 +7,8 @@
 use std::collections::BTreeMap;
 
 use gateway_client::Client as MgsClient;
-use gateway_client::ClientInfo as _;
+use gateway_client::Error as MgsError;
+use gateway_client::types;
 use gateway_types::component::SpType;
 use gateway_types::ignition::SpIgnition;
 use sled_hardware_types::BaseboardId;
@@ -28,23 +29,12 @@ pub enum SledState {
 }
 
 /// Ask `mgs` about the sled in each cubby and return a map of the results,
-/// or `None` if `mgs` does not answer.
+/// or the error if `mgs` cannot list the SPs.
 pub async fn poll_cubbies(
     log: &Logger,
     mgs: &MgsClient,
-) -> Option<BTreeMap<u8, SledState>> {
-    let ignition = match mgs.ignition_list().await {
-        Ok(ignition) => ignition.into_inner(),
-        Err(err) => {
-            debug!(
-                log,
-                "failed to get ignition list from MGS";
-                "mgs" => mgs.baseurl(),
-                "error" => %err,
-            );
-            return None;
-        }
-    };
+) -> Result<BTreeMap<u8, SledState>, MgsError<types::Error>> {
+    let ignition = mgs.ignition_list().await?.into_inner();
 
     let mut states = BTreeMap::new();
     for sp in
@@ -86,7 +76,7 @@ pub async fn poll_cubbies(
             }
         }
     }
-    Some(states)
+    Ok(states)
 }
 
 /// Merge one round of sled states into an existing cubby map. If a cubby

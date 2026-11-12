@@ -56,23 +56,23 @@ pub async fn sled_client_ext(
     Ok(sled_client_from_address_ext(sled_id, sled.address(), log, client))
 }
 
-/// Lookup a sled agent by its `BaseboardId` only if it is commmissioned and part
+/// Lookup a sled agent by its `BaseboardId` only if it is in service and part
 /// of a rack given by `rack_id`.
 ///
 /// In some cases we want to lookup a sled agent by its `BaseboardId`. However,
 /// because a `BaseboardId` can map to multiple sled-agents, but only one is
-/// currently commissioned, we want to find the commissioned one. We also want
-/// to ensure that the baseboard is still inserted in the rack we expect, as
-/// given by `rack_id`.
-pub async fn sled_client_by_baseboard_id_and_rack_id_if_commissioned(
+/// currently commissioned, we want to find the commissioned one, and only if
+/// it is in service. We also want to ensure that the baseboard is still
+/// inserted in the rack we expect, as given by `rack_id`.
+pub async fn sled_client_by_baseboard_id_and_rack_id_if_in_service(
     datastore: &DataStore,
     opctx: &OpContext,
     baseboard_id: &BaseboardId,
     rack_id: RackUuid,
     log: &Logger,
-) -> Result<Option<SledAgentClient>, Error> {
+) -> Result<SledAgentClient, InServiceSledClientError> {
     let client = default_reqwest_client_builder().build().unwrap();
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
+    sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
         datastore,
         opctx,
         baseboard_id,
@@ -83,31 +83,59 @@ pub async fn sled_client_by_baseboard_id_and_rack_id_if_commissioned(
     .await
 }
 
-pub async fn sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
+pub async fn sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
     datastore: &DataStore,
     opctx: &OpContext,
     baseboard_id: &BaseboardId,
     rack_id: RackUuid,
     log: &Logger,
     client: reqwest::Client,
-) -> Result<Option<SledAgentClient>, Error> {
+) -> Result<SledAgentClient, InServiceSledClientError> {
     let Some(sled) = datastore
-        .sled_get_commissioned_by_baseboard_and_rack_id(
+        .sled_get_in_service_by_baseboard_and_rack_id(
             opctx,
             rack_id,
             baseboard_id.clone(),
         )
-        .await?
+        .await
+        .map_err(|error| InServiceSledClientError::LookupFailed {
+            rack_id,
+            baseboard_id: baseboard_id.clone(),
+            error,
+        })?
     else {
-        return Ok(None);
+        return Err(InServiceSledClientError::NotInService {
+            rack_id,
+            baseboard_id: baseboard_id.clone(),
+        });
     };
 
-    Ok(Some(sled_client_from_address_ext(
+    Ok(sled_client_from_address_ext(
         sled.identity.id.into(),
         sled.address(),
         log,
         client,
-    )))
+    ))
+}
+
+/// An error returned by
+/// [`sled_client_by_baseboard_id_and_rack_id_if_in_service`] and the `_ext`
+/// variant.
+#[derive(Debug, thiserror::Error)]
+pub enum InServiceSledClientError {
+    /// The sled is not in service.
+    #[error("sled {baseboard_id} is not an in-service sled in rack {rack_id}")]
+    NotInService { rack_id: RackUuid, baseboard_id: BaseboardId },
+    /// The sled could not be looked up.
+    #[error(
+        "failed to look up in-service sled {baseboard_id} in rack {rack_id}"
+    )]
+    LookupFailed {
+        rack_id: RackUuid,
+        baseboard_id: BaseboardId,
+        #[source]
+        error: Error,
+    },
 }
 
 pub fn sled_client_from_address(

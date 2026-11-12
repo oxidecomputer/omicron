@@ -667,6 +667,9 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
     created by::::::::::::::   reconfigurator-sim
     created at::::::::::::::   1970-01-01T00:00:00.000Z
     comment:::::::::::::::::   sled 48d95fef-bc9f-4f50-9a53-1e075836291d expunged (expunged 10 disks, 65 datasets, 14 zones)
+    reflects collection:::::   559ce820-617c-4a48-a34f-364c6d8914ff
+    collection started::::::   1970-01-01T00:00:00.000Z
+    collection done:::::::::   1970-01-01T00:00:00.000Z
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1
