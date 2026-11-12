@@ -843,14 +843,14 @@ async fn verify_endpoint(
             }
             let mut request = NexusRequest::new(builder)
                 .authn_as(AuthnMode::UnprivilegedUser);
-            match allowed {
-                Some(AllowedMethod::GetWebsocket) => {
+            match allowed.and_then(AllowedMethod::websocket_handshake) {
+                Some(WebsocketHandshake::ExpectUpgrade) => {
                     request = request.websocket_handshake();
                 }
-                Some(AllowedMethod::GetWebsocketUnavailable) => {
+                Some(WebsocketHandshake::HeadersOnly) => {
                     request = request.websocket_handshake_headers();
                 }
-                _ => {}
+                None => {}
             }
             verify_response(request.execute().await, &method)
                 .with_context(|| format!("unprivileged {method}"))?;
@@ -873,14 +873,14 @@ async fn verify_endpoint(
         if is_scim {
             request = request.allow_non_dropshot_errors();
         }
-        match allowed {
-            Some(AllowedMethod::GetWebsocket) => {
+        match allowed.and_then(AllowedMethod::websocket_handshake) {
+            Some(WebsocketHandshake::ExpectUpgrade) => {
                 request = request.expect_websocket_handshake();
             }
-            Some(AllowedMethod::GetWebsocketUnavailable) => {
+            Some(WebsocketHandshake::HeadersOnly) => {
                 request = request.websocket_handshake_headers();
             }
-            _ => {}
+            None => {}
         }
         verify_response(request.execute().await, &method)
             .with_context(|| format!("unauthenticated {method}"))?;
@@ -912,14 +912,14 @@ async fn verify_endpoint(
                     &http::header::AUTHORIZATION,
                     bad_actor_authn_header.0.encode(),
                 );
-        match allowed {
-            Some(AllowedMethod::GetWebsocket) => {
+        match allowed.and_then(AllowedMethod::websocket_handshake) {
+            Some(WebsocketHandshake::ExpectUpgrade) => {
                 request = request.expect_websocket_handshake();
             }
-            Some(AllowedMethod::GetWebsocketUnavailable) => {
+            Some(WebsocketHandshake::HeadersOnly) => {
                 request = request.websocket_handshake_headers();
             }
-            _ => {}
+            None => {}
         }
         verify_response(request.execute().await, &method)
             .with_context(|| format!("{method} with unknown actor"))?;
@@ -936,14 +936,14 @@ async fn verify_endpoint(
                     &http::header::AUTHORIZATION,
                     bad_creds_authn_header.0.encode(),
                 );
-        match allowed {
-            Some(AllowedMethod::GetWebsocket) => {
+        match allowed.and_then(AllowedMethod::websocket_handshake) {
+            Some(WebsocketHandshake::ExpectUpgrade) => {
                 request = request.expect_websocket_handshake();
             }
-            Some(AllowedMethod::GetWebsocketUnavailable) => {
+            Some(WebsocketHandshake::HeadersOnly) => {
                 request = request.websocket_handshake_headers();
             }
-            _ => {}
+            None => {}
         }
         verify_response(request.execute().await, &method)
             .with_context(|| format!("{method} with malformed credentials"))?;

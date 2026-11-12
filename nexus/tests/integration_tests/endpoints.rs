@@ -1843,6 +1843,36 @@ impl AllowedMethod {
             AllowedMethod::Patch(body) => Some(&body),
         }
     }
+
+    /// Returns what kind of websocket handshake, if any, to use for this method
+    pub fn websocket_handshake(&self) -> Option<WebsocketHandshake> {
+        match self {
+            AllowedMethod::GetWebsocket => {
+                Some(WebsocketHandshake::ExpectUpgrade)
+            }
+            AllowedMethod::GetWebsocketUnavailable => {
+                Some(WebsocketHandshake::HeadersOnly)
+            }
+            AllowedMethod::Delete
+            | AllowedMethod::Get
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetVolatile
+            | AllowedMethod::Head
+            | AllowedMethod::HeadNonexistent
+            | AllowedMethod::Post(_)
+            | AllowedMethod::Put(_)
+            | AllowedMethod::Patch(_) => None,
+        }
+    }
+}
+
+/// Describes the websocket handshake a test request should make
+pub enum WebsocketHandshake {
+    /// Send handshake headers and expect an upgrade
+    ExpectUpgrade,
+    /// Send handshake headers but keep the request's expected status
+    HeadersOnly,
 }
 
 pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
