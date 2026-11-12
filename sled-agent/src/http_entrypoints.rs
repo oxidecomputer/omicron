@@ -57,7 +57,8 @@ use sled_agent_types::multirack::{
 };
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
-    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+    Attestation, CertificateChain, MeasurementLog, MeasurementLogResponse,
+    QualifyingData, RotPathParams,
 };
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
@@ -1820,7 +1821,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn rot_measurement_log(
         request_context: RequestContext<Self::Context>,
         path_params: Path<RotPathParams>,
-    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+    ) -> Result<HttpResponseOk<MeasurementLogResponse>, HttpError> {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
@@ -1828,7 +1829,9 @@ impl SledAgentApi for SledAgentImpl {
                 let rot =
                     sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let log = rot.get_measurement_log().await?;
-                Ok(HttpResponseOk(log.into()))
+                Ok(HttpResponseOk(MeasurementLogResponse {
+                    log: log.map(MeasurementLog::from),
+                }))
             })
             .await
     }
@@ -1852,16 +1855,16 @@ impl SledAgentApi for SledAgentImpl {
     async fn rot_attest(
         request_context: RequestContext<Self::Context>,
         path_params: Path<RotPathParams>,
-        body: TypedBody<Nonce>,
+        body: TypedBody<QualifyingData>,
     ) -> Result<HttpResponseOk<Attestation>, HttpError> {
         let sa = request_context.context();
-        let nonce = body.into_inner();
+        let qdata = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
                 let remote_addr = request_context.request.remote_addr();
                 let rot =
                     sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
-                let attestation = rot.attest(nonce.into()).await?;
+                let attestation = rot.attest(qdata.into()).await?;
                 Ok(HttpResponseOk(attestation.into()))
             })
             .await

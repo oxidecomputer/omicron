@@ -137,6 +137,8 @@ pub mod v65;
 pub mod v66;
 #[path = "wicket_ssh_auth/mod.rs"]
 pub mod v67;
+#[path = "add_helios_rot/mod.rs"]
+pub mod v68;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

@@ -457,7 +457,7 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.3.1"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738" }
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "22178824119bfbfddae5dd498334339c660f8a5a" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -524,7 +524,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
-dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738", default-features = false }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "22178824119bfbfddae5dd498334339c660f8a5a", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.4.0", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.5.0"
@@ -580,6 +580,7 @@ glob = "0.3.2"
 guppy = "0.17.20"
 headers = "0.4.1"
 heck = "0.5"
+helios-rot = { git = "https://github.com/oxidecomputer/helios-rot", rev = "ceb9fa57ae71abdf93bb2da87dd3d67dbe5fa7f8" }
 hex = "0.4.3"
 hex-literal = "0.4.1"
 hickory-client = "0.25.2"
@@ -719,7 +720,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
-oxide-rot = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738", default-features = false }
+oxide-rot = { git = "https://github.com/oxidecomputer/dice-util", rev = "22178824119bfbfddae5dd498334339c660f8a5a", default-features = false }
 oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
