@@ -2062,8 +2062,7 @@ impl DataStore {
     /// to be expunged, and expunge it if it does.
     ///
     /// This method is idempotent: if the sled is already expunged, it returns
-    /// `Ok(SledPolicy::Expunged)`. (The upcoming background task that's part of
-    /// RFD 747 relies on this behavior.)
+    /// `Ok(SledPolicy::Expunged)`.
     pub async fn sled_set_policy_to_expunged_if_trust_quorum_allows(
         &self,
         opctx: &OpContext,
@@ -2148,7 +2147,7 @@ impl DataStore {
         .map_err(|error| error.into_external_error())
     }
 
-    async fn sled_set_policy_conn(
+    pub(super) async fn sled_set_policy_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: SledUuid,
         new_sled_policy: SledPolicy,
