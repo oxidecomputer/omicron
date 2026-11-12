@@ -37,7 +37,7 @@ use sled_agent_client::types::{
 };
 use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, error, info, o};
+use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -189,7 +189,8 @@ impl Status {
             Status::CoordinatorNotInService(coordinator_id) => {
                 swriteln!(
                     &mut s,
-                    "    Coordinator ({coordinator_id}) is not in service."
+                    "    Coordinator ({coordinator_id}) is not in service: \
+                     configuration is aborted."
                 );
             }
             Status::Preparing => {
@@ -327,9 +328,11 @@ async fn prepare(
         {
             Ok(client) => client,
             Err(InServiceSledClientError::NotInService { .. }) => {
-                return Ok(Status::CoordinatorNotInService(
-                    config.coordinator.clone(),
-                ));
+                abort_config_with_coordinator_not_in_service(
+                    log, opctx, datastore, &config,
+                )
+                .await?;
+                return Ok(Status::CoordinatorNotInService(config.coordinator));
             }
             Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
                 return Err(error.into());
@@ -397,6 +400,56 @@ async fn record_prepare_status(
         .tq_update_prepare_status(opctx, coordinator_config, acked_prepares)
         .await?;
     Ok(outcome)
+}
+
+/// Abort a trust quorum reconfiguration in the database because the coordinator
+/// is no longer in service.
+///
+/// Returns `Ok(())` if the abort succeeded, including when the configuration
+/// was already aborted.
+///
+/// Returns an error if the abort failed, including the case where the abort
+/// cannot happen because this configuration has already moved past the
+/// preparing stage. The next time the background task is activated, it'll
+/// reload the configuration and act on its current state. (Why not do it in
+/// this activation? Because the race is quite narrow -- this Nexus has to
+/// discover that the coordinator is out of service at the same time that
+/// another Nexus moves this config past the preparing stage. We'll let the
+/// Nexus that moved the config past the preparing stage take charge.)
+async fn abort_config_with_coordinator_not_in_service(
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    config: &NexusTrustQuorumConfig,
+) -> Result<(), Error> {
+    let reason = format!(
+        "Coordinator {} is no longer an in-service sled in rack {}; aborted \
+         by the trust quorum background task.",
+        config.coordinator, config.rack_id
+    );
+    datastore
+        .tq_abort_config(
+            opctx,
+            authz::TrustQuorumConfig::for_rack_id(config.rack_id),
+            config.epoch,
+            reason,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "failed to abort the configuration whose coordinator {} is \
+                 not in service",
+                config.coordinator
+            )
+        })?;
+    warn!(
+        log,
+        "Aborted trust quorum configuration: coordinator is not in service";
+        "rack_id" => %config.rack_id,
+        "epoch" => %config.epoch,
+        "coordinator" => %config.coordinator,
+    );
+    Ok(())
 }
 
 #[derive(Debug)]
