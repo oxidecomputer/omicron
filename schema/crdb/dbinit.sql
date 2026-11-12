@@ -1294,6 +1294,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
 ) WHERE
     time_deleted IS NULL;
 
+/**
+ * A view of the amount of provisioned resources on a given project.
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.project_utilization
+AS SELECT
+    p.id AS project_id,
+    s.silo_id AS silo_id,
+    c.cpus_provisioned AS cpus_provisioned,
+    c.ram_provisioned AS memory_provisioned,
+    c.virtual_disk_bytes_provisioned AS storage_provisioned
+FROM
+    omicron.public.virtual_provisioning_collection AS c
+    INNER JOIN omicron.public.project AS p
+    ON c.id = p.id
+    INNER JOIN omicron.public.silo_utilization AS s
+    ON p.silo_id = s.silo_id
+WHERE
+    c.collection_type = 'Project'
+    AND (
+        s.silo_discoverable IS TRUE
+            OR s.cpus_allocated > 0
+            OR s.memory_allocated > 0
+            OR s.storage_allocated > 0
+    )
+    AND p.time_deleted IS NULL;
+
 /*
  * Instances
  */
@@ -1317,7 +1343,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     /* The instance has been destroyed. */
     'destroyed',
 
-    /* 
+    /*
      * The instance has no active VMM due to a sled being evacutated.
      * Corresponds to the "rebooting" external state.
      */
@@ -3362,6 +3388,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (bundle_id)
 );
@@ -5922,7 +5949,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
 
     -- The generation of the collective set of all external networking config
     -- described by the blueprint
-    external_networking_generation INT8 NOT NULL
+    external_networking_generation INT8 NOT NULL,
+
+    -- These columns describe the inventory collection that this blueprint
+    -- reflects.  They are currently used for debugging, but they may be used
+    -- for other purposes in the future.  They are either all NULL (if it's not
+    -- known which collection the blueprint reflects) or all non-NULL.
+    -- Like `parent_blueprint_id`, `reflects_collection_id` is not a real
+    -- foreign key because the collection may have since been deleted.
+    reflects_collection_id UUID,
+    reflects_collection_time_started TIMESTAMPTZ,
+    reflects_collection_time_done TIMESTAMPTZ,
+
+    CONSTRAINT reflects_collection_all_or_none CHECK (
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_started IS NULL) AND
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_done IS NULL)
+    )
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -8829,6 +8873,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (sitrep_id, request_id)
 );
@@ -9873,6 +9918,87 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_sled_by_id ON omicron.public.
     id
 ) WHERE time_deleted IS NULL;
 
+-- A problem detected by the fault management subsystem (see RFD 699).
+--
+-- This table contains relatively little data, because most of the data
+-- associated with a problem exists at a given revision. In order to allow
+-- exporting the historical revisions of a problem, we store all revisions of
+-- the problem since it was created. Therefore, this table basically just stores
+-- the unique ID of the problem and the latest revision number, and can be
+-- JOINed with `problem_revision` and other tables to fetch the latest revision.
+--
+-- Everything which may be changed across revisions lives instead in the
+-- `problem_revision` table and its friends.
+CREATE TABLE IF NOT EXISTS omicron.public.problem (
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The latest revision number of this problem. This can be used to
+    -- select the current revision from the `problem_revision` table.
+    current_revision INT8 NOT NULL,
+
+    CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_problem_by_time_created
+ON
+    omicron.public.problem (time_created)
+WHERE
+    time_deleted IS NULL;
+
+-- A revision of a problem (see RFD 699). This table allows us to store the
+-- revision history of a given problem, along with the current revision.
+-- Querying the current version is done by looking up the problem from the
+-- `problem` table and then selecting the entry from *this* table as of the
+-- `current_revision` revision.
+CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `problem` table.
+    revision INT8 NOT NULL,
+
+    -- The time at which *this revision* was created. This is **not** the time
+    -- the problem itself was created, and will correspond to the `time_modified`
+    -- at which this revision was made current.
+    --
+    -- This column is used primarily when exporting the complete revision
+    -- history of a problem.
+    time_created TIMESTAMPTZ NOT NULL,
+
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
+    time_resolved TIMESTAMPTZ,
+
+    -- The problem's problem code as of this revision.
+    --
+    -- This determines the problem class, as well as the problem's
+    -- documentation.
+    code INT8 NOT NULL,
+
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (problem_id, revision)
+);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9882,7 +10008,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '312.0.0', NULL)
+    (TRUE, NOW(), NOW(), '316.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

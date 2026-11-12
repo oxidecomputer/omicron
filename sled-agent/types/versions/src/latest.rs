@@ -216,6 +216,8 @@ pub mod inventory {
 
     pub use crate::v57::inventory::Inventory;
 
+    pub use crate::v62::inventory::SledRegistrationInfo;
+
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
     pub use crate::impls::inventory::FmdInventoryResultDisplay;
@@ -236,6 +238,8 @@ pub mod multirack {
     pub use crate::v60::multirack::MultirackJoinServiceStatus;
     pub use crate::v60::multirack::SledAgentInfo;
     pub use crate::v60::multirack::SledAgentStartState;
+
+    pub use crate::v63::multirack::MultirackJoinCompleteResponse;
 }
 
 pub mod probes {

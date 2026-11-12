@@ -49,8 +49,12 @@ use sled_agent_types::instance::{
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
-use sled_agent_types::multirack::MultirackJoinServiceStatus;
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo,
+};
+use sled_agent_types::multirack::{
+    MultirackJoinCompleteResponse, MultirackJoinServiceStatus,
+};
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
     Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
@@ -1867,12 +1871,14 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn multirack_join_complete(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError> {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                sa.complete_multirack_join()?;
-                Ok(HttpResponseUpdatedNoContent())
+                let bootstore_generation = sa.complete_multirack_join().await?;
+                Ok(HttpResponseOk(MultirackJoinCompleteResponse {
+                    bootstore_generation,
+                }))
             })
             .await
     }
@@ -1921,7 +1927,9 @@ impl SledAgentApi for SledAgentImpl {
                     RssAccessError::MultirackJoinInProgress
                     | RssAccessError::MembershipChangeNoLongerAllowed
                     | RssAccessError::RackSubnetChangeNotAllowed
-                    | RssAccessError::MultirackJoinStatusNotYetAvailable => {
+                    | RssAccessError::MultirackJoinStatusNotYetAvailable
+                    | RssAccessError::MultirackJoinGenerationUnavailable
+                    | RssAccessError::MultirackJoinPendingConfigUpdate => {
                         HttpError::for_client_error(
                             Some(err.error_code().to_string()),
                             dropshot::ClientErrorStatusCode::CONFLICT,
@@ -1931,6 +1939,17 @@ impl SledAgentApi for SledAgentImpl {
                 })?;
 
                 Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.sled_registration_info()))
             })
             .await
     }

@@ -219,7 +219,7 @@ impl DataStore {
                 model::DbSledBpAvailability::Unavailable,
             )
             .bind::<sql_types::Array<VmmStateEnum>, _>(
-                DbVmmState::SHOULD_MARK_TO_STOP_FOR_EVACUATION.to_vec(),
+                DbVmmState::SHOULD_STOP_FOR_EVACUATION.to_vec(),
             )
             .bind::<sql_types::BigInt, _>(i64::from(batch_size.get()))
             .execute_async(&*conn)
@@ -926,8 +926,7 @@ mod tests {
         let is_stoppable = |state: DbVmmState| {
             matches!(
                 state,
-                DbVmmState::Creating
-                    | DbVmmState::Starting
+                DbVmmState::Starting
                     | DbVmmState::Running
                     | DbVmmState::Rebooting
             )
@@ -1002,7 +1001,7 @@ mod tests {
             .filter(|v| v.time_deleted.is_none() && is_stoppable(v.state))
             .count()
             / 3;
-        assert_eq!(stoppable_per_sled, 4);
+        assert_eq!(stoppable_per_sled, 3);
 
         // Fetches every VMM row, including deleted VMMs (unlike `vmm_fetch`,
         // which skips them).
@@ -1092,8 +1091,8 @@ mod tests {
             .await
             .expect("bulk mark should succeed");
         assert_eq!(
-            marked.vmms_marked, 8,
-            "the 4 stoppable VMMs on each of sleds A and B should be marked"
+            marked.vmms_marked, 6,
+            "the 3 stoppable VMMs on each of sleds A and B should be marked"
         );
         assert_eq!(marked.batches, 1);
         assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
@@ -1112,7 +1111,7 @@ mod tests {
             }
         }
 
-        // There should be 25 unmarked rows. 6 unstoppable VMMs on each of
+        // There should be 27 unmarked rows. 8 unstoppable VMMs on each of
         // sleds A and B, all 10 on sled C, plus the 3 deleted VMMs.
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
@@ -1121,7 +1120,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            25,
+            27,
             "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
@@ -1140,7 +1139,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            25
+            27
         );
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
@@ -1166,7 +1165,7 @@ mod tests {
             .await
             .expect("bulk mark for sled C should succeed");
         assert_eq!(
-            marked_c.vmms_marked, 4,
+            marked_c.vmms_marked, 3,
             "only the 4 stoppable VMMs on sled C should be marked"
         );
         assert_eq!(marked_c.batches, 1);
@@ -1198,13 +1197,13 @@ mod tests {
             .values()
             .filter(|v| v.stop_for_update_disposition_generation.is_none())
             .count();
-        assert_eq!(gen1_count, 4, "sled A's marked VMMs are unchanged");
+        assert_eq!(gen1_count, 3, "sled A's marked VMMs are unchanged");
         assert_eq!(
-            gen2_count, 8,
+            gen2_count, 6,
             "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
         assert_eq!(
-            null_count, 21,
+            null_count, 24,
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
@@ -1283,7 +1282,7 @@ mod tests {
             .collect();
 
         // We have the same marked VMMs, nothing has changed
-        assert_eq!(sled_a_marked.len(), 4);
+        assert_eq!(sled_a_marked.len(), 3);
         for vmm in sled_a_marked {
             assert_eq!(
                 vmm.stop_for_update_disposition_generation,

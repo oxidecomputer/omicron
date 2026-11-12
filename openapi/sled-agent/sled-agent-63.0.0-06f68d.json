@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "61.0.0"
+    "version": "63.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -380,11 +380,18 @@
     "/multirack-join-complete": {
       "put": {
         "summary": "Report that this sled's multirack join is complete.",
-        "description": "Sent by Nexus once it has observed this sled on the underlay network.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network. Returns the final bootstore generation written by the multirack join service. Repeated requests return the same generation.\n\nReturns 409 Conflict if this request arrives while a new networking configuration was accepted but not written. Returns 410 Gone if sled-agent restarted after a completed join.",
         "operationId": "multirack_join_complete",
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinCompleteResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -626,6 +633,31 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SledIdentifiers"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sled-registration-info": {
+      "get": {
+        "summary": "Return this sled's registration identity.",
+        "description": "Nexus calls this method synchronously while handling this sled's `sled_agent_put`.",
+        "operationId": "sled_registration_info",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledRegistrationInfo"
                 }
               }
             }
@@ -7227,6 +7259,21 @@
           }
         ]
       },
+      "MultirackJoinCompleteResponse": {
+        "description": "The result of completing a multirack join",
+        "type": "object",
+        "properties": {
+          "bootstore_generation": {
+            "description": "The latest bootstore generation when join completes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bootstore_generation"
+        ]
+      },
       "MultirackJoinServiceStatus": {
         "type": "object",
         "properties": {
@@ -9866,6 +9913,32 @@
           "rack_id",
           "revision",
           "serial",
+          "sled_id"
+        ]
+      },
+      "SledRegistrationInfo": {
+        "description": "The sled's registration identity.\n\nThis returns additional information that isn't present in the `sled_upsert` upcall to Nexus.\n\nThe data that can be returned here has important restrictions! See the comment in sled_registration_info for more information.",
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "description": "The rack ID that this sled is registered with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          },
+          "sled_id": {
+            "description": "The ID of this sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rack_id",
           "sled_id"
         ]
       },
