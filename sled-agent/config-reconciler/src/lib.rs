@@ -69,6 +69,8 @@ pub use handle::InventoryError;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
 pub use handle::UpdateDispositionReceiver;
+pub use handle::WicketSshAuthReceiver;
+pub use handle::WicketSshAuthReceiverError;
 pub use host_phase_2::HostPhase2PreparedContents;
 pub use internal_disks::InternalDisks;
 pub use internal_disks::InternalDisksReceiver;

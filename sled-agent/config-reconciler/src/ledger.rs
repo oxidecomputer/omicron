@@ -128,9 +128,10 @@ pub(crate) struct LedgerTaskHandle {
 impl LedgerTaskHandle {
     pub fn spawn_ledger_task<T: SledAgentArtifactStore>(
         internal_disks_rx: InternalDisksReceiver,
+        current_config_tx: watch::Sender<CurrentSledConfig>,
         artifact_store: T,
         log: Logger,
-    ) -> (Self, watch::Receiver<CurrentSledConfig>, oneshot::Receiver<()>) {
+    ) -> (Self, oneshot::Receiver<()>) {
         // We only accept two kinds of requests on this channel, both of which
         // come from HTTP requests to sled agent:
         //
@@ -148,17 +149,12 @@ impl LedgerTaskHandle {
         // too much. This is a WAG at a reasonable number.
         let (request_tx, request_rx) = mpsc::channel(12);
 
-        // We always start in the "waiting for internal disks" state. The
-        // internal disk management task is started more or less concurrently
-        // with us, so we won't stay in this state for long unless something is
-        // very wrong.
-        let (current_config_tx, current_config_rx) =
-            watch::channel(CurrentSledConfig::WaitingForInternalDisks);
-
         // The measurement handler relies on the ledger task running.
         // Give a channel to wait for that to happen instead of relying
         // on polling.
         let (ledger_run_tx, ledger_run_rx) = oneshot::channel();
+
+        let current_config_rx = current_config_tx.subscribe();
 
         tokio::spawn(
             LedgerTask {
@@ -171,11 +167,7 @@ impl LedgerTaskHandle {
             .run(ledger_run_tx),
         );
 
-        (
-            Self { request_tx, current_config_rx: current_config_rx.clone() },
-            current_config_rx,
-            ledger_run_rx,
-        )
+        (Self { request_tx, current_config_rx }, ledger_run_rx)
     }
 
     pub(crate) fn current_config(&self) -> CurrentSledConfig {
@@ -816,9 +808,12 @@ mod tests {
             }
 
             // Spawn the ledger task.
-            let (task_handle, mut current_config_rx, ledger_task_run_rx) =
+            let (current_config_tx, mut current_config_rx) =
+                watch::channel(CurrentSledConfig::WaitingForInternalDisks);
+            let (task_handle, ledger_task_run_rx) =
                 LedgerTaskHandle::spawn_ledger_task(
                     internal_disks_rx.clone(),
+                    current_config_tx,
                     fake_artifact_store,
                     log,
                 );
@@ -913,20 +908,17 @@ mod tests {
         let (disks_tx, disks_rx) = watch::channel(Vec::new());
         let internal_disks_rx =
             InternalDisksReceiver::fake_dynamic(mount_config.into(), disks_rx);
+        let (current_config_tx, mut current_config_rx) =
+            watch::channel(CurrentSledConfig::WaitingForInternalDisks);
 
-        // Spawn the ledger task. It should sit in the `WaitingForInternalDisks`
-        // state.
-        let (_task_handle, mut current_config_rx, ledger_task_run_rx) =
+        // Spawn the ledger task.
+        let (_task_handle, ledger_task_run_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 internal_disks_rx,
+                current_config_tx,
                 FakeArtifactStore::default(),
                 logctx.log.clone(),
             );
-
-        assert_eq!(
-            *current_config_rx.borrow_and_update(),
-            CurrentSledConfig::WaitingForInternalDisks
-        );
 
         // Populate a fake disk.
         disks_tx.send(vec![make_fake_disk()]).expect("receiver still exists");
