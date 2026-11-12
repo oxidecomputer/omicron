@@ -433,7 +433,7 @@ pub trait Api: Send + Sync {
         zone: Option<&str>,
         fmri: &str,
         log: Logger,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), crate::svc::WaitForServiceTimeout> {
         crate::svc::wait_for_service(zone, fmri, log).await
     }
 

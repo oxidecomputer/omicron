@@ -4,10 +4,20 @@
 
 //! Utilities for accessing services.
 
-use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use slog::{Logger, warn};
 use std::time::Duration;
+
+/// Errors returned by [`wait_for_service`].
+#[derive(thiserror::Error, Debug)]
+#[error(
+    "service {fmri} in zone {zone:?} did not reach 'online' in {timeout:?}'"
+)]
+pub struct WaitForServiceTimeout {
+    zone: Option<String>,
+    fmri: String,
+    timeout: Duration,
+}
 
 // TODO(https://www.illumos.org/issues/13837): This is a hack;
 // remove me when when fixed. Ideally, the ".synchronous()" argument
@@ -30,7 +40,7 @@ pub async fn wait_for_service<'a>(
     zone: Option<&'a str>,
     fmri: &str,
     log: Logger,
-) -> Result<(), Error> {
+) -> Result<(), WaitForServiceTimeout> {
     // Okay, so...all timeouts are arbitrary, right? The important thing here is
     // that if the service isn't coming up, we should eventually give up and
     // return an error, instead of waiting forever. Assuming that a service that
@@ -91,9 +101,14 @@ pub async fn wait_for_service<'a>(
         log_notification_failure,
     )
     .await
-    .map_err(|e| Error::InternalError {
-        internal_message: format!(
-            "service {fmri:?} did not reach \"online\" within {TIMEOUT:?}: {e}",
-        ),
+    .map_err(|_| {
+        // N.B. that we throw away the underlying error here because it's always
+        // the string "Property not found", which is not that interesting
+        // here...
+        WaitForServiceTimeout {
+            zone: zone.map(ToString::to_string),
+            fmri: fmri.to_string(),
+            timeout: TIMEOUT,
+        }
     })
 }
