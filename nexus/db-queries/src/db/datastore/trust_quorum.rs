@@ -237,6 +237,39 @@ impl ReconfigurationBase {
             }) => Some(config),
         }
     }
+
+    pub(super) fn require_last_committed(
+        &self,
+    ) -> Result<(&TrustQuorumConfig, Epoch), Error> {
+        match &self.latest {
+            None => Err(missing_tq_configs_error(self.rack_id)),
+            Some(LatestConfig::Aborted { epoch, last_committed: None }) => {
+                Err(no_committed_tq_config_error(self.rack_id, *epoch))
+            }
+            Some(LatestConfig::LastCommitted(config)) => {
+                Ok((config, config.epoch))
+            }
+            Some(LatestConfig::Aborted {
+                epoch,
+                last_committed: Some(config),
+            }) => Ok((config, *epoch)),
+        }
+    }
+}
+
+fn missing_tq_configs_error(rack_id: RackUuid) -> Error {
+    Error::conflict(format!(
+        "Missing trust quorum configurations for rack {rack_id}. Upgrade to \
+         trust quorum required."
+    ))
+}
+
+fn no_committed_tq_config_error(rack_id: RackUuid, epoch: Epoch) -> Error {
+    Error::conflict(format!(
+        "No committed trust quorum configuration for rack {rack_id}: the \
+         upgrade from LRTQ at epoch {epoch} was aborted. Retry the upgrade \
+         from LRTQ."
+    ))
 }
 
 /// The latest trust quorum configuration for a rack, once we've verified that a
@@ -466,12 +499,9 @@ impl DataStore {
         let Some(latest_config) =
             Self::tq_get_latest_config_with_members_conn(conn, rack_id).await?
         else {
-            return Err(TransactionError::CustomError(Error::conflict(
-                format!(
-                    "Missing trust quorum configurations for rack {rack_id}. \
-                    Upgrade to trust quorum required."
-                ),
-            )));
+            return Err(TransactionError::CustomError(
+                missing_tq_configs_error(rack_id),
+            ));
         };
 
         let highest_epoch = latest_config.epoch;
@@ -482,14 +512,9 @@ impl DataStore {
         // insertion of the new configuration.
         let latest_committed_config = if latest_config.state.is_aborted() {
             let Some(epoch) = latest_config.last_committed_epoch else {
-                return Err(TransactionError::CustomError(Error::conflict(
-                    format!(
-                        "No committed trust quorum configuration for rack \
-                         {rack_id}: the upgrade from LRTQ at epoch {} was \
-                         aborted. Retry the upgrade from LRTQ.",
-                        latest_config.epoch
-                    ),
-                )));
+                return Err(TransactionError::CustomError(
+                    no_committed_tq_config_error(rack_id, latest_config.epoch),
+                ));
             };
 
             // Load the configuration for the last commmitted epoch
@@ -655,7 +680,7 @@ impl DataStore {
         }))
     }
 
-    async fn tq_get_config_with_members_from_epoch_conn(
+    pub(super) async fn tq_get_config_with_members_from_epoch_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
         epoch: Epoch,
@@ -2117,13 +2142,14 @@ impl DataStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::db::datastore) mod tests {
     use super::*;
     use crate::db::datastore::sled::SledTransition;
     use crate::db::datastore::sled::TransitionError;
     use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
+    use crate::db::pub_test_utils::sled_expunge_request::fail_sled_expunge_request;
     use crate::db::pub_test_utils::sled_expunge_request::insert_sled_expunge_request;
     use crate::db::pub_test_utils::sled_expunge_request::set_sled_expunge_request_state;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -2147,11 +2173,15 @@ mod tests {
     use proptest::prelude::*;
     use uuid::Uuid;
 
-    fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
+    pub(in crate::db::datastore) fn make_authz_tq(
+        rack_id: RackUuid,
+    ) -> authz::TrustQuorumConfig {
         authz::TrustQuorumConfig::for_rack_id(rack_id)
     }
 
-    async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<HwBaseboardId> {
+    pub(in crate::db::datastore) async fn insert_hw_baseboard_ids(
+        db: &TestDatabase,
+    ) -> Vec<HwBaseboardId> {
         let (_, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         use nexus_db_schema::schema::hw_baseboard_id::dsl;
@@ -2181,7 +2211,7 @@ mod tests {
     }
 
     /// Insert a sled whose baseboard matches `hw`.
-    async fn insert_sled_for_baseboard(
+    pub(in crate::db::datastore) async fn insert_sled_for_baseboard(
         datastore: &DataStore,
         rack_id: RackUuid,
         hw: &HwBaseboardId,
@@ -3460,6 +3490,9 @@ mod tests {
                 DbTrustQuorumConfigurationState::Committed => {
                     (already(6, "committed"), already(5, "committed"))
                 }
+                // TODO-RAINCLAUDE: The `sled_expunge` task gate's safety
+                // argument (RFD 747) relies on `tq_abort_config` refusing a
+                // `CommittedPartially` config.
                 DbTrustQuorumConfigurationState::CommittedPartially => (
                     already(6, "partially committed"),
                     already(5, "partially committed"),
@@ -4264,7 +4297,7 @@ mod tests {
             SledExpungeRequestStateKind::ALL
                 .iter()
                 .copied()
-                .filter(|state| state.is_finished())
+                .filter(|state| state.as_unfinished().is_none())
                 .collect::<Vec<_>>(),
         )
     }
@@ -4642,12 +4675,7 @@ mod tests {
         for (request, finisher) in &finishers {
             match finisher {
                 RequestFinisher::Fail => {
-                    set_sled_expunge_request_state(
-                        datastore,
-                        request,
-                        SledExpungeRequestStateKind::Failed,
-                    )
-                    .await;
+                    fail_sled_expunge_request(opctx, datastore, request).await;
                 }
                 RequestFinisher::Done => {
                     set_sled_expunge_request_state(

@@ -10338,6 +10338,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_expunge_request (
     -- This is recorded at creation from inventory or from the ignition scan's
     -- sp_get, or written later if a sled that wasn't present at creation is
     -- seen again.
+    -- TODO-RAINCLAUDE: `sp_slot_source` records where the value came from:
+    -- `inventory` or `live_scan` at creation, and `found_after_absent` or
+    -- `relocated` from the powering-off step. The prose above needs
+    -- rewording, because creation's fallback is a live scan that can reuse
+    -- inventory's board identities rather than an `sp_get`, and because it
+    -- doesn't mention the `relocated` case.
     sp_slot INT4,
     sp_slot_source omicron.public.sled_expunge_sp_slot_source,
 

@@ -2,18 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::authz;
+use crate::context::OpContext;
 use crate::db::DataStore;
+use crate::db::datastore::SledExpungeRequestUpdateOutcome;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
-use nexus_db_model::DbSledExpungePowerOffOutcome;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::SledExpungeRequest as DbSledExpungeRequest;
+use nexus_db_model::SledExpungeRequestTransitionColumns;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::schema::sled_expunge_request::dsl;
+use nexus_types::sled_expunge::SledExpungeCubbyPowerOffOutcome;
+use nexus_types::sled_expunge::SledExpungePowerOff;
 use nexus_types::sled_expunge::SledExpungeRecordedCubby;
 use nexus_types::sled_expunge::SledExpungeRequest;
+use nexus_types::sled_expunge::SledExpungeRequestAdvance;
 use nexus_types::sled_expunge::SledExpungeRequestStateKind;
+use nexus_types::sled_expunge::SledExpungeRequestTransition;
+use nexus_types::sled_expunge::SledExpungeRequestUnfinishedState;
 use nexus_types::sled_expunge::SledExpungeSpSlotSource;
 use omicron_common::now_db_precision;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
@@ -22,82 +31,128 @@ use trust_quorum_types::types::Epoch;
 pub const TEST_FAILURE_REASON: &str = "test failure";
 pub const TEST_SP_SLOT: u16 = 0;
 
+// TODO-RAINCLAUDE: Returns the real transitions that take a request from `from`
+// to `state`. The power-off step records `PoweredOff` at `cubby`, or
+// `AbsentAtCreation` when there is no `cubby`.
+fn sled_expunge_request_transitions(
+    from: SledExpungeRequestStateKind,
+    cubby: Option<SledExpungeRecordedCubby>,
+    state: SledExpungeRequestStateKind,
+) -> Vec<SledExpungeRequestTransition> {
+    let mut transitions = Vec::new();
+    let mut current = from;
+    while current != state {
+        let unfinished = current.as_unfinished().unwrap_or_else(|| {
+            panic!(
+                "test moves a sled expunge request forward from an unfinished \
+                 state (requested {from} -> {state})",
+            )
+        });
+        let (transition, next) = match state {
+            SledExpungeRequestStateKind::Failed => (
+                SledExpungeRequestTransition::Failed {
+                    from: unfinished,
+                    failure_reason: TEST_FAILURE_REASON.to_string(),
+                },
+                SledExpungeRequestStateKind::Failed,
+            ),
+            SledExpungeRequestStateKind::WaitingForTrustQuorum
+            | SledExpungeRequestStateKind::PoweringOff
+            | SledExpungeRequestStateKind::Expunging
+            | SledExpungeRequestStateKind::Done => match unfinished {
+                SledExpungeRequestUnfinishedState::WaitingForTrustQuorum => (
+                    SledExpungeRequestTransition::Advance(
+                        SledExpungeRequestAdvance::ToPoweringOff,
+                    ),
+                    SledExpungeRequestStateKind::PoweringOff,
+                ),
+                SledExpungeRequestUnfinishedState::PoweringOff => {
+                    let power_off = match cubby {
+                        Some(cubby) => SledExpungePowerOff::Cubby {
+                            cubby,
+                            outcome:
+                                SledExpungeCubbyPowerOffOutcome::PoweredOff,
+                        },
+                        None => SledExpungePowerOff::AbsentAtCreation,
+                    };
+                    (
+                        SledExpungeRequestTransition::Advance(
+                            SledExpungeRequestAdvance::ToExpunging {
+                                power_off,
+                            },
+                        ),
+                        SledExpungeRequestStateKind::Expunging,
+                    )
+                }
+                SledExpungeRequestUnfinishedState::Expunging => (
+                    SledExpungeRequestTransition::Done,
+                    SledExpungeRequestStateKind::Done,
+                ),
+            },
+        };
+        transitions.push(transition);
+        current = next;
+    }
+    transitions
+}
+
 fn sled_expunge_request_with_state(
     request: DbSledExpungeRequest,
+    cubby: Option<SledExpungeRecordedCubby>,
     state: SledExpungeRequestStateKind,
 ) -> DbSledExpungeRequest {
     let now = now_db_precision();
-    let default_outcome = match request.sp_slot {
-        Some(_) => DbSledExpungePowerOffOutcome::PoweredOff,
-        None => DbSledExpungePowerOffOutcome::AbsentAtCreation,
-    };
-    let power_off_outcome = match state {
-        SledExpungeRequestStateKind::WaitingForTrustQuorum
-        | SledExpungeRequestStateKind::PoweringOff => None,
-        SledExpungeRequestStateKind::Expunging
-        | SledExpungeRequestStateKind::Done => {
-            Some(request.power_off_outcome.unwrap_or(default_outcome))
-        }
-        SledExpungeRequestStateKind::Failed => request.power_off_outcome,
-    };
-    let failure_reason = match state {
-        SledExpungeRequestStateKind::WaitingForTrustQuorum
-        | SledExpungeRequestStateKind::PoweringOff
-        | SledExpungeRequestStateKind::Expunging
-        | SledExpungeRequestStateKind::Done => None,
-        SledExpungeRequestStateKind::Failed => {
-            Some(TEST_FAILURE_REASON.to_string())
-        }
-    };
-    let finished = state.is_finished();
-    DbSledExpungeRequest {
-        time_modified: now,
-        state: state.into(),
-        power_off_outcome,
-        failure_reason,
-        time_completed: finished.then_some(now),
-        last_error: if finished { None } else { request.last_error },
-        ..request
-    }
+    sled_expunge_request_transitions(request.state.into(), cubby, state)
+        .into_iter()
+        .fold(request, |request, transition| {
+            SledExpungeRequestTransitionColumns::new(transition, now)
+                .apply_to(request)
+        })
+}
+
+pub(crate) fn new_sled_expunge_request(
+    rack_id: RackUuid,
+    sled_id: SledUuid,
+    baseboard_id: BaseboardId,
+    tq_epoch: Epoch,
+    state: SledExpungeRequestStateKind,
+) -> DbSledExpungeRequest {
+    new_sled_expunge_request_with_sp_slot(
+        rack_id,
+        sled_id,
+        baseboard_id,
+        Some(TEST_SP_SLOT),
+        tq_epoch,
+        state,
+    )
 }
 
 // TODO-RAINCLAUDE: Tests pick only a slot, so the request records it as found
 // in inventory, which is where request creation looks first.
-fn new_request_with_inventory_slot(
+pub(crate) fn new_sled_expunge_request_with_sp_slot(
     rack_id: RackUuid,
     sled_id: SledUuid,
     baseboard_id: BaseboardId,
     sp_slot: Option<u16>,
     tq_epoch: Epoch,
+    state: SledExpungeRequestStateKind,
 ) -> DbSledExpungeRequest {
     let cubby = sp_slot.map(|slot| SledExpungeRecordedCubby {
         slot,
         source: SledExpungeSpSlotSource::Inventory,
     });
-    DbSledExpungeRequest::new(rack_id, sled_id, baseboard_id, cubby, tq_epoch)
-        .expect("test epoch fits in the database")
-}
-
-pub fn new_sled_expunge_request(
-    rack_id: RackUuid,
-    sled_id: SledUuid,
-    baseboard_id: BaseboardId,
-    tq_epoch: Epoch,
-    state: SledExpungeRequestStateKind,
-) -> DbSledExpungeRequest {
-    sled_expunge_request_with_state(
-        new_request_with_inventory_slot(
-            rack_id,
-            sled_id,
-            baseboard_id,
-            Some(TEST_SP_SLOT),
-            tq_epoch,
-        ),
-        state,
+    let request = DbSledExpungeRequest::new(
+        rack_id,
+        sled_id,
+        baseboard_id,
+        cubby,
+        tq_epoch,
     )
+    .expect("test epoch fits in the database");
+    sled_expunge_request_with_state(request, cubby, state)
 }
 
-fn decode(request: DbSledExpungeRequest) -> SledExpungeRequest {
+pub(crate) fn decode(request: DbSledExpungeRequest) -> SledExpungeRequest {
     SledExpungeRequest::try_from(request)
         .unwrap_or_else(|error| panic!("decoded the request row: {error:#}"))
 }
@@ -109,13 +164,66 @@ pub async fn insert_sled_expunge_request(
     tq_epoch: Epoch,
     state: SledExpungeRequestStateKind,
 ) -> SledExpungeRequest {
-    let request = new_sled_expunge_request(
-        rack_id,
-        SledUuid::new_v4(),
-        baseboard_id,
-        tq_epoch,
-        state,
-    );
+    insert_request(
+        datastore,
+        new_sled_expunge_request(
+            rack_id,
+            SledUuid::new_v4(),
+            baseboard_id,
+            tq_epoch,
+            state,
+        ),
+    )
+    .await
+}
+
+pub async fn insert_sled_expunge_request_for_sled(
+    datastore: &DataStore,
+    rack_id: RackUuid,
+    sled_id: SledUuid,
+    baseboard_id: &BaseboardId,
+    tq_epoch: Epoch,
+    state: SledExpungeRequestStateKind,
+) -> SledExpungeRequest {
+    insert_request(
+        datastore,
+        new_sled_expunge_request(
+            rack_id,
+            sled_id,
+            baseboard_id.clone(),
+            tq_epoch,
+            state,
+        ),
+    )
+    .await
+}
+
+pub async fn insert_sled_expunge_request_with_sp_slot(
+    datastore: &DataStore,
+    rack_id: RackUuid,
+    baseboard_id: &BaseboardId,
+    sp_slot: Option<u16>,
+    tq_epoch: Epoch,
+    state: SledExpungeRequestStateKind,
+) -> SledExpungeRequest {
+    insert_request(
+        datastore,
+        new_sled_expunge_request_with_sp_slot(
+            rack_id,
+            SledUuid::new_v4(),
+            baseboard_id.clone(),
+            sp_slot,
+            tq_epoch,
+            state,
+        ),
+    )
+    .await
+}
+
+async fn insert_request(
+    datastore: &DataStore,
+    request: DbSledExpungeRequest,
+) -> SledExpungeRequest {
     let conn = datastore
         .pool_connection_for_tests()
         .await
@@ -129,83 +237,103 @@ pub async fn insert_sled_expunge_request(
     decode(row)
 }
 
-fn state_order(state: SledExpungeRequestStateKind) -> u8 {
-    match state {
-        SledExpungeRequestStateKind::WaitingForTrustQuorum => 0,
-        SledExpungeRequestStateKind::PoweringOff => 1,
-        SledExpungeRequestStateKind::Expunging => 2,
-        SledExpungeRequestStateKind::Done
-        | SledExpungeRequestStateKind::Failed => 3,
-    }
-}
-
-// TODO-RAINCLAUDE: The row is read back and compared with the caller's copy,
-// so a stale copy trips an assert. The compare-and-swap then covers every
-// column this writes or derives from (sp_slot picks the default outcome), so
-// a write that lands between the read and the update trips the other assert
-// instead of being overwritten. Returns the request as written.
+// TODO-RAINCLAUDE: Moves a request forward to `state` without going through the
+// datastore's gated paths. Tests use this to get a finished request without
+// setting up a sled and a trust quorum that pass the task gate.
 pub async fn set_sled_expunge_request_state(
     datastore: &DataStore,
     request: &SledExpungeRequest,
     state: SledExpungeRequestStateKind,
 ) -> SledExpungeRequest {
     let from = request.state.kind();
-    assert!(
-        state_order(from) < state_order(state),
-        "test moves a sled expunge request forward from an unfinished state \
-         (requested {from} -> {state})",
+    assert_ne!(
+        from, state,
+        "test moves a sled expunge request to a different state",
+    );
+    let transitions = sled_expunge_request_transitions(
+        from,
+        request.state.recorded_cubby(),
+        state,
     );
     let conn = datastore
         .pool_connection_for_tests()
         .await
         .expect("got a database connection");
-    let current: DbSledExpungeRequest = dsl::sled_expunge_request
-        .filter(dsl::id.eq(request.id.into_untyped_uuid()))
-        .select(DbSledExpungeRequest::as_select())
+    let mut updated = request.clone();
+    for transition in transitions {
+        let step_from = transition.from_state();
+        let row = DataStore::sled_expunge_request_transition_conn(
+            &conn,
+            request.id,
+            transition,
+            now_db_precision(),
+        )
+        .await
+        .expect("updated the sled expunge request's state")
+        .unwrap_or_else(|| {
+            panic!(
+                "updated the sled expunge request, still in state {step_from} \
+                 with the cubby the test last saw (requested {from} -> \
+                 {state})",
+            )
+        });
+        updated = decode(row);
+    }
+    updated
+}
+
+// TODO-RAINCLAUDE: Moves `time_modified` an hour into the past, so that a test
+// can assert that a later write strictly increases it, whatever the clock's
+// resolution.
+pub async fn backdate_sled_expunge_request(
+    datastore: &DataStore,
+    request: &SledExpungeRequest,
+) -> SledExpungeRequest {
+    let conn = datastore
+        .pool_connection_for_tests()
+        .await
+        .expect("got a database connection");
+    let row = diesel::update(dsl::sled_expunge_request)
+        .filter(dsl::id.eq(to_db_typed_uuid(request.id)))
+        .set(
+            dsl::time_modified
+                .eq(request.time_modified - chrono::Duration::hours(1)),
+        )
+        .returning(DbSledExpungeRequest::as_returning())
         .get_result_async(&*conn)
         .await
-        .expect("read the sled expunge request");
-    assert_eq!(
-        &decode(current.clone()),
-        request,
-        "the test's copy of the sled expunge request is current",
-    );
-    let updated = sled_expunge_request_with_state(current.clone(), state);
-    let mut rows = diesel::update(dsl::sled_expunge_request)
-        .filter(dsl::id.eq(current.id))
-        .filter(dsl::state.eq(current.state))
-        .filter(dsl::sp_slot.is_not_distinct_from(current.sp_slot))
-        .filter(
-            dsl::power_off_outcome
-                .is_not_distinct_from(current.power_off_outcome),
+        .expect("backdated time_modified");
+    decode(row)
+}
+
+pub async fn fail_sled_expunge_request(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    request: &SledExpungeRequest,
+) {
+    let from = request.state.kind().as_unfinished().unwrap_or_else(|| {
+        panic!(
+            "test fails a sled expunge request that is unfinished (it is {})",
+            request.state.kind(),
         )
-        .filter(
-            dsl::failure_reason
-                .is_not_distinct_from(current.failure_reason.clone()),
-        )
-        .filter(
-            dsl::last_error.is_not_distinct_from(current.last_error.clone()),
-        )
-        .filter(
-            dsl::time_completed.is_not_distinct_from(current.time_completed),
-        )
-        .set((
-            dsl::state.eq(updated.state),
-            dsl::power_off_outcome.eq(updated.power_off_outcome),
-            dsl::failure_reason.eq(updated.failure_reason),
-            dsl::last_error.eq(updated.last_error),
-            dsl::time_completed.eq(updated.time_completed),
-            dsl::time_modified.eq(updated.time_modified),
-        ))
-        .returning(DbSledExpungeRequest::as_returning())
-        .get_results_async(&*conn)
+    });
+    let (authz_request,) = LookupPath::new(opctx, datastore)
+        .sled_expunge_request(request.id)
+        .lookup_for(authz::Action::Modify)
         .await
-        .expect("updated the sled expunge request's state");
-    assert_eq!(
-        rows.len(),
-        1,
-        "updated exactly one sled expunge request, still as the test last \
-         saw it in state {from}",
-    );
-    decode(rows.pop().expect("exactly one row was updated"))
+        .expect("looked up the sled expunge request");
+    let outcome = datastore
+        .sled_expunge_request_fail(
+            opctx,
+            &authz_request,
+            from,
+            TEST_FAILURE_REASON.to_string(),
+        )
+        .await
+        .expect("failed the sled expunge request");
+    let SledExpungeRequestUpdateOutcome::Updated { request: failed } = outcome
+    else {
+        panic!("failed the sled expunge request from {from}: {outcome:?}");
+    };
+    assert_eq!(failed.state.kind(), SledExpungeRequestStateKind::Failed);
 }

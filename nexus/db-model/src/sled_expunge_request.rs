@@ -13,8 +13,10 @@ use nexus_types::sled_expunge::SledExpungeCubbyPowerOffOutcome;
 use nexus_types::sled_expunge::SledExpungePowerOff;
 use nexus_types::sled_expunge::SledExpungePowerOffProgress;
 use nexus_types::sled_expunge::SledExpungeRecordedCubby;
+use nexus_types::sled_expunge::SledExpungeRequestAdvance;
 use nexus_types::sled_expunge::SledExpungeRequestState;
 use nexus_types::sled_expunge::SledExpungeRequestStateKind;
+use nexus_types::sled_expunge::SledExpungeRequestTransition;
 use nexus_types::sled_expunge::SledExpungeSpSlotSource;
 use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackKind;
@@ -190,6 +192,90 @@ impl From<SledExpungePowerOff> for DbSledExpungePowerOffOutcome {
     }
 }
 
+#[derive(AsChangeset, Clone, Debug, PartialEq, Eq)]
+#[diesel(table_name = sled_expunge_request, treat_none_as_null = true)]
+pub struct SledExpungeRequestTransitionColumns {
+    state: DbSledExpungeRequestState,
+    #[diesel(treat_none_as_null = false)]
+    power_off_outcome: Option<DbSledExpungePowerOffOutcome>,
+    failure_reason: Option<String>,
+    last_error: Option<String>,
+    time_completed: Option<DateTime<Utc>>,
+    time_modified: DateTime<Utc>,
+}
+
+impl SledExpungeRequestTransitionColumns {
+    // TODO-RAINCLAUDE: Returns the columns this transition writes. This is the
+    // only place that mapping is defined.
+    //
+    // A `power_off_outcome` of `None` leaves the column alone rather than
+    // writing NULL (see `treat_none_as_null` on
+    // `SledExpungeRequestTransitionColumns`), so `Done` and `Failed` keep the
+    // outcome that is already on the row.
+    pub fn new(
+        transition: SledExpungeRequestTransition,
+        now: DateTime<Utc>,
+    ) -> Self {
+        let (state, power_off_outcome, failure_reason, time_completed) =
+            match transition {
+                SledExpungeRequestTransition::Advance(
+                    SledExpungeRequestAdvance::ToPoweringOff,
+                ) => (DbSledExpungeRequestState::PoweringOff, None, None, None),
+                SledExpungeRequestTransition::Advance(
+                    SledExpungeRequestAdvance::ToExpunging { power_off },
+                ) => (
+                    DbSledExpungeRequestState::Expunging,
+                    Some(DbSledExpungePowerOffOutcome::from(power_off)),
+                    None,
+                    None,
+                ),
+                SledExpungeRequestTransition::Done => {
+                    (DbSledExpungeRequestState::Done, None, None, Some(now))
+                }
+                SledExpungeRequestTransition::Failed {
+                    from: _,
+                    failure_reason,
+                } => (
+                    DbSledExpungeRequestState::Failed,
+                    None,
+                    Some(failure_reason),
+                    Some(now),
+                ),
+            };
+        Self {
+            state,
+            power_off_outcome,
+            failure_reason,
+            last_error: None,
+            time_completed,
+            time_modified: now,
+        }
+    }
+
+    pub fn apply_to(self, request: SledExpungeRequest) -> SledExpungeRequest {
+        let Self {
+            state,
+            power_off_outcome,
+            failure_reason,
+            last_error,
+            time_completed,
+            time_modified,
+        } = self;
+        SledExpungeRequest {
+            state,
+            power_off_outcome: power_off_outcome.or(request.power_off_outcome),
+            failure_reason,
+            last_error,
+            time_completed,
+            time_modified,
+            ..request
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: A row of the `sled_expunge_request` table. `sled_id`,
+// `rack_id`, the baseboard (`part_number` and `serial_number`) and `tq_epoch`
+// never change after insert.
 #[derive(Queryable, Insertable, Selectable, Clone, Debug, PartialEq, Eq)]
 #[diesel(table_name = sled_expunge_request)]
 pub struct SledExpungeRequest {
