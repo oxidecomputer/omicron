@@ -208,9 +208,9 @@ async fn sim_reserve_sled_resources(
     let params = sagactx.saga_params::<Params>()?;
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
-    let Some(compatible_sled_families) =
-        params.src_vmm.cpu_platform.compatible_sled_cpu_families()
-    else {
+    let compatible_sled_families =
+        params.src_vmm.cpu_platform.compatible_sled_cpu_families();
+    if compatible_sled_families.is_empty() {
         // If we're here there are no compatible sled families for the VMM's CPU
         // platform. That means the VMM's CPU platform is "SledDefault" and we
         // just don't know what sleds might be compatible with the CPU platform

@@ -3428,6 +3428,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (bundle_id)
 );
@@ -8596,7 +8597,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
     'physical_disk',
     'saga',
-    'certificate'
+    'certificate',
+    'smf_service'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8785,6 +8787,43 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_certificate (
     PRIMARY KEY (sitrep_id, id)
 );
 
+-- The SMF service diagnosis engine's facts.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_smf_service_kind AS ENUM (
+    'in_maintenance'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_smf_service (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The SMF service instance this fact is about. Common to every kind of
+    -- SMF service fact (the case is keyed by it), so it is always present
+    -- regardless of `kind`.
+    sled_id UUID NOT NULL,
+    zone_name TEXT NOT NULL,
+    fmri TEXT NOT NULL,
+
+    -- Which SMF service fact this row represents.
+    kind omicron.public.fm_fact_smf_service_kind NOT NULL,
+
+    -- The inventory collection in which the service was observed, and when
+    -- the sled agent observed it.
+    observed_in_inv UUID NOT NULL,
+    time_observed TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
     -- association is assigned a UUID. These are used primarily to aid in
@@ -8912,6 +8951,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (sitrep_id, request_id)
 );
@@ -10046,7 +10086,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '316.0.0', NULL)
+    (TRUE, NOW(), NOW(), '318.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
