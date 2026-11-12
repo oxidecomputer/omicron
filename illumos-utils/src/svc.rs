@@ -60,6 +60,7 @@ pub async fn wait_for_service<'a>(
             delay
         );
     };
+    let online = smf::PropertyValue::Astring("online".to_string());
     backoff::retry_notify(
         backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
@@ -67,9 +68,7 @@ pub async fn wait_for_service<'a>(
             let properties =
                 { if let Some(zone) = zone { p.zone(zone) } else { &mut p } };
             if let Ok(value) = properties.lookup().run(&name, &fmri) {
-                if value.value()
-                    == &smf::PropertyValue::Astring("online".to_string())
-                {
+                if value.value() == &online {
                     return Ok(());
                 } else {
                     // This is helpful in virtual environments where
