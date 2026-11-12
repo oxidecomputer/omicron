@@ -10284,6 +10284,136 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_support_bundle (
     PRIMARY KEY (sitrep_id, problem_id, support_bundle_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_expunge_request_state AS ENUM (
+    'waiting_for_trust_quorum',
+    'powering_off',
+    'expunging',
+    'done',
+    'failed'
+);
+
+-- These values mirror `SledExpungePowerOffOutcome` in the external API. See
+-- that type for information on what each variant means.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_expunge_power_off_outcome AS ENUM (
+    'powered_off',
+    'already_off',
+    'other_board_present',
+    'not_present',
+    'absent_at_creation'
+);
+
+-- The source from which a sled expunge request's `sp_slot` (last known cubby)
+-- was obtained.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_expunge_sp_slot_source AS ENUM (
+    'inventory',
+    'live_scan',
+    'found_after_absent',
+    'relocated'
+);
+
+-- Sled expunge requests
+--
+-- Each row is one operator request to power off and expunge a sled (RFD 747).
+CREATE TABLE IF NOT EXISTS omicron.public.sled_expunge_request (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    rack_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+
+    -- The baseboard ID (part_number and serial_number) are captured at creation
+    -- time and stored here.
+    --
+    -- Why do this and not just use the sled ID? Because a baseboard can outlive
+    -- the corresponding sled's control plane object. For example, if a sled is
+    -- manually clean slated and before expunge is marked as completed here, we
+    -- want to ensure that the baseboard can't get re-adopted until the expunge
+    -- state machine reaches completion.
+    part_number STRING(63) NOT NULL,
+    serial_number STRING(63) NOT NULL,
+
+    -- The sled's last known cubby.
+    --
+    -- This is recorded at creation from inventory or from the ignition scan's
+    -- sp_get, or written later if a sled that wasn't present at creation is
+    -- seen again.
+    sp_slot INT4,
+    sp_slot_source omicron.public.sled_expunge_sp_slot_source,
+
+    tq_epoch INT8 NOT NULL,
+
+    state omicron.public.sled_expunge_request_state NOT NULL,
+    power_off_outcome omicron.public.sled_expunge_power_off_outcome,
+
+    -- `last_error` describes a problem that is being retried, and is only set
+    -- on unfinished requests. `failure_reason` says why a request failed, and
+    -- is set exactly when the state is `failed`. Both are shown to operators as
+    -- is, so they must not contain raw MGS or SQL errors.
+    last_error TEXT,
+    failure_reason TEXT,
+    time_completed TIMESTAMPTZ,
+
+    CONSTRAINT time_completed_iff_finished CHECK (
+        (state IN ('done', 'failed') AND time_completed IS NOT NULL)
+        OR
+        (state NOT IN ('done', 'failed') AND time_completed IS NULL)
+    ),
+
+    CONSTRAINT failure_reason_iff_failed CHECK (
+        (state = 'failed' AND failure_reason IS NOT NULL)
+        OR
+        (state != 'failed' AND failure_reason IS NULL)
+    ),
+
+    -- A `failed` request may or may not have an outcome, because a request can
+    -- fail before the power-off step finishes, or afterwards while it is
+    -- expunging.
+    CONSTRAINT power_off_outcome_matches_state CHECK (
+        (state IN ('waiting_for_trust_quorum', 'powering_off')
+            AND power_off_outcome IS NULL)
+        OR
+        (state IN ('expunging', 'done') AND power_off_outcome IS NOT NULL)
+        OR
+        state = 'failed'
+    ),
+
+    CONSTRAINT last_error_only_if_unfinished CHECK (
+        state IN ('waiting_for_trust_quorum', 'powering_off', 'expunging')
+        OR
+        last_error IS NULL
+    ),
+
+    CONSTRAINT sp_slot_source_iff_sp_slot CHECK (
+        (sp_slot IS NULL) = (sp_slot_source IS NULL)
+    ),
+
+    CONSTRAINT sp_slot_is_sled_cubby CHECK (
+        sp_slot BETWEEN 0 AND 31
+    ),
+
+    CONSTRAINT power_off_outcome_matches_sp_slot CHECK (
+        power_off_outcome IS NULL
+        OR
+        ((power_off_outcome = 'absent_at_creation') = (sp_slot IS NULL))
+    )
+);
+
+-- At most one request per sled can be unfinished.
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unfinished_sled_expunge_request_by_sled
+    ON omicron.public.sled_expunge_request (sled_id)
+    WHERE state IN ('waiting_for_trust_quorum', 'powering_off', 'expunging');
+
+CREATE INDEX IF NOT EXISTS lookup_sled_expunge_request_by_sled
+    ON omicron.public.sled_expunge_request (sled_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unfinished_sled_expunge_request_by_baseboard
+    ON omicron.public.sled_expunge_request (part_number, serial_number)
+    WHERE state IN ('waiting_for_trust_quorum', 'powering_off', 'expunging');
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_expunge_request_by_creation
+    ON omicron.public.sled_expunge_request (time_created, id);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -10293,7 +10423,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '324.0.0', NULL)
+    (TRUE, NOW(), NOW(), '325.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -18,6 +18,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SiloUuid;
+use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oso::PolarClass;
@@ -129,6 +130,14 @@ pub async fn make_resources(
         authz::FLEET,
         support_bundle_id,
         LookupType::by_id(support_bundle_id),
+    ));
+
+    let sled_expunge_request_id: SledExpungeRequestUuid =
+        "e9f923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
+    builder.new_resource(authz::SledExpungeRequest::new(
+        authz::FLEET,
+        sled_expunge_request_id,
+        LookupType::by_id(sled_expunge_request_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
