@@ -13,7 +13,7 @@ pub(crate) fn parse_ok(line: &str) -> CliCommand {
 }
 
 /// Asserts that none of `lines` parse.
-pub(crate) fn rejects(lines: &[&str]) {
+pub(crate) fn parse_err(lines: &[&str]) {
     for line in lines {
         if let Ok(command) = parse(line) {
             panic!("`{line}` should not parse, got {command:?}");

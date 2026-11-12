@@ -65,7 +65,7 @@ mod tests {
     use super::*;
     use crate::CliCommand;
     use crate::command::{SimCommand, Verb};
-    use crate::test_utils::{parse_ok, rejects};
+    use crate::test_utils::{parse_err, parse_ok};
 
     #[test]
     fn time_commands_parse() {
@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(parse_ok("time advance 5m"), advance(300));
         assert_eq!(parse_ok("time advance '1h 30m'"), advance(5400));
 
-        rejects(&[
+        parse_err(&[
             "time",
             "time show extra",
             "time advance",
