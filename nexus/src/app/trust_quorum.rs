@@ -175,21 +175,11 @@ impl super::Nexus {
         self.db_datastore
             .tq_abort_config(
                 opctx,
-                authz_tq.clone(),
+                authz_tq,
                 latest_config.epoch,
                 "Aborted via API request".to_string(),
             )
-            .await?;
-
-        // Return the updated configuration
-        self.db_datastore
-            .tq_get_config(opctx, authz_tq, latest_config.epoch)
-            .await?
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "Configuration was just aborted but cannot be retrieved",
-                )
-            })
+            .await
     }
 
     /// Read the set of all commissioned sleds from an existing deployment and
