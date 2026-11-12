@@ -191,7 +191,7 @@ async fn wait_for_http_server(
             // here, because the client we construct in `setup_propolis_zone`
             // uses a `reqwest` client builder without a per-request timeout (so
             // that the HTTP long-polling in the `instance_state_monitor`
-            // endpoint work correctly). That means that if propolis simply
+            // endpoint can work correctly). That means that if propolis simply
             // never responds to our request here without closing the
             // connection, we can potentially wait forever, despite the retry
             // policy's timeout (which does not cancel the operation future
