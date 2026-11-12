@@ -890,7 +890,6 @@ impl InstanceRunner {
 
     async fn run(mut self, mut ticket: InstanceTicket) {
         use InstanceRequest::*;
-        use omicron_common::api::external::InstanceShutdownPolicy;
 
         // Clone the arc around the terminator so that we can await the
         // termination signal even while running an async function that mutably
@@ -898,33 +897,9 @@ impl InstanceRunner {
         let terminator = self.terminator.clone();
         let mut state_owner = VmmStateOwner::Runner;
 
-        // Timeout for stopping the instance gracefully.
-        //
-        // When we send Propolis a put-state request to transition to
-        // Stopped`, we start this timer. If Propolis does not report back
-        // that it has stopped the instance within `STOP_GRACE_PERIOD`
-        // (plus any additional time spent waiting for the instance's configured
-        // ACPI shutdown policy, where applicable), we will forcibly terminate
-        // the VMM. This is to ensure that a totally stuck VMM does not prevent
-        // the Propolis zone from being cleaned up.
-        //
-        // The timeout is abandoned if a reboot request is accepted by propolis
-        // while the instance was still gracefully stopping from a prior ACPI
-        // shutdown request.
-        //
-        // If a stop request *without* an ACPI shutdown timeout is received
-        // while a prior ACPI shutdown timeout is running, the timeout becomes
-        // the shorter of itself or `STOP_GRACE_PERIOD`.
-        let mut stop_timeout: Option<(_, Option<std::time::Instant>)> = None;
-        async fn stop_timeout_completed(
-            stop_timeout: Option<&mut Pin<Box<impl Future<Output = Duration>>>>,
-        ) -> Duration {
-            if let Some(timeout) = stop_timeout {
-                timeout.await
-            } else {
-                std::future::pending().await
-            }
-        }
+        // Timeout for stopping the instance gracefully before escalating to
+        // forcibly destroying the zone.
+        let mut force_stop_timer = UngracefulTermGraceTime::default();
 
         while !self.is_terminating() {
             tokio::select! {
@@ -943,7 +918,7 @@ impl InstanceRunner {
                 // instance monitor requests, as we would prefer to honor a
                 // message from the instance monitor indicating a successful
                 // stop, even if we have reached the timeout.
-                time = stop_timeout_completed(stop_timeout.as_mut().map(|(st, _)| st)) => {
+                time = force_stop_timer.stop_timeout_completed() => {
                     warn!(
                         self.log,
                         "Instance failed to stop within the {}-second \
@@ -1023,64 +998,28 @@ impl InstanceRunner {
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
                                 if let VmmStateRequested::Stopped { method } = state {
-                                    // Only start the stop timeout if there
-                                    // isn't one already, so that additional
-                                    // requests to stop coming in don't reset
-                                    // the clock, *unless* the prior timeout
-                                    // was for an ACPI shutdown and this is
-                                    // a hard-stop request that would terminate
-                                    // sooner.
-                                    let acpi_timeout = match method {
-                                        InstanceShutdownPolicy::HardOff => 0u64,
-                                        InstanceShutdownPolicy::PowerButton {
-                                            timeout_secs
-                                        } => timeout_secs.into(),
-                                    };
-                                    let duration = Duration::from_secs(acpi_timeout)
-                                        + Self::STOP_GRACE_PERIOD;
-                                    let new_deadline = std::time::Instant::now() + duration;
-                                    let should_set = if let Some((_, Some(dl))) = &stop_timeout {
-                                        // true iff current request is hard-stop and would
-                                        // shorten the existing timeout, and the existing
-                                        // timeout was for an ACPI shutdown
-                                        method == InstanceShutdownPolicy::HardOff &&
-                                        new_deadline < *dl
-                                    } else {
-                                        // there's no existing timeout
-                                        true
-                                    };
-                                    if should_set {
-                                        stop_timeout = Some((
-                                            Box::pin(async move {
-                                                tokio::time::sleep(duration).await;
-                                                duration
-                                            }),
-                                            // if this is an ACPI shutdown, store the timeout
-                                            // deadline, such that we may shorten it later if
-                                            // a force-off comes through.
-                                            if let InstanceShutdownPolicy::PowerButton { .. } = method {
-                                                Some(new_deadline)
-                                            } else {
-                                                None
-                                            }
-                                        ));
-                                    }
+                                    force_stop_timer.set_stop_timeout(method);
                                 }
 
                                 let propolis_result = self
                                     .put_state(state)
                                     .await;
-                                // If we receive a reboot request while a stop timeout is running
-                                // that was initiated by an ACPI shutdown, disarm the timeout,
-                                // but only if Propolis was still there and honored the request.
+
+                                // If we receive a reboot request while a stop
+                                // timeout is running that was initiated by an
+                                // ACPI shutdown, disarm the timeout, but only
+                                // if Propolis was still there and honored the
+                                // request.
                                 if let (
                                     VmmStateRequested::Reboot { method: _ },
-                                    Some((_, Some(_))),
-                                    Ok(_),
-                                ) = (state, &stop_timeout, &propolis_result)
+                                    Ok(sled_vmm_state),
+                                ) = (state, &propolis_result)
                                 {
-                                    stop_timeout = None;
+                                    if sled_vmm_state.vmm_state.state != VmmState::Failed {
+                                        force_stop_timer.disarm();
+                                    }
                                 }
+
                                 tx.send(propolis_result
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
@@ -2465,7 +2404,7 @@ impl InstanceRunner {
         &mut self,
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
-        use omicron_common::api::internal::shared::InstanceShutdownPolicy::PowerButton;
+        use sled_agent_types::instance::InstanceShutdownPolicy::PowerButton;
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
@@ -3074,6 +3013,78 @@ async fn zpool_monitor(
     }
 }
 
+/// Timeout for stopping the instance gracefully.
+///
+/// When we send Propolis a put-state request to transition to
+/// `Stopped`, we start this timer. If Propolis does not report back
+/// that it has stopped the instance within `STOP_GRACE_PERIOD`
+/// (plus any additional time spent waiting for the instance's configured
+/// ACPI shutdown policy, where applicable), we will forcibly terminate
+/// the VMM. This is to ensure that a totally stuck VMM does not prevent
+/// the Propolis zone from being cleaned up.
+///
+/// The timeout is abandoned if a reboot request is accepted by propolis
+/// while the instance was still gracefully stopping from a prior ACPI
+/// shutdown request.
+///
+/// If a stop request *without* an ACPI shutdown timeout is received
+/// while a prior ACPI shutdown timeout is running, the timeout becomes
+/// the shorter of itself or `STOP_GRACE_PERIOD`.
+#[derive(Default)]
+struct UngracefulTermGraceTime {
+    timeout_duration: std::time::Duration,
+    stop_req_method: InstanceShutdownPolicy,
+    stop_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl UngracefulTermGraceTime {
+    fn set_stop_timeout(&mut self, method: InstanceShutdownPolicy) {
+        let acpi_timeout = match method {
+            InstanceShutdownPolicy::HardOff => 0u64,
+            InstanceShutdownPolicy::PowerButton {
+                timeout_secs
+            } => timeout_secs.into(),
+        };
+
+        let duration = Duration::from_secs(acpi_timeout)
+            + InstanceRunner::STOP_GRACE_PERIOD;
+
+        let new_sleep = Box::pin(tokio::time::sleep(duration));
+
+        // Only start the stop timeout if there isn't one already, so that
+        // additional requests to stop coming in don't reset the clock,
+        // *unless* the prior timeout was for an ACPI shutdown and this is
+        // a hard-stop request that would terminate sooner.
+        if let Some(old_sleep) = &self.stop_timeout {
+            if self.stop_req_method == InstanceShutdownPolicy::HardOff ||
+                method != InstanceShutdownPolicy::HardOff ||
+                new_sleep.deadline() > old_sleep.deadline()
+            {
+                return;
+            }
+        }
+            
+        self.stop_timeout = Some(new_sleep);
+        self.timeout_duration = duration;
+        self.stop_req_method = method;
+    }
+
+    fn disarm(&mut self) {
+        self.stop_timeout = None;
+    }
+    
+    async fn stop_timeout_completed(
+        &mut self,
+    ) -> Duration {
+        if let Some(timeout) = &mut self.stop_timeout {
+            timeout.await;
+            self.timeout_duration
+        } else {
+            std::future::pending().await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3087,7 +3098,7 @@ mod tests {
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
-    use omicron_common::api::external::{Hostname, InstanceShutdownPolicy};
+    use omicron_common::api::external::Hostname;
     use omicron_common::api::internal::shared::{
         DhcpConfig, PrivateIpConfig, SledIdentifiers,
     };
@@ -3109,6 +3120,7 @@ mod tests {
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::instance::InstanceShutdownPolicy;
     use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;

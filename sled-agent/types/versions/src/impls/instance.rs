@@ -40,7 +40,7 @@ impl std::fmt::Display for VmmStateRequested {
 
 impl VmmStateRequested {
     fn label(&self) -> &str {
-        use omicron_common::api::internal::shared::InstanceShutdownPolicy::*;
+        use crate::latest::instance::InstanceShutdownPolicy::*;
         match self {
             VmmStateRequested::MigrationTarget(_) => "migrating in",
             VmmStateRequested::Running => "running",

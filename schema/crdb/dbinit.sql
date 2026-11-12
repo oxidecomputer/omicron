@@ -1551,7 +1551,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /*
      * The means by which to stop the instance.
      */
-    shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL default 'hard_off',
+    shutdown_policy_action omicron.public.instance_shutdown_action NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR

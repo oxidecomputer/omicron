@@ -792,7 +792,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
     ) -> Result<VmmPutStateResponse, HttpError> {
-        use omicron_common::api::internal::shared::InstanceShutdownPolicy::*;
+        use sled_agent_types::instance::InstanceShutdownPolicy::*;
         use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
 
         self.vmm_put_state_pauses.hold_request(&self.log, propolis_id).await?;

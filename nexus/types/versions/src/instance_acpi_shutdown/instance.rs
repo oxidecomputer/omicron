@@ -22,7 +22,7 @@ use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
 use crate::v2026_06_08_00;
 use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
-pub use omicron_common::api::internal::shared::{
+pub use sled_agent_types_versions::v64::instance::{
     AcpiTimeoutSecs, InstanceShutdownPolicy,
 };
 

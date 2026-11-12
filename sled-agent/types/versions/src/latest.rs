@@ -132,6 +132,7 @@ pub mod instance {
 
     pub use crate::v64::instance::VmmPutStateBody;
     pub use crate::v64::instance::VmmStateRequested;
+    pub use crate::v64::instance::InstanceShutdownPolicy;
 }
 
 pub mod inventory {

@@ -261,7 +261,7 @@ impl InstanceStateChangeRequest {
         self,
         shutdown_method: instance::InstanceShutdownPolicy,
     ) -> sled_agent_client::types::VmmStateRequested {
-        use sled_agent_client::types::InstanceShutdownPolicy::HardOff;
+        use instance::InstanceShutdownPolicy::HardOff;
         use sled_agent_client::types::VmmStateRequested as VmmState;
         match self {
             Self::Run => VmmState::Running,
@@ -269,13 +269,13 @@ impl InstanceStateChangeRequest {
                 VmmState::Reboot { method: HardOff }
             }
             Self::Reboot { skip_os_shutdown: false } => {
-                VmmState::Reboot { method: shutdown_method.into() }
+                VmmState::Reboot { method: shutdown_method }
             }
             Self::Stop { skip_os_shutdown: true } => {
                 VmmState::Stopped { method: HardOff }
             }
             Self::Stop { skip_os_shutdown: false } => {
-                VmmState::Stopped { method: shutdown_method.into() }
+                VmmState::Stopped { method: shutdown_method }
             }
             Self::Migrate(params) => VmmState::MigrationTarget(params),
         }
@@ -1509,23 +1509,15 @@ impl super::Nexus {
                 propolis_id,
             } => {
                 let sa = self.sled_client(&sled_id).await?;
-                let shutdown_method = match requested {
-                    InstanceStateChangeRequest::Reboot {
-                        skip_os_shutdown: false,
-                    }
-                    | InstanceStateChangeRequest::Stop {
-                        skip_os_shutdown: false,
-                    } => prev_instance_state
-                        .shutdown_policy()
-                        .map_err(InstanceStateChangeError::Other)?,
-                    // force=true, disregard policy and hard-halt
-                    _ => instance::InstanceShutdownPolicy::HardOff,
-                };
                 let instance_put_result = sa
                     .vmm_put_state(
                         &propolis_id,
                         &VmmPutStateBody {
-                            state: requested.to_vmm(shutdown_method),
+                            state: requested.to_vmm(
+                                prev_instance_state
+                                    .shutdown_policy()
+                                    .map_err(InstanceStateChangeError::Other)?,
+                            ),
                         },
                     )
                     .await

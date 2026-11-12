@@ -296,7 +296,7 @@ impl VmmStopForUpdate {
                     &vmm_id,
                     &VmmPutStateBody {
                         state: VmmStateRequested::Stopped {
-                            method: shutdown_policy.into(),
+                            method: shutdown_policy,
                         },
                     },
                 )

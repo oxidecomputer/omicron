@@ -65,6 +65,7 @@ progenitor::generate_api!(
         Generation = omicron_generation_kinds::Generation,
         Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
+        InstanceShutdownPolicy = sled_agent_types_versions::latest::instance::InstanceShutdownPolicy,
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,
         InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
         InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,
@@ -213,23 +214,6 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
             Udp => Self::Udp,
             Icmp(v) => Self::Icmp(v),
             Icmp6(v) => Self::Icmp6(v),
-        }
-    }
-}
-
-impl From<omicron_common::api::external::InstanceShutdownPolicy>
-    for types::InstanceShutdownPolicy
-{
-    fn from(s: omicron_common::api::external::InstanceShutdownPolicy) -> Self {
-        use omicron_common::api::external::InstanceShutdownPolicy::*;
-        match s {
-            HardOff => Self::HardOff,
-            PowerButton { timeout_secs } => {
-                Self::PowerButton(types::AcpiTimeoutSecs::from(
-                    std::num::NonZeroU64::try_from(u64::from(timeout_secs))
-                        .unwrap(), // unwrap: schemars(min=1)
-                ))
-            }
         }
     }
 }
