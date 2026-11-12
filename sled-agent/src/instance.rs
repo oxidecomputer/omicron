@@ -70,8 +70,8 @@ pub enum Error {
     #[error(transparent)]
     WaitForServiceTimeout(#[from] illumos_utils::svc::WaitForServiceTimeout),
 
-    #[error("Timed out waiting for Propolis HTTP server to start")]
-    PropolisHttpServerTimeout,
+    #[error("Propolis HTTP server did not start within {0:?}")]
+    PropolisHttpServerTimeout(Duration),
 
     #[error("Failed to create VNIC")]
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
@@ -167,6 +167,11 @@ async fn wait_for_http_server(
     log: &Logger,
     client: &PropolisClient,
 ) -> Result<(), Error> {
+    // Ten minutes seems like a *really* long time for Propolis to start its
+    // HTTP server, but let's try to err on the side of not giving up on a
+    // server that has a reasonable chance of starting.
+    const TIMEOUT: Duration = Duration::from_mins(10);
+
     let log_notification_failure = |error, delay| {
         warn!(
             log,
@@ -176,7 +181,7 @@ async fn wait_for_http_server(
     };
 
     backoff::retry_notify(
-        backoff::retry_policy_local(),
+        backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
@@ -196,7 +201,7 @@ async fn wait_for_http_server(
         log_notification_failure,
     )
     .await
-    .map_err(|_| Error::PropolisHttpServerTimeout)
+    .map_err(|_| Error::PropolisHttpServerTimeout(TIMEOUT))
 }
 
 fn service_name() -> &'static str {
