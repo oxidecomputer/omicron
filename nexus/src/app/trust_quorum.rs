@@ -151,14 +151,21 @@ impl super::Nexus {
             }
         };
 
-        self.db_datastore
+        let config = self
+            .db_datastore
             .tq_abort_config(
                 opctx,
                 authz_tq,
                 epoch,
                 API_ABORT_REASON.to_string(),
             )
-            .await
+            .await?;
+        // TODO-RAINCLAUDE: Aborting a removal fails its sled expunge request,
+        // and aborting a re-add lets a waiting request continue. Operators are
+        // told to abort in both cases, so we wake `sled_expunge` to act on it
+        // now rather than up to a period later.
+        self.background_tasks.task_sled_expunge.activate();
+        Ok(config)
     }
 
     /// Read the set of all commissioned sleds from an existing deployment and

@@ -11,6 +11,7 @@
 use crate::external_api::sled::SledPolicy;
 use crate::external_api::sled::SledProvisionPolicy;
 use crate::external_api::sled::SledState;
+use crate::internal_api::background::SledExpungeRackAbsence;
 use crate::inventory::Collection;
 use crate::inventory::SpType;
 use crate::trust_quorum::RemoveSledError;
@@ -18,14 +19,23 @@ use crate::trust_quorum::TrustQuorumConfig;
 use crate::trust_quorum::TrustQuorumConfigState;
 use chrono::DateTime;
 use chrono::Utc;
+use gateway_types::ignition::SpIgnition;
+use gateway_types::ignition::SpIgnitionSystemType;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
+use serde::Deserialize;
+use serde::Serialize;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::fmt;
+use std::net::SocketAddrV6;
 use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::membership::TrustQuorumMembersError;
 use trust_quorum_types::types::Epoch;
@@ -397,6 +407,57 @@ pub fn sled_expunge_removal_refusal(
     }
 }
 
+// TODO-RAINCLAUDE: How one MGS's attempt to power off the sled in a cubby ended
+// without doing so.
+//
+// Note that `IgnitionPowerOffFailed` doesn't mean the sled is still on. The
+// power-off may have taken effect anyway, because the reply can be lost, and
+// MGS can still deliver the request after the client times out.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MgsPowerOffFailure {
+    Unidentified { reason: CubbyUnidentified },
+    OtherBoardPresent { found: NonEmptyBaseboardId },
+    IgnitionPowerOffFailed { error: String },
+}
+
+impl fmt::Display for MgsPowerOffFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unidentified { reason } => match reason {
+                CubbyUnidentified::SpUnreachable { error } => write!(
+                    f,
+                    "SP unreachable through this MGS; nothing sent: {error}"
+                ),
+                CubbyUnidentified::MgsRequestFailed { error } => write!(
+                    f,
+                    "reading the SP's state through this MGS failed; nothing \
+                     sent: {error}"
+                ),
+                CubbyUnidentified::EmptyIdentity { reported } => write!(
+                    f,
+                    "SP reported an empty baseboard identity ({}); nothing \
+                     sent",
+                    reported.baseboard_id(),
+                ),
+                CubbyUnidentified::UnexpectedSystemType { system_type } => {
+                    write!(
+                        f,
+                        "ignition reports system type {system_type:?}; \
+                         nothing sent"
+                    )
+                }
+            },
+            Self::OtherBoardPresent { found } => {
+                write!(f, "SP reported another board ({found}); nothing sent")
+            }
+            Self::IgnitionPowerOffFailed { error } => {
+                write!(f, "ignition power-off failed: {error}")
+            }
+        }
+    }
+}
+
 // TODO-RAINCLAUDE: Returns true if the part number or the serial number is
 // empty.
 //
@@ -472,11 +533,55 @@ impl SledExpungeRequestState {
             } => power_off.cubby(),
         }
     }
+
+    pub fn last_error(&self) -> Option<&str> {
+        match self {
+            Self::WaitingForTrustQuorum { cubby: _, last_error }
+            | Self::PoweringOff { cubby: _, last_error }
+            | Self::Expunging { power_off: _, last_error } => {
+                last_error.as_deref()
+            }
+            Self::Done { power_off: _, time_completed: _ }
+            | Self::Failed {
+                power_off: _,
+                failure_reason: _,
+                time_completed: _,
+            } => None,
+        }
+    }
+
+    pub fn settled_power_off(&self) -> Option<SledExpungePowerOff> {
+        match self {
+            Self::WaitingForTrustQuorum { cubby: _, last_error: _ }
+            | Self::PoweringOff { cubby: _, last_error: _ }
+            | Self::Failed {
+                power_off: SledExpungePowerOffProgress::Pending { cubby: _ },
+                failure_reason: _,
+                time_completed: _,
+            } => None,
+            Self::Expunging { power_off, last_error: _ }
+            | Self::Done { power_off, time_completed: _ }
+            | Self::Failed {
+                power_off: SledExpungePowerOffProgress::Settled(power_off),
+                failure_reason: _,
+                time_completed: _,
+            } => Some(*power_off),
+        }
+    }
 }
 
 #[derive(
-    Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    strum::VariantArray,
+    strum::IntoStaticStr,
 )]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum SledExpungeRequestStateKind {
     WaitingForTrustQuorum,
@@ -538,7 +643,11 @@ pub struct SledExpungeRecordedCubby {
     pub source: SledExpungeSpSlotSource,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum SledExpungeSpSlotSource {
     Inventory,
     LiveScan,
@@ -587,14 +696,30 @@ impl SledExpungePowerOff {
             Self::AbsentAtCreation => None,
         }
     }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Cubby { cubby: _, outcome } => outcome.label(),
+            Self::AbsentAtCreation => "absent_at_creation",
+        }
+    }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
 pub enum SledExpungeCubbyPowerOffOutcome {
     PoweredOff,
     AlreadyOff,
     OtherBoardPresent,
     NotPresent,
+}
+
+impl SledExpungeCubbyPowerOffOutcome {
+    pub fn label(&self) -> &'static str {
+        self.into()
+    }
 }
 
 // TODO-RAINCLAUDE: How far the power-off step got, for a request that failed.
@@ -803,6 +928,389 @@ impl SledExpungeRequestTransition {
 pub enum SledExpungeCubbyPrecondition {
     Any,
     Equals(Option<SledExpungeRecordedCubby>),
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[serde(try_from = "BaseboardId", into = "BaseboardId")]
+pub struct NonEmptyBaseboardId(BaseboardId);
+
+// TODO-RAINCLAUDE: A `BaseboardId` with an empty part or serial number, which
+// doesn't identify a board.
+//
+// This is the error returned by `NonEmptyBaseboardId::new`. It can only be
+// built by that function or by deserializing, which runs the same check, so
+// holding one proves that the `BaseboardId` is empty.
+#[derive(
+    Clone, Debug, PartialEq, Eq, thiserror::Error, Deserialize, Serialize,
+)]
+#[serde(try_from = "BaseboardId", into = "BaseboardId")]
+#[error("baseboard {0:?} has an empty part or serial number")]
+pub struct EmptyBaseboardIdError(BaseboardId);
+
+impl EmptyBaseboardIdError {
+    pub fn baseboard_id(&self) -> &BaseboardId {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("baseboard {0} has a non-empty part and serial number")]
+pub struct NotEmptyBaseboardIdError(NonEmptyBaseboardId);
+
+impl TryFrom<BaseboardId> for EmptyBaseboardIdError {
+    type Error = NotEmptyBaseboardIdError;
+
+    fn try_from(baseboard_id: BaseboardId) -> Result<Self, Self::Error> {
+        match NonEmptyBaseboardId::new(baseboard_id) {
+            Ok(non_empty) => Err(NotEmptyBaseboardIdError(non_empty)),
+            Err(empty) => Ok(empty),
+        }
+    }
+}
+
+impl From<EmptyBaseboardIdError> for BaseboardId {
+    fn from(error: EmptyBaseboardIdError) -> Self {
+        error.0
+    }
+}
+
+impl NonEmptyBaseboardId {
+    pub fn new(
+        baseboard_id: BaseboardId,
+    ) -> Result<Self, EmptyBaseboardIdError> {
+        if is_empty_baseboard_id(&baseboard_id) {
+            Err(EmptyBaseboardIdError(baseboard_id))
+        } else {
+            Ok(Self(baseboard_id))
+        }
+    }
+
+    pub fn as_baseboard_id(&self) -> &BaseboardId {
+        &self.0
+    }
+}
+
+impl TryFrom<BaseboardId> for NonEmptyBaseboardId {
+    type Error = EmptyBaseboardIdError;
+
+    fn try_from(baseboard_id: BaseboardId) -> Result<Self, Self::Error> {
+        Self::new(baseboard_id)
+    }
+}
+
+impl From<NonEmptyBaseboardId> for BaseboardId {
+    fn from(baseboard_id: NonEmptyBaseboardId) -> Self {
+        baseboard_id.0
+    }
+}
+
+impl fmt::Display for NonEmptyBaseboardId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SledCubbyIgnition {
+    pub slot: u16,
+    pub ignition: SpIgnition,
+}
+
+impl IdOrdItem for SledCubbyIgnition {
+    type Key<'a> = u16;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: The sled cubbies whose board must be identified before a
+// sled can be ruled out of the rack, computed from both switches' ignition
+// lists.
+//
+// There are two sets:
+// * `sp_get` holds the cubbies to identify with an `sp_get`. A cubby is
+//   included if either switch shows it powered, because each switch reaches the
+//   cubby over its own ignition link. A cubby that only one switch lists is
+//   also included, because the other switch can't vouch for it. An unknown
+//   system type is treated as a sled, since it may be a newer kind of sled.
+// * `unidentifiable` holds the cubbies where a switch reports a sidecar or PSC
+//   system type. A sled cubby should never report one, so the ignition list
+//   can't be trusted for that cubby, and it counts as unidentified without an
+//   `sp_get`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SledExpungeCubbiesToIdentify {
+    pub sp_get: BTreeSet<u16>,
+    pub unidentifiable: IdOrdMap<UnidentifiedCubby>,
+}
+
+pub fn sled_expunge_cubbies_to_identify(
+    switch0: &IdOrdMap<SledCubbyIgnition>,
+    switch1: &IdOrdMap<SledCubbyIgnition>,
+) -> SledExpungeCubbiesToIdentify {
+    let slots: BTreeSet<u16> =
+        switch0.iter().chain(switch1.iter()).map(|cubby| cubby.slot).collect();
+    let mut sp_get = BTreeSet::new();
+    let mut unidentifiable = IdOrdMap::new();
+    for slot in slots {
+        let views = [switch0.get(&slot), switch1.get(&slot)];
+        let unexpected = views
+            .iter()
+            .flatten()
+            .find_map(|cubby| non_sled_system_type(&cubby.ignition));
+        if let Some(system_type) = unexpected {
+            unidentifiable
+                .insert_unique(UnidentifiedCubby {
+                    slot,
+                    reason: CubbyUnidentified::UnexpectedSystemType {
+                        system_type,
+                    },
+                })
+                .expect("slots is a set, so each cubby is visited once");
+            continue;
+        }
+        let needed = match views {
+            [Some(cubby0), Some(cubby1)] => {
+                ignition_powered(&cubby0.ignition)
+                    || ignition_powered(&cubby1.ignition)
+            }
+            [Some(_), None] | [None, Some(_)] => true,
+            [None, None] => false,
+        };
+        if needed {
+            sp_get.insert(slot);
+        }
+    }
+    SledExpungeCubbiesToIdentify { sp_get, unidentifiable }
+}
+
+fn ignition_powered(ignition: &SpIgnition) -> bool {
+    match ignition {
+        SpIgnition::Absent | SpIgnition::Present { power: false, .. } => false,
+        SpIgnition::Present { power: true, .. } => true,
+    }
+}
+
+fn non_sled_system_type(ignition: &SpIgnition) -> Option<SpIgnitionSystemType> {
+    match ignition {
+        SpIgnition::Absent => None,
+        SpIgnition::Present { id, .. } => match id {
+            SpIgnitionSystemType::Gimlet
+            | SpIgnitionSystemType::Cosmo
+            | SpIgnitionSystemType::Unknown { .. } => None,
+            SpIgnitionSystemType::Sidecar | SpIgnitionSystemType::Psc => {
+                Some(*id)
+            }
+        },
+    }
+}
+
+// TODO-RAINCLAUDE: Why the board in a sled cubby could not be identified.
+//
+// Some notes:
+// * `SpUnreachable` means MGS said it couldn't reach the SP. `MgsRequestFailed`
+//   covers every other failure, such as MGS itself being unreachable, so it
+//   says nothing about the SP.
+// * `UnexpectedSystemType` comes only from the ignition lists (see
+//   `sled_expunge_cubbies_to_identify`). Powering off never produces it.
+// * The `error` strings are for logs and omdb only.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CubbyUnidentified {
+    SpUnreachable { error: String },
+    MgsRequestFailed { error: String },
+    EmptyIdentity { reported: EmptyBaseboardIdError },
+    UnexpectedSystemType { system_type: SpIgnitionSystemType },
+}
+
+impl fmt::Display for CubbyUnidentified {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SpUnreachable { error } => {
+                write!(f, "SP unreachable: {error}")
+            }
+            Self::MgsRequestFailed { error } => {
+                write!(f, "MGS request failed: {error}")
+            }
+            Self::EmptyIdentity { reported } => write!(
+                f,
+                "SP reported an empty board identity ({})",
+                reported.baseboard_id(),
+            ),
+            Self::UnexpectedSystemType { system_type } => write!(
+                f,
+                "ignition reports system type {system_type:?}; not identified"
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SledCubbyIdentity {
+    Known(NonEmptyBaseboardId),
+    Unidentified(CubbyUnidentified),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SledCubbyIdentityEntry {
+    pub slot: u16,
+    pub identity: SledCubbyIdentity,
+}
+
+impl IdOrdItem for SledCubbyIdentityEntry {
+    type Key<'a> = u16;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SledCubbyBoard {
+    pub slot: u16,
+    pub baseboard_id: NonEmptyBaseboardId,
+}
+
+impl IdOrdItem for SledCubbyBoard {
+    type Key<'a> = u16;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UnidentifiedCubby {
+    pub slot: u16,
+    pub reason: CubbyUnidentified,
+}
+
+impl IdOrdItem for UnidentifiedCubby {
+    type Key<'a> = u16;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.slot
+    }
+
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: A set of sled cubbies whose board could not be identified.
+//
+// The set is never empty, so a sled that couldn't be confirmed always comes
+// with at least one cubby that could hold it. Both `new` and deserializing
+// enforce this.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(
+    try_from = "IdOrdMap<UnidentifiedCubby>",
+    into = "IdOrdMap<UnidentifiedCubby>"
+)]
+pub struct SledExpungeUnidentifiedCubbies(IdOrdMap<UnidentifiedCubby>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a list of unidentified sled cubbies must not be empty")]
+pub struct NoUnidentifiedCubbiesError;
+
+impl SledExpungeUnidentifiedCubbies {
+    pub fn new(
+        cubbies: IdOrdMap<UnidentifiedCubby>,
+    ) -> Result<Self, NoUnidentifiedCubbiesError> {
+        if cubbies.is_empty() {
+            Err(NoUnidentifiedCubbiesError)
+        } else {
+            Ok(Self(cubbies))
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &UnidentifiedCubby> {
+        self.0.iter()
+    }
+}
+
+impl TryFrom<IdOrdMap<UnidentifiedCubby>> for SledExpungeUnidentifiedCubbies {
+    type Error = NoUnidentifiedCubbiesError;
+
+    fn try_from(
+        cubbies: IdOrdMap<UnidentifiedCubby>,
+    ) -> Result<Self, Self::Error> {
+        Self::new(cubbies)
+    }
+}
+
+impl From<SledExpungeUnidentifiedCubbies> for IdOrdMap<UnidentifiedCubby> {
+    fn from(cubbies: SledExpungeUnidentifiedCubbies) -> Self {
+        cubbies.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SledExpungeLivePresence {
+    InCubby { slot: u16 },
+    Gone { absence: SledExpungeRackAbsence },
+    Unidentified { cubbies: SledExpungeUnidentifiedCubbies },
+}
+
+// TODO-RAINCLAUDE: Decides where a sled is in the rack, given what was found in
+// each sled cubby. Request creation and the power-off step both use this rule.
+//
+// The rule is:
+// * If a cubby holds our board, the sled is in that cubby. This is true even if
+//   other cubbies are unidentified, because a board can only be in one cubby.
+// * Otherwise, if any cubby is unidentified, the sled could be in it, so the
+//   result is `Unidentified`.
+// * The sled is `Gone` only if every cubby was identified as holding some other
+//   board.
+pub fn sled_expunge_live_presence(
+    baseboard_id: &BaseboardId,
+    switch0_mgs: SocketAddrV6,
+    switch1_mgs: SocketAddrV6,
+    identities: &IdOrdMap<SledCubbyIdentityEntry>,
+) -> SledExpungeLivePresence {
+    let mut other_boards = IdOrdMap::new();
+    let mut unidentified = IdOrdMap::new();
+    for entry in identities {
+        match &entry.identity {
+            SledCubbyIdentity::Known(found) => {
+                if found.as_baseboard_id() == baseboard_id {
+                    return SledExpungeLivePresence::InCubby {
+                        slot: entry.slot,
+                    };
+                }
+                other_boards
+                    .insert_unique(SledCubbyBoard {
+                        slot: entry.slot,
+                        baseboard_id: found.clone(),
+                    })
+                    .expect("identities holds one entry per slot");
+            }
+            SledCubbyIdentity::Unidentified(reason) => {
+                unidentified
+                    .insert_unique(UnidentifiedCubby {
+                        slot: entry.slot,
+                        reason: reason.clone(),
+                    })
+                    .expect("identities holds one entry per slot");
+            }
+        }
+    }
+    match SledExpungeUnidentifiedCubbies::new(unidentified) {
+        Ok(cubbies) => SledExpungeLivePresence::Unidentified { cubbies },
+        Err(NoUnidentifiedCubbiesError) => SledExpungeLivePresence::Gone {
+            absence: SledExpungeRackAbsence {
+                switch0_mgs,
+                switch1_mgs,
+                other_boards,
+            },
+        },
+    }
 }
 
 #[cfg(test)]
@@ -1173,5 +1681,264 @@ mod tests {
                 .map(|state| state.kind())
                 .collect();
         assert_eq!(converted, SledExpungeRequestStateKind::UNFINISHED);
+    }
+
+    fn ignition(id: SpIgnitionSystemType, power: bool) -> SpIgnition {
+        SpIgnition::Present {
+            id,
+            power,
+            ctrl_detect_0: true,
+            ctrl_detect_1: true,
+            flt_a3: false,
+            flt_a2: false,
+            flt_rot: false,
+            flt_sp: false,
+        }
+    }
+
+    #[test]
+    fn test_sled_expunge_cubbies_to_identify() {
+        let view = |cubbies: Vec<(u16, SpIgnition)>| -> IdOrdMap<_> {
+            cubbies
+                .into_iter()
+                .map(|(slot, ignition)| SledCubbyIgnition { slot, ignition })
+                .collect()
+        };
+        let unexpected = |slots: Vec<(u16, SpIgnitionSystemType)>| {
+            slots
+                .into_iter()
+                .map(|(slot, system_type)| UnidentifiedCubby {
+                    slot,
+                    reason: CubbyUnidentified::UnexpectedSystemType {
+                        system_type,
+                    },
+                })
+                .collect::<IdOrdMap<_>>()
+        };
+        let switch0 = view(vec![
+            (0, SpIgnition::Absent),
+            (1, ignition(SpIgnitionSystemType::Gimlet, false)),
+            (2, ignition(SpIgnitionSystemType::Gimlet, true)),
+            (3, ignition(SpIgnitionSystemType::Cosmo, true)),
+            (4, ignition(SpIgnitionSystemType::Unknown { id: 9 }, true)),
+            (5, ignition(SpIgnitionSystemType::Sidecar, true)),
+            (6, ignition(SpIgnitionSystemType::Psc, false)),
+            (7, SpIgnition::Absent),
+        ]);
+        let switch0_unpowered = view(
+            (0..8)
+                .map(|slot| {
+                    (slot, ignition(SpIgnitionSystemType::Gimlet, false))
+                })
+                .collect(),
+        );
+        let expected = SledExpungeCubbiesToIdentify {
+            sp_get: BTreeSet::from([2, 3, 4]),
+            unidentifiable: unexpected(vec![
+                (5, SpIgnitionSystemType::Sidecar),
+                (6, SpIgnitionSystemType::Psc),
+            ]),
+        };
+        assert_eq!(
+            sled_expunge_cubbies_to_identify(&switch0, &switch0_unpowered),
+            expected,
+        );
+        assert_eq!(
+            sled_expunge_cubbies_to_identify(&switch0_unpowered, &switch0),
+            expected,
+        );
+        let empty = IdOrdMap::new();
+        assert_eq!(
+            sled_expunge_cubbies_to_identify(&empty, &empty),
+            SledExpungeCubbiesToIdentify {
+                sp_get: BTreeSet::new(),
+                unidentifiable: IdOrdMap::new(),
+            },
+        );
+
+        assert_eq!(
+            sled_expunge_cubbies_to_identify(&switch0, &empty),
+            SledExpungeCubbiesToIdentify {
+                sp_get: BTreeSet::from([0, 1, 2, 3, 4, 7]),
+                unidentifiable: expected.unidentifiable.clone(),
+            },
+        );
+        let switch1 = view(vec![
+            (0, ignition(SpIgnitionSystemType::Gimlet, true)),
+            (1, ignition(SpIgnitionSystemType::Gimlet, true)),
+            (2, SpIgnition::Absent),
+            (3, SpIgnition::Absent),
+            (4, SpIgnition::Absent),
+            (5, SpIgnition::Absent),
+            (6, SpIgnition::Absent),
+            (7, SpIgnition::Absent),
+            (8, SpIgnition::Absent),
+            (9, ignition(SpIgnitionSystemType::Gimlet, false)),
+        ]);
+        assert_eq!(
+            sled_expunge_cubbies_to_identify(&switch0, &switch1),
+            SledExpungeCubbiesToIdentify {
+                sp_get: BTreeSet::from([0, 1, 2, 3, 4, 8, 9]),
+                unidentifiable: expected.unidentifiable.clone(),
+            },
+        );
+    }
+
+    #[test]
+    fn test_sled_expunge_live_presence() {
+        let board = |serial: &str| BaseboardId {
+            part_number: "913-0000019".to_string(),
+            serial_number: serial.to_string(),
+        };
+        let ours = board("ours");
+        let switch0_mgs: SocketAddrV6 =
+            "[fd00:1122:3344:101::2]:12225".parse().expect("parsed an address");
+        let switch1_mgs: SocketAddrV6 =
+            "[fd00:1122:3344:102::2]:12225".parse().expect("parsed an address");
+        let known = |serial: &str| {
+            SledCubbyIdentity::Known(
+                NonEmptyBaseboardId::new(board(serial))
+                    .expect("test boards are non-empty"),
+            )
+        };
+        let unreachable =
+            CubbyUnidentified::SpUnreachable { error: "no SP".to_string() };
+        let mgs_failed = CubbyUnidentified::MgsRequestFailed {
+            error: "connection refused".to_string(),
+        };
+        let empty = CubbyUnidentified::EmptyIdentity {
+            reported: NonEmptyBaseboardId::new(board(""))
+                .expect_err("an empty serial number is empty"),
+        };
+        let entries = |identities: Vec<(u16, SledCubbyIdentity)>| {
+            identities
+                .into_iter()
+                .map(|(slot, identity)| SledCubbyIdentityEntry {
+                    slot,
+                    identity,
+                })
+                .collect::<IdOrdMap<_>>()
+        };
+        let gone = |slots: Vec<(u16, &str)>| SledExpungeLivePresence::Gone {
+            absence: SledExpungeRackAbsence {
+                switch0_mgs,
+                switch1_mgs,
+                other_boards: slots
+                    .into_iter()
+                    .map(|(slot, serial)| SledCubbyBoard {
+                        slot,
+                        baseboard_id: NonEmptyBaseboardId::new(board(serial))
+                            .expect("test boards are non-empty"),
+                    })
+                    .collect(),
+            },
+        };
+        let unidentified = |cubbies: Vec<(u16, CubbyUnidentified)>| {
+            SledExpungeLivePresence::Unidentified {
+                cubbies: SledExpungeUnidentifiedCubbies::new(
+                    cubbies
+                        .into_iter()
+                        .map(|(slot, reason)| UnidentifiedCubby {
+                            slot,
+                            reason,
+                        })
+                        .collect(),
+                )
+                .expect("expected unidentified cubbies are non-empty"),
+            }
+        };
+        let unidentified_entry = |reason: &CubbyUnidentified| {
+            SledCubbyIdentity::Unidentified(reason.clone())
+        };
+
+        let cases = [
+            (vec![], gone(vec![])),
+            (
+                vec![(2, known("other")), (3, known("another"))],
+                gone(vec![(2, "other"), (3, "another")]),
+            ),
+            (
+                vec![(2, unidentified_entry(&unreachable)), (5, known("ours"))],
+                SledExpungeLivePresence::InCubby { slot: 5 },
+            ),
+            (
+                vec![
+                    (2, known("other")),
+                    (3, unidentified_entry(&unreachable)),
+                    (4, unidentified_entry(&mgs_failed)),
+                    (6, unidentified_entry(&empty)),
+                ],
+                unidentified(vec![
+                    (3, unreachable.clone()),
+                    (4, mgs_failed.clone()),
+                    (6, empty.clone()),
+                ]),
+            ),
+        ];
+        for (identities, expected) in cases {
+            let identities = entries(identities);
+            assert_eq!(
+                sled_expunge_live_presence(
+                    &ours,
+                    switch0_mgs,
+                    switch1_mgs,
+                    &identities,
+                ),
+                expected,
+                "{identities:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_sled_expunge_non_empty_deserialize() {
+        let empty = BaseboardId {
+            part_number: "913-0000019".to_string(),
+            serial_number: String::new(),
+        };
+        let reported = NonEmptyBaseboardId::new(empty.clone())
+            .expect_err("an empty serial number is empty");
+        assert_eq!(reported.baseboard_id(), &empty);
+        let error = serde_json::from_str::<NonEmptyBaseboardId>(
+            r#"{"part_number":"913-0000019","serial_number":""}"#,
+        )
+        .expect_err("an empty serial number does not deserialize");
+        assert!(
+            error.to_string().starts_with(
+                "baseboard BaseboardId { part_number: \"913-0000019\", \
+                 serial_number: \"\" } has an empty part or serial number"
+            ),
+            "{error}",
+        );
+        assert_eq!(
+            serde_json::from_str::<EmptyBaseboardIdError>(
+                r#"{"part_number":"913-0000019","serial_number":""}"#,
+            )
+            .expect("an empty serial number deserializes as empty"),
+            reported,
+        );
+        let error = serde_json::from_str::<EmptyBaseboardIdError>(
+            r#"{"part_number":"913-0000019","serial_number":"BRM42220001"}"#,
+        )
+        .expect_err("a non-empty baseboard does not deserialize as empty");
+        assert!(
+            error.to_string().starts_with(
+                "baseboard 913-0000019:BRM42220001 has a non-empty part and \
+                 serial number"
+            ),
+            "{error}",
+        );
+        let error = serde_json::from_str::<SledExpungeUnidentifiedCubbies>(
+            "[]",
+        )
+        .expect_err(
+            "an empty list of unidentified cubbies does not deserialize",
+        );
+        assert!(
+            error.to_string().starts_with(
+                "a list of unidentified sled cubbies must not be empty"
+            ),
+            "{error}",
+        );
     }
 }

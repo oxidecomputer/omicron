@@ -4,6 +4,13 @@
 
 use crate::deployment::PlanningReport;
 use crate::external_api::alert;
+use crate::external_api::sled::SledPolicy;
+use crate::sled_expunge::MgsPowerOffFailure;
+use crate::sled_expunge::NonEmptyBaseboardId;
+use crate::sled_expunge::SledCubbyBoard;
+use crate::sled_expunge::SledExpungeRequestStateKind;
+use crate::sled_expunge::SledExpungeSpSlotSource;
+use crate::sled_expunge::SledExpungeUnidentifiedCubbies;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -19,6 +26,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufRepoUuid;
@@ -33,6 +41,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
@@ -1851,6 +1860,412 @@ pub struct PhysicalDiskAdoptionStatus {
 
     /// Errors encountered during this activation
     pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SledExpungeStatus {
+    ListError {
+        error: String,
+    },
+    Listed {
+        requests: IdOrdMap<SledExpungeRequestStatus>,
+        mgs_discovery: SledExpungeMgsDiscovery,
+    },
+}
+
+// TODO-RAINCLAUDE: How MGS discovery went in one activation of the
+// `sled_expunge` task. `NotNeeded` means that no request needed MGS, so
+// discovery never started. `Unfinished` means that discovery started, but every
+// request waiting on it was cancelled before it finished.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeMgsDiscovery {
+    NotNeeded,
+    Unfinished,
+    Failed {
+        error: String,
+    },
+    Discovered {
+        rack_id_unknown: IdOrdMap<SledExpungeMgsFailure>,
+        racks: IdOrdMap<SledExpungeRackSwitches>,
+    },
+}
+
+// TODO-RAINCLAUDE: What one activation learned about a rack's switches. A rack
+// is listed only if one of its requests ran the rack-wide check.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeRackSwitches {
+    pub rack_id: RackUuid,
+    pub switches: SledExpungeSwitchIdentification,
+}
+
+impl IdOrdItem for SledExpungeRackSwitches {
+    type Key<'a> = RackUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.rack_id
+    }
+
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: Which MGS serves each of a rack's switches. `switch_unknown`
+// holds each MGS that couldn't say which switch it serves, and nothing such an
+// MGS reports counts as evidence for either switch.
+// TODO-RAINCLAUDE: `clippy::large_enum_variant` is expected here. This status
+// is built once per rack per activation, so boxing the large variant would buy
+// nothing.
+#[expect(clippy::large_enum_variant)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeSwitchIdentification {
+    Unfinished,
+    Identified {
+        switch_unknown: IdOrdMap<SledExpungeMgsFailure>,
+        switch0: SledExpungeSwitchMgs,
+        switch1: SledExpungeSwitchMgs,
+    },
+}
+
+// TODO-RAINCLAUDE: The MGS that serves one switch. `Conflict` means that two or
+// more MGSes claim the switch. A correctly cabled rack can't produce that, so
+// none of them counts as evidence for the switch.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeSwitchMgs {
+    Found {
+        mgs: SocketAddrV6,
+        ignition: SledExpungeIgnitionSnapshot,
+    },
+    NotFound,
+    Conflict {
+        first: SocketAddrV6,
+        second: SocketAddrV6,
+        rest: BTreeSet<SocketAddrV6>,
+    },
+}
+
+// TODO-RAINCLAUDE: Whether one switch's ignition list was fetched in this
+// activation. Some notes on the variants:
+//
+// * `NotNeeded` means the fetch never started. The rack-wide check fetches both
+//   lists as soon as it has identified the switches, so this appears only if
+//   the check was cancelled between those two steps.
+// * `Failed` also covers a list that was fetched but can't be used, because it
+//   named a sled cubby twice.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeIgnitionSnapshot {
+    NotNeeded,
+    Unfinished,
+    Fetched,
+    Failed { error: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeMgsFailure {
+    pub mgs: SocketAddrV6,
+    pub error: String,
+}
+
+impl IdOrdItem for SledExpungeMgsFailure {
+    type Key<'a> = SocketAddrV6;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.mgs
+    }
+
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeRequestStatus {
+    pub request_id: SledExpungeRequestUuid,
+    pub sled_id: SledUuid,
+    // TODO-RAINCLAUDE: The request's state as listed at the start of the
+    // activation.
+    pub state: SledExpungeRequestStateKind,
+    pub state_after: SledExpungeStateAfter,
+    pub outcome: SledExpungeRequestOutcome,
+    // TODO-RAINCLAUDE: What the `powering_off` step decided and did in this
+    // activation, if it ran. Once the sled is powered off, the request goes on
+    // to the expunge step, and `outcome` is that step's outcome.
+    pub power_check: Option<SledExpungePowerCheck>,
+}
+
+// TODO-RAINCLAUDE: What the `powering_off` step found or did for one request.
+// This is internal detail for omdb, so unlike `last_error` it may carry MGS
+// addresses and MGS error text.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum SledExpungePowerCheck {
+    PoweredDown {
+        slot: u16,
+        located: SledExpungeCubbyLocated,
+        powered_down: SledPoweredDown,
+    },
+    Gone {
+        search: SledExpungeSearch,
+        absence: SledExpungeRackAbsence,
+    },
+    Waiting {
+        wait: SledExpungePowerOffWait,
+    },
+}
+
+// TODO-RAINCLAUDE: How the cubby the sled was powered down in was chosen.
+//
+// * `Recorded` means it is the request's recorded cubby, and `source` says
+//   where that record came from.
+// * `FoundAfterGoneAtCreation` means the sled was gone at creation, and the
+//   rack-wide check then found it in this cubby.
+// * `Relocated` means the sled wasn't in `recorded_slot`, and the rack-wide
+//   check found it in this cubby instead.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeCubbyLocated {
+    Recorded { source: SledExpungeSpSlotSource },
+    FoundAfterGoneAtCreation,
+    Relocated { recorded_slot: u16 },
+}
+
+// TODO-RAINCLAUDE: How the sled came to be powered down in its cubby.
+//
+// * `PoweredOff` means `mgs` sent an ignition power-off and it succeeded. When
+//   an ignition power-off succeeds, the cubby's power is already cut.
+// * `AlreadyOff` means `mgs` read the sled in A2, so it sent nothing.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledPoweredDown {
+    PoweredOff { mgs: SocketAddrV6 },
+    AlreadyOff { mgs: SocketAddrV6 },
+}
+
+// TODO-RAINCLAUDE: The evidence behind a decision that the sled can't be
+// running in any sled cubby of the rack. The decision needs both switches'
+// ignition lists. It also needs an `sp_get` of every sled cubby that either
+// list shows as powered, or that only one of them lists, and each of those must
+// have identified another board.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeRackAbsence {
+    pub switch0_mgs: SocketAddrV6,
+    pub switch1_mgs: SocketAddrV6,
+    pub other_boards: IdOrdMap<SledCubbyBoard>,
+}
+
+// TODO-RAINCLAUDE: Why the `powering_off` step didn't settle a request. Each
+// reason is rendered as a `last_error`. `IgnitionUnavailable` and
+// `CubbiesUnidentified` both mean that the rack-wide check couldn't rule the
+// sled out, because the sled could still be running in a cubby the check
+// couldn't see or identify.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungePowerOffWait {
+    NoMgs,
+    NotPoweredOff {
+        slot: u16,
+        located: SledExpungeCubbyLocated,
+        failed_attempts: IdOrdMap<SledExpungeMgsPowerOffFailure>,
+    },
+    IgnitionUnavailable {
+        search: SledExpungeSearch,
+        switches: SledExpungeIgnitionUnavailable,
+    },
+    CubbiesUnidentified {
+        search: SledExpungeSearch,
+        cubbies: SledExpungeUnidentifiedCubbies,
+    },
+    SwitchAttachedCubby {
+        slot: u16,
+    },
+}
+
+// TODO-RAINCLAUDE: Why the rack-wide check ran. In `NotInRecordedCubby`,
+// `source` says where the recorded cubby came from, and `other_board` is the
+// MGS that read another board in the recorded cubby, if one did, which ended
+// the attempt there. `failed_attempts` holds the MGSes tried before that, none
+// of which identified a board.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeSearch {
+    GoneAtCreation,
+    NotInRecordedCubby {
+        slot: u16,
+        source: SledExpungeSpSlotSource,
+        other_board: Option<SledExpungeOtherBoard>,
+        failed_attempts: IdOrdMap<SledExpungeMgsPowerOffFailure>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeOtherBoard {
+    pub mgs: SocketAddrV6,
+    pub found: NonEmptyBaseboardId,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeIgnitionUnavailable {
+    Switch0 { switch0: SledExpungeIgnitionGap },
+    Switch1 { switch1: SledExpungeIgnitionGap },
+    Both { switch0: SledExpungeIgnitionGap, switch1: SledExpungeIgnitionGap },
+}
+
+impl SledExpungeIgnitionUnavailable {
+    pub fn from_switches<T0, T1>(
+        switch0: Result<T0, SledExpungeIgnitionGap>,
+        switch1: Result<T1, SledExpungeIgnitionGap>,
+    ) -> Result<(T0, T1), Self> {
+        match (switch0, switch1) {
+            (Ok(switch0), Ok(switch1)) => Ok((switch0, switch1)),
+            (Err(switch0), Ok(_)) => Err(Self::Switch0 { switch0 }),
+            (Ok(_), Err(switch1)) => Err(Self::Switch1 { switch1 }),
+            (Err(switch0), Err(switch1)) => {
+                Err(Self::Both { switch0, switch1 })
+            }
+        }
+    }
+
+    pub fn gaps(&self) -> Vec<(SwitchSlot, SledExpungeIgnitionGap)> {
+        match *self {
+            Self::Switch0 { switch0 } => vec![(SwitchSlot::Switch0, switch0)],
+            Self::Switch1 { switch1 } => vec![(SwitchSlot::Switch1, switch1)],
+            Self::Both { switch0, switch1 } => vec![
+                (SwitchSlot::Switch0, switch0),
+                (SwitchSlot::Switch1, switch1),
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeIgnitionGap {
+    NoMgs,
+    MgsConflict,
+    FetchFailed { mgs: SocketAddrV6 },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeMgsPowerOffFailure {
+    pub mgs: SocketAddrV6,
+    pub failure: MgsPowerOffFailure,
+}
+
+impl IdOrdItem for SledExpungeMgsPowerOffFailure {
+    type Key<'a> = SocketAddrV6;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.mgs
+    }
+
+    id_upcast!();
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum SledExpungeTaskStep {
+    #[default]
+    Starting,
+    DispatchingListedRequest,
+    CheckingTrustQuorum,
+    ResolvingPower,
+    ReReadingRequest,
+    SendingPowerOff,
+    RecordingSpSlot,
+    AdvancingToPoweringOff,
+    AdvancingToExpunging,
+    Completing,
+    SettingLastError,
+    Failing,
+}
+
+impl SledExpungeTaskStep {
+    // TODO-RAINCLAUDE: Returns the step as it reads in the task's logs and in
+    // error texts.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::DispatchingListedRequest => {
+                "sorting the listed requests into the task's passes"
+            }
+            Self::CheckingTrustQuorum => "checking the trust quorum gate",
+            Self::ResolvingPower => "resolving the sled's power state",
+            Self::ReReadingRequest => {
+                "re-reading the request before powering off"
+            }
+            Self::SendingPowerOff => "sending the power-off",
+            Self::RecordingSpSlot => "recording the sled's cubby",
+            Self::AdvancingToPoweringOff => "advancing to powering_off",
+            Self::AdvancingToExpunging => "advancing to expunging",
+            Self::Completing => "completing the request",
+            Self::SettingLastError => "setting last_error",
+            Self::Failing => "failing the request",
+        }
+    }
+}
+
+impl IdOrdItem for SledExpungeRequestStatus {
+    type Key<'a> = SledExpungeRequestUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.request_id
+    }
+
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: The state one activation left a request in, compared to the
+// state it was listed in.
+//
+// * `Unchanged` means the activation knows it left the request in the listed
+//   state.
+// * `Moved` means the activation knows it moved the request to `state`. A
+//   request that completed or failed is always reported this way.
+// * `Unknown` means the activation ended on a timeout, an error or a lost
+//   compare-and-swap. A write may or may not have landed, and another writer
+//   may have moved the request. `last_confirmed` is the state the activation's
+//   last confirmed write left the request in, if it confirmed one.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeStateAfter {
+    Unchanged,
+    Moved { state: SledExpungeRequestStateKind },
+    Unknown { last_confirmed: Option<SledExpungeRequestStateKind> },
+}
+
+// TODO-RAINCLAUDE: What one activation did with one request. Some notes on the
+// variants:
+//
+// * `NotInExpectedState` means a compare-and-swap lost to another writer, such
+//   as another Nexus. It is not an error.
+// * `TimedOut` means the request was abandoned in `step`, so whatever that step
+//   was doing may or may not have happened.
+//
+// In both cases, and after an `Error`, the next activation retries the request.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeRequestOutcome {
+    RemovalPreparing,
+    LastErrorSet { last_error: String },
+    LastErrorUnchanged { last_error: String },
+    Completed { previous_sled_policy: SledPolicy },
+    Failed { failure_reason: String },
+    NotInExpectedState { current_state: SledExpungeRequestStateKind },
+    TimedOut { step: SledExpungeTaskStep },
+    Error { error: String },
 }
 
 #[cfg(test)]

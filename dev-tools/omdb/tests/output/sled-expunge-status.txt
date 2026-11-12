@@ -1,0 +1,133 @@
+    MGS [fd00:1122:3344:103::2]:12225 rack ID unknown: this MGS' rack ID has not been set
+    rack 7a1c0000-0000-4000-8000-000000000001 switches:
+        MGS [fd00:1122:3344:103::2]:12225 switch unknown: Communication Error: connection refused
+        switch0: MGS [fd00:1122:3344:101::2]:12225, ignition fetch failed: Communication Error: timed out
+        switch1: no MGS found
+    rack 7a1c0000-0000-4000-8000-000000000002 switches:
+        switch0: MGS [fd00:1122:3344:101::2]:12225, ignition fetched
+        switch1: more than one MGS claims it ([fd00:1122:3344:102::2]:12225, [fd00:1122:3344:103::2]:12225)
+    rack 7a1c0000-0000-4000-8000-000000000003 switches:
+        switch0: MGS [fd00:1122:3344:101::2]:12225, ignition not needed
+        switch1: MGS [fd00:1122:3344:102::2]:12225, ignition fetch started but did not finish (the requests waiting on it timed out)
+    rack 7a1c0000-0000-4000-8000-000000000004 switch identification started but did not finish (the requests waiting on it timed out)
+    unfinished requests: 17
+    request 00000000-0000-0000-0000-00005ab00000
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              last_error unchanged
+        last_error:           the removal has stayed preparing
+    request 00000000-0000-0000-0000-00005ab00001
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        state after:          failed
+        outcome:              failed
+        failure_reason:       the removal was aborted
+    request 00000000-0000-0000-0000-00005ab00002
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        state after:          unknown (no write confirmed)
+        outcome:              changed concurrently, left for the next activation
+        current_state:        powering_off
+    request 00000000-0000-0000-0000-00005ab00003
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          done
+        power check:          powered off recorded cubby 3 (source: inventory) via [fd00:1122:3344:102::2]:12225
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00004
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          not powered off in recorded cubby 3 (source: live_scan)
+            via [fd00:1122:3344:101::2]:12225: ignition power-off failed: Error Response: status: 503 Service Unavailable
+            via [fd00:1122:3344:102::2]:12225: reading the SP's state through this MGS failed; nothing sent: Communication Error: error sending request
+            via [fd00:1122:3344:103::2]:12225: SP reported an empty baseboard identity (913-0000019:); nothing sent
+        outcome:              set last_error
+        last_error:           the sled could not be powered off
+    request 00000000-0000-0000-0000-00005ab00005
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          done
+        power check:          recorded cubby 3 (source: inventory) holds another board (913-0000019:BRM42220004) per [fd00:1122:3344:101::2]:12225; nothing sent; the sled is in no powered sled cubby per ignition via switch0's MGS [fd00:1122:3344:101::2]:12225 and switch1's MGS [fd00:1122:3344:102::2]:12225; every sled cubby to identify holds another board (cubby 0: 913-0000019:BRM42220001, cubby 1: 913-0000019:BRM42220002)
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00006
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          done
+        power check:          already in A2 in cubby 4 (relocated from recorded cubby 3) per [fd00:1122:3344:101::2]:12225
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00007
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          done
+        power check:          no MGS found the sled in recorded cubby 5 (source: found_after_absent); the sled is in no powered sled cubby per ignition via switch0's MGS [fd00:1122:3344:101::2]:12225 and switch1's MGS [fd00:1122:3344:102::2]:12225; no sled cubby to identify
+            via [fd00:1122:3344:101::2]:12225: SP unreachable through this MGS; nothing sent: Error Response: status: 503 Service Unavailable
+            via [fd00:1122:3344:102::2]:12225: SP unreachable through this MGS; nothing sent: Error Response: status: 503 Service Unavailable
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00008
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          done
+        power check:          gone at creation and still in no powered sled cubby per ignition via switch0's MGS [fd00:1122:3344:101::2]:12225 and switch1's MGS [fd00:1122:3344:102::2]:12225; every sled cubby to identify holds another board (cubby 0: 913-0000019:BRM42220001, cubby 1: 913-0000019:BRM42220002)
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00009
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          done
+        power check:          powered off cubby 6 (found after being gone at creation) via [fd00:1122:3344:101::2]:12225
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab0000a
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          gone at creation; ignition unavailable from switch0 (ignition fetch via [fd00:1122:3344:101::2]:12225 failed), switch1 (no MGS serves this switch)
+        outcome:              set last_error
+        last_error:           no ignition state
+    request 00000000-0000-0000-0000-00005ab0000b
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          not found in recorded cubby 3 (source: relocated); ignition unavailable from switch1 (more than one MGS claims this switch)
+            via [fd00:1122:3344:101::2]:12225: SP unreachable through this MGS; nothing sent: Error Response: status: 503 Service Unavailable
+            via [fd00:1122:3344:102::2]:12225: SP unreachable through this MGS; nothing sent: Error Response: status: 503 Service Unavailable
+        outcome:              set last_error
+        last_error:           no ignition state
+    request 00000000-0000-0000-0000-00005ab0000c
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          not found in recorded cubby 3 (source: relocated); sled cubbies not identified
+            via [fd00:1122:3344:101::2]:12225: SP unreachable through this MGS; nothing sent: Error Response: status: 503 Service Unavailable
+            via [fd00:1122:3344:102::2]:12225: SP unreachable through this MGS; nothing sent: Error Response: status: 503 Service Unavailable
+            cubby 2: SP unreachable: Error Response: status: 503 Service Unavailable
+            cubby 7: SP reported an empty board identity (913-0000019:)
+            cubby 8: MGS request failed: Communication Error: error sending request
+            cubby 9: ignition reports system type Sidecar; not identified
+        outcome:              set last_error
+        last_error:           cubbies unidentified
+    request 00000000-0000-0000-0000-00005ab0000d
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        state after:          powering_off
+        power check:          no MGS for the rack
+        outcome:              set last_error
+        last_error:           no management gateway
+    request 00000000-0000-0000-0000-00005ab0000e
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          in switch-attached cubby 14
+        outcome:              set last_error
+        last_error:           the sled is a scrimlet
+    request 00000000-0000-0000-0000-00005ab0000f
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                expunging
+        state after:          unknown (no write confirmed)
+        outcome:              error
+        error:                completing the request: Internal Error: the sled's state refuses the expunge
+    request 00000000-0000-0000-0000-00005ab00010
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        state after:          unknown (last confirmed: expunging)
+        outcome:              timed out while completing the request; retried next activation

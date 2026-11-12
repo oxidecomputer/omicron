@@ -17,6 +17,7 @@ use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
+use crate::helpers::sled_cubby_with_source_text;
 use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
@@ -32,6 +33,7 @@ use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
+use iddqd::IdOrdMap;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
 use nexus_db_lookup::LookupPath;
@@ -90,6 +92,22 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
+use nexus_types::internal_api::background::SledExpungeCubbyLocated;
+use nexus_types::internal_api::background::SledExpungeIgnitionGap;
+use nexus_types::internal_api::background::SledExpungeIgnitionSnapshot;
+use nexus_types::internal_api::background::SledExpungeMgsDiscovery;
+use nexus_types::internal_api::background::SledExpungeMgsPowerOffFailure;
+use nexus_types::internal_api::background::SledExpungePowerCheck;
+use nexus_types::internal_api::background::SledExpungePowerOffWait;
+use nexus_types::internal_api::background::SledExpungeRackAbsence;
+use nexus_types::internal_api::background::SledExpungeRackSwitches;
+use nexus_types::internal_api::background::SledExpungeRequestOutcome;
+use nexus_types::internal_api::background::SledExpungeSearch;
+use nexus_types::internal_api::background::SledExpungeStateAfter;
+use nexus_types::internal_api::background::SledExpungeStatus;
+use nexus_types::internal_api::background::SledExpungeSwitchIdentification;
+use nexus_types::internal_api::background::SledExpungeSwitchMgs;
+use nexus_types::internal_api::background::SledPoweredDown;
 use nexus_types::internal_api::background::SledSubnetDetails;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -1401,6 +1419,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "session_cleanup" => {
             print_task_session_cleanup(details);
+        }
+        "sled_expunge" => {
+            print_task_sled_expunge(details);
         }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
@@ -3134,6 +3155,488 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
             }
         }
     };
+}
+
+fn print_task_sled_expunge(details: &serde_json::Value) {
+    match serde_json::from_value::<SledExpungeStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            print!("{}", SledExpungeStatusDisplay(&status));
+        }
+    }
+}
+
+struct SledExpungeStatusDisplay<'a>(&'a SledExpungeStatus);
+
+fn search_summary(search: &SledExpungeSearch) -> String {
+    match search {
+        SledExpungeSearch::GoneAtCreation => "gone at creation".to_string(),
+        SledExpungeSearch::NotInRecordedCubby {
+            slot,
+            source,
+            other_board: _,
+            failed_attempts: _,
+        } => {
+            format!(
+                "not found in recorded {}",
+                sled_cubby_with_source_text(*slot, *source),
+            )
+        }
+    }
+}
+
+fn power_off_wait_summary(wait: &SledExpungePowerOffWait) -> String {
+    match wait {
+        SledExpungePowerOffWait::NoMgs => "no MGS for the rack".to_string(),
+        SledExpungePowerOffWait::NotPoweredOff {
+            slot,
+            located,
+            failed_attempts: _,
+        } => {
+            format!("not powered off in {}", located_cubby_text(*slot, located))
+        }
+        SledExpungePowerOffWait::IgnitionUnavailable { search, switches } => {
+            format!(
+                "{}; ignition unavailable from {}",
+                search_summary(search),
+                switches
+                    .gaps()
+                    .into_iter()
+                    .map(|(switch, gap)| format!(
+                        "{switch:?} ({})",
+                        ignition_gap_summary(&gap),
+                    ))
+                    .join(", "),
+            )
+        }
+        SledExpungePowerOffWait::CubbiesUnidentified { search, cubbies: _ } => {
+            format!("{}; sled cubbies not identified", search_summary(search))
+        }
+        SledExpungePowerOffWait::SwitchAttachedCubby { slot } => {
+            format!("in switch-attached cubby {slot}")
+        }
+    }
+}
+
+fn absence_summary(absence: &SledExpungeRackAbsence) -> String {
+    let others = if absence.other_boards.is_empty() {
+        "no sled cubby to identify".to_string()
+    } else {
+        format!(
+            "every sled cubby to identify holds another board ({})",
+            absence
+                .other_boards
+                .iter()
+                .map(|board| format!(
+                    "cubby {}: {}",
+                    board.slot, board.baseboard_id
+                ))
+                .join(", "),
+        )
+    };
+    format!(
+        "in no powered sled cubby per ignition via switch0's MGS {} and \
+         switch1's MGS {}; {others}",
+        absence.switch0_mgs, absence.switch1_mgs,
+    )
+}
+
+fn located_cubby_text(slot: u16, located: &SledExpungeCubbyLocated) -> String {
+    match located {
+        SledExpungeCubbyLocated::Recorded { source } => {
+            format!("recorded {}", sled_cubby_with_source_text(slot, *source))
+        }
+        SledExpungeCubbyLocated::FoundAfterGoneAtCreation => {
+            format!("cubby {slot} (found after being gone at creation)")
+        }
+        SledExpungeCubbyLocated::Relocated { recorded_slot } => {
+            format!(
+                "cubby {slot} (relocated from recorded cubby {recorded_slot})"
+            )
+        }
+    }
+}
+
+fn powered_down_summary(
+    slot: u16,
+    located: &SledExpungeCubbyLocated,
+    powered_down: &SledPoweredDown,
+) -> String {
+    let cubby = located_cubby_text(slot, located);
+    match powered_down {
+        SledPoweredDown::PoweredOff { mgs } => {
+            format!("powered off {cubby} via {mgs}")
+        }
+        SledPoweredDown::AlreadyOff { mgs } => {
+            format!("already in A2 in {cubby} per {mgs}")
+        }
+    }
+}
+
+fn gone_summary(
+    search: &SledExpungeSearch,
+    absence: &SledExpungeRackAbsence,
+) -> String {
+    let absence = absence_summary(absence);
+    match search {
+        SledExpungeSearch::GoneAtCreation => {
+            format!("gone at creation and still {absence}")
+        }
+        SledExpungeSearch::NotInRecordedCubby {
+            slot,
+            source,
+            other_board: Some(other_board),
+            failed_attempts: _,
+        } => format!(
+            "recorded {} holds another board ({}) per {}; nothing sent; the \
+             sled is {absence}",
+            sled_cubby_with_source_text(*slot, *source),
+            other_board.found,
+            other_board.mgs,
+        ),
+        SledExpungeSearch::NotInRecordedCubby {
+            slot,
+            source,
+            other_board: None,
+            failed_attempts: _,
+        } => format!(
+            "no MGS found the sled in recorded {}; the sled is {absence}",
+            sled_cubby_with_source_text(*slot, *source),
+        ),
+    }
+}
+
+fn ignition_gap_summary(gap: &SledExpungeIgnitionGap) -> String {
+    match gap {
+        SledExpungeIgnitionGap::NoMgs => {
+            "no MGS serves this switch".to_string()
+        }
+        SledExpungeIgnitionGap::MgsConflict => {
+            "more than one MGS claims this switch".to_string()
+        }
+        SledExpungeIgnitionGap::FetchFailed { mgs } => {
+            format!("ignition fetch via {mgs} failed")
+        }
+    }
+}
+
+fn write_switch_mgs(
+    f: &mut fmt::Formatter<'_>,
+    name: &str,
+    mgs: &SledExpungeSwitchMgs,
+) -> fmt::Result {
+    match mgs {
+        SledExpungeSwitchMgs::Found { mgs, ignition } => {
+            let ignition = match ignition {
+                SledExpungeIgnitionSnapshot::NotNeeded => {
+                    "ignition not needed".to_string()
+                }
+                SledExpungeIgnitionSnapshot::Unfinished => {
+                    "ignition fetch started but did not finish (the requests \
+                     waiting on it timed out)"
+                        .to_string()
+                }
+                SledExpungeIgnitionSnapshot::Fetched => {
+                    "ignition fetched".to_string()
+                }
+                SledExpungeIgnitionSnapshot::Failed { error } => {
+                    format!("ignition fetch failed: {error}")
+                }
+            };
+            writeln!(f, "        {name}: MGS {mgs}, {ignition}")
+        }
+        SledExpungeSwitchMgs::NotFound => {
+            writeln!(f, "        {name}: no MGS found")
+        }
+        SledExpungeSwitchMgs::Conflict { first, second, rest } => writeln!(
+            f,
+            "        {name}: more than one MGS claims it ({})",
+            [first, second].into_iter().chain(rest).join(", "),
+        ),
+    }
+}
+
+fn write_rack_switches(
+    f: &mut fmt::Formatter<'_>,
+    rack: &SledExpungeRackSwitches,
+) -> fmt::Result {
+    let (switch_unknown, switch0, switch1) = match &rack.switches {
+        SledExpungeSwitchIdentification::Unfinished => {
+            return writeln!(
+                f,
+                "    rack {} switch identification started but did not \
+                 finish (the requests waiting on it timed out)",
+                rack.rack_id,
+            );
+        }
+        SledExpungeSwitchIdentification::Identified {
+            switch_unknown,
+            switch0,
+            switch1,
+        } => (switch_unknown, switch0, switch1),
+    };
+    writeln!(f, "    rack {} switches:", rack.rack_id)?;
+    for failure in switch_unknown {
+        writeln!(
+            f,
+            "        MGS {} switch unknown: {}",
+            failure.mgs, failure.error,
+        )?;
+    }
+    write_switch_mgs(f, "switch0", switch0)?;
+    write_switch_mgs(f, "switch1", switch1)
+}
+
+fn write_failed_attempts(
+    f: &mut fmt::Formatter<'_>,
+    failed_attempts: &IdOrdMap<SledExpungeMgsPowerOffFailure>,
+) -> fmt::Result {
+    for attempt in failed_attempts {
+        writeln!(f, "            via {}: {}", attempt.mgs, attempt.failure)?;
+    }
+    Ok(())
+}
+
+fn write_search_attempts(
+    f: &mut fmt::Formatter<'_>,
+    search: &SledExpungeSearch,
+) -> fmt::Result {
+    match search {
+        SledExpungeSearch::GoneAtCreation => Ok(()),
+        SledExpungeSearch::NotInRecordedCubby {
+            slot: _,
+            source: _,
+            other_board: _,
+            failed_attempts,
+        } => write_failed_attempts(f, failed_attempts),
+    }
+}
+
+impl std::fmt::Display for SledExpungeStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let requests = match self.0 {
+            SledExpungeStatus::ListError { error } => {
+                writeln!(f, "    error listing unfinished requests:")?;
+                writeln!(f, "      {error}")?;
+                return Ok(());
+            }
+            SledExpungeStatus::Listed { requests, mgs_discovery } => {
+                match mgs_discovery {
+                    SledExpungeMgsDiscovery::NotNeeded => {}
+                    SledExpungeMgsDiscovery::Unfinished => {
+                        writeln!(
+                            f,
+                            "    MGS discovery started but did not finish \
+                             (the requests waiting on it timed out)"
+                        )?;
+                    }
+                    SledExpungeMgsDiscovery::Failed { error } => {
+                        writeln!(f, "    error discovering MGS:")?;
+                        writeln!(f, "      {error}")?;
+                    }
+                    SledExpungeMgsDiscovery::Discovered {
+                        rack_id_unknown,
+                        racks,
+                    } => {
+                        for mgs in rack_id_unknown {
+                            writeln!(
+                                f,
+                                "    MGS {} rack ID unknown: {}",
+                                mgs.mgs, mgs.error,
+                            )?;
+                        }
+                        for rack in racks {
+                            write_rack_switches(f, rack)?;
+                        }
+                    }
+                }
+                requests
+            }
+        };
+        writeln!(f, "    unfinished requests: {}", requests.len())?;
+
+        const SLED: &str = "sled:";
+        const STATE: &str = "state:";
+        const STATE_AFTER: &str = "state after:";
+        const OUTCOME: &str = "outcome:";
+        const LAST_ERROR: &str = "last_error:";
+        const FAILURE_REASON: &str = "failure_reason:";
+        const CURRENT_STATE: &str = "current_state:";
+        const ERROR: &str = "error:";
+        const PREVIOUS_POLICY: &str = "previous sled policy:";
+        const POWER_CHECK: &str = "power check:";
+        const WIDTH: usize = const_max_len(&[
+            SLED,
+            STATE,
+            STATE_AFTER,
+            OUTCOME,
+            LAST_ERROR,
+            FAILURE_REASON,
+            CURRENT_STATE,
+            ERROR,
+            PREVIOUS_POLICY,
+            POWER_CHECK,
+        ]) + 1;
+
+        for request in requests {
+            writeln!(f, "    request {}", request.request_id)?;
+            writeln!(f, "        {SLED:<WIDTH$}{}", request.sled_id)?;
+            writeln!(f, "        {STATE:<WIDTH$}{}", request.state)?;
+            match &request.state_after {
+                SledExpungeStateAfter::Unchanged => {}
+                SledExpungeStateAfter::Moved { state } => {
+                    writeln!(f, "        {STATE_AFTER:<WIDTH$}{state}")?;
+                }
+                SledExpungeStateAfter::Unknown {
+                    last_confirmed: Some(last_confirmed),
+                } => {
+                    writeln!(
+                        f,
+                        "        {STATE_AFTER:<WIDTH$}unknown (last confirmed: \
+                         {last_confirmed})"
+                    )?;
+                }
+                SledExpungeStateAfter::Unknown { last_confirmed: None } => {
+                    writeln!(
+                        f,
+                        "        {STATE_AFTER:<WIDTH$}unknown (no write \
+                         confirmed)"
+                    )?;
+                }
+            }
+            match &request.power_check {
+                None => {}
+                Some(SledExpungePowerCheck::PoweredDown {
+                    slot,
+                    located,
+                    powered_down,
+                }) => {
+                    writeln!(
+                        f,
+                        "        {POWER_CHECK:<WIDTH$}{}",
+                        powered_down_summary(*slot, located, powered_down),
+                    )?;
+                }
+                Some(SledExpungePowerCheck::Gone { search, absence }) => {
+                    writeln!(
+                        f,
+                        "        {POWER_CHECK:<WIDTH$}{}",
+                        gone_summary(search, absence),
+                    )?;
+                    write_search_attempts(f, search)?;
+                }
+                Some(SledExpungePowerCheck::Waiting { wait }) => {
+                    writeln!(
+                        f,
+                        "        {POWER_CHECK:<WIDTH$}{}",
+                        power_off_wait_summary(wait),
+                    )?;
+                    match wait {
+                        SledExpungePowerOffWait::NotPoweredOff {
+                            slot: _,
+                            located: _,
+                            failed_attempts,
+                        } => {
+                            write_failed_attempts(f, failed_attempts)?;
+                        }
+                        SledExpungePowerOffWait::IgnitionUnavailable {
+                            search,
+                            switches: _,
+                        } => {
+                            write_search_attempts(f, search)?;
+                        }
+                        SledExpungePowerOffWait::CubbiesUnidentified {
+                            search,
+                            cubbies,
+                        } => {
+                            write_search_attempts(f, search)?;
+                            for cubby in cubbies.iter() {
+                                writeln!(
+                                    f,
+                                    "            cubby {}: {}",
+                                    cubby.slot, cubby.reason,
+                                )?;
+                            }
+                        }
+                        SledExpungePowerOffWait::NoMgs
+                        | SledExpungePowerOffWait::SwitchAttachedCubby {
+                            ..
+                        } => {}
+                    }
+                }
+            }
+            match &request.outcome {
+                SledExpungeRequestOutcome::RemovalPreparing => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}waiting for the removal to \
+                         finish preparing"
+                    )?;
+                }
+                SledExpungeRequestOutcome::LastErrorSet { last_error } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}set last_error")?;
+                    writeln!(f, "        {LAST_ERROR:<WIDTH$}{last_error}")?;
+                }
+                SledExpungeRequestOutcome::LastErrorUnchanged {
+                    last_error,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}last_error unchanged"
+                    )?;
+                    writeln!(f, "        {LAST_ERROR:<WIDTH$}{last_error}")?;
+                }
+                SledExpungeRequestOutcome::Failed { failure_reason } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}failed")?;
+                    writeln!(
+                        f,
+                        "        {FAILURE_REASON:<WIDTH$}{failure_reason}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::NotInExpectedState {
+                    current_state,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}changed concurrently, left \
+                         for the next activation"
+                    )?;
+                    writeln!(
+                        f,
+                        "        {CURRENT_STATE:<WIDTH$}{current_state}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::Completed {
+                    previous_sled_policy,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}expunged the sled; done"
+                    )?;
+                    writeln!(
+                        f,
+                        "        {PREVIOUS_POLICY:<WIDTH$}{previous_sled_policy}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::TimedOut { step } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}timed out while {}; \
+                         retried next activation",
+                        step.description(),
+                    )?;
+                }
+                SledExpungeRequestOutcome::Error { error } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}error")?;
+                    writeln!(f, "        {ERROR:<WIDTH$}{error}")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
@@ -6252,14 +6755,32 @@ async fn cmd_nexus_support_bundles_inspect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gateway_types::ignition::SpIgnitionSystemType;
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::external_api::sled::SledPolicy;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::internal_api::background::SledExpungeIgnitionUnavailable;
+    use nexus_types::internal_api::background::SledExpungeMgsFailure;
+    use nexus_types::internal_api::background::SledExpungeOtherBoard;
+    use nexus_types::internal_api::background::SledExpungeRequestStatus;
+    use nexus_types::internal_api::background::SledExpungeTaskStep;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use nexus_types::sled_expunge::CubbyUnidentified;
+    use nexus_types::sled_expunge::MgsPowerOffFailure;
+    use nexus_types::sled_expunge::NonEmptyBaseboardId;
+    use nexus_types::sled_expunge::SledCubbyBoard;
+    use nexus_types::sled_expunge::SledExpungeRequestStateKind;
+    use nexus_types::sled_expunge::SledExpungeSpSlotSource;
+    use nexus_types::sled_expunge::SledExpungeUnidentifiedCubbies;
+    use nexus_types::sled_expunge::UnidentifiedCubby;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledExpungeRequestUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::net::SocketAddrV6;
 
     #[test]
     fn test_ereporter_status_totals_display() {
@@ -6358,6 +6879,439 @@ mod tests {
                 failed: 3,
                 errors: 2,
             },
+        );
+    }
+
+    #[test]
+    fn test_sled_expunge_status_display() {
+        let sled = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
+        let mgs0: SocketAddrV6 =
+            "[fd00:1122:3344:101::2]:12225".parse().expect("parsed address");
+        let mgs1: SocketAddrV6 =
+            "[fd00:1122:3344:102::2]:12225".parse().expect("parsed address");
+        let mgs2: SocketAddrV6 =
+            "[fd00:1122:3344:103::2]:12225".parse().expect("parsed address");
+        let board = |serial: &str| {
+            NonEmptyBaseboardId::new(BaseboardId {
+                part_number: "913-0000019".to_string(),
+                serial_number: serial.to_string(),
+            })
+            .expect("test boards are non-empty")
+        };
+        let failures = |entries: Vec<(SocketAddrV6, MgsPowerOffFailure)>| {
+            IdOrdMap::from_iter_unique(entries.into_iter().map(
+                |(mgs, failure)| SledExpungeMgsPowerOffFailure { mgs, failure },
+            ))
+            .expect("MGSes are unique")
+        };
+        let unreachable_error =
+            || "Error Response: status: 503 Service Unavailable".to_string();
+        let unreachable = || MgsPowerOffFailure::Unidentified {
+            reason: CubbyUnidentified::SpUnreachable {
+                error: unreachable_error(),
+            },
+        };
+        let empty_identity = || {
+            NonEmptyBaseboardId::new(BaseboardId {
+                part_number: "913-0000019".to_string(),
+                serial_number: String::new(),
+            })
+            .expect_err("an empty serial number is empty")
+        };
+        let absence = SledExpungeRackAbsence {
+            switch0_mgs: mgs0,
+            switch1_mgs: mgs1,
+            other_boards: [(0, "BRM42220001"), (1, "BRM42220002")]
+                .into_iter()
+                .map(|(slot, serial)| SledCubbyBoard {
+                    slot,
+                    baseboard_id: board(serial),
+                })
+                .collect(),
+        };
+        let not_in_recorded = SledExpungeSearch::NotInRecordedCubby {
+            slot: 3,
+            source: SledExpungeSpSlotSource::Relocated,
+            other_board: None,
+            failed_attempts: failures(vec![
+                (mgs0, unreachable()),
+                (mgs1, unreachable()),
+            ]),
+        };
+        let waiting_for = |wait| SledExpungePowerCheck::Waiting { wait };
+        let cubby = |slot, located, powered_down| {
+            SledExpungePowerCheck::PoweredDown { slot, located, powered_down }
+        };
+        let status = |state, outcome| SledExpungeRequestStatus {
+            request_id: SledExpungeRequestUuid::nil(),
+            sled_id: sled,
+            state,
+            state_after: SledExpungeStateAfter::Unchanged,
+            outcome,
+            power_check: None,
+        };
+        let waiting = SledExpungeRequestStateKind::WaitingForTrustQuorum;
+        let powering_off = SledExpungeRequestStateKind::PoweringOff;
+        let expunging = SledExpungeRequestStateKind::Expunging;
+        let completed = |previous_sled_policy| {
+            SledExpungeRequestOutcome::Completed { previous_sled_policy }
+        };
+        let non_provisionable = SledPolicy::InService {
+            provision_policy: SledProvisionPolicy::NonProvisionable,
+        };
+        let done = SledExpungeStateAfter::Moved {
+            state: SledExpungeRequestStateKind::Done,
+        };
+        let last_error_set =
+            |last_error: &str| SledExpungeRequestOutcome::LastErrorSet {
+                last_error: last_error.to_string(),
+            };
+        let entries = [
+            status(
+                waiting,
+                SledExpungeRequestOutcome::LastErrorUnchanged {
+                    last_error: "the removal has stayed preparing".to_string(),
+                },
+            ),
+            SledExpungeRequestStatus {
+                state_after: SledExpungeStateAfter::Moved {
+                    state: SledExpungeRequestStateKind::Failed,
+                },
+                ..status(
+                    waiting,
+                    SledExpungeRequestOutcome::Failed {
+                        failure_reason: "the removal was aborted".to_string(),
+                    },
+                )
+            },
+            SledExpungeRequestStatus {
+                state_after: SledExpungeStateAfter::Unknown {
+                    last_confirmed: None,
+                },
+                ..status(
+                    waiting,
+                    SledExpungeRequestOutcome::NotInExpectedState {
+                        current_state: SledExpungeRequestStateKind::PoweringOff,
+                    },
+                )
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(cubby(
+                    3,
+                    SledExpungeCubbyLocated::Recorded {
+                        source: SledExpungeSpSlotSource::Inventory,
+                    },
+                    SledPoweredDown::PoweredOff { mgs: mgs1 },
+                )),
+                state_after: done,
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::NotPoweredOff {
+                        slot: 3,
+                        located: SledExpungeCubbyLocated::Recorded {
+                            source: SledExpungeSpSlotSource::LiveScan,
+                        },
+                        failed_attempts: failures(vec![
+                            (
+                                mgs0,
+                                MgsPowerOffFailure::IgnitionPowerOffFailed {
+                                    error: "Error Response: status: 503 \
+                                            Service Unavailable"
+                                        .to_string(),
+                                },
+                            ),
+                            (
+                                mgs1,
+                                MgsPowerOffFailure::Unidentified {
+                                    reason:
+                                        CubbyUnidentified::MgsRequestFailed {
+                                            error: "Communication Error: \
+                                                    error sending request"
+                                                .to_string(),
+                                        },
+                                },
+                            ),
+                            (
+                                mgs2,
+                                MgsPowerOffFailure::Unidentified {
+                                    reason: CubbyUnidentified::EmptyIdentity {
+                                        reported: empty_identity(),
+                                    },
+                                },
+                            ),
+                        ]),
+                    },
+                )),
+                ..status(
+                    powering_off,
+                    last_error_set("the sled could not be powered off"),
+                )
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::Gone {
+                    search: SledExpungeSearch::NotInRecordedCubby {
+                        slot: 3,
+                        source: SledExpungeSpSlotSource::Inventory,
+                        other_board: Some(SledExpungeOtherBoard {
+                            mgs: mgs0,
+                            found: board("BRM42220004"),
+                        }),
+                        failed_attempts: IdOrdMap::new(),
+                    },
+                    absence: absence.clone(),
+                }),
+                state_after: done,
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(cubby(
+                    4,
+                    SledExpungeCubbyLocated::Relocated { recorded_slot: 3 },
+                    SledPoweredDown::AlreadyOff { mgs: mgs0 },
+                )),
+                state_after: done,
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::Gone {
+                    search: SledExpungeSearch::NotInRecordedCubby {
+                        slot: 5,
+                        source: SledExpungeSpSlotSource::FoundAfterAbsent,
+                        other_board: None,
+                        failed_attempts: failures(vec![
+                            (mgs0, unreachable()),
+                            (mgs1, unreachable()),
+                        ]),
+                    },
+                    absence: SledExpungeRackAbsence {
+                        other_boards: IdOrdMap::new(),
+                        ..absence.clone()
+                    },
+                }),
+                state_after: done,
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::Gone {
+                    search: SledExpungeSearch::GoneAtCreation,
+                    absence: absence.clone(),
+                }),
+                state_after: done,
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(cubby(
+                    6,
+                    SledExpungeCubbyLocated::FoundAfterGoneAtCreation,
+                    SledPoweredDown::PoweredOff { mgs: mgs0 },
+                )),
+                state_after: done,
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::IgnitionUnavailable {
+                        search: SledExpungeSearch::GoneAtCreation,
+                        switches: SledExpungeIgnitionUnavailable::Both {
+                            switch0: SledExpungeIgnitionGap::FetchFailed {
+                                mgs: mgs0,
+                            },
+                            switch1: SledExpungeIgnitionGap::NoMgs,
+                        },
+                    },
+                )),
+                ..status(powering_off, last_error_set("no ignition state"))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::IgnitionUnavailable {
+                        search: not_in_recorded.clone(),
+                        switches: SledExpungeIgnitionUnavailable::Switch1 {
+                            switch1: SledExpungeIgnitionGap::MgsConflict,
+                        },
+                    },
+                )),
+                ..status(powering_off, last_error_set("no ignition state"))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::CubbiesUnidentified {
+                        search: not_in_recorded,
+                        cubbies: SledExpungeUnidentifiedCubbies::new(
+                            [
+                                (
+                                    2,
+                                    CubbyUnidentified::SpUnreachable {
+                                        error: unreachable_error(),
+                                    },
+                                ),
+                                (
+                                    7,
+                                    CubbyUnidentified::EmptyIdentity {
+                                        reported: empty_identity(),
+                                    },
+                                ),
+                                (
+                                    8,
+                                    CubbyUnidentified::MgsRequestFailed {
+                                        error: "Communication Error: error \
+                                                sending request"
+                                            .to_string(),
+                                    },
+                                ),
+                                (
+                                    9,
+                                    CubbyUnidentified::UnexpectedSystemType {
+                                        system_type:
+                                            SpIgnitionSystemType::Sidecar,
+                                    },
+                                ),
+                            ]
+                            .into_iter()
+                            .map(|(slot, reason)| UnidentifiedCubby {
+                                slot,
+                                reason,
+                            })
+                            .collect(),
+                        )
+                        .expect("four unidentified cubbies"),
+                    },
+                )),
+                ..status(powering_off, last_error_set("cubbies unidentified"))
+            },
+            SledExpungeRequestStatus {
+                state_after: SledExpungeStateAfter::Moved {
+                    state: powering_off,
+                },
+                power_check: Some(waiting_for(SledExpungePowerOffWait::NoMgs)),
+                ..status(waiting, last_error_set("no management gateway"))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::SwitchAttachedCubby { slot: 14 },
+                )),
+                ..status(powering_off, last_error_set("the sled is a scrimlet"))
+            },
+            SledExpungeRequestStatus {
+                state_after: SledExpungeStateAfter::Unknown {
+                    last_confirmed: None,
+                },
+                ..status(
+                    expunging,
+                    SledExpungeRequestOutcome::Error {
+                        error: "completing the request: Internal Error: the \
+                                sled's state refuses the expunge"
+                            .to_string(),
+                    },
+                )
+            },
+            SledExpungeRequestStatus {
+                state_after: SledExpungeStateAfter::Unknown {
+                    last_confirmed: Some(expunging),
+                },
+                ..status(
+                    powering_off,
+                    SledExpungeRequestOutcome::TimedOut {
+                        step: SledExpungeTaskStep::Completing,
+                    },
+                )
+            },
+        ];
+        let requests =
+            IdOrdMap::from_iter_unique(entries.into_iter().enumerate().map(
+                |(n, entry)| SledExpungeRequestStatus {
+                    request_id: SledExpungeRequestUuid::from_u128(
+                        0x5ab0_0000 + n as u128,
+                    ),
+                    ..entry
+                },
+            ))
+            .expect("request ids are unique");
+        let found =
+            |mgs, ignition| SledExpungeSwitchMgs::Found { mgs, ignition };
+        let rack = |n: u128, switches| SledExpungeRackSwitches {
+            rack_id: RackUuid::from_u128(
+                0x7a1c0000_0000_4000_8000_000000000000 + n,
+            ),
+            switches,
+        };
+        let racks = IdOrdMap::from_iter_unique([
+            rack(
+                1,
+                SledExpungeSwitchIdentification::Identified {
+                    switch_unknown: IdOrdMap::from_iter_unique([
+                        SledExpungeMgsFailure {
+                            mgs: mgs2,
+                            error: "Communication Error: connection refused"
+                                .to_string(),
+                        },
+                    ])
+                    .expect("one MGS"),
+                    switch0: found(
+                        mgs0,
+                        SledExpungeIgnitionSnapshot::Failed {
+                            error: "Communication Error: timed out".to_string(),
+                        },
+                    ),
+                    switch1: SledExpungeSwitchMgs::NotFound,
+                },
+            ),
+            rack(
+                2,
+                SledExpungeSwitchIdentification::Identified {
+                    switch_unknown: IdOrdMap::new(),
+                    switch0: found(mgs0, SledExpungeIgnitionSnapshot::Fetched),
+                    switch1: SledExpungeSwitchMgs::Conflict {
+                        first: mgs1,
+                        second: mgs2,
+                        rest: BTreeSet::new(),
+                    },
+                },
+            ),
+            rack(
+                3,
+                SledExpungeSwitchIdentification::Identified {
+                    switch_unknown: IdOrdMap::new(),
+                    switch0: found(
+                        mgs0,
+                        SledExpungeIgnitionSnapshot::NotNeeded,
+                    ),
+                    switch1: found(
+                        mgs1,
+                        SledExpungeIgnitionSnapshot::Unfinished,
+                    ),
+                },
+            ),
+            rack(4, SledExpungeSwitchIdentification::Unfinished),
+        ])
+        .expect("rack ids are unique");
+        let status = SledExpungeStatus::Listed {
+            requests,
+            mgs_discovery: SledExpungeMgsDiscovery::Discovered {
+                rack_id_unknown: IdOrdMap::from_iter_unique([
+                    SledExpungeMgsFailure {
+                        mgs: mgs2,
+                        error: "this MGS' rack ID has not been set".to_string(),
+                    },
+                ])
+                .expect("one MGS"),
+                racks,
+            },
+        };
+        // TODO-RAINCLAUDE: omdb reads this status back from the task's JSON, so
+        // every variant shown here must survive a serialization round trip.
+        let json =
+            serde_json::to_value(&status).expect("the status serializes");
+        assert_eq!(
+            serde_json::from_value::<SledExpungeStatus>(json)
+                .expect("the serialized status deserializes"),
+            status,
+        );
+        expectorate::assert_contents(
+            "tests/output/sled-expunge-status.txt",
+            &SledExpungeStatusDisplay(&status).to_string(),
         );
     }
 
