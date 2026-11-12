@@ -1608,76 +1608,71 @@ impl InstanceRunner {
 
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
-        //
-        // NOTE: we call `Zones::halt_and_remove_logged` directly instead of
-        // `RunningZone::stop()`, because that cannot be retried (see #7881)
-        // on failure.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        omicron_common::backoff::retry_notify_ext(
-            omicron_common::backoff::retry_policy_local(),
-            || async {
-                self.zone_builder_factory
-                    .zones_api()
-                    .halt_and_remove_logged(&self.log, &zname)
-                    .await
-                    .map_err(BackoffError::transient)
-            },
-            |e, count, duration| {
-                const WARN_DURATION: Duration = Duration::from_mins(2);
-                const ERR_DURATION: Duration = Duration::from_mins(5);
-                if duration > ERR_DURATION {
-                    error!(
-                        &self.log,
-                        "failed to stop Propolis zone after more than \
-                        {ERR_DURATION:?}. Retries will continue, but the \
-                        zone could be stuck";
-                        "zone_name" => &zname,
-                        "attempts" => count,
-                        "duration" => ?duration,
-                        "error" => InlineErrorChain::new(&e),
-                    );
-                } else if duration > WARN_DURATION {
-                    warn!(
-                        &self.log,
-                        "failed to stop Propolis zone after more than \
-                        {WARN_DURATION:?}, retrying";
-                        "zone_name" => &zname,
-                        "attempts" => count,
-                        "duration" => ?duration,
-                        "error" => InlineErrorChain::new(&e),
-                    );
-                } else {
-                    debug!(
-                        &self.log,
-                        "failed to stop Propolis zone, retrying";
-                        "zone_name" => &zname,
-                        "attempts" => count,
-                        "duration" => ?duration,
-                        "error" => InlineErrorChain::new(&e),
-                    );
-                }
-            },
-        )
-        .await
-        .expect("infinite retry loop stopping Propolis zone");
 
-        // See if there are any runtime objects to clean up.
+        // Note that this is a handwritten retry loop, rather than using
+        // `retry_notify_ext` or similar. This is a bit of a bummer, but it's
+        // necessary because `running_zone.stop()` mutably borrows the
+        // `RunningZone`, which cannot be moved into the retry loop's operation
+        // closure, because we must leave it in place in `self.running_state`
+        // until the backoff loop has completed, for cancellation-safety
+        // reasons.
         //
-        // We already removed the zone using the "direct" zones API above. While
-        // that does actually operate on the zone on the host, it doesn't touch
-        // the in-memory state in `running_state`. Calling this again here will
-        // update that to reflect the actual state of the zone. This should only
-        // fail if something like `zoneadm list` also fails, since the zone must
-        // be stopped. But regardless, log an error and continue if it does
-        // fail.
-        if let Err(e) = running_state.running_zone.stop().await {
-            error!(
-                &self.log,
-                "RunningZone::stop() failed after Propolis \
-                zone was already stopped";
-                "zone_name" => &zname,
-                "error" => e,
-            );
+        // In practice, the hand-written retry loop (which still uses the
+        // backoff *policy* code) turned out to not really be that much more
+        // code than the `retry_notify_ext`-based retry loop. Honestly, this is
+        // kinda making me question the value of that extremely closure-y API...
+        let mut backoff_policy = omicron_common::backoff::retry_policy_local();
+        let mut attempts = 0;
+        loop {
+            use backoff::Backoff;
+
+            let err = match running_state.running_zone.stop().await {
+                Ok(_) => break,
+                Err(e) => e,
+            };
+
+            const WARN_DURATION: Duration = Duration::from_mins(2);
+            const ERR_DURATION: Duration = Duration::from_mins(5);
+
+            attempts += 1;
+            let duration = backoff_policy.get_elapsed_time();
+            if duration > ERR_DURATION {
+                error!(
+                    &self.log,
+                    "failed to stop Propolis zone after more than \
+                    {ERR_DURATION:?}. Retries will continue, but the \
+                    zone could be stuck";
+                    "zone_name" => &zname,
+                    "attempts" => attempts,
+                    "duration" => ?duration,
+                    "error" => %err,
+                );
+            } else if duration > WARN_DURATION {
+                warn!(
+                    &self.log,
+                    "failed to stop Propolis zone after more than \
+                    {WARN_DURATION:?}, retrying";
+                    "zone_name" => &zname,
+                    "attempts" => attempts,
+                    "duration" => ?duration,
+                    "error" => %err,
+                );
+            } else {
+                debug!(
+                    &self.log,
+                    "failed to stop Propolis zone, retrying";
+                    "zone_name" => &zname,
+                    "attempts" => attempts,
+                    "duration" => ?duration,
+                    "error" => %err,
+                );
+            }
+
+            let backoff = backoff_policy
+                .next_backoff()
+                .expect("backoff policy has no retry duration limit");
+            tokio::time::sleep(backoff).await;
         }
 
         // Remove any OPTE ports from the port manager.
