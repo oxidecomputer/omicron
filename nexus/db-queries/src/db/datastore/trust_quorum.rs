@@ -251,7 +251,7 @@ enum LatestConfig {
         /// The configuration the aborted one was built on, or `None` for an
         /// aborted LRTQ upgrade.
         last_committed: Option<TrustQuorumConfig>,
-     },
+    },
 }
 
 impl DataStore {
