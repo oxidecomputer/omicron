@@ -321,7 +321,7 @@ impl super::Nexus {
         // Retrieve the sled for the coordinator
         let Some(sled) = self
             .db_datastore
-            .sled_get_commissioned_by_baseboard_and_rack_id(
+            .sled_get_in_service_by_baseboard_and_rack_id(
                 opctx,
                 rack_id,
                 coordinator.clone(),
@@ -330,7 +330,7 @@ impl super::Nexus {
         else {
             let msg = format!(
                 "Coordinator sled for trust quorum reconfiguration is no \
-                longer commissioned or is present in another rack. \
+                longer in service or is present in another rack. \
                 Configuration stored in database for this configuration will \
                 be aborted. Expected rack_id: {rack_id}, baseboard_id: {}.",
                 coordinator
