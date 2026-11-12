@@ -52,7 +52,7 @@ use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::read;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
@@ -411,6 +411,7 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
                 let mut map = Cubbies::new();
+                let mut errors = BTreeMap::new();
                 for subnet in subnets {
                     let addr = SocketAddrV6::new(
                         get_switch_zone_address(subnet),
@@ -423,7 +424,8 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                         client.clone(),
                         log.clone(),
                     );
-                    if mgs.sp_local_switch_id().await.is_err() {
+                    if let Err(error) = mgs.sp_local_switch_id().await {
+                        errors.insert(addr, error);
                         continue;
                     }
                     for cubby in 0..=MAX_CUBBY {
@@ -447,10 +449,19 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                         }
                     }
                 }
-                // If this code is running, there must be at least one sled in
-                // the rack, so we reject any response that does not have at
-                // least one sled.
-                if !map.is_empty() {
+
+                // If this code is running, there must be at least one sled
+                // in the rack, so an empty map means something went wrong.
+                if map.is_empty() {
+                    warn!(log, "no sleds found, cubby map unchanged");
+                    for (addr, error) in &errors {
+                        warn!(
+                            log, "MGS probe failed";
+                            "addr" => %addr,
+                            "error" => InlineErrorChain::new(error),
+                        );
+                    }
+                } else {
                     cubbies.send_replace(map);
                 }
             }
