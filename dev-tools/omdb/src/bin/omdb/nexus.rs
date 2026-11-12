@@ -102,6 +102,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateDetails;
 use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
@@ -1520,6 +1521,7 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
 }
 
 fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::VmmStopForUpdateDetails;
     use nexus_types::internal_api::background::VmmStopForUpdateStatus;
 
     match serde_json::from_value::<VmmStopForUpdateStatus>(details.clone()) {
@@ -1527,11 +1529,14 @@ fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(VmmStopForUpdateStatus {
+        Ok(VmmStopForUpdateStatus::Disabled) => {
+            println!("    task explicitly disabled by config!");
+        }
+        Ok(VmmStopForUpdateStatus::Enabled(VmmStopForUpdateDetails {
             vmms_stopped_by_sled,
             vmms_failed_to_stop_by_sled,
             error_messages,
-        }) => {
+        })) => {
             let total: usize =
                 vmms_stopped_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
             println!("    VMMs stopped for sled evacuation: {total} total");
@@ -2299,7 +2304,8 @@ fn print_task_capacity_metrics(details: &serde_json::Value) {
             "warning: failed to interpret task details: {error:?}: {details:?}",
         ),
         Ok(status) => {
-            println!("    samples queued: {}", status.samples_queued);
+            println!("    silo samples: {}", status.silo_samples);
+            println!("    project samples: {}", status.project_samples);
         }
     }
 }
@@ -3035,13 +3041,16 @@ fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(status) => {
-            let VmmMarkStopForUpdateStatus {
+        Ok(VmmMarkStopForUpdateStatus::Disabled) => {
+            println!("    task explicitly disabled by config!");
+        }
+        Ok(VmmMarkStopForUpdateStatus::Enabled(details)) => {
+            let VmmMarkStopForUpdateDetails {
                 vmms_marked,
                 batches,
                 batch_size,
                 error,
-            } = status;
+            } = details;
 
             const MARKED: &str = "VMMs marked to be stopped for an update:";
             const BATCHES: &str = "  batches:";

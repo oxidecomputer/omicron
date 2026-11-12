@@ -205,43 +205,30 @@ impl super::Nexus {
         let rack_id = sled.rack_id();
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
-        // If the sled still exists in the latest committed trust quorum
-        // configuration, it cannot be expunged.
+        // Refuse to expunge a sled that the trust quorum could still treat as
+        // a member. This requires the following conditions to all be true:
         //
-        // This is just a sanity check. There is an inherent TOCTUO here, since
-        // we aren't combining the check with with the policy change inside
-        // a transaction. However, it is unlikely that an operator would be
-        // creating a different trust quorum configuration while trying to
-        // expunge this sled, since both have to be done from omdb by an oxide
-        // employee right now.
+        // * The sled must be absent from the latest non-aborted trust
+        //   quorum configuration.
+        // * That configuration must have started committing, since a
+        //   configuration that is still preparing can be aborted.
         //
-        // When we add an external API, we'll probably want to come back and add
-        // some extra safeguards including checking that there are no ongoing
-        // configurations currently, as the last committed configuration can be
-        // different from the current configuration. However, if we checked that
-        // here we'd have to do yet more DB lookups to check that the state of
-        // the last configuration wasn't aborted. This is probably good enough
-        // for now given that the user already has to confirm a bunch of prompts
-        // before kicking off the operation.
-        let (tq_latest_committed_config, _) = self
-            .tq_load_latest_possible_committed_config(opctx, authz_tq)
-            .await?;
+        // See `check_trust_quorum_allows_expunge` for the full set of rules.
+        //
+        // The check and the change to expunged run in a single transaction,
+        // so a configuration proposed concurrently can't slip in between them.
         let baseboard_id = BaseboardId {
             part_number: sled.part_number().to_string(),
             serial_number: sled.serial_number().to_string(),
         };
-        if tq_latest_committed_config.members.contains_key(&baseboard_id) {
-            return Err(Error::conflict(format!(
-                "Cannot expunge sled {sled_id}, as its baseboard \
-                {baseboard_id} is still a member of the latest committed \
-                trust quorum configuration at epoch {} for rack {rack_id}",
-                tq_latest_committed_config.epoch
-            )));
-        }
-
         let prev_policy = self
             .db_datastore
-            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .sled_set_policy_to_expunged_if_trust_quorum_allows(
+                opctx,
+                &authz_sled,
+                &authz_tq,
+                &baseboard_id,
+            )
             .await?;
 
         // The instance-watcher background task is responsible for marking any

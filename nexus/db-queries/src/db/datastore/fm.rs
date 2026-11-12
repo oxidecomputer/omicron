@@ -1225,7 +1225,8 @@ impl DataStore {
                 match data {
                     BundleData::Reconfigurator
                     | BundleData::SledCubbyInfo
-                    | BundleData::SpDumps => {}
+                    | BundleData::SpDumps
+                    | BundleData::SpComponents => {}
                     BundleData::HostInfo(sleds) => {
                         host_info_rows.push(HostInfo::from_sitrep(
                             sitrep_id, req_id, sleds,
@@ -3897,6 +3898,7 @@ mod tests {
                 include_reconfigurator: true,
                 include_sled_cubby_info: false,
                 include_sp_dumps: true,
+                include_sp_components: false,
             })
             .execute_async(&*conn)
             .await

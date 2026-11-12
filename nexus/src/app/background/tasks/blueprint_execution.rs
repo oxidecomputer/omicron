@@ -237,6 +237,7 @@ mod test {
     use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
@@ -330,6 +331,7 @@ mod test {
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: dns_version,
             external_dns_version: dns_version,
             target_release_minimum_generation: TargetReleaseGeneration::new(),
