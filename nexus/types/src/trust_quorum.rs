@@ -311,9 +311,7 @@ impl ProposedTrustQuorumConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RemoveSledError {
     /// The sled is not a member of the trust quorum.
-    NotMember {
-        sled: BaseboardId,
-    },
+    NotMember { sled: BaseboardId },
     /// The members left after removing `sled` are outside the trust quorum size
     /// bounds.
     InvalidMembership {
