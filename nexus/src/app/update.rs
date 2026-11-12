@@ -22,12 +22,14 @@ use nexus_db_model::saga_types::Saga;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::QuiesceInfo;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::TargetRelease;
 use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::BlueprintPlannerLatest;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::Zpool;
@@ -88,13 +90,15 @@ const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 #[derive(Clone)]
 pub struct UpdateStatusHandle {
     latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+    latest_planner: watch::Receiver<BlueprintPlannerLatest>,
 }
 
 impl UpdateStatusHandle {
     pub fn new(
         latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+        latest_planner: watch::Receiver<BlueprintPlannerLatest>,
     ) -> Self {
-        Self { latest_blueprint }
+        Self { latest_blueprint, latest_planner }
     }
 }
 
@@ -681,13 +685,35 @@ impl super::Nexus {
             )
             .await?;
 
+        let (operator_notes, planner_error) = self.operator_notes();
+
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
             time_last_step_planned,
             suspended,
             contact_support,
+            operator_notes,
+            planner_error: Nullable(planner_error),
         })
+    }
+
+    /// Returns operator notes based on this Nexus's most recent planning
+    /// report, plus the error from the most recent planning activation (if it
+    /// failed).
+    fn operator_notes(&self) -> (update::OperatorNotes, Option<String>) {
+        // Clone what we need so that we don't hold the channel's lock.
+        let latest = self.update_status.latest_planner.borrow().clone();
+        let quiesce_state = self.quiesce.state();
+        let status = latest.operator_status(QuiesceInfo::Known(&quiesce_state));
+        let time_planned = latest.latest_report().map(|r| r.time_planned);
+        let status_message = status.to_string();
+        let notes = update::OperatorNotes {
+            time_planned: Nullable(time_planned),
+            status: update::OperatorStatus::from(&status),
+            status_message,
+        };
+        (notes, latest.last_error().map(String::from))
     }
 
     /// Identify known reasons why we would want a customer to call support

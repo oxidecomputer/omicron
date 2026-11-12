@@ -705,6 +705,36 @@ async fn test_update_status() -> Result<()> {
     // hold onto this to compare it to later values
     let time_last_step_planned = status.time_last_step_planned;
 
+    // The planner is disabled by default in the test context.  Once it has
+    // run with its config loaded, the operator notes should say that the
+    // status is unknown because the planner has never succeeded.  (Until the
+    // config is loaded, the planner reports a different status, so keep
+    // activating it until it reports that it is disabled.)
+    wait_for_condition(
+        || async {
+            match run_blueprint_planner(&cptestctx.lockstep_client).await {
+                BlueprintPlannerStatus::Disabled => Ok(()),
+                other => Err(CondCheckError::<()>::NotYet {
+                    status: Some(format!("planner status: {other:?}")),
+                }),
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("planner should have reported being disabled within 60s");
+    let status: update::UpdateStatus =
+        object_get(client, "/v1/system/update/status").await;
+    let expected_error = "blueprint planning is disabled";
+    assert_eq!(status.planner_error.0.as_deref(), Some(expected_error));
+    assert_eq!(status.operator_notes.time_planned.0, None);
+    assert_eq!(status.operator_notes.status, update::OperatorStatus::Unknown);
+    assert_eq!(
+        status.operator_notes.status_message,
+        format!("Unknown: planner produced error: {expected_error}")
+    );
+
     // Upload a fake TUF repo and set it as the target release
     let trust_root = TestTrustRoot::generate().await?;
     trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
@@ -772,6 +802,49 @@ async fn test_update_status() -> Result<()> {
     // The task that checks for enabled not online SMF services isn't running on
     // a simulated system; the contact_support field should be true
     assert!(status.contact_support, "should need to contact support");
+
+    // Enable the planner.  Once it runs, the status should include operator
+    // notes from that run and no error.
+    let time_enabled = Utc::now();
+    let nexus_client = cptestctx.lockstep_client();
+    let config_initial = nexus_client
+        .reconfigurator_config_show_current()
+        .await
+        .expect("load initial reconfigurator config")
+        .into_inner();
+    nexus_client
+        .reconfigurator_config_set(&ReconfiguratorConfigParam {
+            version: config_initial.version + 1,
+            config: ReconfiguratorConfig {
+                planner_enabled: true,
+                ..config_initial.config
+            },
+        })
+        .await
+        .expect("enable blueprint planner");
+
+    // The config change ought to activate the planner, but it may take some
+    // time for it to actually run.
+    let (time_planned, notes) = wait_for_condition(
+        || async {
+            let status: update::UpdateStatus =
+                object_get(client, "/v1/system/update/status").await;
+            let notes = status.operator_notes;
+            match (notes.time_planned.0, status.planner_error.0) {
+                (Some(time_planned), None) => Ok((time_planned, notes)),
+                (_, error) => {
+                    Err(CondCheckError::<()>::NotYet { status: error })
+                }
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("operator notes should have appeared within 60s");
+    assert!(time_planned >= time_enabled);
+    assert_ne!(notes.status, update::OperatorStatus::Unknown);
+    assert!(!notes.status_message.is_empty());
 
     cptestctx.teardown().await;
     Ok(())

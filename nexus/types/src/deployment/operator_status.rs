@@ -3,9 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Summary of what the system is doing, intended for operators
+//!
+//! These types carry more detail than the external API exposes.  The external
+//! API includes only the top-level kind of status (see
+//! [`crate::external_api::update::OperatorStatus`]) plus the message produced
+//! by this module's `Display` impls.
 
 use crate::deployment::MgsUpdateComponent;
 use crate::deployment::planning_report::WaitingOnSledEvacuationDetails;
+use crate::external_api::update as external_api_update;
 use crate::internal_api::views::QuiesceState;
 use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
@@ -105,6 +111,20 @@ impl fmt::Display for OperatorStatus {
             OperatorStatus::Unknown(UnknownReason::PlannerFailed { error }) => {
                 write!(f, "Unknown: planner produced error: {error}")
             }
+        }
+    }
+}
+
+impl From<&OperatorStatus> for external_api_update::OperatorStatus {
+    fn from(status: &OperatorStatus) -> Self {
+        match status {
+            OperatorStatus::AtRest => Self::AtRest,
+            OperatorStatus::Busy => Self::Busy,
+            OperatorStatus::WaitingForMupdateResolution => {
+                Self::WaitingForMupdateResolution
+            }
+            OperatorStatus::WaitingForUpdate(_) => Self::WaitingForUpdate,
+            OperatorStatus::Unknown(_) => Self::Unknown,
         }
     }
 }

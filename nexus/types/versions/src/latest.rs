@@ -461,10 +461,12 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::UpdatesPutRepositoryParams;
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
 
-    pub use crate::v2026_05_20_00::update::UpdateStatus;
-
     pub use crate::v2026_10_13_00::update::TufRepo;
     pub use crate::v2026_10_13_00::update::TufRepoUpload;
+
+    pub use crate::v2026_11_09_00::update::OperatorNotes;
+    pub use crate::v2026_11_09_00::update::OperatorStatus;
+    pub use crate::v2026_11_09_00::update::UpdateStatus;
 }
 
 pub mod vpc {

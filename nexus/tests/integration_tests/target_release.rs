@@ -302,6 +302,8 @@ async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
 
             // not relevant to the test
             time_last_step_planned: _,
+            operator_notes: _,
+            planner_error: _,
         } = object_get(client, "/v1/system/update/status").await;
         assert_eq!(target_release.0.unwrap().version, version_1_0_0);
         assert!(!suspended, "should not be suspended after recovery");
