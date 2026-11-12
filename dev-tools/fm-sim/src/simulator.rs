@@ -47,7 +47,7 @@ impl Simulator {
         match verb {
             // TODO(#10209): When we implement history, record query commands
             // on the current state node (the state the query ran against).
-            Verb::Query(query) => query.run(&self.state),
+            Verb::Query(query) => query.run(&self.state).map_err(Error::Sim),
             // TODO(#10209): When we implement history, record each mutation
             // command on the result state node that the mutation produced.
             Verb::Mutate(mutate) => {

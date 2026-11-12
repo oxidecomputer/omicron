@@ -9,10 +9,9 @@ use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use clap::Subcommand;
-use nexus_fm_simulation::{SimState, SimStateBuilder, time};
+use nexus_fm_simulation::{Error, SimState, SimStateBuilder, time};
 
 use super::{Mutate, Query};
-use crate::Error;
 
 /// `time` verbs that read state.
 #[derive(Debug, PartialEq, Subcommand)]

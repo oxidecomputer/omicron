@@ -16,9 +16,7 @@
 use std::fmt;
 
 use clap::Subcommand;
-use nexus_fm_simulation::{SimState, SimStateBuilder};
-
-use crate::Error;
+use nexus_fm_simulation::{Error, SimState, SimStateBuilder};
 
 mod time;
 
