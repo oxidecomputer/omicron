@@ -348,7 +348,7 @@ impl DataStore {
         let Some(latest_config) =
             Self::tq_get_latest_config_with_members_conn(conn, rack_id).await?
         else {
-            return Err(TransactionError::CustomError(Error::invalid_request(
+            return Err(TransactionError::CustomError(Error::conflict(
                 format!(
                     "Missing trust quorum configurations for rack {rack_id}. \
                     Upgrade to trust quorum required."
@@ -364,12 +364,14 @@ impl DataStore {
         // insertion of the new configuration.
         let latest_committed_config = if latest_config.state.is_aborted() {
             let Some(epoch) = latest_config.last_committed_epoch else {
-                return Err(TransactionError::CustomError(
-                    Error::invalid_request(format!(
-                        "No committed trust quorum configuration for \
-                        rack {rack_id}."
-                    )),
-                ));
+                return Err(TransactionError::CustomError(Error::conflict(
+                    format!(
+                        "No committed trust quorum configuration for rack \
+                         {rack_id}: the upgrade from LRTQ at epoch {} was \
+                         aborted. Retry the upgrade from LRTQ.",
+                        latest_config.epoch
+                    ),
+                )));
             };
 
             // Load the configuration for the last commmitted epoch
@@ -380,7 +382,7 @@ impl DataStore {
                 .await?
             else {
                 return Err(TransactionError::CustomError(
-                    Error::invalid_request(format!(
+                    Error::internal_error(&format!(
                         "Missing expected last committed trust quorum \
                         configuration for rack {rack_id}, epoch {epoch}."
                     )),
@@ -636,12 +638,24 @@ impl DataStore {
         )
         .await?;
 
-        bail_unless!(
-            hw_baseboard_ids.len()
-                == usize::from(proposed.members.num_members()),
-            "Trust Quorum proposed configuration missing hw_baseboard_ids \
-            in database. Do all physical sleds exist in this rack?"
-        );
+        let known: BTreeSet<BaseboardId> =
+            hw_baseboard_ids.into_iter().map(BaseboardId::from).collect();
+        let unknown: Vec<&BaseboardId> = proposed
+            .members
+            .iter()
+            .filter(|member| !known.contains(*member))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(Error::invalid_request(format!(
+                "Cannot propose a trust quorum configuration for rack {}: \
+                 the control plane has no record of {}. Check the part and \
+                 serial numbers. A newly inserted sled is recorded once \
+                 inventory collection finds it.",
+                proposed.rack_id,
+                itertools::join(&unknown, ", "),
+            ))
+            .into());
+        }
 
         // Check that if a sled is commissioned with a matching baseboard that
         // it's for this `rack_id`.
@@ -1945,7 +1959,7 @@ mod tests {
             .tq_insert_latest_config(opctx, bad_config)
             .await
             .unwrap_err();
-        println!("{e2}");
+        assert_unknown_baseboards(&e2, rack_id, "bad:value");
 
         // Non-sequential epoch (should be 2)
         let bad_config = ProposedTrustQuorumConfig {
@@ -2020,6 +2034,28 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[track_caller]
+    fn assert_unknown_baseboards(
+        error: &Error,
+        rack_id: RackUuid,
+        unknown: &str,
+    ) {
+        let expected = format!(
+            "Cannot propose a trust quorum configuration for rack {rack_id}: \
+             the control plane has no record of {unknown}. Check the part and \
+             serial numbers. A newly inserted sled is recorded once inventory \
+             collection finds it."
+        );
+        match error {
+            Error::InvalidRequest { message } => {
+                assert_eq!(message.external_message(), expected);
+            }
+            other => {
+                panic!("expected InvalidRequest {expected:?}, got {other:?}")
+            }
+        }
     }
 
     #[track_caller]
@@ -3511,7 +3547,7 @@ mod tests {
         };
 
         match expunge(non_member_sled, non_member_hw.clone()).await {
-            Err(Error::InvalidRequest { message }) => {
+            Err(Error::Conflict { message }) => {
                 assert_eq!(
                     message.external_message(),
                     format!(
@@ -3520,7 +3556,7 @@ mod tests {
                     ),
                 );
             }
-            other => panic!("expected InvalidRequest, got {other:?}"),
+            other => panic!("expected Conflict, got {other:?}"),
         }
         assert_eq!(policy(non_member_sled).await, in_service);
         assert_eq!(
