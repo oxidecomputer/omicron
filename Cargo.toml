@@ -719,7 +719,7 @@ oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f8cad5dec65e6c1edaa91e4d1a98d27208c0c0ad", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "894c1f3b2f19e3071721bd9b90bb91442f707950", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
 once_cell = "1.21.3"
@@ -728,7 +728,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f8cad5dec65e6c1edaa91e4d1a98d27208c0c0ad" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "894c1f3b2f19e3071721bd9b90bb91442f707950" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
