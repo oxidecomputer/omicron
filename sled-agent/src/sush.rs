@@ -38,8 +38,6 @@ use anyhow::{Context, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use dice_verifier::verify_cert_chain as verify_platform_cert_chain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
-use futures::StreamExt as _;
-use futures::stream::FuturesUnordered;
 use gateway_client::Client as MgsClient;
 use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
@@ -65,7 +63,7 @@ use tokio::fs::{OpenOptions, create_dir_all};
 use tokio::io::AsyncWriteExt as _;
 use tokio::spawn;
 use tokio::sync::watch;
-use tokio::task::spawn_blocking;
+use tokio::task::{JoinSet, spawn_blocking};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
@@ -416,43 +414,44 @@ async fn update_cubbies(log: Logger, tx_cubbies: watch::Sender<Cubbies>) {
     loop {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
-                let mgs_clients: Vec<_> = subnets
-                    .into_iter()
-                    .map(|subnet| {
-                        let addr = SocketAddrV6::new(
-                            get_switch_zone_address(subnet),
-                            MGS_PORT,
-                            0,
-                            0,
-                        );
-                        let mgs = MgsClient::new_with_client(
-                            &format!("http://{addr}"),
-                            client.clone(),
-                            log.clone(),
-                        );
-                        (addr, mgs)
-                    })
-                    .collect();
-                let log = &log;
-                let mut polls: FuturesUnordered<_> = mgs_clients
-                    .iter()
-                    .map(|(addr, mgs)| async move {
-                        (addr, poll_cubbies(log, mgs).await)
-                    })
-                    .collect();
+                let mut polls = JoinSet::new();
+                for subnet in subnets {
+                    let log = log.clone();
+                    let addr = SocketAddrV6::new(
+                        get_switch_zone_address(subnet),
+                        MGS_PORT,
+                        0,
+                        0,
+                    );
+                    let mgs = MgsClient::new_with_client(
+                        &format!("http://{addr}"),
+                        client.clone(),
+                        log.clone(),
+                    );
+                    polls.spawn(async move {
+                        (addr, poll_cubbies(&log, &mgs).await)
+                    });
+                }
+
                 let mut errors = BTreeMap::new();
                 let mut updated = false;
-                while let Some((addr, poll)) = polls.next().await {
-                    match poll {
-                        Ok(states) => {
+                while let Some(joined) = polls.join_next().await {
+                    match joined {
+                        Ok((_, Ok(states))) => {
                             tx_cubbies.send_modify(|cubbies| {
                                 merge_cubbies(cubbies, states)
                             });
                             updated = true;
                             break;
                         }
-                        Err(error) => {
+                        Ok((addr, Err(error))) => {
                             errors.insert(addr, error);
+                        }
+                        Err(error) => {
+                            warn!(
+                                log, "MGS probe task failed";
+                                "error" => InlineErrorChain::new(&error),
+                            );
                         }
                     }
                 }
