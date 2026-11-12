@@ -115,6 +115,8 @@ define_enums! {
     ServiceKindEnum => "service_kind",
     SledBpAvailabilityEnum => "sled_bp_availability",
     SledCpuFamilyEnum => "sled_cpu_family",
+    SledExpungePowerOffOutcomeEnum => "sled_expunge_power_off_outcome",
+    SledExpungeRequestStateEnum => "sled_expunge_request_state",
     SledPolicyEnum => "sled_policy",
     SledResourceVmmStateEnum => "sled_resource_vmm_state",
     SledRoleEnum => "sled_role",

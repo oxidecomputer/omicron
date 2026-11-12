@@ -10037,6 +10037,97 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
     PRIMARY KEY (problem_id, revision)
 );
 
+-- TODO-RAINCLAUDE: lifecycle of an RFD 747 sled expunge request.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_expunge_request_state AS ENUM (
+    'waiting_for_trust_quorum',
+    'powering_off',
+    'expunging',
+    'done',
+    'failed'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.sled_expunge_power_off_outcome AS ENUM (
+    -- TODO-RAINCLAUDE: powered_off: an MGS accepted the A2 command for the slot the latest inventory collection put the sled in, after re-checking that slot's full baseboard ID; a sled that has been physically removed has no outcome yet (deferred).
+    'powered_off'
+);
+
+-- TODO-RAINCLAUDE: one row per operator request to power off and expunge a sled (RFD 747).
+CREATE TABLE IF NOT EXISTS omicron.public.sled_expunge_request (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    rack_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    -- TODO-RAINCLAUDE: baseboard identity at request time, denormalized so the re-add check and power-off can match the full BaseboardId without joining the sled row.
+    part_number STRING(63) NOT NULL,
+    serial_number STRING(63) NOT NULL,
+
+    -- TODO-RAINCLAUDE: trust quorum epoch of the removal config this request proposed; each request has its own epoch.
+    tq_epoch INT8 NOT NULL,
+
+    state omicron.public.sled_expunge_request_state NOT NULL,
+    power_off_outcome omicron.public.sled_expunge_power_off_outcome,
+
+    -- TODO-RAINCLAUDE: last_error: retryable needs-attention condition, unfinished requests only; operator-safe text, never raw MGS or SQL errors.
+    last_error TEXT,
+    -- TODO-RAINCLAUDE: failure_reason: terminal explanation, set exactly when failed.
+    failure_reason TEXT,
+    time_completed TIMESTAMPTZ,
+
+    -- TODO-RAINCLAUDE: these CHECKs are per-row only; the datastore's conditional (compare-and-swap) transitions are what keep the state machine acyclic.
+    CONSTRAINT tq_epoch_is_positive CHECK (tq_epoch > 0),
+
+    CONSTRAINT time_completed_iff_finished CHECK (
+        (state IN ('done', 'failed') AND time_completed IS NOT NULL)
+        OR
+        (state NOT IN ('done', 'failed') AND time_completed IS NULL)
+    ),
+
+    CONSTRAINT failure_reason_iff_failed CHECK (
+        (state = 'failed' AND failure_reason IS NOT NULL)
+        OR
+        (state != 'failed' AND failure_reason IS NULL)
+    ),
+
+    -- TODO-RAINCLAUDE: outcome is NULL before power-off and required in expunging and done; failed may keep it, since a request can fail from expunging after the sled was powered off.
+    CONSTRAINT power_off_outcome_matches_state CHECK (
+        (state IN ('waiting_for_trust_quorum', 'powering_off')
+            AND power_off_outcome IS NULL)
+        OR
+        (state IN ('expunging', 'done') AND power_off_outcome IS NOT NULL)
+        OR
+        state = 'failed'
+    ),
+
+    CONSTRAINT last_error_only_if_unfinished CHECK (
+        state IN ('waiting_for_trust_quorum', 'powering_off', 'expunging')
+        OR
+        last_error IS NULL
+    )
+);
+
+-- TODO-RAINCLAUDE: at most one unfinished request per sled; the predicate lists unfinished states positively so Diesel eq_any queries match it, so adding a state means recreating this index and the baseboard one.
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unfinished_sled_expunge_request_by_sled
+    ON omicron.public.sled_expunge_request (sled_id)
+    WHERE state IN ('waiting_for_trust_quorum', 'powering_off', 'expunging');
+
+CREATE INDEX IF NOT EXISTS lookup_sled_expunge_request_by_sled
+    ON omicron.public.sled_expunge_request (sled_id);
+
+-- TODO-RAINCLAUDE: each request proposed its own trust quorum epoch; also maps a config to its request.
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_expunge_request_by_rack_and_epoch
+    ON omicron.public.sled_expunge_request (rack_id, tq_epoch);
+
+-- TODO-RAINCLAUDE: at most one unfinished request per baseboard; serves the re-add check.
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_unfinished_sled_expunge_request_by_baseboard
+    ON omicron.public.sled_expunge_request (part_number, serial_number)
+    WHERE state IN ('waiting_for_trust_quorum', 'powering_off', 'expunging');
+
+-- TODO-RAINCLAUDE: serves the external API's list, which pages by time_created and then id.
+CREATE INDEX IF NOT EXISTS lookup_sled_expunge_request_by_creation
+    ON omicron.public.sled_expunge_request (time_created, id);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -10046,7 +10137,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '317.0.0', NULL)
+    (TRUE, NOW(), NOW(), '318.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
