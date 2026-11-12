@@ -101,6 +101,7 @@ INFO current sled measurements are in an unknown state, sled_id: d81c6a84-79b8-4
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
 planning report:
+status for operators: System is busy
 * noop converting 9/9 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting 8/8 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 8/8 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -423,6 +424,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for update of RoT on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1510,6 +1512,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
 planning report:
+status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1950,6 +1953,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2013,6 +2017,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2085,6 +2090,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for update of RoT on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2168,6 +2174,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for sled to be evacuated in preparation for update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1): marking sled for evacuation
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2327,6 +2334,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for update of SP on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2525,6 +2533,7 @@ INFO ran out of boards for MGS-driven update
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for sled to be returned to service after update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
