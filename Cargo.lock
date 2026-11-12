@@ -16121,7 +16121,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=a5c7570eb88fd01a49125d36ef086c92a68cb08c#a5c7570eb88fd01a49125d36ef086c92a68cb08c"
+source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
 dependencies = [
  "chrono",
  "dropshot 0.18.0",
@@ -16138,7 +16138,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=a5c7570eb88fd01a49125d36ef086c92a68cb08c#a5c7570eb88fd01a49125d36ef086c92a68cb08c"
+source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
 dependencies = [
  "bytes",
  "bytesize",
@@ -16173,7 +16173,7 @@ dependencies = [
 [[package]]
 name = "sush-proxy"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=a5c7570eb88fd01a49125d36ef086c92a68cb08c#a5c7570eb88fd01a49125d36ef086c92a68cb08c"
+source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
 dependencies = [
  "camino",
  "chrono",
@@ -16198,7 +16198,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=a5c7570eb88fd01a49125d36ef086c92a68cb08c#a5c7570eb88fd01a49125d36ef086c92a68cb08c"
+source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
 dependencies = [
  "async-trait",
  "atomicwrites",
