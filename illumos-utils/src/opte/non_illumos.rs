@@ -31,6 +31,9 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
+/// Fake path to an XDE control device path.
+pub const XDE_CTL_DEVICE: &str = "/dev/fake-xde";
+
 // The real OPTE error type comes from `opte_ioctl` and is only defined on
 // illumos; define our own for non-illumos systems (dev / test).
 #[derive(thiserror::Error, Debug)]

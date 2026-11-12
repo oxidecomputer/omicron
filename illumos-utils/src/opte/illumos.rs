@@ -15,6 +15,9 @@ use slog::info;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+/// Path to the XDE control device, used to interact directly with the driver.
+pub const XDE_CTL_DEVICE: &str = OpteHdl::XDE_CTL;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failure interacting with the OPTE ioctl(2) interface: {0}")]
