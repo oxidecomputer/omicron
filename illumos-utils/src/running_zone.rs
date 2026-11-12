@@ -202,7 +202,7 @@ impl RunningZone {
         S: AsRef<std::ffi::OsStr>,
     {
         use std::os::unix::process::CommandExt;
-        if self.inner.has_stopped {
+        if self.inner.has_been_removed {
             return Err(RunCommandError {
                 zone: self.name().to_string(),
                 err: crate::ExecutionError::NotRunning,
