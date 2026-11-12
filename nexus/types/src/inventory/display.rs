@@ -22,7 +22,7 @@ use omicron_uuid_kinds::{
 };
 use sled_agent_types::inventory::{
     InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
-    SvcsEnabledNotOnlineResult, SvcsError,
+    SvcsEnabledNotOnlineResult, SvcsError, WicketSshAuth, WicketSshAuthKind,
 };
 use sled_agent_types::{
     disk::M2Slot,
@@ -1411,6 +1411,7 @@ fn display_sled_config(
         host_phase_2,
         measurements,
         update_disposition,
+        wicket_ssh_auth,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1419,6 +1420,28 @@ fn display_sled_config(
     writeln!(indented, "generation: {}", generation)?;
     writeln!(indented, "remove_mupdate_override: {remove_mupdate_override:?}")?;
     writeln!(indented, "update_disposition: {update_disposition:?}")?;
+
+    {
+        let WicketSshAuth { generation, kind } = wicket_ssh_auth;
+        write!(indented, "wicket SSH auth:")?;
+        match kind {
+            WicketSshAuthKind::Unauthenticated => {
+                write!(indented, " unauthenticated")?;
+            }
+            WicketSshAuthKind::PublicKeys {
+                authorized_keys,
+                allow_support_keys,
+            } => {
+                write!(
+                    indented,
+                    " authenticated ({} SSH keys allowed; support {}allowed)",
+                    authorized_keys.len(),
+                    if *allow_support_keys { "" } else { "not " },
+                )?;
+            }
+        }
+        writeln!(indented, " (generation {generation})")?;
+    }
 
     let display_host_phase_2_desired = |desired| match desired {
         HostPhase2DesiredContents::CurrentContents => {

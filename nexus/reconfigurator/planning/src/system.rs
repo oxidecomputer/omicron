@@ -76,6 +76,7 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_hardware_types::BaseboardId;
@@ -1605,6 +1606,7 @@ impl Sled {
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: iddqd::IdOrdMap::new(),
                 fmd: Ok(FmdInventory::default()),
+                wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
             }
         };
 
@@ -1794,6 +1796,7 @@ impl Sled {
                 .reference_measurements
                 .clone(),
             fmd: Ok(FmdInventory::default()),
+            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
         };
 
         Sled {

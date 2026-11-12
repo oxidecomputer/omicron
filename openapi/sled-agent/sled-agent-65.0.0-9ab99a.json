@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "64.0.0"
+    "version": "65.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6484,6 +6484,9 @@
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
           },
+          "wicket_ssh_auth_status": {
+            "$ref": "#/components/schemas/WicketSshAuthStatus"
+          },
           "zpools": {
             "type": "array",
             "items": {
@@ -6509,6 +6512,7 @@
           "smf_services_enabled_not_online",
           "usable_hardware_threads",
           "usable_physical_ram",
+          "wicket_ssh_auth_status",
           "zpools"
         ]
       },
@@ -7912,6 +7916,9 @@
           "update_disposition": {
             "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
           },
+          "wicket_ssh_auth": {
+            "$ref": "#/components/schemas/WicketSshAuth"
+          },
           "zones": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -7937,6 +7944,7 @@
           "generation",
           "measurements",
           "update_disposition",
+          "wicket_ssh_auth",
           "zones"
         ]
       },
@@ -11204,6 +11212,131 @@
         "required": [
           "rules",
           "vni"
+        ]
+      },
+      "WicketSshAuth": {
+        "description": "Describes the authentication requirements for accessing the `wicket` captive shell over SSH.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/WicketSshAuthGeneration"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WicketSshAuthKind"
+          }
+        },
+        "required": [
+          "generation",
+          "kind"
+        ]
+      },
+      "WicketSshAuthGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::WicketSshAuthGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "WicketSshAuthKind": {
+        "description": "Particular kind of authentication requirement for accessing the `wicket` captive shell over SSH.",
+        "oneOf": [
+          {
+            "description": "`wicket` is publicly accessible to any client.",
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "description": "`wicket` is only accessible to clients supplying one of the specified SSH keys.",
+            "type": "object",
+            "properties": {
+              "allow_support_keys": {
+                "description": "Whether to allow the built-in support keys shipped with the release access to `wicket`.\n\nThis setting only controls the support keys' access to `wicket`; even if this is false, the support keys can still be used for support operations (support access is strictly more powerful than access to `wicket`; we recommend leaving this set to `true`).",
+                "type": "boolean"
+              },
+              "authorized_keys": {
+                "description": "Set of operator-specified keys allowed to access wicket.\n\nThis set may be empty. If it is empty and `allow_support_keys` is `false`, no SSH connections to `wicket` will succeed.\n\nEach item in this set is expected to be a single, valid `authorized_keys` line. Nexus is expected to perform suitable validation on incoming keys before passing them to sled-agent.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "public_keys"
+                ]
+              }
+            },
+            "required": [
+              "allow_support_keys",
+              "authorized_keys",
+              "mode"
+            ]
+          }
+        ]
+      },
+      "WicketSshAuthStatus": {
+        "description": "Status of the application of our configured [`WicketSshAuth`] to our switch zone, if we have one.",
+        "oneOf": [
+          {
+            "description": "We have no switch zone, and therefore have no need to apply SSH settings.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "no_switch_zone"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "We have a switch zone.",
+            "type": "object",
+            "properties": {
+              "effective_auth_gen": {
+                "description": "The current auth generation setting in effect in our switch zone.\n\nThis generation number can be compared against the ledgered generation stored in our [`OmicronSledConfig`] to check for effective application of the latest-known setting.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WicketSshAuthGeneration"
+                  }
+                ]
+              },
+              "last_error": {
+                "nullable": true,
+                "description": "If the most recent attempt to set a new auth generation failed, contains the error.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "switch_zone"
+                ]
+              }
+            },
+            "required": [
+              "effective_auth_gen",
+              "state"
+            ]
+          }
         ]
       },
       "WriteNetworkConfigRequest": {

@@ -700,6 +700,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::WicketSshAuth;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::time::Duration;
@@ -894,6 +895,8 @@ mod tests {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(
+            ),
         }
     }
 
@@ -1099,6 +1102,8 @@ mod tests {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(
+            ),
         };
 
         // The ledger task should reject this config due to a missing artifact.

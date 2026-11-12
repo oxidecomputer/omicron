@@ -120,6 +120,7 @@ use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, info, o};
@@ -1079,6 +1080,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
                     update_disposition: OmicronSledUpdateDisposition::Available,
+                    wicket_ssh_auth:
+                        WicketSshAuth::unauthenticated_initial_generation(),
                 })
                 .await
                 .unwrap_or_else(|err| {

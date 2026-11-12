@@ -623,6 +623,7 @@ LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
     update_disposition: Available
+    wicket SSH auth: unauthenticated (generation 1)
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -826,6 +827,7 @@ LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
     update_disposition: Available
+    wicket SSH auth: unauthenticated (generation 1)
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -1026,6 +1028,7 @@ LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
     update_disposition: Available
+    wicket SSH auth: unauthenticated (generation 1)
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3

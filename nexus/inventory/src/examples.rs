@@ -81,6 +81,8 @@ use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
+use sled_agent_types::inventory::WicketSshAuth;
+use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
@@ -476,6 +478,7 @@ pub fn representative() -> Representative {
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
         update_disposition: OmicronSledUpdateDisposition::Available,
+        wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(),
     };
     let sled16 = OmicronSledConfig {
         generation: SledConfigGeneration::from_untyped_generation(
@@ -488,6 +491,7 @@ pub fn representative() -> Representative {
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
         update_disposition: OmicronSledUpdateDisposition::Available,
+        wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(),
     };
     let sled17 = OmicronSledConfig {
         generation: SledConfigGeneration::from_untyped_generation(
@@ -500,6 +504,7 @@ pub fn representative() -> Representative {
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
         update_disposition: OmicronSledUpdateDisposition::Evacuating,
+        wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(),
     };
 
     // Create iterator producing fixed IDs.
@@ -1376,5 +1381,6 @@ pub fn sled_agent(
         smf_services_enabled_not_online,
         reference_measurements,
         fmd,
+        wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
     }
 }

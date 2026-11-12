@@ -141,6 +141,7 @@ use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -4187,6 +4188,12 @@ impl DataStore {
                                 update_disposition: sled_config
                                     .update_disposition
                                     .into(),
+                                // TODO-correctness We should store the
+                                // wicket SSH auth reported in inventory in
+                                // the DB! For now we return the initial value
+                                // in all inventory reports.
+                                wicket_ssh_auth:
+                                    WicketSshAuth::unauthenticated_initial_generation(),
                             },
                         })
                         .map_err(|e| {

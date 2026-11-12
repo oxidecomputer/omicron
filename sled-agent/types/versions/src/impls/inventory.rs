@@ -34,7 +34,7 @@ use crate::latest::inventory::{
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
     SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
-    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline,
+    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline, WicketSshAuth,
     ZoneArtifactInventory, ZoneKind, ZoneSnatConfig, ZpoolHealth,
 };
 
@@ -869,6 +869,8 @@ impl Default for OmicronSledConfig {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(
+            ),
         }
     }
 }

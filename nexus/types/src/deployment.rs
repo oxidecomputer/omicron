@@ -60,6 +60,7 @@ use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::OmicronPhysicalDiskConfig;
 use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -1912,6 +1913,11 @@ impl BlueprintSledConfig {
             host_phase_2: self.host_phase_2.into(),
             measurements: self.measurements.into(),
             update_disposition: self.update_disposition.into(),
+            // TODO-correctness This should come from Nexus once we add an API
+            // for the operator to control it; for now, fill in the same default
+            // used by RSS.
+            wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(
+            ),
         }
     }
 

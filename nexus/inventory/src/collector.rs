@@ -1077,6 +1077,8 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::WicketSshAuth;
+    use sled_agent_types::inventory::WicketSshAuthKind;
     use slog::o;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
@@ -1097,6 +1099,7 @@ mod test {
             host_phase_2,
             measurements,
             update_disposition,
+            wicket_ssh_auth,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -1105,6 +1108,27 @@ mod test {
             "        remove_mupdate_override: {remove_mupdate_override:?}"
         );
         swriteln!(s, "        update_disposition: {update_disposition:?}");
+        {
+            let WicketSshAuth { generation, kind } = wicket_ssh_auth;
+            swriteln!(s, "        wicket ssh auth generation: {generation:?}");
+            match kind {
+                WicketSshAuthKind::Unauthenticated => {
+                    swriteln!(s, "        wicket ssh auth: unauthenticated");
+                }
+                WicketSshAuthKind::PublicKeys {
+                    authorized_keys,
+                    allow_support_keys,
+                } => {
+                    swriteln!(
+                        s,
+                        "        wicket ssh auth: authenticated \
+                                 ({} SSH keys allowed; support {}allowed)",
+                        authorized_keys.len(),
+                        if *allow_support_keys { "" } else { "not " },
+                    );
+                }
+            }
+        }
         {
             let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
             swriteln!(s, "        host_phase_2.slot_a: {slot_a:?}");
@@ -1439,6 +1463,8 @@ mod test {
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 measurements: BTreeSet::new(),
                 update_disposition: OmicronSledUpdateDisposition::Available,
+                wicket_ssh_auth:
+                    WicketSshAuth::unauthenticated_initial_generation(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

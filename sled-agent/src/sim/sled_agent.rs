@@ -67,7 +67,7 @@ use sled_agent_types::inventory::{
     InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
     InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronSledUpdateDisposition, SingleMeasurementInventory,
-    SledRegistrationInfo, ZpoolHealth,
+    SledRegistrationInfo, WicketSshAuthStatus, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -1409,6 +1409,7 @@ impl SledAgent {
             smf_services_enabled_not_online,
             reference_measurements,
             fmd: Ok(FmdInventory::default()),
+            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
         })
     }
 
