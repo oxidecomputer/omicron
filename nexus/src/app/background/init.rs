@@ -163,6 +163,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::fm::CurrentSitrep;
 
+use nexus_types::internal_api::background::BlueprintPlannerLatest;
 use nexus_types::inventory::Collection;
 use nexus_types::support_bundle::SupportBundleSizeLimit;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -588,6 +589,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            args.blueprint_planner_latest_tx,
             args.debug_dropbox_reconfigurator.clone(),
             nexus_id,
         );
@@ -1431,6 +1433,8 @@ pub struct BackgroundTasksData {
     pub tuf_artifact_replication_rx: mpsc::Receiver<Repository>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
+    /// Channel for exposing the latest results from the blueprint planner
+    pub blueprint_planner_latest_tx: watch::Sender<BlueprintPlannerLatest>,
     /// [`ExternalHttpClient`] for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending

@@ -115,3 +115,5 @@ pub mod v2026_10_13_00;
 pub mod v2026_10_29_00;
 #[path = "unadopted_rack_list/mod.rs"]
 pub mod v2026_11_04_00;
+#[path = "add_operator_notes_to_update_status/mod.rs"]
+pub mod v2026_11_09_00;
