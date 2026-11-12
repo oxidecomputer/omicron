@@ -1517,7 +1517,7 @@ async fn siu_commit_instance_updates(
             }) => {
                 info!(
                     log,
-                    "instance update: intended state changed while \
+                    "instance update: intended state changed before \
                      committing; retrying with the new intended state";
                     "instance_id" => %instance_id,
                     "expected_intent" => %current_intent,

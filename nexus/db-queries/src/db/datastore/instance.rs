@@ -240,8 +240,8 @@ pub struct UpdateToCommit {
     /// `new_intent` were determined. The update is committed only if the
     /// instance's intended state still has this value.
     pub expected_intent: InstanceIntendedState,
-    /// If this is [`Some`], the instance's intended state is set to this
-    /// value.
+    /// If this is [`Some`], the instance's intended state has changed and is
+    /// set to this value.
     pub new_intent: Option<InstanceIntendedState>,
 }
 
