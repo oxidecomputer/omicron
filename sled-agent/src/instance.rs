@@ -2404,8 +2404,8 @@ impl InstanceRunner {
         &mut self,
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
-        use sled_agent_types::instance::InstanceShutdownPolicy::PowerButton;
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
+        use sled_agent_types::instance::InstanceShutdownPolicy::PowerButton;
         let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
@@ -3041,9 +3041,9 @@ impl UngracefulTermGraceTime {
     fn set_stop_timeout(&mut self, method: InstanceShutdownPolicy) {
         let acpi_timeout = match method {
             InstanceShutdownPolicy::HardOff => 0u64,
-            InstanceShutdownPolicy::PowerButton {
-                timeout_secs
-            } => timeout_secs.into(),
+            InstanceShutdownPolicy::PowerButton { timeout_secs } => {
+                timeout_secs.into()
+            }
         };
 
         let duration = Duration::from_secs(acpi_timeout)
@@ -3056,14 +3056,14 @@ impl UngracefulTermGraceTime {
         // *unless* the prior timeout was for an ACPI shutdown and this is
         // a hard-stop request that would terminate sooner.
         if let Some(old_sleep) = &self.stop_timeout {
-            if self.stop_req_method == InstanceShutdownPolicy::HardOff ||
-                method != InstanceShutdownPolicy::HardOff ||
-                new_sleep.deadline() > old_sleep.deadline()
+            if self.stop_req_method == InstanceShutdownPolicy::HardOff
+                || method != InstanceShutdownPolicy::HardOff
+                || new_sleep.deadline() > old_sleep.deadline()
             {
                 return;
             }
         }
-            
+
         self.stop_timeout = Some(new_sleep);
         self.timeout_duration = duration;
         self.stop_req_method = method;
@@ -3072,10 +3072,8 @@ impl UngracefulTermGraceTime {
     fn disarm(&mut self) {
         self.stop_timeout = None;
     }
-    
-    async fn stop_timeout_completed(
-        &mut self,
-    ) -> Duration {
+
+    async fn stop_timeout_completed(&mut self) -> Duration {
         if let Some(timeout) = &mut self.stop_timeout {
             timeout.await;
             self.timeout_duration

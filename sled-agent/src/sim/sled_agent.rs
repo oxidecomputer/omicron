@@ -792,8 +792,8 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
     ) -> Result<VmmPutStateResponse, HttpError> {
-        use sled_agent_types::instance::InstanceShutdownPolicy::*;
         use propolis_client::types::InstanceStateRequested as PropolisStateRequested;
+        use sled_agent_types::instance::InstanceShutdownPolicy::*;
 
         self.vmm_put_state_pauses.hold_request(&self.log, propolis_id).await?;
 

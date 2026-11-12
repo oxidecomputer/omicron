@@ -130,9 +130,9 @@ pub mod instance {
     pub use crate::v59::instance::InstanceEnsureBody;
     pub use crate::v59::instance::InstanceSledLocalConfig;
 
+    pub use crate::v64::instance::InstanceShutdownPolicy;
     pub use crate::v64::instance::VmmPutStateBody;
     pub use crate::v64::instance::VmmStateRequested;
-    pub use crate::v64::instance::InstanceShutdownPolicy;
 }
 
 pub mod inventory {
