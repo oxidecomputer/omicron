@@ -54,7 +54,7 @@ use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::read;
 use std::io;
 use std::iter::once;
@@ -419,24 +419,51 @@ async fn update_cubbies(log: Logger, tx_cubbies: watch::Sender<Cubbies>) {
                 let mgs_clients: Vec<_> = subnets
                     .into_iter()
                     .map(|subnet| {
-                        let ip = get_switch_zone_address(subnet);
-                        MgsClient::new_with_client(
-                            &format!("http://[{ip}]:{MGS_PORT}"),
+                        let addr = SocketAddrV6::new(
+                            get_switch_zone_address(subnet),
+                            MGS_PORT,
+                            0,
+                            0,
+                        );
+                        let mgs = MgsClient::new_with_client(
+                            &format!("http://{addr}"),
                             client.clone(),
                             log.clone(),
-                        )
+                        );
+                        (addr, mgs)
                     })
                     .collect();
+                let log = &log;
                 let mut polls: FuturesUnordered<_> = mgs_clients
                     .iter()
-                    .map(|mgs| poll_cubbies(&log, mgs))
+                    .map(|(addr, mgs)| async move {
+                        (addr, poll_cubbies(log, mgs).await)
+                    })
                     .collect();
-                while let Some(poll) = polls.next().await {
-                    if let Some(states) = poll {
-                        tx_cubbies.send_modify(|cubbies| {
-                            merge_cubbies(cubbies, states)
-                        });
-                        break;
+                let mut errors = BTreeMap::new();
+                let mut updated = false;
+                while let Some((addr, poll)) = polls.next().await {
+                    match poll {
+                        Ok(states) => {
+                            tx_cubbies.send_modify(|cubbies| {
+                                merge_cubbies(cubbies, states)
+                            });
+                            updated = true;
+                            break;
+                        }
+                        Err(error) => {
+                            errors.insert(addr, error);
+                        }
+                    }
+                }
+                if !updated {
+                    warn!(log, "no MGS answered, cubby map unchanged");
+                    for (addr, error) in &errors {
+                        warn!(
+                            log, "MGS probe failed";
+                            "addr" => %addr,
+                            "error" => InlineErrorChain::new(error),
+                        );
                     }
                 }
             }

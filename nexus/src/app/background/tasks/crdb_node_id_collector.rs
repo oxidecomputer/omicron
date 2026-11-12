@@ -246,6 +246,7 @@ mod tests {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::ReflectsCollection;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_test_utils::dev;
     use std::collections::BTreeMap;
@@ -286,6 +287,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &bp0,
+            ReflectsCollection::Indeterminate,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )

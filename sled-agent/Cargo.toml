@@ -29,7 +29,7 @@ chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
 derive_more.workspace = true
-dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
+dice-verifier.workspace = true
 display-error-chain.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
@@ -66,6 +66,7 @@ omicron-ddm-admin-client.workspace = true
 omicron-sush-proxy.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-rot = { workspace = true, features = ["ipcc", "mock"] }
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
@@ -148,6 +149,7 @@ opte-ioctl.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+attest-mock.workspace = true
 expectorate.workspace = true
 guppy.workspace = true
 hex-literal.workspace = true
@@ -162,6 +164,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+sprockets-tls-test-utils.workspace = true
 test-strategy.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true

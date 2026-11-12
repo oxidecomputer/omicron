@@ -1365,3 +1365,13 @@ omicron-dev: internal DNS:          [::1]:63673
 ```
 
 This is a handy summary, but it only gets updated when inventory is collected.  This is more cumbersome than `faux-mgs` when you only need to get one piece of information and need it to be up-to-date.
+
+== Sled evacuation during update
+
+To enable evacuating instances from sleds during an update (more on this in https://rfd.shared.oxide.computer/rfd/0739[RFD 739]), first, make sure your system is running a build that contains at least https://github.com/oxidecomputer/omicron/commit/2ba9f0a9915effdcd5abc65a2264abafa56a5b69[commit 2ba9f0a]. *This part is important:* enabling this feature on a build that does not contain this commit will stop all instances and never restart them.
+
+Then, use omdb to change the update reboot policy: `omdb --destructive nexus reconfigurator-config set --sled-update-reboot-policy evacuate`.
+
+Start an update and watch your instances get evacuated!
+
+To disable it, simply set the policy back with `omdb --destructive nexus reconfigurator-config set --sled-update-reboot-policy immediate-no-evacuation`. The policy change takes effect the next time the planner runs. Once that happens, all remaining instances on sleds that have not been marked for evacuation yet will continue to run until their sled reboots.

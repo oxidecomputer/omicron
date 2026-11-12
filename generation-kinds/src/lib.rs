@@ -43,6 +43,7 @@ impl_typed_generation_kinds! {
         InstanceState = {},
         InstanceUpdater = {},
         Nexus = {},
+        Problem = {},
         SagaAdopt = {},
         SagaReassignment = {},
         SitrepAlert = {},
