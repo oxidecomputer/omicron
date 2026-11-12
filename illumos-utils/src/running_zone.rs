@@ -52,7 +52,7 @@ pub struct RunCommandError {
 }
 
 /// Errors returned from [`RunningZone::boot`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum BootError {
     #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
@@ -277,35 +277,67 @@ impl RunningZone {
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
-    pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
+    ///
+    /// If booting the zone fails, this function attempts to remove the zone
+    /// corresponding to the `InstalledZone` immediately.
+    pub async fn boot(mut zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
         info!(zone.log, "Booting {} zone", zone.name);
 
-        zone.zones_api.boot(&zone.name).await?;
+        let id = async {
+            zone.zones_api.boot(&zone.name).await?;
 
-        // Wait until the zone reaches the 'single-user' SMF milestone.
-        // At this point, we know that the dependent
-        //  - svc:/milestone/network
-        //  - svc:/system/manifest-import
-        // services are up, so future requests to create network addresses
-        // or manipulate services will work.
-        let fmri = "svc:/milestone/single-user:default";
-        zone.zones_api
-            .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
-            .await
-            .map_err(|_| BootError::Timeout {
-                service: fmri.to_string(),
-                zone: zone.name.to_string(),
-            })?;
+            // Wait until the zone reaches the 'single-user' SMF milestone.
+            // At this point, we know that the dependent
+            //  - svc:/milestone/network
+            //  - svc:/system/manifest-import
+            // services are up, so future requests to create network addresses
+            // or manipulate services will work.
+            let fmri = "svc:/milestone/single-user:default";
+            zone.zones_api
+                .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
+                .await
+                .map_err(|_| BootError::Timeout {
+                    service: fmri.to_string(),
+                    zone: zone.name.to_string(),
+                })?;
 
-        let id =
-            zone.zones_api.id(&zone.name).await?.ok_or_else(|| {
-                BootError::NoZoneId { zone: zone.name.clone() }
-            })?;
-
-        let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        Ok(running_zone)
+            zone.zones_api
+                .id(&zone.name)
+                .await?
+                .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })
+        }
+        .await;
+        match id {
+            // We successfully booted the zone, so return the `RunningZone`.
+            Ok(id) => {
+                let running_zone = RunningZone { id: Some(id), inner: zone };
+                Ok(running_zone)
+            }
+            // We failed to boot the zone. Halt and remove it now if possible,
+            // and then return the error. Attempting to remove a failed zone
+            // synchronously here reduces the risk that a caller will retry
+            // creating and booting a zone with the same name *before* the task
+            // spawned to destroy the zone in `InstalledZone`'s `Drop` impl
+            // runs.
+            Err(boot_err) => {
+                if let Err(remove_err) = zone.halt_and_remove().await {
+                    warn!(
+                        zone.log,
+                        "Failed to uninstall zone after booting it failed";
+                        "boot_error" => &boot_err,
+                        "error" => %remove_err,
+                    );
+                } else {
+                    info!(
+                        zone.log,
+                        "Uninstalled zone after booting it failed";
+                        "boot_error" => &boot_err,
+                    );
+                }
+                Err(boot_err)
+            }
+        }
     }
 
     /// Create a fake running zone for use in tests.
@@ -436,19 +468,7 @@ impl RunningZone {
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
         self.id = None;
-        if self.inner.has_been_removed {
-            return Ok(());
-        }
-
-        let log = self.inner.log.clone();
-        let name = self.name().to_string();
-        self.inner
-            .zones_api
-            .halt_and_remove_logged(&log, &name)
-            .await
-            .map_err(|err| err.to_string())?;
-        self.inner.has_been_removed = true;
-        Ok(())
+        self.inner.halt_and_remove().await.map_err(|e| e.to_string())
     }
 
     /// Return a reference to the links for this zone.
@@ -681,6 +701,19 @@ impl InstalledZone {
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
         &self.links
+    }
+
+    async fn halt_and_remove(&mut self) -> Result<(), crate::zone::AdmError> {
+        if self.has_been_removed {
+            return Ok(());
+        }
+
+        self.zones_api.halt_and_remove_logged(&self.log, &self.name()).await?;
+
+        // If we have successfully removed the zone, set the flag so that the
+        // `Drop` impl does not attempt to do it again.
+        self.has_been_removed = true;
+        Ok(())
     }
 }
 
