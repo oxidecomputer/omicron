@@ -55,6 +55,7 @@ mod scim;
 mod silo_users;
 mod silos;
 mod sled_bp_availability;
+mod sled_expunge_requests;
 mod sleds;
 mod snapshots;
 mod ssh_keys;

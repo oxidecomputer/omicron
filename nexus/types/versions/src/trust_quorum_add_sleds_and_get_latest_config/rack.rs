@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 /// A unique, monotonically increasing number representing the set of active
 /// sleds in a rack at a given point in time.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct RackMembershipVersion(pub u64);
 
 #[derive(
