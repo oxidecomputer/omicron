@@ -197,6 +197,7 @@ mod db_metadata;
 mod ereport;
 mod saga;
 mod sitrep;
+mod sled_expunge_requests;
 mod target_release;
 mod user_data_export;
 mod whatis;
@@ -417,6 +418,8 @@ enum DbCommands {
     Sleds(SledsArgs),
     /// Show instances grouped by the sled they are running on
     SledInstances(SledInstancesArgs),
+    #[command(about = "Print information about sled expunge requests")]
+    SledExpungeRequests(sled_expunge_requests::SledExpungeRequestsArgs),
     /// Print the current target release and the update date
     TargetRelease(target_release::TargetReleaseArgs),
     /// Print information about customer instances.
@@ -1469,6 +1472,15 @@ impl DbArgs {
                         cmd_db_sled_instances(
                             &opctx,
                             &datastore,
+                            args,
+                        )
+                        .await
+                    }
+                    DbCommands::SledExpungeRequests(args) => {
+                        sled_expunge_requests::cmd_db_sled_expunge_requests(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
                             args,
                         )
                         .await

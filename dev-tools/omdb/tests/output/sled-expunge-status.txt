@@ -1,0 +1,98 @@
+    MGS [fd00:1122:3344:102::2]:12225 rack ID unknown: this MGS' rack ID has not been set
+    rack 6174c6ce-9bb1-4ce8-afc3-97fc1e6aa450 ignition snapshot fetched via [fd00:1122:3344:102::2]:12225
+        failed via [fd00:1122:3344:101::2]:12225: Communication Error: connection refused
+    rack 7a1c0000-0000-4000-8000-000000000002 ignition snapshot started but did not finish (the requests waiting on it timed out)
+    unfinished requests: 16
+    request 00000000-0000-0000-0000-00005ab00000
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              last_error unchanged
+        last_error:           the removal has stayed preparing
+    request 00000000-0000-0000-0000-00005ab00001
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              failed
+        failure_reason:       the removal was aborted
+    request 00000000-0000-0000-0000-00005ab00002
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              changed concurrently, left for the next activation
+        current_state:        powering_off
+    request 00000000-0000-0000-0000-00005ab00003
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          powered off cubby 3 via [fd00:1122:3344:102::2]:12225
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00004
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          not powered off in cubby 3
+            failed via [fd00:1122:3344:101::2]:12225: SP unreachable but ignition shows the cubby powered; nothing sent: Error Response: status: 503 Service Unavailable
+            failed via [fd00:1122:3344:102::2]:12225: ignition power-off failed: Error Response: status: 503 Service Unavailable
+        outcome:              set last_error
+        last_error:           the sled could not be powered off
+    request 00000000-0000-0000-0000-00005ab00005
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          cubby 3 holds another board (913-0000019:BRM42220004) per [fd00:1122:3344:101::2]:12225; nothing sent
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00006
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          already in A2 in cubby 4 per [fd00:1122:3344:101::2]:12225
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00007
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          SP in cubby 5 did not answer; ignition via [fd00:1122:3344:102::2]:12225 reports the cubby unpowered
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00008
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          gone at creation and still gone in collection c011ec71-0000-4000-8000-000000000001
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00009
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          gone at creation; latest collection started 2026-11-13T09:59:00.000Z (before the removal committed at 2026-11-13T10:00:00.000Z)
+        outcome:              waiting for a newer inventory collection
+    request 00000000-0000-0000-0000-00005ab0000a
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          gone at creation; collection c011ec71-0000-4000-8000-000000000001 has no SP records for the rack
+        outcome:              waiting for a newer inventory collection
+    request 00000000-0000-0000-0000-00005ab0000b
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          gone at creation; collection c011ec71-0000-4000-8000-000000000001 has its sled agent but not its SP
+        outcome:              set last_error
+        last_error:           no SP in inventory
+    request 00000000-0000-0000-0000-00005ab0000c
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        state after:          powering_off
+        power check:          no MGS for the rack
+        outcome:              set last_error
+        last_error:           no management gateway
+    request 00000000-0000-0000-0000-00005ab0000d
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          in another rack in inventory (6174c6ce-9bb1-4ce8-afc3-97fc1e6aa450)
+        outcome:              set last_error
+        last_error:           in another rack
+    request 00000000-0000-0000-0000-00005ab0000e
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          in switch-attached cubby 14
+        outcome:              set last_error
+        last_error:           the sled is a scrimlet
+    request 00000000-0000-0000-0000-00005ab0000f
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                expunging
+        outcome:              error
+        error:                completing the request: Internal Error: the sled's state refuses the expunge

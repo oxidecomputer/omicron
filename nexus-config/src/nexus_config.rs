@@ -497,6 +497,8 @@ pub struct BackgroundTaskConfig {
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
     /// configuration for trust quorum manager task
     pub trust_quorum: TrustQuorumConfig,
+    // TODO-RAINCLAUDE: configuration for the sled_expunge task (RFD 747).
+    pub sled_expunge: SledExpungeConfig,
     /// configuration for the attached subnet manager
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
     /// configuration for console session cleanup task
@@ -1171,6 +1173,14 @@ pub struct TrustQuorumConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SledExpungeConfig {
+    // TODO-RAINCLAUDE: period (in seconds) for periodic activations of the task that drives sled expunge requests.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1461,6 +1471,7 @@ mod test {
             fm.analysis_period_secs = 52
             fm.config_load_period_secs = 53
             trust_quorum.period_secs = 60
+            sled_expunge.period_secs = 60
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
@@ -1750,6 +1761,9 @@ mod test {
                         trust_quorum: TrustQuorumConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        sled_expunge: SledExpungeConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                         attached_subnet_manager: AttachedSubnetManagerConfig {
                             period_secs: Duration::from_secs(60),
                         },
@@ -1884,6 +1898,7 @@ mod test {
             fm.config_load_period_secs = 50
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
+            sled_expunge.period_secs = 60
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000

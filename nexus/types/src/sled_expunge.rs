@@ -15,9 +15,12 @@ use crate::trust_quorum::TrustQuorumConfigState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
+use serde::Deserialize;
+use serde::Serialize;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use std::fmt;
 use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::membership::TrustQuorumMembersError;
 
@@ -283,6 +286,47 @@ pub fn sled_expunge_removal_refusal(
             InlineErrorChain::new(&error),
         )),
     }
+}
+
+// TODO-RAINCLAUDE: how one MGS failed to settle the recorded cubby; the caller moves on to the next MGS, and failing that, a later activation retries. IdentityUnknown: the SP answered with an empty BaseboardId, so nothing was sent. SpUnreachableCubbyPowered: the SP did not answer this MGS but the activation's ignition snapshot shows the cubby powered, so nothing was sent. SpUnreachableCubbyUnpowered: the SP did not answer this MGS and the snapshot shows the cubby absent or unpowered, but the cubby is not settled (see conclude_unsettled). IgnitionStateUnknown: the SP did not answer and the ignition snapshot was unavailable or had no entry for the cubby, so nothing was sent. IgnitionPowerOffFailed: the ignition power-off failed and may have landed (a sidecar refusal looks like a communication failure, the reply can be lost after the sidecar acted, and after a client-side timeout MGS can still deliver the request).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MgsPowerOffFailure {
+    IdentityUnknown,
+    SpUnreachableCubbyPowered,
+    SpUnreachableCubbyUnpowered,
+    IgnitionStateUnknown,
+    IgnitionPowerOffFailed,
+}
+
+impl fmt::Display for MgsPowerOffFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IdentityUnknown => f.write_str(
+                "SP reported an empty baseboard identity; nothing sent",
+            ),
+            Self::SpUnreachableCubbyPowered => f.write_str(
+                "SP unreachable but ignition shows the cubby powered; \
+                 nothing sent",
+            ),
+            Self::SpUnreachableCubbyUnpowered => f.write_str(
+                "SP unreachable and ignition shows the cubby absent or \
+                 unpowered, but another MGS disagreed; nothing sent",
+            ),
+            Self::IgnitionStateUnknown => f.write_str(
+                "SP unreachable and the cubby's ignition state is unknown; \
+                 nothing sent",
+            ),
+            Self::IgnitionPowerOffFailed => {
+                f.write_str("ignition power-off failed")
+            }
+        }
+    }
+}
+
+// TODO-RAINCLAUDE: an SP with unprogrammed VPD reports an empty part or serial number, which says nothing about which board it is, so it counts as an unknown identity, never as a different board.
+pub fn is_empty_baseboard_id(baseboard_id: &BaseboardId) -> bool {
+    baseboard_id.part_number.is_empty() || baseboard_id.serial_number.is_empty()
 }
 
 #[cfg(test)]

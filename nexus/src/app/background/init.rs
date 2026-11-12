@@ -137,6 +137,7 @@ use super::tasks::region_snapshot_replacement_step::*;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::session_cleanup;
+use super::tasks::sled_expunge;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::trust_quorum;
@@ -285,6 +286,7 @@ impl BackgroundTasksInitializer {
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
             task_trust_quorum_manager: Activator::new(),
+            task_sled_expunge: Activator::new(),
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
             task_populate_switch_ports: Activator::new(),
@@ -383,6 +385,7 @@ impl BackgroundTasksInitializer {
             task_probe_distributor,
             task_multicast_reconciler,
             task_trust_quorum_manager,
+            task_sled_expunge,
             task_attached_subnet_manager,
             task_session_cleanup,
             task_audit_log_timeout_incomplete,
@@ -1280,10 +1283,31 @@ impl BackgroundTasksInitializer {
             period: config.trust_quorum.period_secs,
             task_impl: Box::new(trust_quorum::TrustQuorumManager::new(
                 datastore.clone(),
+                task_sled_expunge.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_trust_quorum_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "sled_expunge",
+            description: "drives operator-requested sled expunges (RFD 747) \
+                 through the trust quorum, power-off, and expunge steps",
+            period: config.sled_expunge.period_secs,
+            task_impl: Box::new(sled_expunge::SledExpunge::new(
+                datastore.clone(),
+                resolver.clone(),
+                inventory_load_watcher.clone(),
+                task_inventory_collection.clone(),
+                sled_expunge::SledExpungeActivators {
+                    instance_watcher: task_instance_watcher.clone(),
+                    blueprint_planner: task_blueprint_planner.clone(),
+                },
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
+            activator: task_sled_expunge,
         });
 
         driver.register(TaskDefinition {

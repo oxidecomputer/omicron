@@ -32,6 +32,7 @@ use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
+use iddqd::IdOrdMap;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
 use nexus_db_lookup::LookupPath;
@@ -90,6 +91,15 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
+use nexus_types::internal_api::background::SledExpungeCollectionWait;
+use nexus_types::internal_api::background::SledExpungeCubbyIgnition;
+use nexus_types::internal_api::background::SledExpungeIgnitionSnapshot;
+use nexus_types::internal_api::background::SledExpungeMgsDiscovery;
+use nexus_types::internal_api::background::SledExpungeMgsPowerOffFailure;
+use nexus_types::internal_api::background::SledExpungePowerCheck;
+use nexus_types::internal_api::background::SledExpungePowerOffWait;
+use nexus_types::internal_api::background::SledExpungeRequestOutcome;
+use nexus_types::internal_api::background::SledExpungeStatus;
 use nexus_types::internal_api::background::SledSubnetDetails;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -1401,6 +1411,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "session_cleanup" => {
             print_task_session_cleanup(details);
+        }
+        "sled_expunge" => {
+            print_task_sled_expunge(details);
         }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
@@ -3134,6 +3147,329 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
             }
         }
     };
+}
+
+fn print_task_sled_expunge(details: &serde_json::Value) {
+    match serde_json::from_value::<SledExpungeStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            print!("{}", SledExpungeStatusDisplay(&status));
+        }
+    }
+}
+
+struct SledExpungeStatusDisplay<'a>(&'a SledExpungeStatus);
+
+fn power_off_wait_summary(
+    wait: &SledExpungePowerOffWait,
+) -> (String, Option<&IdOrdMap<SledExpungeMgsPowerOffFailure>>) {
+    match wait {
+        SledExpungePowerOffWait::NoMgs => {
+            ("no MGS for the rack".to_string(), None)
+        }
+        SledExpungePowerOffWait::NotPoweredOff { slot, failed_attempts } => {
+            (format!("not powered off in cubby {slot}"), Some(failed_attempts))
+        }
+        SledExpungePowerOffWait::SledAgentWithoutSp { collection_id } => (
+            format!(
+                "gone at creation; collection {collection_id} has its sled \
+                 agent but not its SP"
+            ),
+            None,
+        ),
+        SledExpungePowerOffWait::NotASled { sp_type } => {
+            (format!("inventory reports a {sp_type:?} SP, not a sled"), None)
+        }
+        SledExpungePowerOffWait::InAnotherRack { rack_id } => {
+            (format!("in another rack in inventory ({rack_id})"), None)
+        }
+        SledExpungePowerOffWait::SwitchAttachedCubby { slot } => {
+            (format!("in switch-attached cubby {slot}"), None)
+        }
+    }
+}
+
+fn collection_wait_summary(wait: &SledExpungeCollectionWait) -> String {
+    match wait {
+        SledExpungeCollectionWait::NoInventory => {
+            "gone at creation; waiting for an inventory collection to load"
+                .to_string()
+        }
+        SledExpungeCollectionWait::NoCollectionSinceRemoval {
+            removal_committed_at,
+            collection_started_at,
+        } => format!(
+            "gone at creation; latest collection started {} (before the \
+             removal committed at {})",
+            collection_started_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+            removal_committed_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+        ),
+        SledExpungeCollectionWait::NoRackSpData { collection_id } => format!(
+            "gone at creation; collection {collection_id} has no SP records \
+             for the rack"
+        ),
+    }
+}
+
+fn cubby_ignition_label(ignition: &SledExpungeCubbyIgnition) -> &'static str {
+    match ignition {
+        SledExpungeCubbyIgnition::Absent => "absent",
+        SledExpungeCubbyIgnition::Unpowered => "unpowered",
+    }
+}
+
+impl std::fmt::Display for SledExpungeStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let requests = match self.0 {
+            SledExpungeStatus::ListError { error } => {
+                writeln!(f, "    error listing unfinished requests:")?;
+                writeln!(f, "      {error}")?;
+                return Ok(());
+            }
+            SledExpungeStatus::Listed {
+                requests,
+                mgs_discovery,
+                ignition_snapshots,
+            } => {
+                match mgs_discovery {
+                    SledExpungeMgsDiscovery::NotNeeded => {}
+                    SledExpungeMgsDiscovery::Unfinished => {
+                        writeln!(
+                            f,
+                            "    MGS discovery started but did not finish \
+                             (the requests waiting on it timed out)"
+                        )?;
+                    }
+                    SledExpungeMgsDiscovery::Failed { error } => {
+                        writeln!(f, "    error discovering MGS:")?;
+                        writeln!(f, "      {error}")?;
+                    }
+                    SledExpungeMgsDiscovery::Discovered { rack_id_unknown } => {
+                        for mgs in rack_id_unknown {
+                            writeln!(
+                                f,
+                                "    MGS {} rack ID unknown: {}",
+                                mgs.mgs, mgs.error,
+                            )?;
+                        }
+                    }
+                }
+                for rack in ignition_snapshots {
+                    match &rack.snapshot {
+                        SledExpungeIgnitionSnapshot::Unfinished => {
+                            writeln!(
+                                f,
+                                "    rack {} ignition snapshot started but did \
+                                 not finish (the requests waiting on it timed \
+                                 out)",
+                                rack.rack_id,
+                            )?;
+                        }
+                        SledExpungeIgnitionSnapshot::Fetched {
+                            mgs,
+                            failed_attempts,
+                        } => {
+                            writeln!(
+                                f,
+                                "    rack {} ignition snapshot fetched via {mgs}",
+                                rack.rack_id,
+                            )?;
+                            for attempt in failed_attempts {
+                                writeln!(
+                                    f,
+                                    "        failed via {}: {}",
+                                    attempt.mgs, attempt.error,
+                                )?;
+                            }
+                        }
+                        SledExpungeIgnitionSnapshot::Failed {
+                            failed_attempts,
+                        } => {
+                            writeln!(
+                                f,
+                                "    rack {} ignition snapshot unavailable:",
+                                rack.rack_id,
+                            )?;
+                            for attempt in failed_attempts {
+                                writeln!(
+                                    f,
+                                    "        failed via {}: {}",
+                                    attempt.mgs, attempt.error,
+                                )?;
+                            }
+                        }
+                    }
+                }
+                requests
+            }
+        };
+        writeln!(f, "    unfinished requests: {}", requests.len())?;
+
+        const SLED: &str = "sled:";
+        const STATE: &str = "state:";
+        const STATE_AFTER: &str = "state after:";
+        const OUTCOME: &str = "outcome:";
+        const LAST_ERROR: &str = "last_error:";
+        const FAILURE_REASON: &str = "failure_reason:";
+        const CURRENT_STATE: &str = "current_state:";
+        const ERROR: &str = "error:";
+        const PREVIOUS_POLICY: &str = "previous sled policy:";
+        const POWER_CHECK: &str = "power check:";
+        const WIDTH: usize = const_max_len(&[
+            SLED,
+            STATE,
+            STATE_AFTER,
+            OUTCOME,
+            LAST_ERROR,
+            FAILURE_REASON,
+            CURRENT_STATE,
+            ERROR,
+            PREVIOUS_POLICY,
+            POWER_CHECK,
+        ]) + 1;
+
+        for request in requests {
+            writeln!(f, "    request {}", request.request_id)?;
+            writeln!(f, "        {SLED:<WIDTH$}{}", request.sled_id)?;
+            writeln!(f, "        {STATE:<WIDTH$}{}", request.state)?;
+            if let Some(state_after) = &request.state_after {
+                writeln!(f, "        {STATE_AFTER:<WIDTH$}{state_after}")?;
+            }
+            if let Some(check) = &request.power_check {
+                let (resolution, failed_attempts) = match check {
+                    SledExpungePowerCheck::PoweredOff { slot, mgs } => {
+                        (format!("powered off cubby {slot} via {mgs}"), None)
+                    }
+                    SledExpungePowerCheck::AlreadyOff { slot, mgs } => (
+                        format!("already in A2 in cubby {slot} per {mgs}"),
+                        None,
+                    ),
+                    SledExpungePowerCheck::OtherBoardPresent {
+                        slot,
+                        mgs,
+                        found,
+                    } => (
+                        format!(
+                            "cubby {slot} holds another board ({found}) per \
+                             {mgs}; nothing sent"
+                        ),
+                        None,
+                    ),
+                    SledExpungePowerCheck::NotPresent {
+                        slot,
+                        mgs,
+                        ignition,
+                    } => (
+                        format!(
+                            "SP in cubby {slot} did not answer; ignition via \
+                             {mgs} reports the cubby {}",
+                            cubby_ignition_label(ignition),
+                        ),
+                        None,
+                    ),
+                    SledExpungePowerCheck::AbsentAtCreation {
+                        collection_id,
+                    } => (
+                        format!(
+                            "gone at creation and still gone in collection \
+                             {collection_id}"
+                        ),
+                        None,
+                    ),
+                    SledExpungePowerCheck::WaitingForCollection { wait } => {
+                        (collection_wait_summary(wait), None)
+                    }
+                    SledExpungePowerCheck::Waiting { wait } => {
+                        power_off_wait_summary(wait)
+                    }
+                };
+                writeln!(f, "        {POWER_CHECK:<WIDTH$}{resolution}")?;
+                for attempt in failed_attempts.into_iter().flatten() {
+                    writeln!(
+                        f,
+                        "            failed via {}: {}: {}",
+                        attempt.mgs, attempt.failure, attempt.error,
+                    )?;
+                }
+            }
+            match &request.outcome {
+                SledExpungeRequestOutcome::RemovalPreparing => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}waiting for the removal to \
+                         finish preparing"
+                    )?;
+                }
+                SledExpungeRequestOutcome::LastErrorSet { last_error } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}set last_error")?;
+                    writeln!(f, "        {LAST_ERROR:<WIDTH$}{last_error}")?;
+                }
+                SledExpungeRequestOutcome::LastErrorUnchanged {
+                    last_error,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}last_error unchanged"
+                    )?;
+                    writeln!(f, "        {LAST_ERROR:<WIDTH$}{last_error}")?;
+                }
+                SledExpungeRequestOutcome::Failed { failure_reason } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}failed")?;
+                    writeln!(
+                        f,
+                        "        {FAILURE_REASON:<WIDTH$}{failure_reason}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::NotInExpectedState {
+                    current_state,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}changed concurrently, left \
+                         for the next activation"
+                    )?;
+                    writeln!(
+                        f,
+                        "        {CURRENT_STATE:<WIDTH$}{current_state}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::Completed {
+                    previous_sled_policy,
+                } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}expunged the sled; done"
+                    )?;
+                    writeln!(
+                        f,
+                        "        {PREVIOUS_POLICY:<WIDTH$}{previous_sled_policy}"
+                    )?;
+                }
+                SledExpungeRequestOutcome::WaitingForCollection => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}waiting for a newer \
+                         inventory collection"
+                    )?;
+                }
+                SledExpungeRequestOutcome::TimedOut { step } => {
+                    writeln!(
+                        f,
+                        "        {OUTCOME:<WIDTH$}timed out while {step}; \
+                         retried next activation"
+                    )?;
+                }
+                SledExpungeRequestOutcome::Error { error } => {
+                    writeln!(f, "        {OUTCOME:<WIDTH$}error")?;
+                    writeln!(f, "        {ERROR:<WIDTH$}{error}")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
@@ -6241,13 +6577,23 @@ async fn cmd_nexus_support_bundles_inspect(
 mod tests {
     use super::*;
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
+    use nexus_types::external_api::sled::SledPolicy;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::internal_api::background::SledExpungeMgsIgnitionFailure;
+    use nexus_types::internal_api::background::SledExpungeMgsRackIdUnknown;
+    use nexus_types::internal_api::background::SledExpungeRackIgnitionSnapshot;
+    use nexus_types::internal_api::background::SledExpungeRequestStatus;
+    use nexus_types::internal_api::background::SledExpungeTaskRequestState;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use nexus_types::sled_expunge::MgsPowerOffFailure;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledExpungeRequestUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::net::SocketAddrV6;
 
     #[test]
     fn test_ereporter_status_totals_display() {
@@ -6346,6 +6692,247 @@ mod tests {
                 failed: 3,
                 errors: 2,
             },
+        );
+    }
+
+    #[test]
+    fn test_sled_expunge_status_display() {
+        let sled = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
+        let mgs0: SocketAddrV6 =
+            "[fd00:1122:3344:101::2]:12225".parse().expect("parsed address");
+        let mgs1: SocketAddrV6 =
+            "[fd00:1122:3344:102::2]:12225".parse().expect("parsed address");
+        let failure =
+            |mgs, failure, error: &str| SledExpungeMgsPowerOffFailure {
+                mgs,
+                failure,
+                error: error.to_string(),
+            };
+        let waiting_for = |wait| SledExpungePowerCheck::Waiting { wait };
+        let status = |state, outcome| SledExpungeRequestStatus {
+            request_id: SledExpungeRequestUuid::nil(),
+            sled_id: sled,
+            state,
+            state_after: None,
+            outcome,
+            power_check: None,
+        };
+        let collection_id =
+            CollectionUuid::from_u128(0xc011_ec71_0000_4000_8000_000000000001);
+        let waiting = SledExpungeTaskRequestState::WaitingForTrustQuorum;
+        let powering_off = SledExpungeTaskRequestState::PoweringOff;
+        let expunging = SledExpungeTaskRequestState::Expunging;
+        let completed = |previous_sled_policy| {
+            SledExpungeRequestOutcome::Completed { previous_sled_policy }
+        };
+        let non_provisionable = SledPolicy::InService {
+            provision_policy: SledProvisionPolicy::NonProvisionable,
+        };
+        let last_error_set =
+            |last_error: &str| SledExpungeRequestOutcome::LastErrorSet {
+                last_error: last_error.to_string(),
+            };
+        let entries = [
+            status(
+                waiting,
+                SledExpungeRequestOutcome::LastErrorUnchanged {
+                    last_error: "the removal has stayed preparing".to_string(),
+                },
+            ),
+            status(
+                waiting,
+                SledExpungeRequestOutcome::Failed {
+                    failure_reason: "the removal was aborted".to_string(),
+                },
+            ),
+            status(
+                waiting,
+                SledExpungeRequestOutcome::NotInExpectedState {
+                    current_state: SledExpungeTaskRequestState::PoweringOff,
+                },
+            ),
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::PoweredOff {
+                    slot: 3,
+                    mgs: mgs1,
+                }),
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::NotPoweredOff {
+                        slot: 3,
+                        failed_attempts: IdOrdMap::from_iter_unique([
+                            failure(
+                                mgs0,
+                                MgsPowerOffFailure::SpUnreachableCubbyPowered,
+                                "Error Response: status: 503 Service \
+                                 Unavailable",
+                            ),
+                            failure(
+                                mgs1,
+                                MgsPowerOffFailure::IgnitionPowerOffFailed,
+                                "Error Response: status: 503 Service \
+                                 Unavailable",
+                            ),
+                        ])
+                        .expect("MGSes are unique"),
+                    },
+                )),
+                ..status(
+                    powering_off,
+                    last_error_set("the sled could not be powered off"),
+                )
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::OtherBoardPresent {
+                    slot: 3,
+                    mgs: mgs0,
+                    found: BaseboardId {
+                        part_number: "913-0000019".to_string(),
+                        serial_number: "BRM42220004".to_string(),
+                    },
+                }),
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::AlreadyOff {
+                    slot: 4,
+                    mgs: mgs0,
+                }),
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::NotPresent {
+                    slot: 5,
+                    mgs: mgs1,
+                    ignition: SledExpungeCubbyIgnition::Unpowered,
+                }),
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::AbsentAtCreation {
+                    collection_id,
+                }),
+                ..status(powering_off, completed(non_provisionable))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::WaitingForCollection {
+                    wait: SledExpungeCollectionWait::NoCollectionSinceRemoval {
+                        removal_committed_at: "2026-11-13T10:00:00Z"
+                            .parse()
+                            .expect("parsed a timestamp"),
+                        collection_started_at: "2026-11-13T09:59:00Z"
+                            .parse()
+                            .expect("parsed a timestamp"),
+                    },
+                }),
+                ..status(
+                    powering_off,
+                    SledExpungeRequestOutcome::WaitingForCollection,
+                )
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(SledExpungePowerCheck::WaitingForCollection {
+                    wait: SledExpungeCollectionWait::NoRackSpData {
+                        collection_id,
+                    },
+                }),
+                ..status(
+                    powering_off,
+                    SledExpungeRequestOutcome::WaitingForCollection,
+                )
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::SledAgentWithoutSp {
+                        collection_id,
+                    },
+                )),
+                ..status(powering_off, last_error_set("no SP in inventory"))
+            },
+            SledExpungeRequestStatus {
+                state_after: Some(powering_off),
+                power_check: Some(waiting_for(SledExpungePowerOffWait::NoMgs)),
+                ..status(waiting, last_error_set("no management gateway"))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::InAnotherRack {
+                        rack_id: RackUuid::from_u128(
+                            0x6174c6ce_9bb1_4ce8_afc3_97fc1e6aa450,
+                        ),
+                    },
+                )),
+                ..status(powering_off, last_error_set("in another rack"))
+            },
+            SledExpungeRequestStatus {
+                power_check: Some(waiting_for(
+                    SledExpungePowerOffWait::SwitchAttachedCubby { slot: 14 },
+                )),
+                ..status(powering_off, last_error_set("the sled is a scrimlet"))
+            },
+            status(
+                expunging,
+                SledExpungeRequestOutcome::Error {
+                    error: "completing the request: Internal Error: the \
+                            sled's state refuses the expunge"
+                        .to_string(),
+                },
+            ),
+        ];
+        let requests =
+            IdOrdMap::from_iter_unique(entries.into_iter().enumerate().map(
+                |(n, entry)| SledExpungeRequestStatus {
+                    request_id: SledExpungeRequestUuid::from_u128(
+                        0x5ab0_0000 + n as u128,
+                    ),
+                    ..entry
+                },
+            ))
+            .expect("request ids are unique");
+        expectorate::assert_contents(
+            "tests/output/sled-expunge-status.txt",
+            &SledExpungeStatusDisplay(&SledExpungeStatus::Listed {
+                requests,
+                ignition_snapshots: IdOrdMap::from_iter_unique([
+                    SledExpungeRackIgnitionSnapshot {
+                        rack_id: RackUuid::from_u128(
+                            0x6174c6ce_9bb1_4ce8_afc3_97fc1e6aa450,
+                        ),
+                        snapshot: SledExpungeIgnitionSnapshot::Fetched {
+                            mgs: mgs1,
+                            failed_attempts: IdOrdMap::from_iter_unique([
+                                SledExpungeMgsIgnitionFailure {
+                                    mgs: mgs0,
+                                    error: "Communication Error: connection \
+                                            refused"
+                                        .to_string(),
+                                },
+                            ])
+                            .expect("one MGS"),
+                        },
+                    },
+                    SledExpungeRackIgnitionSnapshot {
+                        rack_id: RackUuid::from_u128(
+                            0x7a1c0000_0000_4000_8000_000000000002,
+                        ),
+                        snapshot: SledExpungeIgnitionSnapshot::Unfinished,
+                    },
+                ])
+                .expect("racks are unique"),
+                mgs_discovery: SledExpungeMgsDiscovery::Discovered {
+                    rack_id_unknown: IdOrdMap::from_iter_unique([
+                        SledExpungeMgsRackIdUnknown {
+                            mgs: mgs1,
+                            error: "this MGS' rack ID has not been set"
+                                .to_string(),
+                        },
+                    ])
+                    .expect("one MGS"),
+                },
+            })
+            .to_string(),
         );
     }
 
