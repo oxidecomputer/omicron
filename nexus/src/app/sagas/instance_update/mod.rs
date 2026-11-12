@@ -2624,12 +2624,14 @@ mod test {
         assert_instance_unlocked(instance);
         assert_instance_record_is_consistent(instance);
         assert_eq!(instance.intended_state, InstanceIntendedState::Stopped);
+        let new_runtime_state = instance.runtime().nexus_state;
         assert_eq!(
-            instance.runtime().nexus_state,
+            new_runtime_state,
             InstanceState::NoVmm,
             "an instance stopped by the user during an update saga for an \
              active VMM stopped due to sled evacuation should come to rest in \
-             the `NoVmm` state, not `SledEvacuating`\ninstance: {instance:#?}",
+             the `NoVmm` state, not `{new_runtime_state:?}`\n\
+             instance: {instance:#?}",
         );
     }
 
@@ -2689,11 +2691,12 @@ mod test {
         assert_instance_unlocked(instance);
         assert_instance_record_is_consistent(instance);
         assert_eq!(instance.runtime().nexus_state, InstanceState::NoVmm);
+        let new_intended_state = instance.intended_state;
         assert_eq!(
-            instance.intended_state,
+            new_intended_state,
             InstanceIntendedState::Stopped,
             "a user's request to stop the instance should not be overwritten \
-             with `GuestShutdown`\ninstance: {instance:#?}",
+             with `{new_intended_state:?}`\ninstance: {instance:#?}",
         );
     }
 
