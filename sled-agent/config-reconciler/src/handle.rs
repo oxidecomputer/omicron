@@ -13,6 +13,7 @@ use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_storage::config::MountConfig;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
@@ -81,39 +82,115 @@ pub enum TimeSyncConfig {
     Skip,
 }
 
+/// Spawn token returned by [`ConfigReconcilerHandle::spawn_ledger_task()`] to
+/// ensure all dependencies of the config reconciler are supplied in the proper
+/// order.
 #[derive(Debug)]
-struct SpawnTokenCommon {
+pub struct ConfigReconcilerSpawnToken {
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
+    current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_task_log: Logger,
 }
 
+/// Spawn token returned by [`ConfigReconcilerHandle::new()`] to ensure all
+/// dependencies of the config reconciler are supplied in the proper order.
 #[derive(Debug)]
 pub struct LedgerTaskSpawnToken {
-    common: SpawnTokenCommon,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+    current_config_tx: watch::Sender<CurrentSledConfig>,
     ledger_task_log: Logger,
-}
-
-#[derive(Debug)]
-pub struct ConfigReconcilerSpawnToken {
-    common: SpawnTokenCommon,
-    ledger_rx: watch::Receiver<CurrentSledConfig>,
 }
 
 impl ConfigReconcilerSpawnToken {
     /// Create a new watch channel receiver containing this sled's update
     /// disposition.
     pub fn subscribe_update_disposition(&self) -> UpdateDispositionReceiver {
-        UpdateDispositionReceiver::new(self.ledger_rx.clone())
+        UpdateDispositionReceiver::new(self.current_config_rx.clone())
     }
 
     /// Returns a clone of the handle to the former zone root archiver.
     pub fn former_zone_root_archiver(&self) -> FormerZoneRootArchiver {
-        self.common.former_zone_root_archiver.clone()
+        self.former_zone_root_archiver.clone()
+    }
+}
+
+impl LedgerTaskSpawnToken {
+    /// Create a new watch channel receiver containing this sled's wicket SSH
+    /// auth configuration.
+    pub fn subscribe_wicket_ssh_auth(&self) -> WicketSshAuthReceiver {
+        WicketSshAuthReceiver::new(
+            self.config_reconciler_spawn_token.current_config_rx.clone(),
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WicketSshAuthReceiverError {
+    #[error("internal disks are not yet available")]
+    NoInternalDisks,
+    #[error(transparent)]
+    RecvError(#[from] watch::error::RecvError),
+}
+
+/// Watch channel receiver that yields the current [`WicketSshAuth`] setting
+/// that should be applied by this sled.
+#[derive(Debug, Clone)]
+pub struct WicketSshAuthReceiver {
+    // We act as a forwarding watch receiver for the ledger channel that reports
+    // the full sled config. To avoid spurious `changed()` wakeups, we cache the
+    // most-recently-returned SSH auth, allowing us to swallow any config
+    // changes that don't affect that field.
+    ledger_rx: watch::Receiver<CurrentSledConfig>,
+    most_recently_returned_auth: Option<WicketSshAuth>,
+}
+
+impl WicketSshAuthReceiver {
+    fn new(ledger_rx: watch::Receiver<CurrentSledConfig>) -> Self {
+        Self { ledger_rx, most_recently_returned_auth: None }
+    }
+
+    /// Read the current wicket SSH auth configuration, if available, and mark
+    /// the underlying watch channel value as seen.
+    pub fn current_and_update(
+        &mut self,
+    ) -> Result<WicketSshAuth, WicketSshAuthReceiverError> {
+        let auth = match &*self.ledger_rx.borrow_and_update() {
+            CurrentSledConfig::WaitingForInternalDisks => {
+                return Err(WicketSshAuthReceiverError::NoInternalDisks);
+            }
+            CurrentSledConfig::WaitingForInitialConfig => {
+                // We're pre-RSS; we must fall back to unauthenticated wicket
+                // (the same thing RSS will set up when it runs).
+                WicketSshAuth::initial()
+            }
+            CurrentSledConfig::Ledgered(config) => {
+                config.wicket_ssh_auth.clone()
+            }
+        };
+        self.most_recently_returned_auth = Some(auth.clone());
+        Ok(auth)
+    }
+
+    /// Waits for a change notification in the underlying watch channel, then
+    /// marks the current value as seen and returns it.
+    pub async fn changed_value(
+        &mut self,
+    ) -> Result<WicketSshAuth, WicketSshAuthReceiverError> {
+        let prev_auth = self.most_recently_returned_auth.clone();
+        loop {
+            self.ledger_rx.changed().await?;
+
+            // Did the config change actually affect the auth config?
+            let auth = self.current_and_update()?;
+            if Some(&auth) != prev_auth.as_ref() {
+                return Ok(auth);
+            }
+        }
     }
 }
 
@@ -306,6 +383,13 @@ impl ConfigReconcilerHandle {
             base_log,
         );
 
+        // We always start in the "waiting for internal disks" state. The
+        // internal disk management task is started more or less concurrently
+        // with us, so we won't stay in this state for long unless something is
+        // very wrong.
+        let (current_config_tx, current_config_rx) =
+            watch::channel(CurrentSledConfig::WaitingForInternalDisks);
+
         (
             Self {
                 raw_disks_tx,
@@ -319,18 +403,20 @@ impl ConfigReconcilerHandle {
             // `spawn_reconciliation_task()` inside this token that the caller
             // has to hold until it has the other outside dependencies ready.
             LedgerTaskSpawnToken {
-                common: SpawnTokenCommon {
+                config_reconciler_spawn_token: ConfigReconcilerSpawnToken {
                     key_requester,
                     time_sync_config,
                     reconciler_result_tx,
                     currently_managed_zpools_tx,
                     former_zone_root_archiver,
                     raw_disks_rx,
+                    current_config_rx,
                     reconciler_task_log: base_log
                         .new(slog::o!("component" => "ConfigReconcilerTask")),
                 },
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
+                current_config_tx,
             },
         )
     }
@@ -356,12 +442,17 @@ impl ConfigReconcilerHandle {
         sled_agent_artifact_store: U,
         token: LedgerTaskSpawnToken,
     ) -> (ConfigReconcilerSpawnToken, oneshot::Receiver<()>) {
-        let LedgerTaskSpawnToken { common, ledger_task_log } = token;
+        let LedgerTaskSpawnToken {
+            config_reconciler_spawn_token,
+            current_config_tx,
+            ledger_task_log,
+        } = token;
 
         // Spawn the task that manages our config ledger.
-        let (ledger_task, current_config_rx, ledger_task_run_rx) =
+        let (ledger_task, ledger_task_run_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 self.internal_disks_rx.clone(),
+                current_config_tx,
                 sled_agent_artifact_store.clone(),
                 ledger_task_log,
             );
@@ -375,10 +466,7 @@ impl ConfigReconcilerHandle {
             }
         }
 
-        (
-            ConfigReconcilerSpawnToken { common, ledger_rx: current_config_rx },
-            ledger_task_run_rx,
-        )
+        (config_reconciler_spawn_token, ledger_task_run_rx)
     }
 
     /// Spawn the primary config reconciliation task.
@@ -400,17 +488,14 @@ impl ConfigReconcilerHandle {
         token: ConfigReconcilerSpawnToken,
     ) {
         let ConfigReconcilerSpawnToken {
-            common:
-                SpawnTokenCommon {
-                    key_requester,
-                    time_sync_config,
-                    reconciler_result_tx,
-                    currently_managed_zpools_tx,
-                    former_zone_root_archiver,
-                    raw_disks_rx,
-                    reconciler_task_log,
-                },
-            ledger_rx,
+            key_requester,
+            time_sync_config,
+            reconciler_result_tx,
+            currently_managed_zpools_tx,
+            former_zone_root_archiver,
+            raw_disks_rx,
+            current_config_rx,
+            reconciler_task_log,
         } = token;
 
         reconciler_task::spawn(
@@ -418,7 +503,7 @@ impl ConfigReconcilerHandle {
             self.dataset_task.clone(),
             key_requester,
             time_sync_config,
-            ledger_rx,
+            current_config_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
