@@ -2,12 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::authz;
+use crate::context::OpContext;
 use crate::db::DataStore;
+use crate::db::datastore::SledExpungeRequestUpdateOutcome;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::SledExpungePowerOffOutcome;
 use nexus_db_model::SledExpungeRequest;
+use nexus_db_model::SledExpungeRequestAdvance;
 use nexus_db_model::SledExpungeRequestState;
+use nexus_db_model::SledExpungeRequestTransition;
+use nexus_db_model::SledExpungeRequestUnfinishedState;
 use nexus_db_schema::schema::sled_expunge_request::dsl;
 use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackUuid;
@@ -16,46 +23,52 @@ use sled_hardware_types::BaseboardId;
 
 pub const TEST_FAILURE_REASON: &str = "test failure";
 
-// TODO-RAINCLAUDE: step 10b moves this per-state column mapping into one db-model function shared with the real transitions.
+// TODO-RAINCLAUDE: walks the real transition column mapping forward from request's state to state, failing straight from the current unfinished state; the power-off step always records PoweredOff, and a backward move or a move out of a finished state panics.
 fn sled_expunge_request_with_state(
-    request: SledExpungeRequest,
+    mut request: SledExpungeRequest,
     state: SledExpungeRequestState,
 ) -> SledExpungeRequest {
     let now = now_db_precision();
-    let power_off_outcome = match state {
-        SledExpungeRequestState::WaitingForTrustQuorum
-        | SledExpungeRequestState::PoweringOff => None,
-        SledExpungeRequestState::Expunging => Some(
-            request
-                .power_off_outcome
-                .unwrap_or(SledExpungePowerOffOutcome::PoweredOff),
-        ),
-        SledExpungeRequestState::Done => Some(
-            request
-                .power_off_outcome
-                .unwrap_or(SledExpungePowerOffOutcome::PoweredOff),
-        ),
-        SledExpungeRequestState::Failed => request.power_off_outcome,
-    };
-    let failure_reason = match state {
-        SledExpungeRequestState::WaitingForTrustQuorum
-        | SledExpungeRequestState::PoweringOff
-        | SledExpungeRequestState::Expunging
-        | SledExpungeRequestState::Done => None,
-        SledExpungeRequestState::Failed => {
-            Some(TEST_FAILURE_REASON.to_string())
-        }
-    };
-    let finished = state.is_finished();
-    SledExpungeRequest {
-        time_modified: now,
-        state,
-        power_off_outcome,
-        failure_reason,
-        time_completed: finished.then_some(now),
-        last_error: if finished { None } else { request.last_error.clone() },
-        ..request
+    let original_state = request.state;
+    while request.state != state {
+        let from = request.state.as_unfinished().unwrap_or_else(|| {
+            panic!(
+                "test moves a sled expunge request forward from an unfinished \
+                 state (requested {original_state} -> {state})",
+            )
+        });
+        let transition = match state {
+            SledExpungeRequestState::Failed => {
+                SledExpungeRequestTransition::Failed {
+                    from,
+                    failure_reason: TEST_FAILURE_REASON.to_string(),
+                }
+            }
+            SledExpungeRequestState::WaitingForTrustQuorum
+            | SledExpungeRequestState::PoweringOff
+            | SledExpungeRequestState::Expunging
+            | SledExpungeRequestState::Done => match from {
+                SledExpungeRequestUnfinishedState::WaitingForTrustQuorum => {
+                    SledExpungeRequestTransition::Advance(
+                        SledExpungeRequestAdvance::ToPoweringOff,
+                    )
+                }
+                SledExpungeRequestUnfinishedState::PoweringOff => {
+                    SledExpungeRequestTransition::Advance(
+                        SledExpungeRequestAdvance::ToExpunging {
+                            power_off_outcome:
+                                SledExpungePowerOffOutcome::PoweredOff,
+                        },
+                    )
+                }
+                SledExpungeRequestUnfinishedState::Expunging => {
+                    SledExpungeRequestTransition::Done
+                }
+            },
+        };
+        request = transition.columns(now).apply_to(request);
     }
+    request
 }
 
 pub fn new_sled_expunge_request(
@@ -78,9 +91,28 @@ pub async fn insert_sled_expunge_request(
     tq_epoch: i64,
     state: SledExpungeRequestState,
 ) -> SledExpungeRequest {
-    let request = new_sled_expunge_request(
+    insert_sled_expunge_request_for_sled(
+        datastore,
         rack_id,
         SledUuid::new_v4(),
+        baseboard_id,
+        tq_epoch,
+        state,
+    )
+    .await
+}
+
+pub async fn insert_sled_expunge_request_for_sled(
+    datastore: &DataStore,
+    rack_id: RackUuid,
+    sled_id: SledUuid,
+    baseboard_id: &BaseboardId,
+    tq_epoch: i64,
+    state: SledExpungeRequestState,
+) -> SledExpungeRequest {
+    let request = new_sled_expunge_request(
+        rack_id,
+        sled_id,
         baseboard_id.clone(),
         tq_epoch,
         state,
@@ -97,26 +129,16 @@ pub async fn insert_sled_expunge_request(
         .expect("inserted a sled expunge request")
 }
 
-fn state_order(state: SledExpungeRequestState) -> u8 {
-    match state {
-        SledExpungeRequestState::WaitingForTrustQuorum => 0,
-        SledExpungeRequestState::PoweringOff => 1,
-        SledExpungeRequestState::Expunging => 2,
-        SledExpungeRequestState::Done | SledExpungeRequestState::Failed => 3,
-    }
-}
-
-// TODO-RAINCLAUDE: test-only forward move that may skip states; the real compare-and-swap transitions land in step 10b.
+// TODO-RAINCLAUDE: test-only forward move that may skip states, for tests that need a finished request without the real transitions (Done needs a sled and a trust quorum that pass the gate).
 pub async fn set_sled_expunge_request_state(
     datastore: &DataStore,
     request: &SledExpungeRequest,
     state: SledExpungeRequestState,
 ) {
     let from = request.state;
-    assert!(
-        !from.is_finished() && state_order(from) < state_order(state),
-        "test moves a sled expunge request forward from an unfinished state \
-         (requested {from} -> {state})",
+    assert_ne!(
+        from, state,
+        "test moves a sled expunge request to a different state",
     );
     let updated = sled_expunge_request_with_state(request.clone(), state);
     let conn = datastore
@@ -141,4 +163,57 @@ pub async fn set_sled_expunge_request_state(
         n_updated, 1,
         "updated exactly one sled expunge request, still in state {from}",
     );
+}
+
+// TODO-RAINCLAUDE: moves time_modified an hour into the past, so a following write must strictly increase it whatever the clock resolution.
+pub async fn backdate_sled_expunge_request(
+    datastore: &DataStore,
+    request: &SledExpungeRequest,
+) -> SledExpungeRequest {
+    let conn = datastore
+        .pool_connection_for_tests()
+        .await
+        .expect("got a database connection");
+    diesel::update(dsl::sled_expunge_request)
+        .filter(dsl::id.eq(request.id))
+        .set(
+            dsl::time_modified
+                .eq(request.time_modified - chrono::Duration::hours(1)),
+        )
+        .returning(SledExpungeRequest::as_returning())
+        .get_result_async(&*conn)
+        .await
+        .expect("backdated time_modified")
+}
+
+pub async fn fail_sled_expunge_request(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    request: &SledExpungeRequest,
+) {
+    let from = request.state.as_unfinished().unwrap_or_else(|| {
+        panic!(
+            "test fails a sled expunge request that is unfinished (it is {})",
+            request.state,
+        )
+    });
+    let (authz_request,) = LookupPath::new(opctx, datastore)
+        .sled_expunge_request(request.id())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .expect("looked up the sled expunge request");
+    let outcome = datastore
+        .sled_expunge_request_fail(
+            opctx,
+            &authz_request,
+            from,
+            TEST_FAILURE_REASON.to_string(),
+        )
+        .await
+        .expect("failed the sled expunge request");
+    let SledExpungeRequestUpdateOutcome::Updated { request: failed } = outcome
+    else {
+        panic!("failed the sled expunge request from {from}: {outcome:?}");
+    };
+    assert_eq!(failed.state, SledExpungeRequestState::Failed);
 }

@@ -142,6 +142,13 @@ impl Sled {
         &self.part_number
     }
 
+    pub fn baseboard_id(&self) -> sled_hardware_types::BaseboardId {
+        sled_hardware_types::BaseboardId {
+            part_number: self.part_number.clone(),
+            serial_number: self.serial_number.clone(),
+        }
+    }
+
     /// The policy here is the `sled_types::SledPolicy` because we expect external
     /// users to always use that.
     pub fn policy(&self) -> sled_types::SledPolicy {
