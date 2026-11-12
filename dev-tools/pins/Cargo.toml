@@ -10,6 +10,7 @@ camino.workspace = true
 cargo_metadata.workspace = true
 fs-err.workspace = true
 omicron-workspace-hack.workspace = true
+semver.workspace = true
 serde.workspace = true
 toml_edit.workspace = true
 

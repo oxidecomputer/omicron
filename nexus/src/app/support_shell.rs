@@ -2,15 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! An authenticated byte tunnel to the rack's Support Shell proxy.
+//! An authenticated tunnel to the Support Shell proxy.
 //!
-//! Nexus copies bytes and nothing else. The client's platform TLS
-//! terminates in the switch zone and every support action is signed
-//! off-rack, so this endpoint decides who may reach the support
-//! plane without being able to read or alter what crosses it.
-//!
-//! The mirror image of this proxy lives in wicketd's `nexus_proxy`,
-//! which carries techport users the other way.
+//! The tunnel endpoint controls who may reach the Support Shell,
+//! without being able to read or alter what crosses it. The proxy
+//! in the switch zone still terminates the platform-ID-backed TLS
+//! connections from the client; this tunnel just wraps them in a
+//! WebSocket.
 
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -18,7 +16,7 @@ use std::time::Duration;
 use dropshot::{
     WebsocketConnectionRaw, WebsocketEndpointResult, WebsocketUpgrade,
 };
-use futures::stream::FuturesUnordered;
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::authz;
@@ -30,10 +28,14 @@ use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::spawn;
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{Bytes, Message};
+use tokio_util::sync::CancellationToken;
 
 /// How long to wait for a switch's proxy to answer a connect.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -100,23 +102,21 @@ impl super::Nexus {
         // single rack is ours (omicron#1276).
         self.rack_lookup(opctx, rack_id).await?;
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let proxy_addrs = self
+        let ips = self
             .internal_resolver
             .lookup_all_ipv6(ServiceName::Dendrite)
             .await
-            .map_err(|e| Error::unavail(&e.to_string()))?
-            .into_iter()
-            .map(|ip| {
-                SocketAddr::V6(SocketAddrV6::new(ip, SUSH_PROXY_PORT, 0, 0))
-            })
-            .collect::<Vec<_>>();
-        let mut connects = proxy_addrs
-            .iter()
-            .map(|&addr| async move {
+            .map_err(|e| Error::unavail(&e.to_string()))?;
+        let mut connects = JoinSet::new();
+        for ip in ips {
+            let addr =
+                SocketAddr::V6(SocketAddrV6::new(ip, SUSH_PROXY_PORT, 0, 0));
+            connects.spawn(async move {
                 (addr, timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await)
-            })
-            .collect::<FuturesUnordered<_>>();
-        while let Some((addr, connect)) = connects.next().await {
+            });
+        }
+        while let Some(joined) = connects.join_next().await {
+            let (addr, connect) = joined.expect("connect panicked");
             match connect {
                 Ok(Ok(stream)) => {
                     let _ = stream.set_nodelay(true);
@@ -137,91 +137,107 @@ impl super::Nexus {
     }
 }
 
-/// Why a tunnel ended and how much it carried.
+/// Why a tunnel ended and how many bytes it carried each way.
 struct PipeSummary {
     reason: String,
     to_proxy: u64,
     to_client: u64,
 }
 
-/// Copy bytes both ways until either side finishes, returning why
-/// and how much. The directions are independent pipes; when either
-/// ends, both are torn down, since half-open service would only
-/// delay the client's error.
+/// Copy bytes both ways until either side finishes. The directions
+/// are independent pipes, but when either ends, both are torn down.
 async fn pipe(
     client: WebSocketStream<WebsocketConnectionRaw>,
     proxy: TcpStream,
 ) -> PipeSummary {
-    let (mut ws_sink, mut ws_source) = client.split();
-    let (mut proxy_read, mut proxy_write) = proxy.into_split();
-    let mut to_proxy = 0;
-    let mut to_client = 0;
-
-    let inbound = async {
-        while let Some(message) = ws_source.next().await {
-            match message {
-                Ok(Message::Binary(data)) => {
-                    if let Err(error) = proxy_write.write_all(&data).await {
-                        return format!(
-                            "proxy write failed: {}",
-                            InlineErrorChain::new(&error)
-                        );
-                    }
-                    to_proxy += data.len() as u64;
-                }
-                Ok(Message::Close(_)) => break,
-                Err(error) => {
-                    return format!(
-                        "client read failed: {}",
-                        InlineErrorChain::new(&error)
-                    );
-                }
-                // Tungstenite answers pings itself.
-                Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
-                // Anything else would truncate the byte stream
-                // invisibly; fail loudly instead.
-                Ok(_) => return "unexpected frame".to_string(),
-            }
-        }
-        "client closed".to_string()
-    };
-
-    let outbound = async {
-        let mut buf = [0; 0x2000];
-        loop {
-            match proxy_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    let data = Bytes::copy_from_slice(&buf[..n]);
-                    if let Err(error) =
-                        ws_sink.send(Message::Binary(data)).await
-                    {
-                        return format!(
-                            "client send failed: {}",
-                            InlineErrorChain::new(&error)
-                        );
-                    }
-                    to_client += n as u64;
-                }
-                Err(error) => {
-                    return format!(
-                        "proxy read failed: {}",
-                        InlineErrorChain::new(&error)
-                    );
-                }
-            }
-        }
-        "proxy closed".to_string()
-    };
-
-    let reason = tokio::select! {
-        reason = inbound => reason,
-        reason = outbound => reason,
-    };
-    // Close both writers here rather than in the pipes, so that each
-    // side sees an orderly end (a Close frame, a FIN) no matter which
-    // pipe finished first or how.
-    let _ = ws_sink.close().await;
-    let _ = proxy_write.shutdown().await;
+    let (ws_sink, ws_source) = client.split();
+    let (proxy_read, proxy_write) = proxy.into_split();
+    let cancel = CancellationToken::new();
+    let inbound = spawn(copy_to_proxy(ws_source, proxy_write, cancel.clone()));
+    let outbound = spawn(copy_to_client(proxy_read, ws_sink, cancel));
+    let (inbound_reason, to_proxy) = inbound.await.expect("pipe panicked");
+    let (outbound_reason, to_client) = outbound.await.expect("pipe panicked");
+    let reason = inbound_reason
+        .or(outbound_reason)
+        .unwrap_or_else(|| "cancelled".to_string());
     PipeSummary { reason, to_proxy, to_client }
+}
+
+async fn copy_to_proxy(
+    mut source: SplitStream<WebSocketStream<WebsocketConnectionRaw>>,
+    mut proxy: OwnedWriteHalf,
+    cancel: CancellationToken,
+) -> (Option<String>, u64) {
+    let _cancel_other = cancel.clone().drop_guard();
+    let mut copied = 0;
+    let reason = loop {
+        let message = tokio::select! {
+            () = cancel.cancelled() => break None,
+            message = source.next() => message,
+        };
+        match message {
+            Some(Ok(Message::Binary(data))) => {
+                if let Err(error) = proxy.write_all(&data).await {
+                    break Some(format!(
+                        "proxy write failed: {}",
+                        InlineErrorChain::new(&error)
+                    ));
+                }
+                copied += data.len() as u64;
+            }
+            None | Some(Ok(Message::Close(_))) => {
+                break Some("client closed".to_string());
+            }
+            Some(Err(error)) => {
+                break Some(format!(
+                    "client read failed: {}",
+                    InlineErrorChain::new(&error)
+                ));
+            }
+            // Tungstenite answers pings itself.
+            Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+            // Anything else would truncate the byte stream invisibly;
+            // fail loudly instead.
+            Some(Ok(_)) => break Some("unexpected frame".to_string()),
+        }
+    };
+    let _ = proxy.shutdown().await;
+    (reason, copied)
+}
+
+async fn copy_to_client(
+    mut proxy: OwnedReadHalf,
+    mut sink: SplitSink<WebSocketStream<WebsocketConnectionRaw>, Message>,
+    cancel: CancellationToken,
+) -> (Option<String>, u64) {
+    let _cancel_other = cancel.clone().drop_guard();
+    let mut copied = 0;
+    let mut buf = [0; 0x2000];
+    let reason = loop {
+        let read = tokio::select! {
+            () = cancel.cancelled() => break None,
+            read = proxy.read(&mut buf) => read,
+        };
+        match read {
+            Ok(0) => break Some("proxy closed".to_string()),
+            Ok(n) => {
+                let data = Bytes::copy_from_slice(&buf[..n]);
+                if let Err(error) = sink.send(Message::Binary(data)).await {
+                    break Some(format!(
+                        "client send failed: {}",
+                        InlineErrorChain::new(&error)
+                    ));
+                }
+                copied += n as u64;
+            }
+            Err(error) => {
+                break Some(format!(
+                    "proxy read failed: {}",
+                    InlineErrorChain::new(&error)
+                ));
+            }
+        }
+    };
+    let _ = sink.close().await;
+    (reason, copied)
 }

@@ -172,8 +172,14 @@ async fn update_cubbies(
     tx_cubbies: watch::Sender<Cubbies>,
 ) {
     loop {
-        if let Some(states) = poll_cubbies(&log, &mgs).await {
-            tx_cubbies.send_modify(|cubbies| merge_cubbies(cubbies, states));
+        match poll_cubbies(&log, &mgs).await {
+            Ok(states) => {
+                tx_cubbies.send_modify(|cubbies| merge_cubbies(cubbies, states))
+            }
+            Err(error) => debug!(
+                log, "failed to get ignition list from MGS";
+                "error" => %error,
+            ),
         }
         sleep(POLL_INTERVAL).await;
     }

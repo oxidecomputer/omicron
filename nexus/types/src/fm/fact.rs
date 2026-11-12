@@ -18,7 +18,7 @@ use crate::observed_saga::{OrphanedReason, SagaProgressState};
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
-    CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
+    CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -37,6 +37,8 @@ pub enum FactPayload {
     Saga(SagaFact),
     /// A fact owned by the certificate diagnosis engine.
     Certificate(CertificateFact),
+    /// A fact owned by the SMF service diagnosis engine.
+    SmfService(SmfServiceFact),
 }
 
 impl From<DiskFact> for FactPayload {
@@ -57,6 +59,12 @@ impl From<CertificateFact> for FactPayload {
     }
 }
 
+impl From<SmfServiceFact> for FactPayload {
+    fn from(fact: SmfServiceFact) -> Self {
+        FactPayload::SmfService(fact)
+    }
+}
+
 impl FactPayload {
     /// The diagnosis engine that owns this payload's variant.
     pub fn engine(&self) -> DiagnosisEngineKind {
@@ -64,6 +72,7 @@ impl FactPayload {
             FactPayload::PhysicalDisk(_) => DiagnosisEngineKind::PhysicalDisk,
             FactPayload::Saga(_) => DiagnosisEngineKind::Saga,
             FactPayload::Certificate(_) => DiagnosisEngineKind::Certificate,
+            FactPayload::SmfService(_) => DiagnosisEngineKind::SmfService,
         }
     }
 
@@ -90,6 +99,15 @@ impl FactPayload {
     pub fn as_certificate(&self) -> Option<&CertificateFact> {
         match self {
             FactPayload::Certificate(fact) => Some(fact),
+            _ => None,
+        }
+    }
+
+    /// The SMF service payload, or `None` if this fact belongs to a
+    /// different diagnosis engine.
+    pub fn as_smf_service(&self) -> Option<&SmfServiceFact> {
+        match self {
+            FactPayload::SmfService(fact) => Some(fact),
             _ => None,
         }
     }
@@ -273,4 +291,41 @@ pub struct CertificateExpiryFactPayload {
     pub certificate_id: Uuid,
     /// The leaf `not_after` of that certificate.
     pub not_after: DateTime<Utc>,
+}
+
+/// Per-fact state for the SMF service diagnosis engine.
+///
+/// An SMF service case is keyed by the service instance: its sled, zone, and
+/// FMRI. Only the `maintenance` state is tracked. Services that are offline,
+/// degraded, or in an unrecognized state are deliberately ignored.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SmfServiceFact {
+    /// The service instance is enabled, but in the `maintenance` state.
+    InMaintenance(SmfServiceFactPayload),
+}
+
+impl SmfServiceFact {
+    /// The condition-defining payload, shared by every kind.
+    pub fn payload(&self) -> &SmfServiceFactPayload {
+        match self {
+            SmfServiceFact::InMaintenance(p) => p,
+        }
+    }
+}
+
+/// Payload of an [`SmfServiceFact`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SmfServiceFactPayload {
+    /// The sled the service runs on.
+    pub sled_id: SledUuid,
+    /// The zone the service runs in (`global` for the global zone).
+    pub zone_name: String,
+    /// The service instance's FMRI.
+    pub fmri: String,
+    /// Inventory collection that produced this observation. Recorded for
+    /// provenance only; see [`ZpoolUnhealthyFactPayload::observed_in_inv`].
+    pub observed_in_inv: CollectionUuid,
+    /// When the sled agent observed the service in this state.
+    pub time_observed: DateTime<Utc>,
 }

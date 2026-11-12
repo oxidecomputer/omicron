@@ -340,6 +340,7 @@ mod test {
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::silo;
@@ -733,6 +734,7 @@ mod test {
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
@@ -1532,6 +1534,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
+            ReflectsCollection::Indeterminate,
             "test suite",
             PlannerRng::from_entropy(),
         )

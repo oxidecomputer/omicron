@@ -424,6 +424,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     created by::::::::::::::   test suite
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1
@@ -1047,6 +1048,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     created by::::::::::::::   reconfigurator-cli
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1
@@ -1689,6 +1691,9 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     created by::::::::::::::   reconfigurator-sim
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   (none)
+    reflects collection:::::   8bc58dd6-dd6e-44e2-9671-e35a2a941c98
+    collection started::::::   <REDACTED_TIMESTAMP>
+    collection done:::::::::   <REDACTED_TIMESTAMP>
     internal DNS version::::   1
     external DNS version::::   1
     target release min gen::   1
