@@ -342,6 +342,11 @@ pub struct Config {
     /// Support Shell server runs on this sled.
     #[serde(default)]
     pub sush: Option<SushConfig>,
+
+    /// Configuration for the Helios RoT. If unset, requests to this RoT are
+    /// rejected.
+    #[serde(default)]
+    pub helios_rot: Option<HeliosRotConfig>,
 }
 
 /// Configuration for the Support Shell (`sush`) server that runs in the global
@@ -400,6 +405,23 @@ impl SushConfig {
     fn default_max_output_mb() -> u32 {
         10 * 1024
     }
+}
+
+/// Configuration for the Helios RoT.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "which", rename_all = "snake_case")]
+pub enum HeliosRotConfig {
+    /// Use the HeliosRot impl provided by the Helios `os_rot` driver.
+    OsRot,
+    /// Use the mock HeliosRot backed by a P-384 private key and certificate chain
+    /// loaded from local PEM files.
+    Local {
+        /// PKCS#8 PEM encoded P-384 key for signing attestations
+        priv_key: Utf8PathBuf,
+        /// chain of x509 certificates ending in a cert for the attestation
+        /// signing key
+        cert_chain: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

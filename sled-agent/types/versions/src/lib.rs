@@ -135,6 +135,8 @@ pub mod v64;
 pub mod v65;
 #[path = "add_acpi_shutdown_timeout/mod.rs"]
 pub mod v66;
+#[path = "add_helios_rot/mod.rs"]
+pub mod v67;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

@@ -17,9 +17,9 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use sled_agent_types_versions::{
-    latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
-    v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
-    v50, v51, v52, v53, v55, v57, v61,
+    latest, v1, v11, v14, v15, v18, v19, v20, v22, v24, v25, v26, v28, v29,
+    v30, v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48,
+    v49, v50, v51, v52, v53, v55, v57, v61,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (67, ADD_HELIOS_ROT),
     (66, PROPOLIS_ACPI_SHUTDOWN),
     (65, ADD_DISK_LOCATION_TO_INVENTORY),
     (64, TRUST_QUORUM_MEMBERS),
@@ -1929,32 +1930,111 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/rot/{rot}/measurement-log",
+        versions = VERSION_ADD_HELIOS_ROT..,
     }]
     async fn rot_measurement_log(
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::rot::RotPathParams>,
-    ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::rot::MeasurementLogResponse>, HttpError>;
+
+    /// Return the set of measurments recorded by the RoT.
+    #[endpoint {
+        operation_id = "rot_measurement_log",
+        method = GET,
+        path = "/rot/{rot}/measurement-log",
+        versions = ..VERSION_ADD_HELIOS_ROT,
+    }]
+    async fn rot_measurement_log_v19(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<v19::attestation::RotPathParams>,
+    ) -> Result<HttpResponseOk<v19::attestation::MeasurementLog>, HttpError>
+    {
+        // Clients of these versions can only select the Oxide RoT, which
+        // always provides a measurement log.
+        Self::rot_measurement_log(
+            request_context,
+            path_params.map(latest::rot::RotPathParams::from),
+        )
+        .await?
+        .try_map(|response| {
+            v19::attestation::MeasurementLog::try_from(response).map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })
+        })
+    }
 
     /// Return the certificate chain for the attestation signer from the RoT.
     #[endpoint {
         method = GET,
         path = "/rot/{rot}/certificate-chain",
+        versions = VERSION_ADD_HELIOS_ROT..,
     }]
     async fn rot_certificate_chain(
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::rot::RotPathParams>,
     ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
 
-    /// Return attestation over recorded measurments and nonce from the RoT.
+    /// Return the certificate chain for the attestation signer from the RoT.
+    #[endpoint {
+        operation_id = "rot_certificate_chain",
+        method = GET,
+        path = "/rot/{rot}/certificate-chain",
+        versions = ..VERSION_ADD_HELIOS_ROT,
+    }]
+    async fn rot_certificate_chain_v19(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<v19::attestation::RotPathParams>,
+    ) -> Result<HttpResponseOk<v19::attestation::CertificateChain>, HttpError>
+    {
+        Self::rot_certificate_chain(
+            request_context,
+            path_params.map(latest::rot::RotPathParams::from),
+        )
+        .await
+    }
+
+    /// Return attestation over recorded measurments and qualifying data from the RoT.
     #[endpoint {
         method = POST,
         path = "/rot/{rot}/attest",
+        versions = VERSION_ADD_HELIOS_ROT..,
     }]
     async fn rot_attest(
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::rot::RotPathParams>,
-        body: TypedBody<latest::rot::Nonce>,
+        body: TypedBody<latest::rot::QualifyingData>,
     ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
+
+    /// Return attestation over recorded measurments and nonce from the RoT.
+    #[endpoint {
+        operation_id = "rot_attest",
+        method = POST,
+        path = "/rot/{rot}/attest",
+        versions = ..VERSION_ADD_HELIOS_ROT,
+    }]
+    async fn rot_attest_v19(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<v19::attestation::RotPathParams>,
+        body: TypedBody<v19::attestation::Nonce>,
+    ) -> Result<HttpResponseOk<v19::attestation::Attestation>, HttpError> {
+        // Clients of these versions can only select the Oxide RoT, that will
+        // only produce an Ed25519 signature.
+        Self::rot_attest(
+            request_context,
+            path_params.map(latest::rot::RotPathParams::from),
+            body.map(latest::rot::QualifyingData::from),
+        )
+        .await?
+        .try_map(|attestation| {
+            v19::attestation::Attestation::try_from(attestation).map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })
+        })
+    }
 
     /// Report that this sled's multirack join is complete.
     ///

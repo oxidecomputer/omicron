@@ -67,7 +67,8 @@ use sled_agent_types::multirack::{
 };
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
-    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+    Attestation, CertificateChain, MeasurementLogResponse, QualifyingData,
+    RotPathParams,
 };
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
@@ -1149,7 +1150,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn rot_measurement_log(
         _request_context: RequestContext<Self::Context>,
         _path_params: Path<RotPathParams>,
-    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+    ) -> Result<HttpResponseOk<MeasurementLogResponse>, HttpError> {
         method_unimplemented()
     }
 
@@ -1163,7 +1164,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn rot_attest(
         _request_context: RequestContext<Self::Context>,
         _path_params: Path<RotPathParams>,
-        _body: TypedBody<Nonce>,
+        _body: TypedBody<QualifyingData>,
     ) -> Result<HttpResponseOk<Attestation>, HttpError> {
         method_unimplemented()
     }

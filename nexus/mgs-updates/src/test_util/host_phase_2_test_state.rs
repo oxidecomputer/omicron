@@ -1120,7 +1120,7 @@ mod api_impl {
             _request_context: RequestContext<Self::Context>,
             _path_params: Path<sled_agent_types::rot::RotPathParams>,
         ) -> Result<
-            HttpResponseOk<sled_agent_types::rot::MeasurementLog>,
+            HttpResponseOk<sled_agent_types::rot::MeasurementLogResponse>,
             HttpError,
         > {
             unimplemented!()
@@ -1139,7 +1139,7 @@ mod api_impl {
         async fn rot_attest(
             _request_context: RequestContext<Self::Context>,
             _path_params: Path<sled_agent_types::rot::RotPathParams>,
-            _body: TypedBody<sled_agent_types::rot::Nonce>,
+            _body: TypedBody<sled_agent_types::rot::QualifyingData>,
         ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
         {
             unimplemented!()

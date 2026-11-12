@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "66.0.0"
+    "version": "67.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -509,7 +509,7 @@
     },
     "/rot/{rot}/attest": {
       "post": {
-        "summary": "Return attestation over recorded measurments and nonce from the RoT.",
+        "summary": "Return attestation over recorded measurments and qualifying data from the RoT.",
         "operationId": "rot_attest",
         "parameters": [
           {
@@ -526,7 +526,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Nonce"
+                "$ref": "#/components/schemas/QualifyingData"
               }
             }
           },
@@ -608,7 +608,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MeasurementLog"
+                  "$ref": "#/components/schemas/MeasurementLogResponse"
                 }
               }
             }
@@ -3253,7 +3253,7 @@
         ]
       },
       "Attestation": {
-        "description": "An RoT produced attestation that represents a signature over the provided [`Nonce`] combined with the [`MeasurementLog`] and signed by a key certified by the [`CertificateChain`].",
+        "description": "An RoT produced attestation that represents a signature over the provided [`QualifyingData`] (combined with the measurement log, for RoTs that provide one) and signed by a key certified by the RoT's certificate chain.",
         "oneOf": [
           {
             "description": "An Ed25519 signature.",
@@ -3266,6 +3266,27 @@
             },
             "required": [
               "ed25519"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "An ECDSA P-384 signature.",
+            "type": "object",
+            "properties": {
+              "p384": {
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<96>",
+                  "version": "0.2.0"
+                },
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{192}$",
+                "minLength": 192,
+                "maxLength": 192
+              }
+            },
+            "required": [
+              "p384"
             ],
             "additionalProperties": false
           }
@@ -7224,6 +7245,21 @@
           "$ref": "#/components/schemas/Measurement"
         }
       },
+      "MeasurementLogResponse": {
+        "description": "The measurement log from an RoT, if it provides one.",
+        "type": "object",
+        "properties": {
+          "log": {
+            "nullable": true,
+            "description": "The set of measurements recorded by the RoT, or `None` if the RoT does not provide a measurement log.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MeasurementLog"
+              }
+            ]
+          }
+        }
+      },
       "MigrationFailureInjector": {
         "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.",
         "type": "object",
@@ -7718,16 +7754,6 @@
           "connected_peers",
           "persistent_state",
           "proxied_requests"
-        ]
-      },
-      "Nonce": {
-        "description": "A random nonce provided as part of an attestation challenge to guarantee freshness thereby preventing replay attacks.",
-        "anyOf": [
-          {
-            "description": "A 32-byte nonce.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          }
         ]
       },
       "NvmeDisk": {
@@ -9045,6 +9071,35 @@
           "enable_isa"
         ],
         "additionalProperties": false
+      },
+      "QualifyingData": {
+        "description": "Data provided by the challenger in an attestation challenge. This value is opaque to the responder & so we place no restrictions on its use. Callers typically provide a random value / nonce as a means to prevent replay attacks.",
+        "anyOf": [
+          {
+            "description": "32 bytes of qualifying data.",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<32>",
+              "version": "0.2.0"
+            },
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          {
+            "description": "48 bytes of qualifying data.",
+            "x-rust-type": {
+              "crate": "byte-wrapper",
+              "path": "byte_wrapper::HexArray::<48>",
+              "version": "0.2.0"
+            },
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{96}$",
+            "minLength": 96,
+            "maxLength": 96
+          }
+        ]
       },
       "RackNetworkConfig": {
         "description": "Initial network configuration",
@@ -11643,6 +11698,13 @@
             "type": "string",
             "enum": [
               "oxide"
+            ]
+          },
+          {
+            "description": "The RoT provided by Helios.",
+            "type": "string",
+            "enum": [
+              "helios"
             ]
           }
         ]
