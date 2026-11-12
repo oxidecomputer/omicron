@@ -130,9 +130,15 @@ mod zenter {
 /// Represents a running zone.
 #[derive(Debug)]
 pub struct RunningZone {
-    // The `zoneid_t` for the zone. This is only used on illumos, for `zenter`.
-    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
-    id: i32,
+    /// The `zoneid_t` for the zone, while it's running, or `None` if not.
+    ///
+    /// This is passed to `zenter` in [`RunningZone::run_cmd()`]. Calling
+    /// [`RunningZone::stop()`] will clear this zone ID immediately, even if the
+    /// call to `halt_and_remove_zone` ultimately returns an error. This is in
+    /// order to ensure that we never attempt to `zenter` a zone ID that
+    /// corresponds to a zone that may have been removed, in case the kernel
+    /// reuses that zone ID for a new zone.
+    id: Option<i32>,
     inner: InstalledZone,
 }
 
@@ -202,13 +208,12 @@ impl RunningZone {
         S: AsRef<std::ffi::OsStr>,
     {
         use std::os::unix::process::CommandExt;
-        if self.inner.has_been_removed {
+        let Some(id) = self.id else {
             return Err(RunCommandError {
                 zone: self.name().to_string(),
                 err: crate::ExecutionError::NotRunning,
             });
         };
-        let id = self.id;
         let template = std::sync::Arc::new(
             contract::Template::new(contract::ContractType::Process).map_err(
                 |err| RunCommandError { zone: self.name().to_string(), err },
@@ -298,7 +303,7 @@ impl RunningZone {
                 BootError::NoZoneId { zone: zone.name.clone() }
             })?;
 
-        let running_zone = RunningZone { id, inner: zone };
+        let running_zone = RunningZone { id: Some(id), inner: zone };
 
         Ok(running_zone)
     }
@@ -306,7 +311,7 @@ impl RunningZone {
     /// Create a fake running zone for use in tests.
     #[cfg(feature = "testing")]
     pub fn fake_boot(zone_id: i32, zone: InstalledZone) -> Self {
-        RunningZone { id: zone_id, inner: zone }
+        RunningZone { id: Some(zone_id), inner: zone }
     }
 
     pub async fn ensure_address(
@@ -430,6 +435,7 @@ impl RunningZone {
     ///
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
+        self.id = None;
         if self.inner.has_been_removed {
             return Ok(());
         }
