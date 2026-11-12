@@ -4,6 +4,8 @@
 
 use crate::deployment::PlanningReport;
 use crate::external_api::alert;
+use crate::external_api::sled::SledPolicy;
+use crate::sled_expunge::MgsPowerOffFailure;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -19,6 +21,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufRepoUuid;
@@ -27,12 +30,14 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_hardware_types::BaseboardId;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
@@ -1839,6 +1844,174 @@ pub struct PhysicalDiskAdoptionStatus {
 
     /// Errors encountered during this activation
     pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SledExpungeStatus {
+    ListError {
+        error: String,
+    },
+    Listed {
+        requests: IdOrdMap<SledExpungeRequestStatus>,
+        mgs_discovery: SledExpungeMgsDiscovery,
+    },
+}
+
+// TODO-RAINCLAUDE: NotNeeded: no request in powering_off in this activation (listed there, or advanced to it) had a sled that inventory places in a sled cubby, so discovery never started. Unfinished: discovery started but every request that waited on it was cancelled (timed out) before it finished. Failed: discovery failed outright, either because no MGS resolved in DNS or because none of those that did has a known rack ID, so those requests saw no MGS for their rack. Discovered lists the MGSes whose rack ID could not be learned; power-off is not tried through them.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeMgsDiscovery {
+    NotNeeded,
+    Unfinished,
+    Failed { error: String },
+    Discovered { rack_id_unknown: IdOrdMap<SledExpungeMgsRackIdUnknown> },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeMgsRackIdUnknown {
+    pub mgs: SocketAddrV6,
+    pub error: String,
+}
+
+impl IdOrdItem for SledExpungeMgsRackIdUnknown {
+    type Key<'a> = SocketAddrV6;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.mgs
+    }
+
+    id_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeRequestStatus {
+    pub request_id: SledExpungeRequestUuid,
+    pub sled_id: SledUuid,
+    // TODO-RAINCLAUDE: the request's state as listed at the start of the activation.
+    pub state: SledExpungeTaskRequestState,
+    // TODO-RAINCLAUDE: the state this activation left the request in, when that differs (for example a waiting request that went on to powering_off); None when it did not change it or a write lost a race.
+    pub state_after: Option<SledExpungeTaskRequestState>,
+    pub outcome: SledExpungeRequestOutcome,
+    // TODO-RAINCLAUDE: what this activation's powering_off step decided and did, if it ran; once the sled is powered off, outcome is that of the expunge step that followed.
+    pub power_check: Option<SledExpungePowerCheck>,
+}
+
+// TODO-RAINCLAUDE: internal detail for omdb, so unlike last_error it may name MGS addresses and carry MGS error text: what this activation's powering_off step did. PoweredOff: MGS accepted the A2 command through mgs, at the slot the latest loaded inventory collection put the sled in. Waiting: the request waits with a last_error, for the given reason.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum SledExpungePowerCheck {
+    PoweredOff { slot: u16, mgs: SocketAddrV6 },
+    Waiting { wait: SledExpungePowerOffWait },
+}
+
+// TODO-RAINCLAUDE: why the powering_off step did not power the sled off. The inventory variants (NoInventory through SwitchAttachedCubby) are decided from the latest loaded collection before any MGS is needed. NoMgs: no MGS was discovered for the request's rack. SlotHoldsOtherBoard: mgs read found at the slot and nothing was sent through it. NotPoweredOff: every MGS failed, as failed_attempts records.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungePowerOffWait {
+    NoInventory,
+    NotInInventory,
+    NotASled {
+        sp_type: SpType,
+    },
+    InAnotherRack {
+        rack_id: RackUuid,
+    },
+    SwitchAttachedCubby {
+        slot: u16,
+    },
+    NoMgs,
+    SlotHoldsOtherBoard {
+        slot: u16,
+        mgs: SocketAddrV6,
+        found: BaseboardId,
+    },
+    NotPoweredOff {
+        slot: u16,
+        failed_attempts: IdOrdMap<SledExpungeMgsPowerOffFailure>,
+    },
+}
+
+// TODO-RAINCLAUDE: stage is the step at which this MGS failed (whether anything was sent), and error the MGS client's error chain.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SledExpungeMgsPowerOffFailure {
+    pub mgs: SocketAddrV6,
+    pub stage: MgsPowerOffFailure,
+    pub error: String,
+}
+
+impl IdOrdItem for SledExpungeMgsPowerOffFailure {
+    type Key<'a> = SocketAddrV6;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.mgs
+    }
+
+    id_upcast!();
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum SledExpungeTaskStep {
+    #[default]
+    Starting,
+    CheckingTrustQuorum,
+    ResolvingPower,
+    SendingPowerOff,
+    AdvancingToPoweringOff,
+    AdvancingToExpunging,
+    Completing,
+    SettingLastError,
+    Failing,
+}
+
+impl IdOrdItem for SledExpungeRequestStatus {
+    type Key<'a> = SledExpungeRequestUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.request_id
+    }
+
+    id_upcast!();
+}
+
+// TODO-RAINCLAUDE: a sled expunge request's state as the sled_expunge task reports it; mirrors the database enum, which nexus-types cannot depend on.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum SledExpungeTaskRequestState {
+    WaitingForTrustQuorum,
+    PoweringOff,
+    Expunging,
+    Done,
+    Failed,
+}
+
+// TODO-RAINCLAUDE: what one activation did with one request. NotInExpectedState means a compare-and-swap lost to a concurrent writer (another Nexus); it is not an error. TimedOut means driving the request took longer than the task's per-request timeout and was abandoned in the given step, so whatever that step was doing may or may not have happened. Error carries the error text of the step that failed, retryable or not; the next activation retries the request.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SledExpungeRequestOutcome {
+    RemovalPreparing,
+    LastErrorSet { last_error: String },
+    LastErrorUnchanged { last_error: String },
+    Completed { previous_sled_policy: SledPolicy },
+    Failed { failure_reason: String },
+    NotInExpectedState { current_state: SledExpungeTaskRequestState },
+    TimedOut { step: SledExpungeTaskStep },
+    Error { error: String },
 }
 
 #[cfg(test)]

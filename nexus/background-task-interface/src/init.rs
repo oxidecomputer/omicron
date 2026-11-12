@@ -63,6 +63,7 @@ pub struct BackgroundTasks {
     pub task_probe_distributor: Activator,
     pub task_multicast_reconciler: Activator,
     pub task_trust_quorum_manager: Activator,
+    pub task_sled_expunge: Activator,
     pub task_attached_subnet_manager: Activator,
     pub task_session_cleanup: Activator,
     pub task_populate_switch_ports: Activator,

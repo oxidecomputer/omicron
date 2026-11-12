@@ -8,7 +8,9 @@
 mod firewall_rules;
 mod gateway_client;
 mod sled_client;
+mod sled_power_off;
 
 pub use firewall_rules::*;
 pub use gateway_client::*;
 pub use sled_client::*;
+pub use sled_power_off::*;

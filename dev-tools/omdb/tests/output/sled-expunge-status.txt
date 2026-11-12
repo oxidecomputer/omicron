@@ -1,0 +1,61 @@
+    MGS [fd00:1122:3344:102::2]:12225 rack ID unknown: this MGS' rack ID has not been set
+    unfinished requests: 10
+    request 00000000-0000-0000-0000-00005ab00000
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              last_error unchanged
+        last_error:           the removal has stayed preparing
+    request 00000000-0000-0000-0000-00005ab00001
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              failed
+        failure_reason:       the removal was aborted
+    request 00000000-0000-0000-0000-00005ab00002
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        outcome:              changed concurrently, left for the next activation
+        current_state:        powering_off
+    request 00000000-0000-0000-0000-00005ab00003
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          powered off in slot 3 via [fd00:1122:3344:102::2]:12225
+        outcome:              expunged the sled; done
+        previous sled policy: not provisionable
+    request 00000000-0000-0000-0000-00005ab00004
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          not powered off in slot 3
+            failed via [fd00:1122:3344:101::2]:12225: identity re-check failed; nothing sent: Communication Error: connection refused
+            failed via [fd00:1122:3344:102::2]:12225: power-off command failed: Error Response: status: 503 Service Unavailable
+        outcome:              set last_error
+        last_error:           the sled could not be powered off
+    request 00000000-0000-0000-0000-00005ab00005
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          slot 3 holds another board (913-0000019:BRM42220004) per [fd00:1122:3344:101::2]:12225; nothing sent
+        outcome:              set last_error
+        last_error:           the slot holds another
+    request 00000000-0000-0000-0000-00005ab00006
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                waiting_for_trust_quorum
+        state after:          powering_off
+        power check:          no MGS for the rack
+        outcome:              set last_error
+        last_error:           no management gateway
+    request 00000000-0000-0000-0000-00005ab00007
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          in another rack in inventory (6174c6ce-9bb1-4ce8-afc3-97fc1e6aa450)
+        outcome:              set last_error
+        last_error:           in another rack
+    request 00000000-0000-0000-0000-00005ab00008
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                powering_off
+        power check:          in switch-attached cubby 14
+        outcome:              set last_error
+        last_error:           the sled is a scrimlet
+    request 00000000-0000-0000-0000-00005ab00009
+        sled:                 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+        state:                expunging
+        outcome:              error
+        error:                completing the request: Internal Error: the sled's state refuses the expunge

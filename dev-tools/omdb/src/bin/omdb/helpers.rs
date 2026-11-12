@@ -50,6 +50,15 @@ pub(crate) fn display_option_blank<T: std::fmt::Display>(
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
 
+pub(crate) fn display_option_dash<T: std::fmt::Display>(
+    opt: &Option<T>,
+) -> String {
+    match opt {
+        Some(value) => value.to_string(),
+        None => String::from("-"),
+    }
+}
+
 /// Display the string `<INVALID>` for an Option<T> if it's None.
 pub(crate) fn display_option_invalid<T: std::fmt::Display>(
     opt: &Option<T>,
