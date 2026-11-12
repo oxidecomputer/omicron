@@ -8,11 +8,16 @@
 use crate::{CliCommand, parse};
 
 /// Parses `line`, panicking with the error if it does not parse.
+#[track_caller]
 pub(crate) fn parse_ok(line: &str) -> CliCommand {
-    parse(line).unwrap_or_else(|e| panic!("`{line}` should parse: {e}"))
+    match parse(line) {
+        Ok(command) => command,
+        Err(e) => panic!("`{line}` should parse: {e}"),
+    }
 }
 
 /// Asserts that none of `lines` parse.
+#[track_caller]
 pub(crate) fn parse_err(lines: &[&str]) {
     for line in lines {
         if let Ok(command) = parse(line) {
