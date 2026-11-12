@@ -302,6 +302,36 @@ impl DataStore {
         Ok(requests)
     }
 
+    // TODO-RAINCLAUDE: check 2.1 on its own, outside a transaction, so that the caller can return the sled's unfinished request without first probing MGS for where the sled is; None means there is none right now, and sled_expunge_request_create's own check 2.1 stays the source of truth if one appears before it runs.
+    pub async fn sled_expunge_request_find_outstanding(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        acknowledged_serial: &str,
+    ) -> Result<Option<SledExpungeRequest>, Error> {
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+        opctx.authorize(authz::Action::Modify, authz_tq).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let sled_id = authz_sled.id();
+        let Some(request) =
+            Self::sled_expunge_request_unfinished_for_sled_conn(&conn, sled_id)
+                .await
+                .map_err(|error| {
+                    public_error_from_diesel(error, ErrorHandler::Server)
+                })?
+        else {
+            return Ok(None);
+        };
+        sled_expunge_request_replay_outstanding(
+            sled_id,
+            authz_tq.rack().id(),
+            acknowledged_serial,
+            request,
+        )
+        .map(Some)
+    }
+
     // TODO-RAINCLAUDE: RFD 747 request creation, one retried transaction running checks 2.1 to 2.9 in order. 2.1 comes first so that a retry after a lost response finds the sled's unfinished request, even once the sled has left the trust quorum; it still needs the same serial number. Database errors stay retryable; every refusal rolls back all of the writes. Modify on the sled and on the rack's trust quorum config is checked here, once each, before the transaction; authz_tq must be for the sled's rack. presence is what the caller found (through inventory and MGS, outside the transaction) about where the sled is, and is recorded as sp_slot only on a new request; a replay returns the outstanding request as it was created, whatever presence says.
     pub async fn sled_expunge_request_create(
         &self,

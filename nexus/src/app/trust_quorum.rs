@@ -270,7 +270,7 @@ impl super::Nexus {
     /// the config crashes before this is called, the coordinator never receives
     /// the config, and the reconfiguration gets stuck in the preparing phase.
     /// We should fix this for real.
-    async fn tq_send_reconfigure(
+    pub(crate) async fn tq_send_reconfigure(
         &self,
         opctx: &OpContext,
         config: &TrustQuorumConfig,

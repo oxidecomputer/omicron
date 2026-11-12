@@ -12,7 +12,10 @@ use crate::inventory::SpType;
 use crate::trust_quorum::RemoveSledError;
 use crate::trust_quorum::TrustQuorumConfig;
 use crate::trust_quorum::TrustQuorumConfigState;
+use gateway_types::ignition::SpIgnition;
+use gateway_types::ignition::SpIgnitionSystemType;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledExpungeRequestUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
@@ -20,6 +23,8 @@ use serde::Serialize;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::membership::TrustQuorumMembersError;
@@ -329,6 +334,163 @@ pub fn is_empty_baseboard_id(baseboard_id: &BaseboardId) -> bool {
     baseboard_id.part_number.is_empty() || baseboard_id.serial_number.is_empty()
 }
 
+// TODO-RAINCLAUDE: what the latest inventory collection says about where a sled is, for creating its expunge request (RFD 747). InCubby: its SP is in a sled cubby of its rack, so that cubby is recorded. NotInInventory: neither its SP nor its sled agent is in the collection (or there is no collection), so an ignition scan decides whether it is gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SledExpungeInventoryPresence {
+    InCubby { sp_slot: u16 },
+    NotInInventory,
+}
+
+// TODO-RAINCLAUDE: a sled agent without its SP is refused rather than scanned for: the sled is running, and without its SP record its cubby is unknown, so it can't be powered off safely. An SP record that is ours but not a sled's, or in another rack, should not happen and is refused too.
+pub fn sled_expunge_inventory_presence(
+    latest_collection: Option<&Collection>,
+    sled_id: SledUuid,
+    rack_id: RackUuid,
+    baseboard_id: &BaseboardId,
+) -> Result<SledExpungeInventoryPresence, Error> {
+    let Some(collection) = latest_collection else {
+        return Ok(SledExpungeInventoryPresence::NotInInventory);
+    };
+    let not_in_sled_cubby = |kind: &str, slot: u16| {
+        Error::conflict(format!(
+            "Cannot expunge sled {sled_id}: the latest inventory collection \
+             ({}) found its service processor in {kind} slot {} rather than \
+             in a sled cubby, so where to power it off is unclear. Contact \
+             Oxide support.",
+            collection.id, slot,
+        ))
+    };
+    match collection.sps.get(baseboard_id) {
+        Some(sp) => match sp.sp_type {
+            SpType::Sled if sp.rack_id == rack_id => {
+                Ok(SledExpungeInventoryPresence::InCubby {
+                    sp_slot: sp.sp_slot,
+                })
+            }
+            SpType::Sled => Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest inventory \
+                 collection ({}) found its service processor in sled cubby {} \
+                 of rack {}, but the sled is in rack {rack_id}, so where to \
+                 power it off is unclear. Contact Oxide support.",
+                collection.id, sp.sp_slot, sp.rack_id,
+            ))),
+            SpType::Switch => Err(not_in_sled_cubby("switch", sp.sp_slot)),
+            SpType::Power => Err(not_in_sled_cubby("power shelf", sp.sp_slot)),
+        },
+        None if collection.sled_agents.get(&sled_id).is_some() => {
+            Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest inventory \
+                 collection ({}) has a record from its sled agent but none \
+                 from its service processor, so the cubby it must be powered \
+                 off in is unknown. Retry after the next inventory \
+                 collection; if this persists, check that the sled's service \
+                 processor is reachable, or contact Oxide support.",
+                collection.id,
+            )))
+        }
+        None => Ok(SledExpungeInventoryPresence::NotInInventory),
+    }
+}
+
+// TODO-RAINCLAUDE: the sled cubbies ignition reports present and powered with a sled system type, any of which could be running a sled that is missing from inventory. An unknown system type counts, since it may be a newer sled; a sidecar or PSC system type in a sled cubby does not.
+pub fn sled_expunge_powered_sled_cubbies(
+    sled_ignition: &BTreeMap<u16, SpIgnition>,
+) -> BTreeSet<u16> {
+    sled_ignition
+        .iter()
+        .filter_map(|(slot, ignition)| match ignition {
+            SpIgnition::Absent | SpIgnition::Present { power: false, .. } => {
+                None
+            }
+            SpIgnition::Present { power: true, id, .. } => match id {
+                SpIgnitionSystemType::Gimlet
+                | SpIgnitionSystemType::Cosmo
+                | SpIgnitionSystemType::Unknown { .. } => Some(*slot),
+                SpIgnitionSystemType::Sidecar | SpIgnitionSystemType::Psc => {
+                    None
+                }
+            },
+        })
+        .collect()
+}
+
+// TODO-RAINCLAUDE: the board the collection found in a sled cubby of the rack, if it has a non-empty identity for it; a cubby without one needs an sp_get through MGS.
+pub fn sled_expunge_collection_cubby_identity(
+    latest_collection: Option<&Collection>,
+    rack_id: RackUuid,
+    slot: u16,
+) -> Option<&BaseboardId> {
+    latest_collection?
+        .sps
+        .iter()
+        .find(|(baseboard_id, sp)| {
+            sp.sp_slot == slot
+                && sp.rack_id == rack_id
+                && !is_empty_baseboard_id(baseboard_id)
+                && match sp.sp_type {
+                    SpType::Sled => true,
+                    SpType::Switch | SpType::Power => false,
+                }
+        })
+        .map(|(baseboard_id, _)| &**baseboard_id)
+}
+
+// TODO-RAINCLAUDE: what is in a powered sled cubby, from the collection or else an sp_get through MGS; SpUnreachable means the sp_get failed, whose details the caller logs rather than putting MGS addresses and client errors in the operator-facing refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SledCubbyIdentity {
+    Known(BaseboardId),
+    SpUnreachable,
+}
+
+// TODO-RAINCLAUDE: where an ignition scan places a sled that is not in inventory: in the cubby that holds its board, or gone, which needs every powered sled cubby to be identified as some other board.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SledExpungeIgnitionPresence {
+    InCubby { sp_slot: u16 },
+    Gone,
+}
+
+// TODO-RAINCLAUDE: identities maps each powered sled cubby (sled_expunge_powered_sled_cubbies) to what is in it. Finding our board settles it whatever the other cubbies hold, since a board is in one cubby only; otherwise any cubby whose board is unknown or reported empty could be our sled still running, so the request is refused.
+pub fn sled_expunge_ignition_presence(
+    sled_id: SledUuid,
+    baseboard_id: &BaseboardId,
+    identities: &BTreeMap<u16, SledCubbyIdentity>,
+) -> Result<SledExpungeIgnitionPresence, Error> {
+    let mut unidentified = Vec::new();
+    for (slot, identity) in identities {
+        match identity {
+            SledCubbyIdentity::Known(found) if found == baseboard_id => {
+                return Ok(SledExpungeIgnitionPresence::InCubby {
+                    sp_slot: *slot,
+                });
+            }
+            SledCubbyIdentity::Known(found) if is_empty_baseboard_id(found) => {
+                unidentified.push(format!(
+                    "cubby {slot}: its service processor reported an empty \
+                     baseboard identity"
+                ));
+            }
+            SledCubbyIdentity::Known(_) => {}
+            SledCubbyIdentity::SpUnreachable => {
+                unidentified.push(format!(
+                    "cubby {slot}: its service processor did not answer"
+                ));
+            }
+        }
+    }
+    if unidentified.is_empty() {
+        return Ok(SledExpungeIgnitionPresence::Gone);
+    }
+    Err(Error::conflict(format!(
+        "Cannot expunge sled {sled_id}: neither its service processor nor its \
+         sled agent is in the latest inventory collection, but ignition \
+         reports powered sled cubbies whose boards could not be identified, \
+         so the sled may still be running in one of them ({}). Retry after \
+         the next inventory collection; if this persists, contact Oxide \
+         support.",
+        unidentified.join("; "),
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,6 +647,92 @@ mod tests {
                 ),
                 expected,
                 "{evidence:?}, sled row {sled_row_role:?}",
+            );
+        }
+    }
+
+    fn ignition(id: SpIgnitionSystemType, power: bool) -> SpIgnition {
+        SpIgnition::Present {
+            id,
+            power,
+            ctrl_detect_0: true,
+            ctrl_detect_1: true,
+            flt_a3: false,
+            flt_a2: false,
+            flt_rot: false,
+            flt_sp: false,
+        }
+    }
+
+    #[test]
+    fn test_sled_expunge_powered_sled_cubbies() {
+        let sleds = BTreeMap::from([
+            (0, SpIgnition::Absent),
+            (1, ignition(SpIgnitionSystemType::Gimlet, false)),
+            (2, ignition(SpIgnitionSystemType::Gimlet, true)),
+            (3, ignition(SpIgnitionSystemType::Cosmo, true)),
+            (4, ignition(SpIgnitionSystemType::Unknown { id: 9 }, true)),
+            (5, ignition(SpIgnitionSystemType::Sidecar, true)),
+            (6, ignition(SpIgnitionSystemType::Psc, true)),
+        ]);
+        assert_eq!(
+            sled_expunge_powered_sled_cubbies(&sleds),
+            BTreeSet::from([2, 3, 4]),
+        );
+    }
+
+    #[test]
+    fn test_sled_expunge_ignition_presence() {
+        let sled_id = SledUuid::new_v4();
+        let board = |serial: &str| BaseboardId {
+            part_number: "913-0000019".to_string(),
+            serial_number: serial.to_string(),
+        };
+        let ours = board("ours");
+        let known = |serial: &str| SledCubbyIdentity::Known(board(serial));
+        let unknown = SledCubbyIdentity::SpUnreachable;
+        let empty = SledCubbyIdentity::Known(board(""));
+        let refused = |unidentified: &str| {
+            Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: neither its service processor \
+                 nor its sled agent is in the latest inventory collection, \
+                 but ignition reports powered sled cubbies whose boards could \
+                 not be identified, so the sled may still be running in one \
+                 of them ({unidentified}). Retry after the next inventory \
+                 collection; if this persists, contact Oxide support."
+            )))
+        };
+
+        // TODO-RAINCLAUDE: one row per outcome: no powered cubbies and only other boards are gone; our board wins over an unidentified cubby; an unknown or empty identity refuses.
+        let cases = [
+            (vec![], Ok(SledExpungeIgnitionPresence::Gone)),
+            (
+                vec![(2, known("other")), (3, known("another"))],
+                Ok(SledExpungeIgnitionPresence::Gone),
+            ),
+            (
+                vec![(2, unknown.clone()), (5, known("ours"))],
+                Ok(SledExpungeIgnitionPresence::InCubby { sp_slot: 5 }),
+            ),
+            (
+                vec![(2, known("other")), (3, unknown.clone())],
+                refused("cubby 3: its service processor did not answer"),
+            ),
+            (
+                vec![(2, empty.clone()), (3, unknown.clone())],
+                refused(
+                    "cubby 2: its service processor reported an empty \
+                     baseboard identity; cubby 3: its service processor did \
+                     not answer",
+                ),
+            ),
+        ];
+        for (identities, expected) in cases {
+            let identities: BTreeMap<_, _> = identities.into_iter().collect();
+            assert_eq!(
+                sled_expunge_ignition_presence(sled_id, &ours, &identities),
+                expected,
+                "{identities:?}",
             );
         }
     }
