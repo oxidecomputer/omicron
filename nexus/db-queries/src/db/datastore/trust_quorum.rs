@@ -1698,8 +1698,7 @@ mod tests {
     use crate::db::datastore::sled::TransitionError;
     use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
-    use crate::db::pub_test_utils::helpers::SledSystemHardwareBuilder;
-    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
+    use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::result::Error as DieselError;
     use nexus_db_lookup::LookupPath;
@@ -1707,19 +1706,16 @@ mod tests {
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
-    use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledState;
-    use nexus_db_model::SledUpdate;
     use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::identity::Asset;
     use nexus_types::trust_quorum::{
         IsLrtqUpgrade, TrustQuorumConfigState, TrustQuorumMemberState,
     };
-    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
-    use std::net::{Ipv6Addr, SocketAddrV6};
     use uuid::Uuid;
 
     fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
@@ -1756,30 +1752,18 @@ mod tests {
     }
 
     /// Insert a sled whose baseboard matches `hw`.
-    ///
-    /// `SledUpdateBuilder` always uses `sled_baseboard_for_test()`, so build the
-    /// `SledUpdate` directly to control the part number and serial.
     async fn insert_sled_for_baseboard(
         datastore: &DataStore,
         rack_id: RackUuid,
         hw: &HwBaseboardId,
     ) -> SledUuid {
-        let sled_id = SledUuid::new_v4();
-        let update = SledUpdate::new(
-            sled_id,
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
-            0,
-            SledBaseboard {
-                serial_number: hw.serial_number.clone(),
-                part_number: hw.part_number.clone(),
-                revision: 1,
-            },
-            SledSystemHardwareBuilder::new().build(),
+        sled_upsert_for_baseboard(
+            datastore,
             rack_id,
-            SledRegistrationGeneration::new(),
-        );
-        sled_upsert_expect_written(datastore, update).await;
-        sled_id
+            &BaseboardId::from(hw.clone()),
+        )
+        .await
+        .id()
     }
 
     #[tokio::test]
