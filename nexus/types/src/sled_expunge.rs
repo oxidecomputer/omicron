@@ -8,6 +8,8 @@
 // Nothing in this module reads the database or talks to MGS, so each rule can
 // be tested on its own.
 
+use crate::external_api::rack::RackMembershipVersion;
+use crate::external_api::sled as views;
 use crate::external_api::sled::SledPolicy;
 use crate::external_api::sled::SledProvisionPolicy;
 use crate::external_api::sled::SledState;
@@ -33,6 +35,7 @@ use serde::Serialize;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::SocketAddrV6;
@@ -928,6 +931,237 @@ impl SledExpungeRequestTransition {
 pub enum SledExpungeCubbyPrecondition {
     Any,
     Equals(Option<SledExpungeRecordedCubby>),
+}
+
+impl From<SledExpungeRequest> for views::SledExpungeRequest {
+    fn from(request: SledExpungeRequest) -> Self {
+        let SledExpungeRequest {
+            id,
+            rack_id,
+            sled_id,
+            baseboard_id,
+            tq_epoch,
+            state,
+            time_created,
+            time_modified,
+        } = request;
+        Self {
+            id,
+            rack_id,
+            sled_id,
+            baseboard_id,
+            status: state.into(),
+            rack_membership_version: RackMembershipVersion(tq_epoch.0),
+            time_created,
+            time_modified,
+        }
+    }
+}
+
+impl From<SledExpungeRequestState> for views::SledExpungeRequestState {
+    fn from(state: SledExpungeRequestState) -> Self {
+        match state {
+            SledExpungeRequestState::WaitingForTrustQuorum {
+                cubby,
+                last_error,
+            } => Self::WaitingForTrustQuorum {
+                cubby: cubby.map(views::SledExpungeCubby::from),
+                last_error,
+            },
+            SledExpungeRequestState::PoweringOff { cubby, last_error } => {
+                Self::PoweringOff {
+                    cubby: cubby.map(views::SledExpungeCubby::from),
+                    last_error,
+                }
+            }
+            SledExpungeRequestState::Expunging { power_off, last_error } => {
+                Self::Expunging { power_off: power_off.into(), last_error }
+            }
+            SledExpungeRequestState::Done { power_off, time_completed } => {
+                Self::Done { power_off: power_off.into(), time_completed }
+            }
+            SledExpungeRequestState::Failed {
+                power_off,
+                failure_reason,
+                time_completed,
+            } => Self::Failed {
+                failure_reason,
+                power_off: power_off.into(),
+                time_completed,
+            },
+        }
+    }
+}
+
+impl From<SledExpungeRecordedCubby> for views::SledExpungeCubby {
+    fn from(cubby: SledExpungeRecordedCubby) -> Self {
+        let SledExpungeRecordedCubby { slot, source } = cubby;
+        Self { slot, source: source.into() }
+    }
+}
+
+impl From<SledExpungeSpSlotSource> for views::SledExpungeCubbySource {
+    fn from(source: SledExpungeSpSlotSource) -> Self {
+        match source {
+            SledExpungeSpSlotSource::Inventory => Self::Inventory,
+            SledExpungeSpSlotSource::LiveScan => Self::LiveScan,
+            SledExpungeSpSlotSource::FoundAfterAbsent => Self::FoundAfterAbsent,
+            SledExpungeSpSlotSource::Relocated => Self::Relocated,
+        }
+    }
+}
+
+impl From<SledExpungePowerOff> for views::SledExpungePowerOffOutcome {
+    fn from(power_off: SledExpungePowerOff) -> Self {
+        match power_off {
+            SledExpungePowerOff::Cubby { cubby, outcome } => {
+                let cubby = views::SledExpungeCubby::from(cubby);
+                match outcome {
+                    SledExpungeCubbyPowerOffOutcome::PoweredOff => {
+                        Self::PoweredOff { cubby }
+                    }
+                    SledExpungeCubbyPowerOffOutcome::AlreadyOff => {
+                        Self::AlreadyOff { cubby }
+                    }
+                    SledExpungeCubbyPowerOffOutcome::OtherBoardPresent => {
+                        Self::OtherBoardPresent { cubby }
+                    }
+                    SledExpungeCubbyPowerOffOutcome::NotPresent => {
+                        Self::NotPresent { cubby }
+                    }
+                }
+            }
+            SledExpungePowerOff::AbsentAtCreation => Self::AbsentAtCreation,
+        }
+    }
+}
+
+impl From<SledExpungePowerOffProgress> for views::SledExpungePowerOffProgress {
+    fn from(progress: SledExpungePowerOffProgress) -> Self {
+        match progress {
+            SledExpungePowerOffProgress::Pending { cubby } => Self::Pending {
+                cubby: cubby.map(views::SledExpungeCubby::from),
+            },
+            SledExpungePowerOffProgress::Settled(power_off) => {
+                Self::Settled { outcome: power_off.into() }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SledExpungeInventoryPresence {
+    InCubby { sp_slot: u16 },
+    NotInInventory,
+}
+
+// TODO-RAINCLAUDE: Returns what the latest inventory collection says about
+// where the sled is.
+//
+// Some cases are refused:
+// * The collection has the sled's sled agent but not its SP. The sled is
+//   running, but its cubby is unknown, so it can't be powered off safely. This
+//   is a 409.
+// * The collection has the sled's SP in a sled cubby of another rack. That is
+//   physically possible, so it is also a 409.
+// * The collection has the sled's baseboard on a switch or power shelf SP. That
+//   can't happen, so the collection is corrupt, and this is a 500.
+pub fn sled_expunge_inventory_presence(
+    latest_collection: Option<&Collection>,
+    sled_id: SledUuid,
+    rack_id: RackUuid,
+    baseboard_id: &BaseboardId,
+) -> Result<SledExpungeInventoryPresence, Error> {
+    let Some(collection) = latest_collection else {
+        return Ok(SledExpungeInventoryPresence::NotInInventory);
+    };
+    let not_in_sled_cubby = |kind: &str, slot: u16| {
+        Error::internal_error(&format!(
+            "sled expunge inventory presence for sled {sled_id}: inventory \
+             collection {} has the sled's baseboard {baseboard_id} on a \
+             {kind} SP in slot {slot}, which a sled's baseboard can't be",
+            collection.id,
+        ))
+    };
+    match collection.sps.get(baseboard_id) {
+        Some(sp) => match sp.sp_type {
+            SpType::Sled if sp.rack_id == rack_id => {
+                Ok(SledExpungeInventoryPresence::InCubby {
+                    sp_slot: sp.sp_slot,
+                })
+            }
+            SpType::Sled => Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest inventory \
+                 collection ({}) found its service processor in sled cubby {} \
+                 of rack {}, but the sled is in rack {rack_id}, so where to \
+                 power it off is unclear. Contact Oxide support.",
+                collection.id, sp.sp_slot, sp.rack_id,
+            ))),
+            SpType::Switch => Err(not_in_sled_cubby("switch", sp.sp_slot)),
+            SpType::Power => Err(not_in_sled_cubby("power shelf", sp.sp_slot)),
+        },
+        None if collection.sled_agents.get(&sled_id).is_some() => {
+            Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest inventory \
+                 collection ({}) has a record from its sled agent but none \
+                 from its service processor, so the cubby it must be powered \
+                 off in is unknown. Retry after the next inventory \
+                 collection; if this persists, check that the sled's service \
+                 processor is reachable, or contact Oxide support.",
+                collection.id,
+            )))
+        }
+        None => Ok(SledExpungeInventoryPresence::NotInInventory),
+    }
+}
+
+// TODO-RAINCLAUDE: Returns the boards that the latest collection found in this
+// rack's sled cubbies. Request creation treats these cubbies as identified
+// without an `sp_get`.
+//
+// Two kinds of cubby are left out, so that they are identified live instead:
+// * A cubby in which the collection found two different boards.
+// * Every switch-attached cubby. A sled in one of those is a scrimlet, so
+//   creation doesn't take the collection's word for what is there.
+pub fn sled_expunge_collection_cubby_identities(
+    latest_collection: Option<&Collection>,
+    rack_id: RackUuid,
+) -> IdOrdMap<SledCubbyBoard> {
+    let Some(collection) = latest_collection else {
+        return IdOrdMap::new();
+    };
+    let mut boards: BTreeMap<u16, BTreeSet<NonEmptyBaseboardId>> =
+        BTreeMap::new();
+    for (baseboard_id, sp) in &collection.sps {
+        let in_sled_cubby = match sp.sp_type {
+            SpType::Sled => true,
+            SpType::Switch | SpType::Power => false,
+        };
+        if !in_sled_cubby
+            || sp.rack_id != rack_id
+            || SWITCH_ATTACHED_SLED_CUBBIES.contains(&sp.sp_slot)
+        {
+            continue;
+        }
+        match NonEmptyBaseboardId::new((**baseboard_id).clone()) {
+            Ok(baseboard_id) => {
+                boards.entry(sp.sp_slot).or_default().insert(baseboard_id);
+            }
+            Err(_empty) => {}
+        }
+    }
+    boards
+        .into_iter()
+        .filter_map(|(slot, boards)| {
+            let mut boards = boards.into_iter();
+            match (boards.next(), boards.next()) {
+                (Some(baseboard_id), None) => {
+                    Some(SledCubbyBoard { slot, baseboard_id })
+                }
+                (Some(_), Some(_)) | (None, _) => None,
+            }
+        })
+        .collect()
 }
 
 #[derive(

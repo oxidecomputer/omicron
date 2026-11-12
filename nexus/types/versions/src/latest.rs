@@ -594,6 +594,16 @@ pub mod sled {
     pub use crate::v2025_11_20_00::sled::SledState;
     pub use crate::v2025_11_20_00::sled::SwitchSelector;
     pub use crate::v2026_08_12_00::sled::Sled;
+
+    pub use crate::v2026_11_24_00::sled::SledExpungeCubby;
+    pub use crate::v2026_11_24_00::sled::SledExpungeCubbySource;
+    pub use crate::v2026_11_24_00::sled::SledExpungeParams;
+    pub use crate::v2026_11_24_00::sled::SledExpungePowerOffOutcome;
+    pub use crate::v2026_11_24_00::sled::SledExpungePowerOffProgress;
+    pub use crate::v2026_11_24_00::sled::SledExpungeRequest;
+    pub use crate::v2026_11_24_00::sled::SledExpungeRequestDisposition;
+    pub use crate::v2026_11_24_00::sled::SledExpungeRequestState;
+    pub use crate::v2026_11_24_00::sled::SledExpungeResponse;
 }
 
 pub mod ssh_key {
@@ -649,4 +659,6 @@ pub mod path_params {
     pub use crate::v2025_11_20_00::path_params::TufTrustRootPath;
     pub use crate::v2025_11_20_00::path_params::UserPath;
     pub use crate::v2025_11_20_00::path_params::VpcPath;
+
+    pub use crate::v2026_11_24_00::path_params::SledExpungeRequestPath;
 }

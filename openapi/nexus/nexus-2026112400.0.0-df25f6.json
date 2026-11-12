@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026112100.0.0"
+    "version": "2026112400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -8299,6 +8299,102 @@
         }
       }
     },
+    "/v1/system/hardware/sled-expunge-requests": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "operationId": "sled_expunge_request_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledExpungeRequestResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/sled-expunge-requests/{sled_expunge_request_id}": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "operationId": "sled_expunge_request_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_expunge_request_id",
+            "description": "ID of the sled expunge request",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledExpungeRequest"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/sleds": {
       "get": {
         "tags": [
@@ -8463,6 +8559,54 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/sleds/{sled_id}/expunge": {
+      "post": {
+        "tags": [
+          "system/hardware"
+        ],
+        "operationId": "sled_expunge",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledExpungeParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledExpungeResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -28167,6 +28311,15 @@
           "items"
         ]
       },
+      "RackUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "RelatedProblem": {
         "description": "A problem that is a cause or consequence of another problem",
         "type": "object",
@@ -29652,6 +29805,398 @@
             "type": "boolean"
           }
         }
+      },
+      "SledExpungeCubby": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/SledExpungeCubbySource"
+          }
+        },
+        "required": [
+          "slot",
+          "source"
+        ]
+      },
+      "SledExpungeCubbySource": {
+        "type": "string",
+        "enum": [
+          "inventory",
+          "live_scan",
+          "found_after_absent",
+          "relocated"
+        ]
+      },
+      "SledExpungeParams": {
+        "type": "object",
+        "properties": {
+          "serial": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "serial"
+        ]
+      },
+      "SledExpungePowerOffOutcome": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "$ref": "#/components/schemas/SledExpungeCubby"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "powered_off"
+                ]
+              }
+            },
+            "required": [
+              "cubby",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "$ref": "#/components/schemas/SledExpungeCubby"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "already_off"
+                ]
+              }
+            },
+            "required": [
+              "cubby",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "$ref": "#/components/schemas/SledExpungeCubby"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "other_board_present"
+                ]
+              }
+            },
+            "required": [
+              "cubby",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "$ref": "#/components/schemas/SledExpungeCubby"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_present"
+                ]
+              }
+            },
+            "required": [
+              "cubby",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "absent_at_creation"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "SledExpungePowerOffProgress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SledExpungeCubby"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "outcome": {
+                "$ref": "#/components/schemas/SledExpungePowerOffOutcome"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "settled"
+                ]
+              }
+            },
+            "required": [
+              "outcome",
+              "type"
+            ]
+          }
+        ]
+      },
+      "SledExpungeRequest": {
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SledExpungeRequestUuid"
+          },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "rack_membership_version": {
+            "$ref": "#/components/schemas/RackMembershipVersion"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SledExpungeRequestState"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "id",
+          "rack_id",
+          "rack_membership_version",
+          "sled_id",
+          "status",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SledExpungeRequestDisposition": {
+        "type": "string",
+        "enum": [
+          "created",
+          "already_outstanding"
+        ]
+      },
+      "SledExpungeRequestResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledExpungeRequest"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SledExpungeRequestState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SledExpungeCubby"
+                  }
+                ]
+              },
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_trust_quorum"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "cubby": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SledExpungeCubby"
+                  }
+                ]
+              },
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "powering_off"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "power_off": {
+                "$ref": "#/components/schemas/SledExpungePowerOffOutcome"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "expunging"
+                ]
+              }
+            },
+            "required": [
+              "power_off",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "power_off": {
+                "$ref": "#/components/schemas/SledExpungePowerOffOutcome"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "done"
+                ]
+              },
+              "time_completed": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "power_off",
+              "state",
+              "time_completed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "failure_reason": {
+                "type": "string"
+              },
+              "power_off": {
+                "$ref": "#/components/schemas/SledExpungePowerOffProgress"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              },
+              "time_completed": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "failure_reason",
+              "power_off",
+              "state",
+              "time_completed"
+            ]
+          }
+        ]
+      },
+      "SledExpungeRequestUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledExpungeRequestUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "SledExpungeResponse": {
+        "type": "object",
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/SledExpungeRequestDisposition"
+          },
+          "request": {
+            "$ref": "#/components/schemas/SledExpungeRequest"
+          }
+        },
+        "required": [
+          "disposition",
+          "request"
+        ]
       },
       "SledInstance": {
         "description": "An operator's view of an instance running on a given sled",

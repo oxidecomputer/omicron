@@ -334,6 +334,40 @@ impl DataStore {
         Ok(requests)
     }
 
+    // TODO-RAINCLAUDE: Looks for the sled's unfinished request without starting
+    // a creation, so that the caller can answer a retry with the existing
+    // request before it probes MGS. `None` only means that there was no such
+    // request at the time of this read, and `sled_expunge_request_create`
+    // checks again inside its transaction.
+    pub async fn sled_expunge_request_find_outstanding(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        acknowledged_serial: &str,
+    ) -> Result<Option<SledExpungeRequestOutstanding>, Error> {
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+        opctx.authorize(authz::Action::Modify, authz_tq).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let sled_id = authz_sled.id();
+        let Some(row) =
+            Self::sled_expunge_request_unfinished_for_sled_conn(&conn, sled_id)
+                .await
+                .map_err(|error| {
+                    public_error_from_diesel(error, ErrorHandler::Server)
+                })?
+        else {
+            return Ok(None);
+        };
+        sled_expunge_request_replay_outstanding(
+            sled_id,
+            authz_tq.rack().id(),
+            acknowledged_serial,
+            decode_sled_expunge_request(row)?,
+        )
+        .map(Some)
+    }
+
     // TODO-RAINCLAUDE: Creates a sled expunge request, running the creation
     // checks from RFD 747 in order inside one transaction.
     //
