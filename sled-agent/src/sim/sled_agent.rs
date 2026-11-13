@@ -13,6 +13,7 @@ use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
 use crate::instance_manager::VmmRegistrationDisallowedReason;
 use crate::nexus::NexusClient;
+use crate::rot::RotAttestor;
 use crate::sim::SimulatedUpstairs;
 use crate::sim::simulatable::Simulatable;
 use crate::support_bundle::storage::SupportBundleQueryType;
@@ -69,11 +70,13 @@ use sled_agent_types::inventory::{
     OmicronSledUpdateDisposition, SingleMeasurementInventory,
     SledRegistrationInfo, ZpoolHealth,
 };
+use sled_agent_types::rot::Rot;
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use sprockets_tls::keys::AttestConfig;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -166,6 +169,8 @@ pub struct SledAgent {
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+    /// Mock impl of the sled's RoT attestation endpoint
+    rot_attestor: Option<RotAttestor>,
 }
 
 /// A queue of pending pauses for one of the simulated sled-agent's VMM
@@ -399,10 +404,24 @@ impl SledAgent {
         nexus_client: Arc<NexusClient>,
         simulated_upstairs: Arc<SimulatedUpstairs>,
         sled_index: u16,
-    ) -> Arc<SledAgent> {
+    ) -> Result<Arc<SledAgent>, anyhow::Error> {
         let id = config.id;
         let sim_mode = config.sim_mode;
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
+
+        let rot_attestor = if let Some(cfg) = &config.rot {
+            let attest_config = AttestConfig::Local {
+                priv_key: cfg.alias_key.clone(),
+                cert_chain: cfg.cert_chain.clone(),
+                log: cfg.log.clone(),
+                test_corpus: vec![],
+            };
+            let rot = RotAttestor::new(&log, &attest_config)
+                .context("creating mock RoT")?;
+            Some(rot)
+        } else {
+            None
+        };
 
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
@@ -459,7 +478,7 @@ impl SledAgent {
 
         let scrimlet_reconcilers = ScrimletReconcilers::new(&log);
 
-        Arc::new(SledAgent {
+        Ok(Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
             vmms: Arc::new(SimCollection::new(
@@ -489,7 +508,8 @@ impl SledAgent {
             support_logs: Mutex::new(HashMap::new()),
             network_config_tx,
             scrimlet_reconcilers,
-        })
+            rot_attestor,
+        }))
     }
 
     /// Injects a synthetic zone log file to be served by the support-logs
@@ -506,6 +526,12 @@ impl SledAgent {
     /// Returns the names of zones with injected support logs.
     pub(super) fn support_log_zones(&self) -> Vec<String> {
         self.support_logs.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// Returns the mock RoT, or `None` if RoT artifacts were not configured.
+    pub(super) fn rot_attestor(&self, rot: Rot) -> Option<&RotAttestor> {
+        let Rot::Oxide = rot;
+        self.rot_attestor.as_ref()
     }
 
     pub fn current_bootstore_network_config(&self) -> bootstore::NetworkConfig {

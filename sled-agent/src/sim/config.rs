@@ -4,6 +4,7 @@
 
 //! Interfaces for working with sled agent configuration
 
+use camino::Utf8PathBuf;
 use dropshot::ConfigDropshot;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -69,6 +70,18 @@ pub struct ConfigHardware {
     pub baseboard: Baseboard,
 }
 
+/// Paths to the artifacts used to create a mock of the sled's Oxide RoT.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigRot {
+    /// PKCS#8 PEM encoded private key used to sign attestations
+    pub alias_key: Utf8PathBuf,
+    /// PEM encoded certificate chain, starting with the leaf certificate for
+    /// `alias_key`
+    pub cert_chain: Utf8PathBuf,
+    /// hubpack serialized measurement log
+    pub log: Utf8PathBuf,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
@@ -88,6 +101,10 @@ pub struct Config {
     pub hardware: ConfigHardware,
     /// is this sled a normal gimlet, or a scrimlet?
     pub sled_role: SledRole,
+    /// artifacts used to mock the sled's RoT, if `None` the RoT endpoints are
+    /// left unimplemented
+    #[serde(default)]
+    pub rot: Option<ConfigRot>,
 }
 
 pub enum ZpoolConfig {
@@ -178,6 +195,7 @@ impl Config {
                 },
             },
             sled_role,
+            rot: None,
         }
     }
 }
