@@ -495,13 +495,15 @@ pub async fn generate_proxy_identity(
     let key_path = format!("{zone_root}{SUSH_PROXY_KEY_PATH}");
     let chain_path = format!("{zone_root}{SUSH_PROXY_CERT_CHAIN_PATH}");
     let dir = Utf8Path::new(&key_path).parent().expect("key path has a parent");
-    create_dir_all(dir).await.with_context(|| format!("creating {dir}"))?;
+    create_dir_all(dir)
+        .await
+        .with_context(|| format!("failed to create {dir}"))?;
     write_private(&key_path, key_pem.as_bytes())
         .await
-        .with_context(|| format!("writing {key_path}"))?;
+        .with_context(|| format!("failed to write {key_path}"))?;
     tokio::fs::write(&chain_path, chain_pem.as_bytes())
         .await
-        .with_context(|| format!("writing {chain_path}"))?;
+        .with_context(|| format!("failed to write {chain_path}"))?;
     info!(log, "generated sush proxy TLS identity"; "key" => key_path);
     Ok(())
 }
@@ -513,28 +515,30 @@ pub async fn generate_proxy_identity(
 /// when we generate it, and (b) it's ephemeral and regenerated at every
 /// switch zone startup.
 fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
-    let ipcc = Ipcc::new().context("opening IPCC")?;
-    let chain_der =
-        ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
+    let ipcc = Ipcc::new().context("failed to open IPCC")?;
+    let chain_der = ipcc
+        .rot_get_tq_cert_chain()
+        .context("failed to fetch the TQ cert chain")?;
     let platform = der_cert_chain(&chain_der)?;
     let vouched = EphemeralKey::new_vouched(
         KeyType::Ed25519,
         "CN=sush-proxy,O=Oxide Computer Company,C=US"
             .parse()
-            .context("parsing the proxy cert subject")?,
+            .context("failed to parse the proxy cert subject")?,
         Validity {
             not_before: Time::try_from(SystemTime::now())
-                .context("computing validity")?,
+                .context("failed to compute the proxy cert validity")?,
             not_after: Time::INFINITY,
         },
         |digest| ipcc.rot_tq_sign(digest),
     )
-    .context("generating the proxy key")?;
+    .context("failed to generate the proxy key")?;
     let key_pem =
-        vouched.private_key_pem().context("encoding the proxy key")?;
+        vouched.private_key_pem().context("failed to encode the proxy key")?;
     let chain =
         once(vouched.cert().clone()).chain(platform).collect::<Vec<_>>();
-    let chain_pem = pem_cert_chain(chain).context("encoding the chain")?;
+    let chain_pem = pem_cert_chain(chain)
+        .context("failed to encode the proxy cert chain")?;
     Ok((key_pem, chain_pem))
 }
 
