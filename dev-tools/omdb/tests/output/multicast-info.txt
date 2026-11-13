@@ -1,0 +1,99 @@
+CASE: active group with underlay and members
+---------------------------------------------
+stdout:
+MULTICAST GROUP
+                id: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+              name: test-group
+             state: Active
+      multicast_ip: 232.1.2.3
+               vni: 77
+        source_ips: 10.0.0.1,10.0.0.2
+           ip_pool: mcast-pool (9d8e2f61-7c0d-4b6a-9e5f-3a4b5c6d7e8f)
+    underlay_group: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f
+               tag: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1:232.1.2.3
+           created: 2026-01-02T03:04:05.000Z
+
+UNDERLAY GROUP
+                id: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f
+      multicast_ip: ff04::e801:203
+               tag: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1:232.1.2.3
+           created: 2026-01-02T03:04:06.000Z
+
+MEMBERS (2):
+ID                                   PARENT_KIND PARENT  STATE  MULTICAST_IP SOURCES           SLED        CREATED                  
+0a1b2c3d-4e5f-4a6b-8c7d-8e9fa0b1c2d3 instance    web-0   Joined 232.1.2.3    10.0.0.1,10.0.0.2 BRM42220001 2026-01-02T03:05:00.000Z 
+f0e1d2c3-b4a5-4968-8776-655443322110 probe       probe-0 Left   232.1.2.3    10.0.0.2          -           2026-01-02T03:06:00.000Z 
+---------------------------------------------
+stderr:
+=============================================
+CASE: creating group without underlay or members
+---------------------------------------------
+stdout:
+MULTICAST GROUP
+                id: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+              name: test-group
+             state: Creating
+      multicast_ip: 232.1.2.3
+               vni: 77
+        source_ips: -
+           ip_pool: mcast-pool (9d8e2f61-7c0d-4b6a-9e5f-3a4b5c6d7e8f)
+    underlay_group: -
+               tag: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1:232.1.2.3
+           created: 2026-01-02T03:04:05.000Z
+
+MEMBERS: (none)
+---------------------------------------------
+stderr:
+=============================================
+CASE: deleted group with --include-deleted
+---------------------------------------------
+stdout:
+MULTICAST GROUP
+                id: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+              name: test-group
+             state: Deleting
+      multicast_ip: 232.1.2.3
+               vni: 77
+        source_ips: 10.0.0.1,10.0.0.2
+           ip_pool: mcast-pool (9d8e2f61-7c0d-4b6a-9e5f-3a4b5c6d7e8f)
+    underlay_group: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f
+               tag: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1:232.1.2.3
+           created: 2026-01-02T03:04:05.000Z
+           deleted: 2026-01-03T00:00:00.000Z
+
+UNDERLAY GROUP
+                id: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f
+      multicast_ip: ff04::e801:203
+               tag: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1:232.1.2.3
+           created: 2026-01-02T03:04:06.000Z
+           deleted: 2026-01-03T00:00:00.000Z
+
+MEMBERS (2):
+ID                                   PARENT_KIND PARENT  STATE  MULTICAST_IP SOURCES           SLED        CREATED                  TIME_DELETED             
+0a1b2c3d-4e5f-4a6b-8c7d-8e9fa0b1c2d3 instance    web-0   Joined 232.1.2.3    10.0.0.1,10.0.0.2 BRM42220001 2026-01-02T03:05:00.000Z -                        
+f0e1d2c3-b4a5-4968-8776-655443322110 probe       probe-0 Left   232.1.2.3    -                 -           2026-01-02T03:06:00.000Z 2026-01-03T00:00:00.000Z 
+---------------------------------------------
+stderr:
+=============================================
+CASE: ASM group whose members all list sources
+---------------------------------------------
+stdout:
+MULTICAST GROUP
+                id: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1
+              name: test-group
+             state: Active
+      multicast_ip: 224.1.2.4
+               vni: 77
+        source_ips: 10.0.0.1,10.0.0.2
+           ip_pool: mcast-pool (9d8e2f61-7c0d-4b6a-9e5f-3a4b5c6d7e8f)
+    underlay_group: -
+               tag: 1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1:224.1.2.4
+           created: 2026-01-02T03:04:05.000Z
+
+MEMBERS (2):
+ID                                   PARENT_KIND PARENT  STATE  MULTICAST_IP SOURCES           SLED        CREATED                  
+0a1b2c3d-4e5f-4a6b-8c7d-8e9fa0b1c2d3 instance    web-0   Joined 224.1.2.4    10.0.0.1,10.0.0.2 BRM42220001 2026-01-02T03:05:00.000Z 
+f0e1d2c3-b4a5-4968-8776-655443322110 probe       probe-0 Left   224.1.2.4    10.0.0.2          -           2026-01-02T03:06:00.000Z 
+---------------------------------------------
+stderr:
+=============================================
