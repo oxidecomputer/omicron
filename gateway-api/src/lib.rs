@@ -10,7 +10,7 @@ use dropshot::{
     WebsocketUpgrade,
 };
 use dropshot_api_manager_types::api_versions;
-use gateway_types_versions::{latest, v1};
+use gateway_types_versions::{latest, v1, v2};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (9, METRO_OBSERVER),
     (8, REJECT_LOCAL_SWITCH_RESETS),
     (7, BYTE_WRAPPER_0_2_BUMP),
     (6, ARTIFACT_HASH_SCHEMA),
@@ -436,28 +437,38 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition",
-        versions = VERSION_COSMO..
+        versions = VERSION_METRO_OBSERVER..,
     }]
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::ignition::SpIgnitionInfo>>, HttpError>;
 
-    /// List SPs via Ignition
-    ///
-    /// Retreive information for all SPs via the Ignition controller. This is
-    /// lower latency and has fewer possible failure modes than querying the SP
-    /// over the management network.
     #[endpoint {
         method = GET,
         path = "/ignition",
         operation_id = "ignition_list",
-        versions = VERSION_INITIAL..VERSION_COSMO
+        versions = VERSION_COSMO..VERSION_METRO_OBSERVER,
+    }]
+    async fn ignition_list_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2::ignition::SpIgnitionInfo>>, HttpError>
+    {
+        Ok(Self::ignition_list(rqctx)
+            .await?
+            .map(|v| v.into_iter().map(Into::into).collect()))
+    }
+
+    #[endpoint {
+        method = GET,
+        path = "/ignition",
+        operation_id = "ignition_list",
+        versions = VERSION_INITIAL..VERSION_COSMO,
     }]
     async fn ignition_list_v1(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<v1::ignition::SpIgnitionInfo>>, HttpError>
     {
-        Ok(Self::ignition_list(rqctx)
+        Ok(Self::ignition_list_v2(rqctx)
             .await?
             .map(|v| v.into_iter().map(Into::into).collect()))
     }
@@ -470,29 +481,37 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/ignition/{type}/{slot}",
-        versions = VERSION_COSMO..
+        versions = VERSION_METRO_OBSERVER..,
     }]
     async fn ignition_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::component::PathSp>,
     ) -> Result<HttpResponseOk<latest::ignition::SpIgnitionInfo>, HttpError>;
 
-    /// Get SP info via Ignition
-    ///
-    /// Retreive information for an SP via the Ignition controller. This is
-    /// lower latency and has fewer possible failure modes than querying the SP
-    /// over the management network.
     #[endpoint {
         method = GET,
         path = "/ignition/{type}/{slot}",
         operation_id = "ignition_get",
-        versions = VERSION_INITIAL..VERSION_COSMO
+        versions = VERSION_COSMO..VERSION_METRO_OBSERVER,
+    }]
+    async fn ignition_get_v2(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+    ) -> Result<HttpResponseOk<v2::ignition::SpIgnitionInfo>, HttpError> {
+        Ok(Self::ignition_get(rqctx, path).await?.map(Into::into))
+    }
+
+    #[endpoint {
+        method = GET,
+        path = "/ignition/{type}/{slot}",
+        operation_id = "ignition_get",
+        versions = VERSION_INITIAL..VERSION_COSMO,
     }]
     async fn ignition_get_v1(
         rqctx: RequestContext<Self::Context>,
         path: Path<v1::component::PathSp>,
     ) -> Result<HttpResponseOk<v1::ignition::SpIgnitionInfo>, HttpError> {
-        Ok(Self::ignition_get(rqctx, path).await?.map(Into::into))
+        Ok(Self::ignition_get_v2(rqctx, path).await?.map(Into::into))
     }
 
     /// Send an ignition command targeting a specific SP.

@@ -34,8 +34,10 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
         };
         let typ = match target_state.system_type {
             SystemType::Sidecar => SpType::Switch,
-            SystemType::Gimlet | SystemType::Cosmo => SpType::Sled,
-            SystemType::Psc => SpType::Power,
+            SystemType::Gimlet | SystemType::Cosmo | SystemType::Metro => {
+                SpType::Sled
+            }
+            SystemType::Psc | SystemType::Observer => SpType::Power,
             SystemType::Unknown(id) => {
                 panic!("unknown ignition id ({id}) not implemented in tests")
             }
