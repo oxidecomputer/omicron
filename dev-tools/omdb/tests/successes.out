@@ -923,11 +923,11 @@ task: "fm_sitrep_gc"
       batches:                                                                    1
     orphaned fm_fact_smf_service rows deleted:                                    0
       batches:                                                                    1
-    orphaned fm_problem rows deleted:                                             0
-      batches:                                                                    1
     orphaned fm_problem_alert rows deleted:                                       0
       batches:                                                                    1
-    orphaned fm_problem_revision rows deleted:                                    0
+    orphaned fm_problem_request rows deleted:                                     0
+      batches:                                                                    1
+    orphaned fm_problem_revision_request rows deleted:                            0
       batches:                                                                    1
     orphaned fm_problem_support_bundle rows deleted:                              0
       batches:                                                                    1
@@ -1701,11 +1701,11 @@ task: "fm_sitrep_gc"
       batches:                                                                    1
     orphaned fm_fact_smf_service rows deleted:                                    0
       batches:                                                                    1
-    orphaned fm_problem rows deleted:                                             0
-      batches:                                                                    1
     orphaned fm_problem_alert rows deleted:                                       0
       batches:                                                                    1
-    orphaned fm_problem_revision rows deleted:                                    0
+    orphaned fm_problem_request rows deleted:                                     0
+      batches:                                                                    1
+    orphaned fm_problem_revision_request rows deleted:                            0
       batches:                                                                    1
     orphaned fm_problem_support_bundle rows deleted:                              0
       batches:                                                                    1
