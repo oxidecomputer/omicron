@@ -36,7 +36,8 @@ bytes = { version = "1.11.1", features = ["serde"] }
 camino = { version = "1.2.6", default-features = false, features = ["serde1"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
+cipher-9fbad63c4bcf4a8f = { package = "cipher", version = "0.4.4", default-features = false, features = ["zeroize"] }
+cipher-d8f496e17d97b5cb = { package = "cipher", version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
@@ -214,7 +215,8 @@ camino = { version = "1.2.6", default-features = false, features = ["serde1"] }
 cc = { version = "1.2.56", default-features = false, features = ["parallel"] }
 chacha20 = { version = "0.10.0", default-features = false, features = ["legacy", "rng", "zeroize"] }
 chrono = { version = "0.4.45", features = ["serde"] }
-cipher = { version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
+cipher-9fbad63c4bcf4a8f = { package = "cipher", version = "0.4.4", default-features = false, features = ["zeroize"] }
+cipher-d8f496e17d97b5cb = { package = "cipher", version = "0.5.2", default-features = false, features = ["block-padding", "rand_core", "stream-wrapper"] }
 clap = { version = "4.6.1", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.6.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }

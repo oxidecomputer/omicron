@@ -10250,6 +10250,7 @@ dependencies = [
  "omicron-generation-kinds",
  "omicron-ledger",
  "omicron-rpaths",
+ "omicron-sush-proxy",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -10334,6 +10335,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-sush-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "futures",
+ "gateway-client",
+ "gateway-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "reqwest",
+ "sled-hardware-types",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-term",
+ "sush-common",
+ "sush-proxy",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
@@ -10413,6 +10440,7 @@ dependencies = [
  "cc",
  "chacha20 0.10.0",
  "chrono",
+ "cipher 0.4.4",
  "cipher 0.5.2",
  "clap",
  "clap_builder",
@@ -16362,6 +16390,31 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "x509-cert",
+]
+
+[[package]]
+name = "sush-proxy"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sush?rev=7ab073efccf0d2ef54a316a00101586547b931d6#7ab073efccf0d2ef54a316a00101586547b931d6"
+dependencies = [
+ "camino",
+ "chrono",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "lru 0.18.5",
+ "percent-encoding",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
+ "sush-common",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
 ]
 
 [[package]]
