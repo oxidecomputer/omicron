@@ -9883,6 +9883,7 @@ dependencies = [
  "parallel-task-set",
  "petgraph 0.8.3",
  "pq-sys",
+ "propolis-client",
  "ratatui",
  "reedline",
  "reqwest",
