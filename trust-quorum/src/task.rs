@@ -1591,7 +1591,8 @@ mod tests {
         }
         assert_eq!(acked, num_nodes);
 
-        // TODO-RAINCLAUDE: after committing, the coordinator stops coordinating but still reports both the persisted and the committed epoch.
+        // After committing, the coordinator stops coordinating but still
+        // reports both the persisted and the committed epoch.
         assert_eq!(
             coordinator.coordinator_status_snapshot().await.unwrap(),
             CoordinatorStatusSnapshot::NotCoordinating {
