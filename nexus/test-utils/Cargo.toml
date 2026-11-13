@@ -64,12 +64,14 @@ serde_urlencoded.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
 sled-agent-scrimlet-reconcilers.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio.workspace = true
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util.workspace = true
 transient-dns-server.workspace = true
+trust-quorum-types.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
