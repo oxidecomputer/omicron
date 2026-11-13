@@ -18,7 +18,7 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    /// Constructs a simulator starting from the initial empty state.
+    /// Constructs a simulator starting from the initial state.
     pub fn new() -> Self {
         Self { state: SimState::new() }
     }

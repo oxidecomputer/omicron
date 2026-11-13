@@ -23,7 +23,7 @@ impl SimState {
     /// The initial time for a new simulation.
     pub const EPOCH: DateTime<Utc> = DateTime::UNIX_EPOCH;
 
-    /// Constructs an initial empty state.
+    /// Constructs the initial state that a simulation starts from.
     pub fn new() -> Self {
         Self { now: Self::EPOCH }
     }
