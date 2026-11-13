@@ -187,14 +187,34 @@ impl ProblemCodeDescription {
     }
 }
 
-/// The sitrep internal representation of a problem.
+/// A sitrep-internal representation of a problem.
+///
+/// These records represent a request from the sitrep that a corresponding
+/// externally-visible problem record exists. Externally-visible problem records
+/// are created by FM rendezvous based on the requested problems in the sitrep
+/// being executed.
+///
+/// A problem is carried forward into subsequent sitreps until *both* the
+/// following conditions are true:
+///
+/// 1. The problem reaches the `resolved` state (i.e., its most recent revision
+///    has a non-`None` [`SitrepRevision::time_resolved`]).
+/// 2. Rendezvous has created every requested externally visible record
+///    associated with that problem.
+///
+/// Once a problem is resolved, diagnosis engines should not request further
+/// revisions of it, but the sitrep must keep tracking it until the externally
+/// visible records have been created.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepProblem {
+    /// The problem's ID.
     pub id: ProblemUuid,
-    /// The sitrep in which the diagnosis engine first created this problem.
+    /// The sitrep in which a diagnosis engine first requested this problem.
     ///
-    /// This remains the same as the problem is carried forward into
-    /// subsequent sitreps.
+    /// This is not necessarily the sitrep that was executed when rendezvous
+    /// created the externally visible problem, which may be a later one. It
+    /// remains the same as the problem is carried forward into subsequent
+    /// sitreps.
     pub created_sitrep_id: SitrepUuid,
     /// A human-readable comment explaining why the diagnosis engine created
     /// this problem.
@@ -202,6 +222,10 @@ pub struct SitrepProblem {
     /// This is used for debugging the sitrep, and is not part of the
     /// externally visible problem.
     pub comment: String,
+    /// The revisions of this problem, ordered by revision number.
+    ///
+    /// A problem in a sitrep always has at least one revision, so this should
+    /// never be empty.
     pub revisions: IdOrdMap<SitrepRevision>,
     /// Alerts linked to this problem, indexed by alert ID.
     ///
@@ -232,20 +256,48 @@ impl SitrepProblem {
     }
 }
 
+/// A sitrep-internal representation of a revision of a problem.
+///
+/// These records represent a request from the sitrep that a corresponding
+/// externally-visible problem revision record exists. Externally-visible
+/// revision records are created by FM rendezvous based on the requested
+/// revisions in the sitrep being executed.
+///
+/// Revisions are carried forward into subsequent sitreps until the problem has
+/// been resolved and rendezvous has created the corresponding
+/// externally-visible revision records.
+///
+/// Diagnosis engines may not request a revision that un-resolves a resolved
+/// problem: if a problem's current revision has a `time_resolved`, the sitrep
+/// builder should not permit further revisions of that problem.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepRevision {
-    pub number: ProblemRevNum,
-    /// The sitrep in which this revision was first created.
-    pub created_sitrep_id: SitrepUuid,
-    /// The time at which the problem was resolved, if it should be
-    /// resolved as of this revision.
+    /// The revision number.
     ///
-    /// If this is `None`, the problem will remain active when this
-    /// revision is created.
+    /// A revision's number must always be greater than zero. The zeroth
+    /// revision is reserved for a problem that has been created but does not
+    /// yet have a current revision.
+    pub number: ProblemRevNum,
+    /// The sitrep in which a diagnosis engine first requested this revision.
+    pub created_sitrep_id: SitrepUuid,
+    /// The time at which the problem was resolved, if it is resolved as of
+    /// this revision.
+    ///
+    /// If this is `None`, the problem is active as of this revision; if it is
+    /// `Some`, the problem is resolved.
     pub time_resolved: Option<DateTime<Utc>>,
+    /// The problem's problem code as of this revision.
+    ///
+    /// This determines the problem's class, as well as its documentation.
     pub code: ProblemCode,
+    /// A one-sentence, human-readable summary of the problem as of this
+    /// revision.
     pub summary: String,
+    /// A human-readable description (one or more paragraphs) of the problem as
+    /// of this revision.
     pub description: String,
+    /// A human-readable description (one or more paragraphs) of any operator
+    /// actions required to address the problem.
     pub action_required: String,
     /// A human-readable comment explaining why the diagnosis engine requested
     /// this revision.
@@ -276,10 +328,15 @@ impl iddqd::IdOrdItem for SitrepRevision {
 /// alert may be linked to multiple problems.
 ///
 /// A link exists for as long as the problem it belongs to remains in the
-/// sitrep, and is never removed from or modified problem once created.
-/// Therefore, rendezvous can create link records without needing a separate
-/// generation counter: as long as the problem itself exists, its links
-/// may be created during execution.
+/// sitrep, and is never removed or modified once created. Therefore,
+/// rendezvous can create link records without needing a separate generation
+/// counter: as long as the problem itself exists, its links may be created
+/// during execution. Once the problem is no longer part of the sitrep *and*
+/// rendezvous has created the link, the link need not be carried forward.
+///
+/// Rendezvous must not create an externally visible link until both the
+/// problem and the alert exist. Otherwise, a caller listing a problem's
+/// alerts could see alerts that do not exist yet.
 ///
 /// [rfd]: https://rfd.shared.oxide.computer/rfd/0699#alerts-as-timeline
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -288,7 +345,8 @@ pub struct AlertLink {
     pub alert_id: AlertUuid,
     /// The problem revision with which the alert is associated.
     ///
-    /// This is used to order a problem's alerts by revision.
+    /// This is used to order a problem's alerts by revision. Like all real
+    /// revision numbers, it is greater than zero.
     pub revision: ProblemRevNum,
     /// The sitrep in which this link was first created.
     ///
@@ -316,12 +374,20 @@ impl iddqd::IdOrdItem for AlertLink {
 /// support bundle only by its ID, and are never removed or modified while
 /// the problem remains in the sitrep. The same support bundle may be
 /// linked to multiple problems.
+///
+/// Once the problem is no longer part of the sitrep *and* rendezvous has
+/// created the link, the link need not be carried forward. Rendezvous must not
+/// create an externally visible link until both the problem and the support
+/// bundle exist, so that a caller listing a problem's support bundles never
+/// sees one that does not exist yet.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SupportBundleLink {
     /// The ID of the linked support bundle.
     pub support_bundle_id: SupportBundleUuid,
-    /// The problem revision with which the support bundle is
-    /// associated.
+    /// The problem revision with which the support bundle is associated.
+    ///
+    /// This is used to order a problem's support bundles by revision. Like all
+    /// real revision numbers, it is greater than zero.
     pub revision: ProblemRevNum,
     /// The sitrep in which this link was first created.
     ///

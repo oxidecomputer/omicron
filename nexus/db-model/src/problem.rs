@@ -43,6 +43,10 @@ pub struct Problem {
     ///
     /// This selects the current revision from the `problem_revision`
     /// table.
+    ///
+    /// A problem may have a current revision of zero if and only if it is in
+    /// the process of being created, before its first revision has been made
+    /// current. Such problems are not returned when listing problems.
     pub current_revision: DbTypedGeneration<ProblemRevKind>,
 }
 

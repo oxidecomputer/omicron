@@ -9999,7 +9999,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
 -- following conditions are met:
 --
 -- 1. The problem's latest revision has transitioned it to the `resolved` state
---    (i.e. the revision's `time_reolved` is non-null), and,
+--    (i.e. the revision's `time_resolved` is non-null), and,
 -- 2. All requested revisions of the problem have been created by rendezvous.
 --
 -- Once a problem has been resolved, diagnosis engines should no longer request
@@ -10124,9 +10124,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision_request (
 -- requests for rendezvous to perform any externally visible actions.
 --
 -- Entries in this table are part of a fault management sitrep, and live as long
--- as the sitrep with `sitrep_id` exists. When the linked case or problem are
--- no longer present in the next sitrep, these links are not carried forward
--- into that sitrep.
+-- as the sitrep with `sitrep_id` exists.
+--
+-- The lifetime of this association is tied to that of the case: when the linked
+-- case is no longer present in the current sitrep, these associations are not
+-- carried forward into the next sitrep. However, they may outlive the presence
+-- of the linked *problem* in the sitrep: if the problem is resolved, this
+-- record should be kept to represent that a resolved problem was created for
+-- the case.
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case_problem (
     -- The ID of the case associated with this problem.
     case_id UUID NOT NULL,
@@ -10154,10 +10159,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case_problem (
 -- in the same sitrep.
 --
 -- A link exists for as long as the problem it belongs to remains in the
--- sitrep, and is never removed from or modified problem once created.
+-- sitrep, and is never removed or modified once created.
 -- Therefore, rendezvous can create link records without needing a separate
 -- generation counter: as long as the problem itself exists, its links
--- may be created during execution
+-- may be created during execution.
 --
 -- If the problem with `problem_id` is no longer part of the next sitrep, *and
 -- the requested link record has been created by rendezvous*, these records need

@@ -33,6 +33,8 @@ pub struct Case {
     /// [`Fact`] for semantics.
     pub facts: IdOrdMap<Fact>,
     /// Problems associated with this case, indexed by their ID.
+    ///
+    /// See [`CaseProblem`] for details.
     pub problems: IdOrdMap<CaseProblem>,
 }
 
@@ -373,13 +375,27 @@ impl iddqd::IdOrdItem for SupportBundleRequest {
 
 /// An association between a [`Case`] and a problem.
 ///
-/// These associations are used by diagnosis engine to track whether a problem
+/// These associations are used by diagnosis engines to track whether a problem
 /// exists for a given case across multiple sitreps. The relationship between
 /// cases and problems is many-to-many: a problem may be created due to the
 /// observations contained in one case, but diagnosis engines may determine
 /// that other cases contain observations also related to the same problem. In
 /// the other direction, a case may result in the diagnosis of any number of
 /// problems.
+///
+/// These associations are purely internal to the sitrep, and are used for
+/// internal bookkeeping, such as tracking whether or not a case already has an
+/// active problem of a given code. Unlike problem revision requests and alert
+/// or support bundle link requests, they do not correspond to any record
+/// outside the sitrep, and do not request that rendezvous take any externally
+/// visible action.
+///
+/// The lifetime of this association is tied to that of the case. When the
+/// linked case is no longer present in the current sitrep, these associations
+/// are not carried forward into the next sitrep. However, they may outlive the
+/// presence of the linked problem in the sitrep: if the problem is resolved,
+/// this record should be kept to represent that a resolved problem was created
+/// for the case.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaseProblem {
     /// The ID of the associated problem.
@@ -390,8 +406,8 @@ pub struct CaseProblem {
     /// This is *not* the sitrep in which either the case or the problem was
     /// created.
     pub linked_sitrep_id: SitrepUuid,
-    /// A human-readable comment why the problem is associated with the
-    /// case, for debugging purposes.
+    /// A human-readable comment explaining why the problem is associated with
+    /// the case, for debugging purposes.
     pub comment: String,
 }
 
