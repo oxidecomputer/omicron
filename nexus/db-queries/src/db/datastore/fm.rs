@@ -19,6 +19,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
+use crate::db::model::fm::FmFactRow;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -40,10 +41,6 @@ use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
-use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
-use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
-use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
-use nexus_db_schema::schema::fm_fact_smf_service::dsl as fact_smf_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -162,6 +159,140 @@ fn insert_fact_for_case(
         Error::InternalError { internal_message }
     })
 }
+
+/// Convert fact rows read from one table and add them to the per-case map.
+fn add_fact_rows_to_map<R: FmFactRow>(
+    by_case: &mut HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>,
+    rows: Vec<R>,
+) -> Result<(), Error> {
+    for row in rows {
+        let case_id = row.case_id();
+        let fact_id = row.id();
+        let fact = row.into_fact().with_internal_context(|| {
+            format!("failed to read fact {fact_id} on case {case_id}")
+        })?;
+        insert_fact_for_case(by_case, case_id, fact)?;
+    }
+    Ok(())
+}
+
+/// Declares one fact table per [`fm::FactPayload`] variant, and generates
+/// [`FactRows`] (to insert a sitrep's facts) and [`fm_facts_read`] (to read
+/// them back).
+///
+/// Each `Variant` maps to the table `fm_fact_<variant>` and the model type
+/// `FmFact<Variant>`, which must implement [`FmFactRow`].
+macro_rules! fm_fact_tables {
+    ($($variant:ident),* $(,)?) => { ::paste::paste! {
+        /// A sitrep's facts, split by table for insertion.
+        #[derive(Default)]
+        struct FactRows {
+            $(
+                [<fm_fact_ $variant:snake>]:
+                    Vec<model::fm::[<FmFact $variant>]>,
+            )*
+        }
+
+        impl FactRows {
+            fn push(
+                &mut self,
+                sitrep_id: SitrepUuid,
+                case_id: CaseUuid,
+                fact: &fm::case::Fact,
+            ) {
+                match &fact.payload {
+                    $(
+                        fm::FactPayload::$variant(payload) => {
+                            self.[<fm_fact_ $variant:snake>].push(
+                                model::fm::[<FmFact $variant>]::from_sitrep(
+                                    sitrep_id,
+                                    case_id,
+                                    &fact.metadata,
+                                    payload,
+                                ),
+                            );
+                        }
+                    )*
+                }
+            }
+
+            async fn insert(
+                self,
+                conn: &async_bb8_diesel::Connection<DbConnection>,
+            ) -> Result<(), Error> {
+                $(
+                    let rows = self.[<fm_fact_ $variant:snake>];
+                    if !rows.is_empty() {
+                        use nexus_db_schema::schema::
+                            [<fm_fact_ $variant:snake>]::dsl;
+                        diesel::insert_into(dsl::[<fm_fact_ $variant:snake>])
+                            .values(rows)
+                            .execute_async(conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(concat!(
+                                    "failed to insert ",
+                                    stringify!([<fm_fact_ $variant:snake>]),
+                                    " rows",
+                                ))
+                            })?;
+                    }
+                )*
+                Ok(())
+            }
+        }
+
+        /// Fetch all case facts belonging to cases in the given sitrep,
+        /// grouped by `case_id`.
+        async fn fm_facts_read(
+            conn: &async_bb8_diesel::Connection<DbConnection>,
+            sitrep_id: SitrepUuid,
+        ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error>
+        {
+            let mut by_case = HashMap::new();
+            // NOTE: Each per-DE set of facts belongs to a distinct table.
+            // This would be a reasonable spot to insert parallel_task_set
+            // and do some concurrent queries.
+            //
+            // (... gonna punt on that until we actually have a couple
+            // different tables to query from).
+            $({
+                use nexus_db_schema::schema::[<fm_fact_ $variant:snake>]::dsl;
+                let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+                    Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+                while let Some(p) = paginator.next() {
+                    let batch = paginated(
+                        dsl::[<fm_fact_ $variant:snake>],
+                        dsl::id,
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+                    .select(model::fm::[<FmFact $variant>]::as_select())
+                    .load_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(concat!(
+                                "failed to load ",
+                                stringify!([<fm_fact_ $variant:snake>]),
+                                " rows",
+                            ))
+                    })?;
+
+                    paginator = p.found_batch(&batch, &|f| f.id().into());
+                    add_fact_rows_to_map(&mut by_case, batch)?;
+                }
+            })*
+            Ok(by_case)
+        }
+    }};
+}
+
+fm_fact_tables! { PhysicalDisk, Saga, Certificate, SmfService }
 
 /// Per-child-table statistics from a single GC pass.
 #[derive(Clone, Copy, Debug, Default)]
@@ -432,7 +563,7 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
-        let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
+        let mut case_facts = fm_facts_read(conn, id).await?;
 
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
@@ -561,138 +692,6 @@ impl DataStore {
                         );
                         Error::InternalError { internal_message }
                     })?;
-            }
-        }
-
-        Ok(by_case)
-    }
-
-    /// Fetch all case facts belonging to cases in the given sitrep, grouped
-    /// by `case_id`.
-    ///
-    /// Each diagnosis engine stores its facts in its own typed table, read by
-    /// its own paginated loop here and unioned into the same `by_case` map. A
-    /// case belongs to exactly one engine, so keys never collide across tables.
-    async fn fm_facts_read_on_conn(
-        &self,
-        id: SitrepUuid,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error> {
-        let mut by_case =
-            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
-
-        // NOTE: Each per-DE set of facts belongs to a distinct table.
-        // This would be a reasonable spot to insert parallel_task_set
-        // and do some concurrent queries.
-        //
-        // (... gonna punt on that until we actually have a couple different
-        // tables to query from).
-
-        // --- physical-disk diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_pd_dsl::fm_fact_physical_disk,
-                fact_pd_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_pd_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactPhysicalDisk::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load physical-disk case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
-            }
-        }
-
-        // --- saga diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_saga_dsl::fm_fact_saga,
-                fact_saga_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_saga_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactSaga::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load saga case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
-            }
-        }
-
-        // --- certificate diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_cert_dsl::fm_fact_certificate,
-                fact_cert_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_cert_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactCertificate::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load certificate case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
-            }
-        }
-
-        // --- SMF service diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_smf_dsl::fm_fact_smf_service,
-                fact_smf_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_smf_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactSmfService::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load SMF service case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
             }
         }
 
@@ -954,10 +953,7 @@ impl DataStore {
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
-        let mut physical_disk_facts = Vec::new();
-        let mut saga_facts = Vec::new();
-        let mut certificate_facts = Vec::new();
-        let mut smf_service_facts = Vec::new();
+        let mut facts = FactRows::default();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -982,47 +978,7 @@ impl DataStore {
                 bundle_data_selections_requested.push((req_id, data_selection));
             }
             for fact in case.facts.iter() {
-                // Dispatch each fact to its diagnosis engine's typed table.
-                match &fact.payload {
-                    fm::FactPayload::PhysicalDisk(disk_fact) => {
-                        physical_disk_facts.push(
-                            model::fm::FmFactPhysicalDisk::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                disk_fact,
-                            ),
-                        );
-                    }
-                    fm::FactPayload::Saga(saga_fact) => {
-                        saga_facts.push(model::fm::FmFactSaga::from_sitrep(
-                            sitrep_id,
-                            case_id,
-                            &fact.metadata,
-                            saga_fact,
-                        ));
-                    }
-                    fm::FactPayload::Certificate(cert_fact) => {
-                        certificate_facts.push(
-                            model::fm::FmFactCertificate::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                cert_fact,
-                            ),
-                        );
-                    }
-                    fm::FactPayload::SmfService(smf_fact) => {
-                        smf_service_facts.push(
-                            model::fm::FmFactSmfService::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                smf_fact,
-                            ),
-                        );
-                    }
-                }
+                facts.push(sitrep_id, case_id, fact);
             }
         }
 
@@ -1082,55 +1038,7 @@ impl DataStore {
         )
         .await?;
 
-        if !physical_disk_facts.is_empty() {
-            diesel::insert_into(fact_pd_dsl::fm_fact_physical_disk)
-                .values(physical_disk_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert physical-disk case facts",
-                        )
-                })?;
-        }
-
-        if !saga_facts.is_empty() {
-            diesel::insert_into(fact_saga_dsl::fm_fact_saga)
-                .values(saga_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context("failed to insert saga case facts")
-                })?;
-        }
-
-        if !certificate_facts.is_empty() {
-            diesel::insert_into(fact_cert_dsl::fm_fact_certificate)
-                .values(certificate_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert certificate case facts",
-                        )
-                })?;
-        }
-
-        if !smf_service_facts.is_empty() {
-            diesel::insert_into(fact_smf_dsl::fm_fact_smf_service)
-                .values(smf_service_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert SMF service case facts",
-                        )
-                })?;
-        }
+        facts.insert(&conn).await?;
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
