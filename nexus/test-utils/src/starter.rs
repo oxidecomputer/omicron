@@ -21,6 +21,8 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_messages::SpPort;
+use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
@@ -123,6 +125,7 @@ use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog::{Logger, debug, error, info, o};
+use sp_sim::SimRack;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -168,6 +171,9 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
+    sp_sim_config_file: Utf8PathBuf,
+    // TODO-RAINCLAUDE: started by the first `start_gateway` call and shared by every switch's MGS, as on a real rack.
+    sim_rack: Option<Arc<SimRack>>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
@@ -231,6 +237,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             oximeter: None,
             producer: None,
             gateway: BTreeMap::new(),
+            sp_sim_config_file: DEFAULT_SP_SIM_CONFIG.into(),
+            sim_rack: None,
             dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
             ddm: HashMap::new(),
@@ -417,34 +425,62 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         });
     }
 
+    pub fn set_sp_sim_config_file(&mut self, sp_sim_config_file: Utf8PathBuf) {
+        assert!(
+            self.sim_rack.is_none(),
+            "set_sp_sim_config_file({sp_sim_config_file}) called after \
+             start_gateway already started the simulated rack with \
+             {}; set the SP simulator config before starting any gateway",
+            self.sp_sim_config_file,
+        );
+        self.sp_sim_config_file = sp_sim_config_file;
+    }
+
     pub async fn start_gateway(
         &mut self,
         switch_slot: SwitchSlot,
         port: Option<u16>,
-        sp_sim_config_file: Utf8PathBuf,
     ) {
+        assert!(
+            !self.gateway.contains_key(&switch_slot),
+            "start_gateway({switch_slot:?}) called twice: a second MGS on the \
+             same switch would share that switch's SP port on the simulated \
+             rack, and the first gateway context would leak without teardown",
+        );
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config(sp_sim_config_file);
+        let mgs_config = gateway_test_utils::setup::load_mgs_test_config();
 
-        // The sp_sim_config_file contains suitable configuration information for a MGS daemon running on
-        // switch0. For switch1, the port information needs to be flipped in order for MGS to correctly identify
-        // itself as the switch1 MGS daemon.
-        if switch_slot == SwitchSlot::Switch1 {
-            for config in mgs_config.switch.location.determination.iter_mut() {
-                let swap = config.sp_port_1.clone();
-                config.sp_port_1 = config.sp_port_2.clone();
-                config.sp_port_2 = swap;
+        let sim_rack = match &self.sim_rack {
+            Some(sim_rack) => Arc::clone(sim_rack),
+            None => {
+                let sp_sim_config =
+                    gateway_test_utils::setup::load_sp_sim_config(
+                        self.sp_sim_config_file.clone(),
+                    );
+                let log = self.logctx.log.new(o!("component" => "sp-sim"));
+                let rack = Arc::new(
+                    SimRack::start(&sp_sim_config, &log)
+                        .await
+                        .expect("started simulated SP rack"),
+                );
+                self.sim_rack = Some(Arc::clone(&rack));
+                rack
             }
-        }
+        };
+
+        // TODO-RAINCLAUDE: each SP's port 1 is cabled to switch0 and port 2 to switch1, which is also how MGS determines its location.
+        let sp_port = match switch_slot {
+            SwitchSlot::Switch0 => SpPort::One,
+            SwitchSlot::Switch1 => SpPort::Two,
+        };
 
         let mgs_addr =
             port.map(|port| SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
-        let gateway = gateway_test_utils::setup::test_setup_with_config(
+        let gateway = gateway_test_utils::setup::test_setup_with_simrack(
             self.test_name,
-            gateway_messages::SpPort::One,
+            sp_port,
             mgs_config,
-            &sp_sim_config,
+            sim_rack,
             mgs_addr,
         )
         .await;
@@ -1420,6 +1456,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
+        drop(self.sim_rack);
         for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
         }
@@ -1743,20 +1780,14 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     // be configured. If extra sled agents are requested, then the second sled
     // agent will be for switch1.
 
-    let mgs_config = gateway_config_file.clone();
+    starter.set_sp_sim_config_file(gateway_config_file);
     starter
         .init_with_steps(
             vec![
                 (
                     "start_gateway_switch0",
                     Box::new(|builder| {
-                        builder
-                            .start_gateway(
-                                SwitchSlot::Switch0,
-                                None,
-                                mgs_config,
-                            )
-                            .boxed()
+                        builder.start_gateway(SwitchSlot::Switch0, None).boxed()
                     }),
                 ),
                 (
@@ -1801,11 +1832,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         "start_gateway_switch1",
                         Box::new(|builder| {
                             builder
-                                .start_gateway(
-                                    SwitchSlot::Switch1,
-                                    None,
-                                    gateway_config_file,
-                                )
+                                .start_gateway(SwitchSlot::Switch1, None)
                                 .boxed()
                         }),
                     ),
