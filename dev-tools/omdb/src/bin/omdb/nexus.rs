@@ -1593,6 +1593,12 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
+        BlueprintPlannerStatus::ConfigNotYetLoaded => {
+            println!(
+                "    blueprint planning skipped because the reconfigurator \
+                 config has not been loaded yet"
+            );
+        }
         BlueprintPlannerStatus::LimitReached { limit, report } => {
             println!(
                 "    blueprint auto-planning disabled because \
