@@ -52,8 +52,13 @@ const CONN_TO_MAIN_CHANNEL_BOUND: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoordinatorStatusSnapshot {
-    Coordinating { status: CoordinatorStatus },
-    NotCoordinating { latest_config_epoch: Option<Epoch> },
+    Coordinating {
+        status: CoordinatorStatus,
+    },
+    NotCoordinating {
+        latest_config_epoch: Option<Epoch>,
+        latest_committed_epoch: Option<Epoch>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -273,6 +278,7 @@ impl NodeTaskHandle {
             }
             CoordinatorStatusSnapshot::NotCoordinating {
                 latest_config_epoch: _,
+                latest_committed_epoch: _,
             } => Ok(None),
         }
     }
@@ -748,6 +754,10 @@ impl NodeTask {
                             .persistent_state()
                             .latest_config()
                             .map(|c| c.epoch),
+                        latest_committed_epoch: self
+                            .ctx
+                            .persistent_state()
+                            .latest_committed_epoch(),
                     },
                 };
                 let _ = tx.send(snapshot);
@@ -1522,6 +1532,7 @@ mod tests {
             coordinator.coordinator_status_snapshot().await.unwrap(),
             CoordinatorStatusSnapshot::NotCoordinating {
                 latest_config_epoch: None,
+                latest_committed_epoch: None,
             },
         );
 
@@ -1580,12 +1591,12 @@ mod tests {
         }
         assert_eq!(acked, num_nodes);
 
-        // After committing, the coordinator stops coordinating but still
-        // reports the persisted epoch.
+        // TODO-RAINCLAUDE: after committing, the coordinator stops coordinating but still reports both the persisted and the committed epoch.
         assert_eq!(
             coordinator.coordinator_status_snapshot().await.unwrap(),
             CoordinatorStatusSnapshot::NotCoordinating {
-                latest_config_epoch: Some(Epoch(1))
+                latest_config_epoch: Some(Epoch(1)),
+                latest_committed_epoch: Some(Epoch(1)),
             },
         );
 
