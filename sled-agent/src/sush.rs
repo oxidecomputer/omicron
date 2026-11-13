@@ -7,7 +7,8 @@
 //! See [RFD 620]. The server runs jobs targeted at this sled on behalf of
 //! Oxide support. Jobs are authorized by signatures, and the server runs
 //! a job only when its signature validates against one of the trust
-//! anchors in its config; see `trust_anchors` for how those are selected.
+//! anchors in its config; see `SushConfig::trust_anchors` for how those
+//! are selected.
 //!
 //! Jobs are distributed among servers using a gossip network implemented
 //! by the [rumors] library, running over sprockets on the bootstrap network.
@@ -59,6 +60,7 @@ use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use strum::Display;
 use tokio::fs::{OpenOptions, create_dir_all};
 use tokio::io::AsyncWriteExt as _;
 use tokio::spawn;
@@ -125,7 +127,7 @@ impl SushHandles {
         let bind_address =
             SocketAddr::V6(SocketAddrV6::new(ip, SUSH_API_PORT, 0, 0));
         let api = sush_api::sush_api_mod::api_description::<ApiServer>()
-            .context("describing the sush API")?;
+            .context("failed to describe the sush API")?;
         let server = ServerBuilder::new(
             api,
             Arc::clone(&self.manager),
@@ -142,7 +144,7 @@ impl SushHandles {
             compression: Default::default(),
         })
         .start()
-        .context("starting the sush API server")?;
+        .context("failed to start the sush API server")?;
         info!(
             self.log, "started sush server";
             "address" => %bind_address,
@@ -266,7 +268,7 @@ pub async fn spawn_sush_tasks(
         }
     };
 
-    let anchors = trust_anchors(&log, config).await;
+    let anchors = config.trust_anchors(&log).await;
     let (tx_cubbies, rx_cubbies) = watch::channel(Cubbies::new());
     let mut manager = match JobManager::new(
         log.clone(),
@@ -456,7 +458,10 @@ async fn update_cubbies(log: Logger, tx_cubbies: watch::Sender<Cubbies>) {
                     }
                 }
                 if !updated {
-                    warn!(log, "no MGS answered, cubby map unchanged");
+                    warn!(
+                        log, "no MGS answered, cubby map unchanged";
+                        "previous_sleds" => tx_cubbies.borrow().len(),
+                    );
                     for (addr, error) in &errors {
                         warn!(
                             log, "MGS probe failed";
@@ -512,7 +517,6 @@ fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
     let chain_der =
         ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
     let platform = der_cert_chain(&chain_der)?;
-    ensure!(!platform.is_empty(), "the TQ cert chain is empty");
     let vouched = EphemeralKey::new_vouched(
         KeyType::Ed25519,
         "CN=sush-proxy,O=Oxide Computer Company,C=US"
@@ -534,62 +538,66 @@ fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
     Ok((key_pem, chain_pem))
 }
 
-/// Choose the certificates this sled will trust to sign sush jobs.
-/// Every sled trusts the production anchors, and sleds whose platform
-/// identity (fetched here) chains to the staging root trust the staging
-/// anchors as well. This allows, e.g., support to run production-signed
-/// jobs on lab systems, but does not allow engineers to run staging-signed
-/// jobs on production systems.
-async fn trust_anchors(log: &Logger, config: &SushConfig) -> Vec<Utf8PathBuf> {
-    let SushConfig {
-        production_platform_root,
-        staging_platform_root,
-        production_trust_anchors,
-        staging_trust_anchors,
-        ramdisk_dir: _,
-        ramdisk_max_output_mb: _,
-        max_output_mb: _,
-    } = config.clone();
-    let mut anchors = production_trust_anchors;
-    match spawn_blocking(move || {
-        is_sled_staging_signed(
-            &production_platform_root,
-            &staging_platform_root,
-        )
-    })
-    .await
-    .context("fetching the platform identity")
-    .flatten()
-    {
-        Ok(false) => info!(
-            log,
-            "production platform identity, trusting only production job signers"
-        ),
-        Ok(true) => {
-            info!(
-                log,
-                "staging platform identity, trusting staging job signers too"
-            );
-            anchors.extend(staging_trust_anchors);
+impl SushConfig {
+    /// Choose the certificates this sled will trust to sign sush jobs.
+    /// Every sled trusts the production anchors, and sleds whose platform
+    /// identity (fetched here) chains to the staging root trust the staging
+    /// anchors as well. This allows, e.g., support to run production-signed
+    /// jobs on lab systems, but does not allow engineers to run
+    /// staging-signed jobs on production systems.
+    async fn trust_anchors(&self, log: &Logger) -> Vec<Utf8PathBuf> {
+        let SushConfig {
+            production_platform_root,
+            staging_platform_root,
+            production_trust_anchors,
+            staging_trust_anchors,
+            ramdisk_dir: _,
+            ramdisk_max_output_mb: _,
+            max_output_mb: _,
+        } = self.clone();
+        let mut anchors = production_trust_anchors;
+        match spawn_blocking(move || {
+            platform_identity_signer(
+                &production_platform_root,
+                &staging_platform_root,
+            )
+        })
+        .await
+        .context("failed to fetch the platform identity")
+        .flatten()
+        {
+            Ok(signer) => {
+                info!(log, "platform identity"; "signer" => %signer);
+                if signer == PlatformIdentitySigner::Staging {
+                    anchors.extend(staging_trust_anchors);
+                }
+            }
+            Err(err) => warn!(
+                log, "unknown platform identity, trusting only production job signers";
+                "error" => InlineErrorChain::new(err.as_ref()),
+            ),
         }
-        Err(err) => warn!(
-            log, "unknown platform identity, trusting only production job signers";
-            "error" => InlineErrorChain::new(err.as_ref()),
-        ),
+        anchors
     }
-    anchors
 }
 
-/// Whether this sled's platform identity, read from the RoT, chains to
-/// the `staging` root rather than the `production` one. Uses IPCC, so
-/// performs blocking I/O.
-fn is_sled_staging_signed(
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Display)]
+#[strum(serialize_all = "lowercase")]
+enum PlatformIdentitySigner {
+    Production,
+    Staging,
+}
+
+/// Read the platform identity from the RoT via IPCC (using blocking I/O),
+/// and return which signer was used.
+fn platform_identity_signer(
     production: &Utf8Path,
     staging: &Utf8Path,
-) -> anyhow::Result<bool> {
-    let ipcc = Ipcc::new().context("opening IPCC")?;
-    let chain_der =
-        ipcc.rot_get_tq_cert_chain().context("fetching the TQ cert chain")?;
+) -> anyhow::Result<PlatformIdentitySigner> {
+    let ipcc = Ipcc::new().context("failed to open IPCC")?;
+    let chain_der = ipcc
+        .rot_get_tq_cert_chain()
+        .context("failed to fetch the TQ cert chain")?;
     let chain = der_cert_chain(&chain_der)?;
     let production_root = read_cert(production)?;
     let staging_root = read_cert(staging)?;
@@ -600,8 +608,12 @@ fn is_sled_staging_signed(
     );
     let roots = [production_root, staging_root.clone()];
     let root = verify_platform_cert_chain(&chain, Some(&roots))
-        .context("verifying the platform identity")?;
-    Ok(*root == staging_root)
+        .context("failed to verify the platform identity")?;
+    Ok(if *root == staging_root {
+        PlatformIdentitySigner::Staging
+    } else {
+        PlatformIdentitySigner::Production
+    })
 }
 
 /// Whether a platform identity root's subject includes "Staging", e.g.,
@@ -615,21 +627,24 @@ fn is_staging_cert(root: &Certificate) -> bool {
 
 /// Read a PEM file holding one certificate.
 fn read_cert(path: &Utf8Path) -> anyhow::Result<Certificate> {
-    let pem = read(path).with_context(|| format!("reading {path}"))?;
-    Certificate::from_pem(&pem).with_context(|| format!("parsing {path}"))
+    let pem = read(path).with_context(|| format!("failed to read {path}"))?;
+    Certificate::from_pem(&pem).with_context(|| {
+        format!("failed to parse {path} as a PEM-encoded certificate")
+    })
 }
 
 /// Parse a concatenated series of DER certs, as the RoT returns.
 fn der_cert_chain(bytes: &[u8]) -> anyhow::Result<Vec<Certificate>> {
     let mut chain = Vec::new();
     let mut reader =
-        SliceReader::new(bytes).context("reading the TQ cert chain")?;
+        SliceReader::new(bytes).context("failed to read the TQ cert chain")?;
     while !reader.is_finished() {
         chain.push(
             Certificate::decode(&mut reader)
-                .context("parsing the TQ cert chain")?,
+                .context("failed to parse the TQ cert chain")?,
         );
     }
+    ensure!(!chain.is_empty(), "the TQ cert chain is empty");
     Ok(chain)
 }
 
