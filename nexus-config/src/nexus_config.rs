@@ -18,7 +18,6 @@ pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
@@ -30,6 +29,9 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
+
+#[cfg(test)]
+use schemars::JsonSchema;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NexusConfig {
@@ -123,20 +125,22 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(test, derive(JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum Database {
     FromDns,
     FromUrl {
         #[serde_as(as = "DisplayFromStr")]
-        #[schemars(with = "String")]
+        #[cfg_attr(test, schemars(with = "String"))]
         url: PostgresConfigWithUrl,
     },
 }
 
 /// The mechanism Nexus should use to contact the internal DNS servers.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(test, derive(JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalDns {
     /// Nexus should infer the DNS server addresses from this subnet.
@@ -150,7 +154,24 @@ pub enum InternalDns {
     FromAddress { address: SocketAddr },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+/// Nexus config struct for values known only at deployment time.
+///
+/// Note the [`JsonSchema`] derive is just for `test_deployment_config_schema`,
+/// which is there to guard us against accidentally changing this struct without
+/// giving the proper care and consideration.
+///
+/// We skip adding the Dropshot config fields to the schema because
+/// [`ConfigDropshot`] doesn't implement [`JsonSchema`]; this isn't ideal, but
+/// we can at least lean on the `dropshot` crate's semver adherance to avoid
+/// accidental changes to the underlying config formats for those fields.
+///
+/// Deliberate changes to this struct require careful consideration to avoid
+/// breaking anything on update, and existing TOML example/test config files in
+/// this repo should also be updated accordingly. Once this has been done, the
+/// expected output for `test_deployment_config_schema` can be updated by
+/// running the test with `EXPECTORATE=overwrite`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(test, derive(JsonSchema))]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: OmicronZoneUuid,
@@ -166,11 +187,10 @@ pub struct DeploymentConfig {
     /// configs that were created before this field was added. In production we
     /// always expect this port to be constant, but we need to be able to
     /// override it when running tests.
-    #[schemars(skip)]
     #[serde(default = "default_techport_external_server_port")]
     pub techport_external_server_port: u16,
     /// Dropshot configuration for the external API server.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[cfg_attr(test, schemars(skip))]
     pub dropshot_external: ConfigDropshotWithTls,
     /// Additional addresses to listen on for the external API.
     ///
@@ -178,14 +198,13 @@ pub struct DeploymentConfig {
     /// of these addresses, reusing all other settings (TLS, request limits,
     /// etc.) from `dropshot_external`. This is mainly used to serve the
     /// external API on both IPv4 and IPv6 addresses.
-    #[schemars(skip)]
     #[serde(default)]
     pub dropshot_external_additional_addresses: Vec<SocketAddr>,
     /// Dropshot configuration for internal API server.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[cfg_attr(test, schemars(skip))]
     pub dropshot_internal: ConfigDropshot,
     /// Dropshot configuration for lockstep API server.
-    #[schemars(skip)] // TODO we're protected against dropshot changes
+    #[cfg_attr(test, schemars(skip))]
     pub dropshot_lockstep: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
@@ -308,16 +327,9 @@ struct UnvalidatedTunables {
 /// test-only config, you have to type the string "yes_for_test_purposes_only"
 /// in the config file so you know what you're doing.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    JsonSchema,
-    PartialEq,
-    Serialize,
+    Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize,
 )]
+#[cfg_attr(test, derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TreatLoopbackAsExternal {
     /// Loopback addresses are considered "external". This must only be used
@@ -329,9 +341,8 @@ pub enum TreatLoopbackAsExternal {
 }
 
 /// Configuration for HTTP clients to external services.
-#[derive(
-    Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema,
-)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(test, derive(JsonSchema))]
 pub struct ExternalHttpClientConfig {
     /// If present, bind all TCP connections for external HTTP clients on the
     /// specified interface name.
