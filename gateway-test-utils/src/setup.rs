@@ -7,8 +7,10 @@ use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
 use omicron_gateway::MgsArguments;
+use omicron_gateway::SpIdentifier;
 use omicron_gateway::SpType;
 use omicron_gateway::SwitchPortConfig;
+use omicron_gateway::SwitchPortDescription;
 pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -17,8 +19,12 @@ use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog_error_chain::InlineErrorChain;
+use sp_sim::NUM_IGNITION_TARGETS;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
+use sp_sim::config::EreportConfig;
+use sp_sim::config::GimletConfig;
+use sp_sim::config::SpCommonConfig;
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::future;
@@ -89,6 +95,266 @@ pub fn load_sp_sim_config(sp_sim_config_file: Utf8PathBuf) -> sp_sim::Config {
             InlineErrorChain::new(&e)
         ),
     }
+}
+
+/// Returns the serial number of the simulated gimlet SP in sled slot `slot`.
+pub fn sim_gimlet_serial(slot: u16) -> String {
+    format!("SimGimlet{slot:02}")
+}
+
+// TODO-RAINCLAUDE: records which gimlet SPs `add_simulated_gimlet_sps` appended to an sp-sim config, so `add_simulated_gimlet_ports` can give every MGS config that talks to the resulting rack the matching sled ports; the counts are u8s, like the ignition targets they become.
+#[derive(Clone, Copy, Debug)]
+#[must_use]
+pub struct AddedSimGimlets {
+    sidecars: u8,
+    first_slot: u8,
+    count: u8,
+}
+
+/// Appends the specified number of simulated Gimlet SPs to the sp-sim config.
+///
+/// Each new SP is a copy of the last gimlet SP in the config, with its serial
+/// derived from [`sim_gimlet_serial`].
+///
+/// # Panics
+///
+/// If `count` is 0, this returns without checking anything. Otherwise, panics
+/// if:
+///
+/// * the sp-sim config has no gimlet SP to copy, or
+/// * the total number of simulated SPs (sidecars, existing gimlets, added
+///   gimlets, and PSCs) would exceed sp-sim's
+///   [`sp_sim::NUM_IGNITION_TARGETS`] ignition targets.
+// TODO-RAINCLAUDE: every MGS config that talks to the resulting rack needs the matching sled ports from `add_simulated_gimlet_ports`.
+pub fn add_simulated_gimlet_sps(
+    sp_sim_config: &mut sp_sim::Config,
+    count: usize,
+) -> AddedSimGimlets {
+    let sps = &mut sp_sim_config.simulated_sps;
+    let sidecars = u8::try_from(sps.sidecar.len())
+        .expect("the sp-sim config's sidecar count fits in a u8");
+    let first_slot = u8::try_from(sps.gimlet.len())
+        .expect("the sp-sim config's gimlet count fits in a u8");
+    if count == 0 {
+        return AddedSimGimlets { sidecars, first_slot, count: 0 };
+    }
+
+    let total_sps =
+        usize::from(sidecars) + usize::from(first_slot) + count + sps.psc.len();
+    assert!(
+        total_sps <= NUM_IGNITION_TARGETS,
+        "adding {count} gimlet SPs makes {total_sps} simulated SPs, but \
+         sp-sim has only {NUM_IGNITION_TARGETS} ignition targets",
+    );
+    let added = AddedSimGimlets {
+        sidecars,
+        first_slot,
+        count: u8::try_from(count).expect(
+            "the added gimlet count was checked against sp-sim's limit",
+        ),
+    };
+
+    // Use the last gimlet as a template.
+    let template = sps
+        .gimlet
+        .last()
+        .expect("the sp-sim config has a gimlet SP to copy")
+        .common
+        .clone();
+
+    for slot in added.first_slot..added.first_slot + added.count {
+        sps.gimlet.push(GimletConfig {
+            // The only fields that are different in the other gimlets are:
+            //
+            // - The serial number, to make each SP unique.
+            // - The EreportConfig: a default one gives each SP a fresh restart
+            //   UUID, distinct from the template's.
+            //
+            // Everything else is copied verbatim. Copies don't collide on
+            // their bind addresses, since every one of them is port 0, and
+            // duplicated per-device identity (cert seeds, component VPD
+            // serials) is fine because nothing relies on it being unique.
+            // (But if this changes in the future, we may need to update this.)
+            common: SpCommonConfig {
+                serial_number: sim_gimlet_serial(u16::from(slot)),
+                ereport_config: EreportConfig::default(),
+                ..template.clone()
+            },
+        });
+    }
+
+    added
+}
+
+/// Appends MGS sled ports for the simulated Gimlet SPs that
+/// [`add_simulated_gimlet_sps`] appended to the sp-sim config.
+///
+/// # Panics
+///
+/// If no gimlets were added, this returns without checking anything.
+/// Otherwise, panics if the MGS config's switch ports don't follow sp-sim's
+/// ignition target numbering (sidecars, then gimlets, then PSCs), or if the
+/// added gimlets would push them past sp-sim's
+/// [`sp_sim::NUM_IGNITION_TARGETS`] ignition targets.
+// TODO-RAINCLAUDE: each new port identifies its SP as that sled at every switch location; ports after the gimlets (the PSC ports) move up by the number of gimlets added, following sp-sim's sidecars-then-gimlets-then-PSCs numbering.
+pub fn add_simulated_gimlet_ports(
+    server_config: &mut omicron_gateway::Config,
+    added: AddedSimGimlets,
+) {
+    let AddedSimGimlets { sidecars, first_slot, count } = added;
+    if count == 0 {
+        return;
+    }
+
+    check_switch_port_layout(
+        &server_config.switch,
+        usize::from(sidecars),
+        usize::from(first_slot),
+        usize::from(count),
+    );
+
+    let first_new_target = sidecars + first_slot;
+    for port in &mut server_config.switch.port {
+        if port.ignition_target >= first_new_target {
+            port.ignition_target += count;
+        }
+    }
+
+    let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+    let switch = &mut server_config.switch;
+    for slot in first_slot..first_slot + count {
+        switch.port.push(SwitchPortDescription {
+            config: SwitchPortConfig::Simulated {
+                fake_interface: format!("fake-sled{slot}"),
+                addr: localhost_port_0,
+                ereport_addr: localhost_port_0,
+            },
+            ignition_target: sidecars + slot,
+            location: switch
+                .location
+                .description
+                .iter()
+                .map(|description| {
+                    (
+                        description.name.clone(),
+                        SpIdentifier::new(SpType::Sled, u16::from(slot)),
+                    )
+                })
+                .collect(),
+        });
+    }
+
+    // TODO-RAINCLAUDE: postcondition: the shifted and appended ports follow sp-sim's numbering with the added gimlets counted as existing ones.
+    check_switch_port_layout(
+        &server_config.switch,
+        usize::from(sidecars),
+        usize::from(first_slot) + usize::from(count),
+        0,
+    );
+}
+
+// TODO-RAINCLAUDE: checks that the MGS switch ports follow sp-sim's ignition numbering (switches within the sidecars' targets, sled N at sidecars + N for each existing gimlet, power N at sidecars + gimlets + N) and that the shifted power ports stay within sp-sim's targets; panics listing every mismatch.
+fn check_switch_port_layout(
+    switch: &omicron_gateway::SwitchConfig,
+    sidecars: usize,
+    gimlets: usize,
+    added_gimlets: usize,
+) {
+    let mut mismatches = Vec::new();
+
+    let mut targets: Vec<usize> = switch
+        .port
+        .iter()
+        .map(|port| usize::from(port.ignition_target))
+        .collect();
+    targets.sort_unstable();
+    let mut deduped_targets = targets.clone();
+    deduped_targets.dedup();
+    if deduped_targets != targets {
+        mismatches.push(format!(
+            "more than one switch port has the same ignition target \
+             (targets: {targets:?})"
+        ));
+    }
+
+    for port in &switch.port {
+        let target = usize::from(port.ignition_target);
+        let mut location: Vec<_> = port.location.iter().collect();
+        location.sort_unstable_by_key(|(name, _)| *name);
+        for (name, sp_id) in location {
+            let slot = usize::from(sp_id.slot);
+            let expected = match sp_id.typ {
+                SpType::Switch => {
+                    if slot < sidecars && target < sidecars {
+                        Ok(())
+                    } else {
+                        Err(format!("slot and target both below {sidecars}"))
+                    }
+                }
+                SpType::Sled => {
+                    if slot < gimlets && target == sidecars + slot {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "slot below {gimlets} and target {}",
+                            sidecars + slot,
+                        ))
+                    }
+                }
+                SpType::Power => {
+                    let expected_target = sidecars + gimlets + slot;
+                    if target != expected_target {
+                        Err(format!("target {expected_target}"))
+                    } else if target + added_gimlets >= NUM_IGNITION_TARGETS {
+                        Err(format!(
+                            "a target below {} after shifting by the \
+                             {added_gimlets} added gimlets",
+                            NUM_IGNITION_TARGETS,
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }
+            };
+            if let Err(expected) = expected {
+                mismatches.push(format!(
+                    "at {name}, ignition target {target} is {:?} {slot}, \
+                     but expected {expected}",
+                    sp_id.typ,
+                ));
+            }
+        }
+    }
+
+    let expected_sled_slots: Vec<usize> = (0..gimlets).collect();
+    for description in &switch.location.description {
+        let name = &description.name;
+        let mut sled_slots: Vec<usize> = switch
+            .port
+            .iter()
+            .filter_map(|port| port.location.get(name))
+            .filter_map(|sp_id| match sp_id.typ {
+                SpType::Sled => Some(usize::from(sp_id.slot)),
+                SpType::Switch | SpType::Power => None,
+            })
+            .collect();
+        sled_slots.sort_unstable();
+        if sled_slots != expected_sled_slots {
+            mismatches.push(format!(
+                "at {name}, the sled ports are for slots {sled_slots:?}, \
+                 but expected one per existing gimlet SP \
+                 ({expected_sled_slots:?})"
+            ));
+        }
+    }
+
+    assert!(
+        mismatches.is_empty(),
+        "adding gimlet SPs needs the MGS switch ports to follow sp-sim's \
+         ignition target numbering ({sidecars} sidecars, then {gimlets} \
+         gimlets, then PSCs), but:\n{}",
+        mismatches.join("\n"),
+    );
 }
 
 pub async fn test_setup(

@@ -31,6 +31,7 @@ pub use psc::Psc;
 pub use psc::SIM_PSC_BOARD;
 pub use server::logger;
 pub use sidecar::FAKE_SIDECAR_MODEL;
+pub use sidecar::NUM_IGNITION_TARGETS;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use sidecar::Sidecar;
 pub use slog::Logger;

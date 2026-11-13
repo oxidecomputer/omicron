@@ -22,6 +22,7 @@ use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_messages::SpPort;
+use gateway_test_utils::setup::AddedSimGimlets;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use gateway_test_utils::setup::GatewayTestContext;
 use iddqd::IdOrdMap;
@@ -139,6 +140,13 @@ use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
+// TODO-RAINCLAUDE: the rack shared by every switch's MGS, plus the gimlet SPs added to its config, which each switch's MGS config needs matching sled ports for.
+#[derive(Clone)]
+struct SharedSimRack {
+    rack: Arc<SimRack>,
+    added_gimlets: AddedSimGimlets,
+}
+
 /// Starts the control plane for tests and tools
 ///
 /// This helper manges the configuration and startup of all the control plane
@@ -172,8 +180,10 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
     sp_sim_config_file: Utf8PathBuf,
+    // TODO-RAINCLAUDE: gimlet SPs are added to the sp-sim config until it has at least this many, right before the rack starts.
+    min_gimlet_sps: usize,
     // TODO-RAINCLAUDE: started by the first `start_gateway` call and shared by every switch's MGS, as on a real rack.
-    sim_rack: Option<Arc<SimRack>>,
+    sim_rack: Option<SharedSimRack>,
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
@@ -238,6 +248,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             producer: None,
             gateway: BTreeMap::new(),
             sp_sim_config_file: DEFAULT_SP_SIM_CONFIG.into(),
+            min_gimlet_sps: 0,
             sim_rack: None,
             dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
@@ -436,6 +447,17 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         self.sp_sim_config_file = sp_sim_config_file;
     }
 
+    pub fn set_min_gimlet_sps(&mut self, min_gimlet_sps: usize) {
+        assert!(
+            self.sim_rack.is_none(),
+            "set_min_gimlet_sps({min_gimlet_sps}) called after start_gateway \
+             already started the simulated rack with at least {} gimlet SPs; \
+             set the minimum before starting any gateway",
+            self.min_gimlet_sps,
+        );
+        self.min_gimlet_sps = min_gimlet_sps;
+    }
+
     pub async fn start_gateway(
         &mut self,
         switch_slot: SwitchSlot,
@@ -448,14 +470,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
              rack, and the first gateway context would leak without teardown",
         );
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let mgs_config = gateway_test_utils::setup::load_mgs_test_config();
+        let mut mgs_config = gateway_test_utils::setup::load_mgs_test_config();
 
-        let sim_rack = match &self.sim_rack {
-            Some(sim_rack) => Arc::clone(sim_rack),
+        let shared_rack = match &self.sim_rack {
+            Some(shared_rack) => shared_rack.clone(),
             None => {
-                let sp_sim_config =
+                let mut sp_sim_config =
                     gateway_test_utils::setup::load_sp_sim_config(
                         self.sp_sim_config_file.clone(),
+                    );
+                let added_gimlet_sps = self
+                    .min_gimlet_sps
+                    .saturating_sub(sp_sim_config.simulated_sps.gimlet.len());
+                let added_gimlets =
+                    gateway_test_utils::setup::add_simulated_gimlet_sps(
+                        &mut sp_sim_config,
+                        added_gimlet_sps,
                     );
                 let log = self.logctx.log.new(o!("component" => "sp-sim"));
                 let rack = Arc::new(
@@ -463,10 +493,15 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .await
                         .expect("started simulated SP rack"),
                 );
-                self.sim_rack = Some(Arc::clone(&rack));
-                rack
+                let shared_rack = SharedSimRack { rack, added_gimlets };
+                self.sim_rack = Some(shared_rack.clone());
+                shared_rack
             }
         };
+        gateway_test_utils::setup::add_simulated_gimlet_ports(
+            &mut mgs_config,
+            shared_rack.added_gimlets,
+        );
 
         // TODO-RAINCLAUDE: each SP's port 1 is cabled to switch0 and port 2 to switch1, which is also how MGS determines its location.
         let sp_port = match switch_slot {
@@ -480,7 +515,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             self.test_name,
             sp_port,
             mgs_config,
-            sim_rack,
+            shared_rack.rack,
             mgs_addr,
         )
         .await;
@@ -1781,6 +1816,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     // agent will be for switch1.
 
     starter.set_sp_sim_config_file(gateway_config_file);
+    starter.set_min_gimlet_sps(1 + usize::from(extra_sled_agents));
     starter
         .init_with_steps(
             vec![
@@ -2118,7 +2154,8 @@ pub(crate) async fn start_sled_agent(
     // Generate a baseboard serial number that matches the SP configuration
     // (SimGimlet00, SimGimlet01, etc.) so that inventory can link sled agents
     // to their corresponding SPs via baseboard_id.
-    let baseboard_serial = format!("SimGimlet{:02}", sled_index);
+    let baseboard_serial =
+        gateway_test_utils::setup::sim_gimlet_serial(sled_index);
 
     let config = sim::Config::for_testing_with_baseboard(
         id,
