@@ -9303,7 +9303,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     version_removed INT8,
 
     /* Salt for underlay IP collision avoidance (XORed into mapping) */
-    /* Note: Column order must match the migrated schema */
     underlay_salt INT2,
 
     /* Current state of the multicast group (for RPW) */
