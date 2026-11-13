@@ -15,8 +15,9 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
 use nexus_networking::{
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned,
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext,
+    InServiceSledClientError,
+    sled_client_by_baseboard_id_and_rack_id_if_in_service,
+    sled_client_by_baseboard_id_and_rack_id_if_in_service_ext,
 };
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::{
@@ -36,7 +37,7 @@ use sled_agent_client::types::{
 };
 use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, error, info, o};
+use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -164,7 +165,7 @@ impl BackgroundTask for TrustQuorumManager {
 // Status of an activation for a single rack's active configuration
 enum Status {
     ConfigInactive,
-    CoordinatorNoLongerCommissioned(BaseboardId),
+    CoordinatorNotInService(BaseboardId),
     Preparing,
     Commit(Vec<CommitOpsResults>),
     CommitAndStartSledAgents(Vec<CommitOpsResults>, Vec<StartSledAgentResults>),
@@ -185,10 +186,11 @@ impl Status {
                     aborted."
                 );
             }
-            Status::CoordinatorNoLongerCommissioned(coordinator_id) => {
+            Status::CoordinatorNotInService(coordinator_id) => {
                 swriteln!(
                     &mut s,
-                    "    Coordinator ({coordinator_id}) was decommissioned."
+                    "    Coordinator ({coordinator_id}) is not in service: \
+                     configuration is aborted."
                 );
             }
             Status::Preparing => {
@@ -314,8 +316,8 @@ async fn prepare(
     config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // Get a sled agent for the coordinator
-    let Some(coordinator_sa) =
-        sled_client_by_baseboard_id_and_rack_id_if_commissioned(
+    let coordinator_sa =
+        match sled_client_by_baseboard_id_and_rack_id_if_in_service(
             &datastore,
             &opctx,
             &config.coordinator,
@@ -323,18 +325,19 @@ async fn prepare(
             &log,
         )
         .await
-        .with_context(|| {
-            format!(
-                "failed to retrieve commissioned sled \
-                    by baseboard_id {} and rack_id {}.",
-                config.coordinator, config.rack_id
-            )
-        })?
-    else {
-        return Ok(Status::CoordinatorNoLongerCommissioned(
-            config.coordinator.clone(),
-        ));
-    };
+        {
+            Ok(client) => client,
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                abort_config_with_coordinator_not_in_service(
+                    log, opctx, datastore, &config,
+                )
+                .await?;
+                return Ok(Status::CoordinatorNotInService(config.coordinator));
+            }
+            Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
+                return Err(error.into());
+            }
+        };
 
     let response = coordinator_sa
         .trust_quorum_coordinator_status()
@@ -397,6 +400,56 @@ async fn record_prepare_status(
         .tq_update_prepare_status(opctx, coordinator_config, acked_prepares)
         .await?;
     Ok(outcome)
+}
+
+/// Abort a trust quorum reconfiguration in the database because the coordinator
+/// is no longer in service.
+///
+/// Returns `Ok(())` if the abort succeeded, including when the configuration
+/// was already aborted.
+///
+/// Returns an error if the abort failed, including the case where the abort
+/// cannot happen because this configuration has already moved past the
+/// preparing stage. The next time the background task is activated, it'll
+/// reload the configuration and act on its current state. (Why not do it in
+/// this activation? Because the race is quite narrow -- this Nexus has to
+/// discover that the coordinator is out of service at the same time that
+/// another Nexus moves this config past the preparing stage. We'll let the
+/// Nexus that moved the config past the preparing stage take charge.)
+async fn abort_config_with_coordinator_not_in_service(
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    config: &NexusTrustQuorumConfig,
+) -> Result<(), Error> {
+    let reason = format!(
+        "Coordinator {} is no longer an in-service sled in rack {}; aborted \
+         by the trust quorum background task.",
+        config.coordinator, config.rack_id
+    );
+    datastore
+        .tq_abort_config(
+            opctx,
+            authz::TrustQuorumConfig::for_rack_id(config.rack_id),
+            config.epoch,
+            reason,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "failed to abort the configuration whose coordinator {} is \
+                 not in service",
+                config.coordinator
+            )
+        })?;
+    warn!(
+        log,
+        "Aborted trust quorum configuration: coordinator is not in service";
+        "rack_id" => %config.rack_id,
+        "epoch" => %config.epoch,
+        "coordinator" => %config.coordinator,
+    );
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -696,7 +749,7 @@ async fn send_start_sled_agent_requests(
     results
 }
 
-/// Retrieve up to `num_clients` clients for commissioned sled agents.
+/// Retrieve up to `num_clients` clients for in-service sled agents.
 ///
 /// Returns an error if no clients are available.
 #[allow(clippy::too_many_arguments)]
@@ -728,8 +781,8 @@ async fn get_sled_agent_clients(
 
     // Now try to get a client for `num_clients`
     for id in randomized {
-        let Some(client) =
-            sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
+        let client =
+            match sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
                 &datastore,
                 opctx,
                 &id,
@@ -737,10 +790,14 @@ async fn get_sled_agent_clients(
                 log,
                 reqwest_client.clone(),
             )
-            .await?
-        else {
-            continue;
-        };
+            .await
+            {
+                Ok(client) => client,
+                Err(InServiceSledClientError::NotInService { .. }) => continue,
+                Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
+                    return Err(error.into());
+                }
+            };
         clients.push((id.clone(), client));
         if clients.len() == num_clients {
             break;
@@ -925,6 +982,7 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use nexus_types::trust_quorum::{
         IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfigState,
     };
@@ -981,6 +1039,9 @@ mod tests {
             hw_ids.into_iter().map(BaseboardId::from).collect();
 
         let rack_id = RackUuid::new_v4();
+        for baseboard_id in &members {
+            sled_upsert_for_baseboard(datastore, rack_id, baseboard_id).await;
+        }
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,

@@ -27,6 +27,7 @@ impl_enum_type!(
     PhysicalDisk => b"physical_disk"
     Saga => b"saga"
     Certificate => b"certificate"
+    SmfService => b"smf_service"
 
 );
 
@@ -41,6 +42,7 @@ impl From<DiagnosisEngine> for fm::DiagnosisEngineKind {
             DiagnosisEngine::Certificate => {
                 fm::DiagnosisEngineKind::Certificate
             }
+            DiagnosisEngine::SmfService => fm::DiagnosisEngineKind::SmfService,
         }
     }
 }
@@ -56,6 +58,7 @@ impl From<fm::DiagnosisEngineKind> for DiagnosisEngine {
             fm::DiagnosisEngineKind::Certificate => {
                 DiagnosisEngine::Certificate
             }
+            fm::DiagnosisEngineKind::SmfService => DiagnosisEngine::SmfService,
         }
     }
 }
