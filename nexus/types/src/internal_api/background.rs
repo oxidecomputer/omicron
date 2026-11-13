@@ -961,6 +961,12 @@ pub enum BlueprintPlannerStatus {
     /// by the config file.
     Disabled,
 
+    /// The reconfigurator config has not been loaded yet, so the planner did
+    /// not run.
+    ///
+    /// This is expected briefly after Nexus starts up.
+    ConfigNotYetLoaded,
+
     /// The blueprint limit was reached, so automatic blueprint planning was
     /// disabled.
     ///

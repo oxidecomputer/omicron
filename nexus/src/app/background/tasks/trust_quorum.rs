@@ -353,6 +353,7 @@ async fn prepare(
         TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
         TrustQuorumCoordinatorStatusResponse::NotCoordinating {
             latest_config_epoch,
+            latest_committed_epoch: _,
         } => {
             let latest_config_epoch = match latest_config_epoch {
                 Some(epoch) => epoch.to_string(),

@@ -252,6 +252,12 @@ async fn test_omdb_success_cases() {
     activate_background_task(lockstep_client, "fm_rendezvous").await;
     activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
 
+    // Make sure the planner loaded its config and ran at least once to ensure a
+    // consistent status output.
+    activate_background_task(lockstep_client, "reconfigurator_config_watcher")
+        .await;
+    activate_background_task(lockstep_client, "blueprint_planner").await;
+
     // Populate the `rendezvous_sled_bp_availability` table deterministically so
     // the BP AVAIL column in `omdb db sleds` has data present in it. Run
     // this twice: the first pass populates the table (unless a watch-triggered
