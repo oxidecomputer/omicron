@@ -276,26 +276,51 @@ impl super::Nexus {
         ))
     }
 
+    pub(crate) async fn physical_disk_view(
+        &self,
+        opctx: &OpContext,
+        disk_selector: &path_params::PhysicalDiskPath,
+    ) -> Result<external_api::physical_disk::PhysicalDisk, Error> {
+        let (.., physical_disk) =
+            self.physical_disk_lookup(opctx, disk_selector)?.fetch().await?;
+        let inv = self.inventory_load_rx().borrow().clone();
+        Ok(physical_disk.to_external_api(&inv))
+    }
+
+    /// Convert physical disks to their external view, filling in location from
+    /// the last inventory collection.
+    fn physical_disks_to_external_api(
+        &self,
+        disks: Vec<db::model::PhysicalDisk>,
+    ) -> Vec<external_api::physical_disk::PhysicalDisk> {
+        let inv = self.inventory_load_rx().borrow().clone();
+        disks.into_iter().map(|disk| disk.to_external_api(&inv)).collect()
+    }
+
     /// Return a page of physical disks for a given sled id
     pub(crate) async fn sled_list_physical_disks(
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::PhysicalDisk> {
-        self.db_datastore
+    ) -> ListResultVec<external_api::physical_disk::PhysicalDisk> {
+        let disks = self
+            .db_datastore
             .sled_list_physical_disks(&opctx, sled_id, pagparams)
-            .await
+            .await?;
+        Ok(self.physical_disks_to_external_api(disks))
     }
 
     pub(crate) async fn physical_disk_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::PhysicalDisk> {
-        self.db_datastore
+    ) -> ListResultVec<external_api::physical_disk::PhysicalDisk> {
+        let disks = self
+            .db_datastore
             .physical_disk_list(&opctx, pagparams, DiskFilter::InService)
-            .await
+            .await?;
+        Ok(self.physical_disks_to_external_api(disks))
     }
 
     pub(crate) async fn physical_disk_list_unadopted(

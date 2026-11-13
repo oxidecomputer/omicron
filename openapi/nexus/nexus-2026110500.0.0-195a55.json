@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026102100.0.0"
+    "version": "2026110500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -25835,6 +25835,11 @@
             "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
+          },
+          "location": {
+            "nullable": true,
+            "description": "The physical location in the sled where this disk was last observed. Null if its location is not known at this time.",
+            "type": "string"
           },
           "model": {
             "type": "string"
