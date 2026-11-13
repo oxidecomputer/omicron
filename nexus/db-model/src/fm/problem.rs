@@ -220,7 +220,7 @@ impl FmProblemRequest {
     ) -> Self {
         let SitrepProblem {
             id,
-            created_sitrep_id,
+            requested_sitrep_id,
             comment,
             revisions: _,
             alerts: _,
@@ -229,7 +229,7 @@ impl FmProblemRequest {
         Self {
             id: (*id).into(),
             sitrep_id: sitrep_id.into(),
-            requested_sitrep_id: (*created_sitrep_id).into(),
+            requested_sitrep_id: (*requested_sitrep_id).into(),
             comment: comment.clone(),
         }
     }
@@ -245,7 +245,7 @@ impl FmProblemRevisionRequest {
     ) -> Self {
         let SitrepRevision {
             number,
-            created_sitrep_id,
+            requested_sitrep_id,
             time_resolved,
             code,
             summary,
@@ -257,7 +257,7 @@ impl FmProblemRevisionRequest {
             problem_id: problem_id.into(),
             revision: number.into(),
             sitrep_id: sitrep_id.into(),
-            requested_sitrep_id: created_sitrep_id.into(),
+            requested_sitrep_id: requested_sitrep_id.into(),
             time_resolved,
             code: SqlU32::new(code.into()),
             summary,
@@ -280,7 +280,7 @@ impl TryFrom<FmProblemRevisionRequest> for SitrepRevision {
             problem_id: _,
             revision: number,
             sitrep_id: _,
-            requested_sitrep_id: created_sitrep_id,
+            requested_sitrep_id,
             time_resolved,
             code,
             summary,
@@ -290,7 +290,7 @@ impl TryFrom<FmProblemRevisionRequest> for SitrepRevision {
         } = revision;
         Ok(Self {
             number: number.into(),
-            created_sitrep_id: created_sitrep_id.into(),
+            requested_sitrep_id: requested_sitrep_id.into(),
             time_resolved,
             code: ProblemCode::try_from(u32::from(code))?,
             summary,
