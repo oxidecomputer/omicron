@@ -428,6 +428,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 blueprint source: planner with report:
 planning report:
+status for operators: Waiting for MUPdate resolution
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled d67ce8f0-a691-4010-b414-420d82e80527: 14 zones
