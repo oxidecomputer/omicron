@@ -215,7 +215,7 @@ pub struct SitrepProblem {
     /// created the externally visible problem, which may be a later one. It
     /// remains the same as the problem is carried forward into subsequent
     /// sitreps.
-    pub created_sitrep_id: SitrepUuid,
+    pub requested_sitrep_id: SitrepUuid,
     /// A human-readable comment explaining why the diagnosis engine created
     /// this problem.
     ///
@@ -279,7 +279,7 @@ pub struct SitrepRevision {
     /// yet have a current revision.
     pub number: ProblemRevNum,
     /// The sitrep in which a diagnosis engine first requested this revision.
-    pub created_sitrep_id: SitrepUuid,
+    pub requested_sitrep_id: SitrepUuid,
     /// The time at which the problem was resolved, if it is resolved as of
     /// this revision.
     ///

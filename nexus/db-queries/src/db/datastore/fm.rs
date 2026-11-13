@@ -647,7 +647,7 @@ impl DataStore {
                 problems
                     .insert_unique(SitrepProblem {
                         id,
-                        created_sitrep_id: created_sitrep_id.into(),
+                        requested_sitrep_id: created_sitrep_id.into(),
                         comment,
                         revisions,
                         alerts,
@@ -3381,7 +3381,7 @@ mod tests {
                         summary: &str| {
             fm::problem::SitrepRevision {
                 number: ProblemRevNum::from_u32(number),
-                created_sitrep_id: sitrep_id,
+                requested_sitrep_id: sitrep_id,
                 time_resolved,
                 code: fm::problem::ProblemCode::UnhealthyZpool,
                 summary: summary.to_string(),
@@ -3392,7 +3392,7 @@ mod tests {
         };
         let resolved_problem = fm::problem::SitrepProblem {
             id: ProblemUuid::new_v4(),
-            created_sitrep_id: sitrep_id,
+            requested_sitrep_id: sitrep_id,
             comment: "a problem that has since been resolved".to_string(),
             revisions: [
                 revision(1, None, "something is wrong"),
@@ -3425,7 +3425,7 @@ mod tests {
         };
         let shared_problem = fm::problem::SitrepProblem {
             id: ProblemUuid::new_v4(),
-            created_sitrep_id: sitrep_id,
+            requested_sitrep_id: sitrep_id,
             comment: "a problem shared by two cases".to_string(),
             revisions: [revision(1, None, "two cases agree this is wrong")]
                 .into_iter()
