@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
     v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
-    v50, v51, v52, v53, v55,
+    v50, v51, v52, v53, v55, v61,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -1665,7 +1665,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/coordinator-status",
-        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
@@ -1675,6 +1675,29 @@ pub trait SledAgentApi {
         >,
         HttpError,
     >;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_coordinator_status",
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions =
+            VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_coordinator_status_v61(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v61::trust_quorum::TrustQuorumCoordinatorStatusResponse>,
+        HttpError,
+    > {
+        Self::trust_quorum_coordinator_status(request_context)
+            .await
+            .map(|response| {
+                response.map(
+                    v61::trust_quorum::TrustQuorumCoordinatorStatusResponse::from,
+                )
+            })
+    }
 
     /// Get the coordinator status if this node is coordinating a reconfiguration
     #[endpoint {
@@ -1699,10 +1722,11 @@ pub trait SledAgentApi {
         // immutable blessed documents. But that leaves open the question of how
         // None can be represented on the wire. We return a 404 -- old clients
         // will receive it as an error and will handle it reasonably well.
-        use latest::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+        use v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 
-        Self::trust_quorum_coordinator_status(request_context).await?.try_map(
-            |response| match response {
+        Self::trust_quorum_coordinator_status_v61(request_context)
+            .await?
+            .try_map(|response| match response {
                 TrustQuorumCoordinatorStatusResponse::Coordinating {
                     status,
                 } => Ok(status),
@@ -1715,8 +1739,7 @@ pub trait SledAgentApi {
                      quorum reconfiguration"
                         .to_string(),
                 )),
-            },
-        )
+            })
     }
 
     /// Attempt to prepare and commit a trust quorum configuration

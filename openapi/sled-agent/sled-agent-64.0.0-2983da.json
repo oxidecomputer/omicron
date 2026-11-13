@@ -10518,9 +10518,16 @@
             "description": "The node is not currently coordinating a reconfiguration or LRTQ upgrade.",
             "type": "object",
             "properties": {
+              "latest_committed_epoch": {
+                "nullable": true,
+                "description": "The latest configuration epoch this node has committed.\n\nThis is never greater than `latest_config_epoch`.\n\nThis should be looked at when `latest_config_epoch` is equal to the Nexus epoch. In that case:\n\n* If this field is lower than `latest_config_epoch` (including `None`), then this node persisted the configuration but stopped coordinating it without committing -- in this case, the configuration should be aborted (but see below).\n\n* If this field is equal to `latest_config_epoch`, then this node committed the configuration -- in this case, the configuration must not be aborted, and Nexus should proceed with committing the configuration at the remaining members.\n\nIf this value is lower than the Nexus epoch, it means that _this_ node has not committed that epoch, not that _no_ node has. (For example, the coordinator may have crashed after Nexus started committing, but before its own commit arrived.) Aborting must therefore remain conditional on the configuration not having moved past the `Preparing` state.\n\nThis is `None` if the node has not committed a trust quorum configuration, including a node that has not yet upgraded from LRTQ.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
               "latest_config_epoch": {
                 "nullable": true,
-                "description": "The latest configuration epoch this node has persisted.\n\nIf this is greater than or equal to the epoch that Nexus is driving, the coordinator started that epoch and then stopped for some reason, and Nexus can abort this configuration. If lower than the Nexus epoch, then reconfiguration has not started yet.",
+                "description": "The latest configuration epoch this node has persisted.\n\n* If lower than the Nexus epoch, then this node has not started coordinating that epoch: it either never received the configuration or restarted before persisting it.\n\n* If equal to the Nexus epoch, then this node started coordinating that epoch but is no longer doing so: either it committed the epoch (see `latest_committed_epoch`), or it lost its coordination state, for example by restarting. Only the latter warrants an abort.\n\n* If greater than the Nexus epoch, then this node has moved on to a newer configuration, and the Nexus epoch has been superseded.\n\nThis is `None` if the node has not persisted a trust quorum configuration, including a node that hasn't yet upgraded from LRTQ.",
                 "type": "integer",
                 "format": "uint64",
                 "minimum": 0
