@@ -793,7 +793,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -961,6 +962,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -1559,7 +1561,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1727,6 +1730,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -2221,6 +2225,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
@@ -2370,6 +2375,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1

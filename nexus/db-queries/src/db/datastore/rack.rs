@@ -208,6 +208,23 @@ pub enum SledUnderlayAllocationResult {
 }
 
 impl DataStore {
+    pub async fn rack_id_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<RackUuid> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::rack::dsl;
+        paginated(dsl::rack, dsl::id, pagparams)
+            .select(dsl::id)
+            .load_async::<Uuid>(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|vec| {
+                vec.into_iter().map(RackUuid::from_untyped_uuid).collect()
+            })
+    }
+
     pub async fn rack_list(
         &self,
         opctx: &OpContext,
@@ -1180,6 +1197,7 @@ mod test {
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OperatorNexusConfig;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::UpstreamNtpConfig;
     use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
@@ -1224,6 +1242,7 @@ mod test {
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
+                    reflects_collection: ReflectsCollection::Indeterminate,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
                     target_release_minimum_generation:
@@ -1319,6 +1338,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &EMPTY_BLUEPRINT,
+            ReflectsCollection::Indeterminate,
             test_name,
             PlannerRng::from_entropy(),
         )

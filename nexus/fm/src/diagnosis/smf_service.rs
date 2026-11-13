@@ -105,8 +105,8 @@ enum SledObservation<'a> {
     /// services in maintenance, keyed by `(zone_name, fmri)`.
     Observed {
         in_maintenance: BTreeSet<(&'a str, &'a str)>,
-        /// False if some `svcs` output lines could not be parsed.
-        complete: bool,
+        /// Number of `svcs` output lines that could not be parsed.
+        parse_errors: usize,
         time_of_status: chrono::DateTime<chrono::Utc>,
     },
     /// The sled is in inventory, but its service states are unknown.
@@ -135,7 +135,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                             })
                             .map(|svc| (svc.zone.as_str(), svc.fmri.as_str()))
                             .collect(),
-                        complete: svcs.errors.is_empty(),
+                        parse_errors: svcs.errors.len(),
                         time_of_status: svcs.time_of_status,
                     }
                 }
@@ -149,10 +149,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         .collect();
 
     for (sled_id, obs) in &observations {
-        if let SledObservation::Observed { complete: false, .. } = obs {
+        if let SledObservation::Observed { parse_errors: n @ 1.., .. } = obs {
             builder
                 .log_warning("sled reported unparseable SMF service status")
                 .kv("sled_id", sled_id)
+                .kv("parse_errors", n)
                 .finish();
         }
     }
@@ -207,7 +208,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 // a partial listing is not evidence of recovery.
                 Some(SledObservation::Observed {
                     in_maintenance,
-                    complete: true,
+                    parse_errors: 0,
                     ..
                 }) if !in_maintenance.contains(&(
                     service.zone_name.as_str(),
@@ -228,7 +229,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 
     // Open a case for each service in maintenance on an in-service sled that
     // doesn't already have one. Parsed maintenance lines are trustworthy even
-    // when other lines failed to parse, so this ignores `complete`.
+    // when other lines failed to parse, so this ignores `parse_errors`.
     for (sled_id, obs) in &observations {
         if !in_service_sleds.contains(sled_id) {
             continue;

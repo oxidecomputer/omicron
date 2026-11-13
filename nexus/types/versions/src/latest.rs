@@ -263,6 +263,11 @@ pub mod multicast {
     pub use crate::impls::multicast::validate_source_ip;
 }
 
+pub mod multirack {
+    pub use crate::v2026_11_04_00::multirack::UnadoptedRack;
+    pub use crate::v2026_11_04_00::multirack::UnadoptedSled;
+}
+
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;
@@ -366,6 +371,18 @@ pub mod probe {
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
     pub use crate::v2026_01_05_00::probe::ProbeCreate;
+}
+
+pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactListParams;
+    pub use crate::v2026_11_05_00::problem::ImpactState;
+    pub use crate::v2026_11_05_00::problem::ImpactedResource;
+    pub use crate::v2026_11_05_00::problem::Problem;
+    pub use crate::v2026_11_05_00::problem::ProblemImpact;
+    pub use crate::v2026_11_05_00::problem::ProblemListParams;
+    pub use crate::v2026_11_05_00::problem::ProblemSelector;
+    pub use crate::v2026_11_05_00::problem::ProblemState;
+    pub use crate::v2026_11_05_00::problem::RelatedProblem;
 }
 
 pub mod project {

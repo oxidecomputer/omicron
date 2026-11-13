@@ -37,6 +37,7 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -48,6 +49,7 @@ use nexus_db_model::DbTypedUuid;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
+use nexus_types::trust_quorum::check_trust_quorum_allows_expunge;
 use nonempty::NonEmpty;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -74,6 +76,7 @@ use rand::seq::IndexedRandom;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -1202,9 +1205,9 @@ impl DataStore {
         Ok(rack_id.map(RackUuid::from))
     }
 
-    // Return the commissioned sled if it exists in the given rack, given its
+    // Return the in-service sled if it exists in the given rack, given its
     // `BaseboardId`.
-    pub async fn sled_get_commissioned_by_baseboard_and_rack_id(
+    pub async fn sled_get_in_service_by_baseboard_and_rack_id(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
@@ -1218,7 +1221,7 @@ impl DataStore {
             .filter(dsl::part_number.eq(baseboard_id.part_number))
             .filter(dsl::serial_number.eq(baseboard_id.serial_number))
             .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
-            .sled_filter(SledFilter::Commissioned)
+            .sled_filter(SledFilter::InService)
             .select(Sled::as_select())
             .get_result_async::<Sled>(conn)
             .await
@@ -1226,6 +1229,29 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(sled)
+    }
+
+    /// Return the baseboards of every in-service sled in `rack_id`.
+    pub async fn sled_list_in_service_baseboards_in_rack_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<BTreeSet<BaseboardId>, TransactionError<Error>> {
+        use nexus_db_schema::schema::sled::dsl;
+        let baseboards = dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .sled_filter(SledFilter::InService)
+            .select((dsl::part_number, dsl::serial_number))
+            .load_async::<(String, String)>(conn)
+            .await?;
+
+        Ok(baseboards
+            .into_iter()
+            .map(|(part_number, serial_number)| BaseboardId {
+                part_number,
+                serial_number,
+            })
+            .collect())
     }
 
     pub async fn sled_list(
@@ -2000,7 +2026,7 @@ impl DataStore {
     ) -> Result<SledPolicy, TransitionError> {
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
-        let sled_id = to_db_typed_uuid(authz_sled.id());
+        let sled_id = authz_sled.id();
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
         let policy = self
@@ -2009,101 +2035,14 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    let t = SledTransition::Policy(new_sled_policy);
-                    let valid_old_policies = t.valid_old_policies();
-                    let valid_old_states = t.valid_old_states();
-
-                    use nexus_db_schema::schema::sled::dsl;
-                    let query = diesel::update(dsl::sled)
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(sled_id));
-
-                    let query = match check {
-                        ValidateTransition::Yes => query
-                            .filter(
-                                dsl::sled_policy.eq_any(
-                                    valid_old_policies
-                                        .into_iter()
-                                        .map(to_db_sled_policy),
-                                ),
-                            )
-                            .filter(
-                                dsl::sled_state
-                                    .eq_any(valid_old_states.iter().copied()),
-                            )
-                            .into_boxed(),
-                        #[cfg(test)]
-                        ValidateTransition::No => query.into_boxed(),
-                    };
-
-                    let query = query
-                        .set((
-                            dsl::sled_policy
-                                .eq(to_db_sled_policy(new_sled_policy)),
-                            dsl::time_modified.eq(Utc::now()),
-                        ))
-                        .check_if_exists::<Sled>(sled_id);
-
-                    let result = query.execute_and_check(&conn).await?;
-
-                    let old_policy = match (check, result.status) {
-                        (ValidateTransition::Yes, UpdateStatus::Updated) => {
-                            result.found.policy()
-                        }
-                        (
-                            ValidateTransition::Yes,
-                            UpdateStatus::NotUpdatedButExists,
-                        ) => {
-                            // Two reasons this can happen:
-                            // 1. An idempotent update: this is treated as a
-                            //    success.
-                            // 2. Invalid state transition: a failure.
-                            //
-                            // To differentiate between the two, check that the
-                            // new policy is the same as the old policy, and
-                            // that the old state is valid.
-                            if result.found.policy() == new_sled_policy
-                                && valid_old_states
-                                    .contains(&result.found.state())
-                            {
-                                result.found.policy()
-                            } else {
-                                return Err(err.bail(
-                                    TransitionError::InvalidTransition {
-                                        current: result.found,
-                                        transition: SledTransition::Policy(
-                                            new_sled_policy,
-                                        ),
-                                    },
-                                ));
-                            }
-                        }
-                        #[cfg(test)]
-                        (ValidateTransition::No, _) => result.found.policy(),
-                    };
-
-                    // When a sled is expunged, the associated disks with that
-                    // sled should also be implicitly set to expunged.
-                    let new_disk_policy = match new_sled_policy {
-                        SledPolicy::InService { .. } => None,
-                        SledPolicy::Expunged => {
-                            Some(nexus_db_model::PhysicalDiskPolicy::Expunged)
-                        }
-                    };
-                    if let Some(new_disk_policy) = new_disk_policy {
-                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
-                        diesel::update(physical_disk_dsl::physical_disk)
-                            .filter(physical_disk_dsl::time_deleted.is_null())
-                            .filter(physical_disk_dsl::sled_id.eq(sled_id))
-                            .set(
-                                physical_disk_dsl::disk_policy
-                                    .eq(new_disk_policy),
-                            )
-                            .execute_async(&conn)
-                            .await?;
-                    }
-
-                    Ok(old_policy)
+                    Self::sled_set_policy_conn(
+                        &conn,
+                        sled_id,
+                        new_sled_policy,
+                        check,
+                        &err,
+                    )
+                    .await
                 }
             })
             .await
@@ -2117,6 +2056,184 @@ impl DataStore {
                 ))
             })?;
         Ok(policy)
+    }
+
+    /// Load up the trust quorum configuration, ensure that it allows this sled
+    /// to be expunged, and expunge it if it does.
+    ///
+    /// This method is idempotent: if the sled is already expunged, it returns
+    /// `Ok(SledPolicy::Expunged)`. (The upcoming background task that's part of
+    /// RFD 747 relies on this behavior.)
+    pub async fn sled_set_policy_to_expunged_if_trust_quorum_allows(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        baseboard_id: &BaseboardId,
+    ) -> Result<SledPolicy, external::Error> {
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+        opctx.authorize(authz::Action::Read, authz_tq).await?;
+
+        let sled_id = authz_sled.id();
+        let rack_id = authz_tq.rack().id();
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper(
+            "sled_set_policy_to_expunged_if_trust_quorum_allows",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+
+            async move {
+                let current = {
+                    use nexus_db_schema::schema::sled::dsl;
+                    dsl::sled
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
+                        .select(Sled::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?
+                };
+                // If the sled is already expunged, skip the trust quorum check.
+                // This way, expungement is idempotent.
+                let already_expunged = match current.as_ref().map(Sled::policy)
+                {
+                    Some(SledPolicy::Expunged) => true,
+                    Some(SledPolicy::InService { .. }) | None => false,
+                };
+                if !already_expunged {
+                    async {
+                        let (config, _) =
+                            Self::tq_load_latest_possible_committed_config_conn(
+                                &conn, rack_id,
+                            )
+                            .await?;
+                        check_trust_quorum_allows_expunge(
+                            sled_id,
+                            baseboard_id,
+                            &config,
+                        )?;
+                        Ok::<_, TransactionError<Error>>(())
+                    }
+                    .await
+                    .map_err(|error| match error {
+                        TransactionError::Database(error) => error,
+                        TransactionError::CustomError(error) => {
+                            err.bail(TransitionError::External(error))
+                        }
+                    })?;
+                }
+
+                Self::sled_set_policy_conn(
+                    &conn,
+                    sled_id,
+                    SledPolicy::Expunged,
+                    ValidateTransition::Yes,
+                    &err,
+                )
+                .await
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            }
+            TransitionError::from(public_error_from_diesel(
+                e,
+                ErrorHandler::Server,
+            ))
+        })
+        .map_err(|error| error.into_external_error())
+    }
+
+    async fn sled_set_policy_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+        new_sled_policy: SledPolicy,
+        check: ValidateTransition,
+        err: &OptionalError<TransitionError>,
+    ) -> Result<SledPolicy, DieselError> {
+        let sled_id = to_db_typed_uuid(sled_id);
+        let t = SledTransition::Policy(new_sled_policy);
+        let valid_old_policies = t.valid_old_policies();
+        let valid_old_states = t.valid_old_states();
+
+        use nexus_db_schema::schema::sled::dsl;
+        let query = diesel::update(dsl::sled)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(sled_id));
+
+        let query = match check {
+            ValidateTransition::Yes => query
+                .filter(dsl::sled_policy.eq_any(
+                    valid_old_policies.into_iter().map(to_db_sled_policy),
+                ))
+                .filter(
+                    dsl::sled_state.eq_any(valid_old_states.iter().copied()),
+                )
+                .into_boxed(),
+            #[cfg(test)]
+            ValidateTransition::No => query.into_boxed(),
+        };
+
+        let query = query
+            .set((
+                dsl::sled_policy.eq(to_db_sled_policy(new_sled_policy)),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .check_if_exists::<Sled>(sled_id);
+
+        let result = query.execute_and_check(conn).await?;
+
+        let old_policy = match (check, result.status) {
+            (ValidateTransition::Yes, UpdateStatus::Updated) => {
+                result.found.policy()
+            }
+            (ValidateTransition::Yes, UpdateStatus::NotUpdatedButExists) => {
+                // Two reasons this can happen:
+                // 1. An idempotent update: this is treated as a
+                //    success.
+                // 2. Invalid state transition: a failure.
+                //
+                // To differentiate between the two, check that the
+                // new policy is the same as the old policy, and
+                // that the old state is valid.
+                if result.found.policy() == new_sled_policy
+                    && valid_old_states.contains(&result.found.state())
+                {
+                    result.found.policy()
+                } else {
+                    return Err(err.bail(TransitionError::InvalidTransition {
+                        current: result.found,
+                        transition: SledTransition::Policy(new_sled_policy),
+                    }));
+                }
+            }
+            #[cfg(test)]
+            (ValidateTransition::No, _) => result.found.policy(),
+        };
+
+        // When a sled is expunged, the associated disks with that
+        // sled should also be implicitly set to expunged.
+        let new_disk_policy = match new_sled_policy {
+            SledPolicy::InService { .. } => None,
+            SledPolicy::Expunged => {
+                Some(nexus_db_model::PhysicalDiskPolicy::Expunged)
+            }
+        };
+        if let Some(new_disk_policy) = new_disk_policy {
+            use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+            diesel::update(physical_disk_dsl::physical_disk)
+                .filter(physical_disk_dsl::time_deleted.is_null())
+                .filter(physical_disk_dsl::sled_id.eq(sled_id))
+                .set(physical_disk_dsl::disk_policy.eq(new_disk_policy))
+                .execute_async(conn)
+                .await?;
+        }
+
+        Ok(old_policy)
     }
 
     /// Marks the state of the sled as decommissioned, as believed by Nexus.
@@ -2443,6 +2560,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_filtered;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
+    use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
     use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
@@ -2474,6 +2592,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
@@ -2496,6 +2615,79 @@ pub(in crate::db::datastore) mod test {
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
+
+    #[tokio::test]
+    async fn test_sled_get_in_service_by_baseboard_and_rack_id() {
+        let logctx = dev::test_setup_log(
+            "test_sled_get_in_service_by_baseboard_and_rack_id",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rack_id = RackUuid::new_v4();
+        let baseboard_id = BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: "test-serial".to_string(),
+        };
+        let lookup = async |rack_id| {
+            datastore
+                .sled_get_in_service_by_baseboard_and_rack_id(
+                    opctx,
+                    rack_id,
+                    baseboard_id.clone(),
+                )
+                .await
+                .expect("looked up sled by baseboard")
+                .map(|sled| sled.id())
+        };
+
+        let sled_id =
+            sled_upsert_for_baseboard(datastore, rack_id, &baseboard_id)
+                .await
+                .id();
+        let (authz_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("looked up sled");
+
+        assert_eq!(lookup(rack_id).await, Some(sled_id));
+        assert_eq!(lookup(RackUuid::new_v4()).await, None);
+
+        // Non-provisionable is still in service.
+        datastore
+            .sled_set_provision_policy(
+                opctx,
+                &authz_sled,
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .expect("set sled non-provisionable");
+        assert_eq!(lookup(rack_id).await, Some(sled_id));
+
+        // Expunged but not yet decommissioned is still commissioned, but not in
+        // service.
+        datastore
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .await
+            .expect("expunged sled");
+        let (_, sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch()
+            .await
+            .expect("looked up sled");
+        assert_eq!(sled.state(), SledState::Active);
+        assert_eq!(lookup(rack_id).await, None);
+
+        datastore
+            .sled_set_state_to_decommissioned(opctx, &authz_sled)
+            .await
+            .expect("decommissioned sled");
+        assert_eq!(lookup(rack_id).await, None);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn upsert_sled_updates_hardware() {
@@ -3128,6 +3320,7 @@ pub(in crate::db::datastore) mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             parent,
+            ReflectsCollection::Indeterminate,
             "sled_reservation_tests",
             PlannerRng::from_entropy(),
         )
@@ -5303,6 +5496,7 @@ pub(in crate::db::datastore) mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             &empty,
+            ReflectsCollection::Indeterminate,
             "local storage tests",
             PlannerRng::from_entropy(),
         )

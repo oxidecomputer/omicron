@@ -455,7 +455,7 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d" }
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -522,7 +522,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
-dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "ff9f27aa0d6ef6fb64c349890b6e3c242ea3d8fc", default-features = false }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.3.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.5.0"
@@ -532,8 +532,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e577a94678bf0a8d64d719acd3e19edd965f66a3" }
 dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.9.0"
-dropshot-api-manager-types = "0.9.0"
+dropshot-api-manager = "0.9.1"
+dropshot-api-manager-types = "0.9.1"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "48512bf970474ff0fd0868c833fd504c8d169064" }
@@ -715,6 +715,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
+oxide-rot = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738", default-features = false }
 oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
@@ -826,6 +827,7 @@ shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
+sigstore-verify = { git = "https://github.com/oxidecomputer/sigstore-verify", branch = "main" }
 similar = { version = "2.7.0", features = ["bytes"] }
 similar-asserts = "1.7.0"
 # Don't change sled's version on accident; sled's on-disk format is not yet

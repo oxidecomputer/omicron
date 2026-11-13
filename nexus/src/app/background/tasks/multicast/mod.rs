@@ -282,7 +282,7 @@ impl MulticastGroupReconciler {
     pub(crate) async fn invalidate_sled_mapping_cache(&self) {
         let mut cache = self.sled_mapping_cache.write().await;
         // Set timestamp to past to force refresh on next check
-        *cache = (Instant::now() - self.sled_cache_ttl, cache.1.clone());
+        cache.0 = Instant::now() - self.sled_cache_ttl;
     }
 
     /// Check if sled locations changed and invalidate caches if so.

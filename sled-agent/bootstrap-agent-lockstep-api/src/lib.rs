@@ -15,6 +15,7 @@ use bootstrap_agent_lockstep_types::MultirackJoinServiceState;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
+use bootstrap_agent_lockstep_types::SledAgentStartStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
 use omicron_uuid_kinds::MultirackJoinUuid;
@@ -84,6 +85,21 @@ pub trait BootstrapAgentLockstepApi {
     async fn baseboard_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BaseboardIds>, HttpError>;
+
+    /// Get the status of this sled's attempt to start its sled agent.
+    ///
+    /// On a cold boot a sled will not start its sled agent (and will therefore
+    /// not join the underlay) until trust quorum can reconstruct the rack
+    /// secret. This endpoint is served on the bootstrap network, and is the
+    /// only way to distinguish a sled that is waiting for unlock from one that
+    /// has been expunged.
+    #[endpoint {
+        method = GET,
+        path = "/sled-agent-start-status"
+    }]
+    async fn sled_agent_start_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledAgentStartStatus>, HttpError>;
 
     /// Configure the rack to join a multirack regional cluster
     #[endpoint {

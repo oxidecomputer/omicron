@@ -1147,6 +1147,11 @@ mod test {
             step_names
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
         );
+        assert!(
+            step_names.contains(
+                &SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS
+            )
+        );
         assert!(report.activated_in_db_ok);
         let ereport_step = report
             .collection
@@ -1515,6 +1520,11 @@ mod test {
             step_names
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
         );
+        assert!(
+            step_names.contains(
+                &SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS
+            )
+        );
         assert!(report.activated_in_db_ok);
 
         let observed_bundle = datastore
@@ -1617,6 +1627,11 @@ mod test {
             step_names
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
         );
+        assert!(
+            step_names.contains(
+                &SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS
+            )
+        );
         assert!(report.activated_in_db_ok);
 
         // This is observable by checking the state of bundle1 and bundle2:
@@ -1647,6 +1662,11 @@ mod test {
         assert!(
             step_names
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
+        assert!(
+            step_names.contains(
+                &SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS
+            )
         );
         assert!(report.activated_in_db_ok);
 
@@ -1788,6 +1808,11 @@ mod test {
         assert!(
             step_names
                 .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
+        assert!(
+            step_names.contains(
+                &SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS
+            )
         );
         assert!(report.activated_in_db_ok);
 
@@ -2270,6 +2295,20 @@ mod test {
             })
             .expect("should have SP dumps step");
         assert_eq!(sp_step.status, SupportBundleCollectionStepStatus::Skipped);
+
+        // SP components should be skipped.
+        let sp_components_step = report
+            .collection
+            .steps
+            .iter()
+            .find(|s| {
+                s.name == SupportBundleCollectionStep::STEP_SPAWN_SP_COMPONENTS
+            })
+            .expect("should have SP components step");
+        assert_eq!(
+            sp_components_step.status,
+            SupportBundleCollectionStepStatus::Skipped
+        );
 
         // Sled queries should be skipped.
         let sled_step = report

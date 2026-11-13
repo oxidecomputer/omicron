@@ -43,6 +43,7 @@ use omicron_generation_kinds::{
     UpdateDispositionGeneration,
 };
 use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -244,6 +245,9 @@ pub struct Blueprint {
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
 
+    /// which inventory collection this blueprint reflects
+    pub reflects_collection: ReflectsCollection,
+
     /// internal DNS version when this blueprint was created
     // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
@@ -320,12 +324,68 @@ pub struct Blueprint {
     pub source: BlueprintSource,
 }
 
+/// Describes which inventory collection (if any) a blueprint reflects
+///
+/// The planner always generates a blueprint from a specific inventory
+/// collection, so the blueprint reflects the state of the system as of that
+/// collection.  Blueprints created in other ways (e.g., by rack setup or by
+/// editing a blueprint by hand) may report their own collection, inherit the
+/// value from their parent blueprint, or report `Indeterminate`.
+///
+/// This is currently used for debugging, but it may be used for other purposes
+/// in the future.  The collection that this refers to may have since been
+/// pruned from the database.  Its timestamps are recorded here so that it
+/// remains possible to tell how old the blueprint's view of the system was.
+///
+/// The timestamps come from the clock of whichever Nexus instance collected
+/// the inventory.  Clocks on different systems may disagree.  As a result,
+/// code should not depend on these timestamps for correctness, such as for
+/// ordering collections or blueprints.  They are only a rough guide for
+/// people.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReflectsCollection {
+    /// the blueprint reflects the state of the system described by this
+    /// inventory collection
+    Collection {
+        /// id of the inventory collection
+        collection_id: CollectionUuid,
+        /// when the inventory collection was started
+        time_started: chrono::DateTime<chrono::Utc>,
+        /// when the inventory collection was completed
+        time_done: chrono::DateTime<chrono::Utc>,
+    },
+    /// it is not known which inventory collection this blueprint reflects
+    Indeterminate,
+}
+
+impl From<&'_ Collection> for ReflectsCollection {
+    fn from(collection: &'_ Collection) -> Self {
+        Self::Collection {
+            collection_id: collection.id,
+            time_started: collection.time_started,
+            time_done: collection.time_done,
+        }
+    }
+}
+
 impl Blueprint {
     /// Return metadata for this blueprint.
     pub fn metadata(&self) -> BlueprintMetadata {
         BlueprintMetadata {
             id: self.id,
             parent_blueprint_id: self.parent_blueprint_id,
+            reflects_collection: self.reflects_collection,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
@@ -1409,39 +1469,55 @@ impl BlueprintDisplay<'_> {
             self.blueprint.comment.clone()
         };
 
-        KvList::new_unchanged(
-            Some(METADATA_HEADING),
-            vec![
-                (CREATED_BY, self.blueprint.creator.clone()),
-                (
-                    CREATED_AT,
-                    humantime::format_rfc3339_millis(
-                        self.blueprint.time_created.into(),
-                    )
-                    .to_string(),
-                ),
-                (COMMENT, comment),
-                (
-                    INTERNAL_DNS_VERSION,
-                    self.blueprint.internal_dns_version.to_string(),
-                ),
-                (
-                    EXTERNAL_DNS_VERSION,
-                    self.blueprint.external_dns_version.to_string(),
-                ),
-                (
-                    TARGET_RELEASE_MIN_GEN,
-                    self.blueprint
-                        .target_release_minimum_generation
-                        .to_string(),
-                ),
-                (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
-                (
-                    EXTERNAL_NETWORKING_GENERATION,
-                    self.blueprint.external_networking_generation.to_string(),
-                ),
-            ],
-        )
+        let format_time = |time: chrono::DateTime<chrono::Utc>| {
+            humantime::format_rfc3339_millis(time.into()).to_string()
+        };
+
+        let mut rows = vec![
+            (CREATED_BY, self.blueprint.creator.clone()),
+            (CREATED_AT, format_time(self.blueprint.time_created)),
+            (COMMENT, comment),
+        ];
+
+        match self.blueprint.reflects_collection {
+            ReflectsCollection::Collection {
+                collection_id,
+                time_started,
+                time_done,
+            } => {
+                rows.push((REFLECTS_COLLECTION, collection_id.to_string()));
+                rows.push((COLLECTION_STARTED, format_time(time_started)));
+                rows.push((COLLECTION_DONE, format_time(time_done)));
+            }
+            ReflectsCollection::Indeterminate => {
+                rows.push((
+                    REFLECTS_COLLECTION,
+                    INDETERMINATE_PARENS.to_string(),
+                ));
+            }
+        }
+
+        rows.extend([
+            (
+                INTERNAL_DNS_VERSION,
+                self.blueprint.internal_dns_version.to_string(),
+            ),
+            (
+                EXTERNAL_DNS_VERSION,
+                self.blueprint.external_dns_version.to_string(),
+            ),
+            (
+                TARGET_RELEASE_MIN_GEN,
+                self.blueprint.target_release_minimum_generation.to_string(),
+            ),
+            (NEXUS_GENERATION, self.blueprint.nexus_generation.to_string()),
+            (
+                EXTERNAL_NETWORKING_GENERATION,
+                self.blueprint.external_networking_generation.to_string(),
+            ),
+        ]);
+
+        KvList::new_unchanged(Some(METADATA_HEADING), rows)
     }
 
     // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
@@ -1486,6 +1562,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             external_networking_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
+            reflects_collection: _,
             time_created: _,
             creator: _,
             comment: _,
@@ -3440,6 +3517,10 @@ pub struct BlueprintMetadata {
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
+    /// which inventory collection this blueprint reflects
+    ///
+    /// See [`Blueprint::reflects_collection`].
+    pub reflects_collection: ReflectsCollection,
     /// internal DNS version when this blueprint was created
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
