@@ -5,6 +5,7 @@
 //! Implementation of `crate::artifact_store::StorageBackend` for our simulated
 //! storage.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use camino::Utf8Path;
@@ -99,7 +100,13 @@ impl ArtifactStore<SimArtifactStorage> {
             self,
             log.new(o!("component" => "dropshot (Repo Depot)")),
         )
-        .config(dropshot_config.clone())
+        // Bind to the same IP as the sled agent API, but let the OS pick the
+        // port. Nexus learns the actual depot port when the sled agent
+        // registers.
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::new(dropshot_config.bind_address.ip(), 0),
+            ..dropshot_config.clone()
+        })
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
