@@ -4185,6 +4185,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "fm-sim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "datatest-stable",
+ "expectorate",
+ "humantime",
+ "nexus-fm-simulation",
+ "omicron-repl-utils",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "shell-words",
+ "subprocess",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "fmd-adm"
 version = "0.3.0"
 source = "git+https://github.com/oxidecomputer/fmd-adm?rev=846361bf0a698a8c7efefd97b2828b9aa74858c4#846361bf0a698a8c7efefd97b2828b9aa74858c4"
@@ -7938,6 +7960,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+]
+
+[[package]]
+name = "nexus-fm-simulation"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "chrono",
+ "omicron-workspace-hack",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
