@@ -2977,24 +2977,24 @@ dependencies = [
 
 [[package]]
 name = "dhcproto"
-version = "0.13.0-alpha"
-source = "git+https://github.com/bluecatengineering/dhcproto.git?rev=120da6fcd8a7be84d417d372634ead84ce07e6da#120da6fcd8a7be84d417d372634ead84ce07e6da"
+version = "0.16.0"
+source = "git+https://github.com/bluecatengineering/dhcproto.git?rev=5ba6f4e7781bae21cf0209639aa5223f010a5adb#5ba6f4e7781bae21cf0209639aa5223f010a5adb"
 dependencies = [
  "dhcproto-macros",
- "hex",
- "hickory-proto 0.24.4",
+ "hickory-proto 0.26.3",
  "ipnet",
- "rand 0.8.6",
- "thiserror 1.0.69",
- "url",
+ "rand 0.10.1",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "dhcproto-macros"
-version = "0.1.0"
-source = "git+https://github.com/bluecatengineering/dhcproto.git?rev=120da6fcd8a7be84d417d372634ead84ce07e6da#120da6fcd8a7be84d417d372634ead84ce07e6da"
+version = "0.2.0"
+source = "git+https://github.com/bluecatengineering/dhcproto.git?rev=5ba6f4e7781bae21cf0209639aa5223f010a5adb#5ba6f4e7781bae21cf0209639aa5223f010a5adb"
 dependencies = [
  "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -5140,6 +5140,24 @@ dependencies = [
  "thiserror 2.0.18",
  "tinyvec",
  "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "hickory-proto"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12b92608f679a6fa515dd1d15c1ff89443026e391200a2c840c7afcba482893d"
+dependencies = [
+ "data-encoding",
+ "idna",
+ "ipnet",
+ "jni 0.22.4",
+ "once_cell",
+ "rand 0.10.1",
+ "thiserror 2.0.18",
+ "tinyvec",
  "tracing",
  "url",
 ]
