@@ -108,55 +108,62 @@ pub async fn wait_for_service<'a>(
                     InternalError::PropertyNotFound,
                 ));
             };
-            match property.value() {
+            let error = match property.value() {
                 // Service has reached the 'online' state, we can stop waiting!
                 smf::PropertyValue::Astring(state) if state == ONLINE_STATE => {
-                    Ok(())
+                    return Ok(());
                 }
                 // Service is in the 'maintenance' state, and will never become
                 // 'online'. Give up trying, unless we are configured to
-                // automatically clear services in maintenance.
+                // automatically clear services in maintenance (in which case,
+                // this is also considered retryable).
                 smf::PropertyValue::Astring(state)
                     if state == MAINTENANCE_STATE =>
                 {
                     let err = InternalError::ServiceInMaintenance;
-                    // This is helpful in virtual environments where services
-                    // take a few tries to come up. To enable, compile with
-                    // RUSTFLAGS="--cfg svcadm_autoclear"
-                    #[cfg(svcadm_autoclear)]
-                    if let Some(zname) = zone {
-                        if let Err(out) =
-                            tokio::process::Command::new(crate::PFEXEC)
-                                .env_clear()
-                                .arg("svcadm")
-                                .arg("-z")
-                                .arg(zname)
-                                .arg("clear")
-                                .arg("*")
-                                .output()
-                                .await
-                        {
-                            warn!(
-                                log,
-                                "clearing service maintenance failed: {out}"
-                            );
-                        } else {
-                            return Err(BackoffError::transient(err));
-                        }
+                    if cfg!(svcadm_autoclear) {
+                        BackoffError::transient(err)
+                    } else {
+                        BackoffError::permanent(err)
                     }
-                    Err(BackoffError::permanent(err))
                 }
                 // Some other state, keep waiting.
-                smf::PropertyValue::Astring(_) => Err(BackoffError::transient(
-                    InternalError::ServiceNotOnline,
-                )),
+                smf::PropertyValue::Astring(_) => {
+                    BackoffError::transient(InternalError::ServiceNotOnline)
+                }
                 // Well, this is weird, it should be a string, but it isn't!
                 // Return a distinct error so that this gets logged when we
                 // retry.
-                prop => Err(BackoffError::transient(
+                prop => BackoffError::transient(
                     InternalError::UnexpectedPropertyValue(prop.to_string()),
-                )),
+                ),
+            };
+
+            // This is helpful in virtual environments where services
+            // take a few tries to come up. To enable, compile with
+            // RUSTFLAGS="--cfg svcadm_autoclear".
+            //
+            // Note that we do this *any* time the service has not reached
+            // online, not just if it is in maintenance, because the service may
+            // have a *dependency* that is in maintenance, and clearing that may
+            // allow the service to come up okay.
+            #[cfg(svcadm_autoclear)]
+            if let Some(zname) = zone {
+                if let Err(out) = tokio::process::Command::new(crate::PFEXEC)
+                    .env_clear()
+                    .arg("svcadm")
+                    .arg("-z")
+                    .arg(zname)
+                    .arg("clear")
+                    .arg("*")
+                    .output()
+                    .await
+                {
+                    warn!(log, "clearing service maintenance failed: {out}");
+                }
             }
+
+            Err(error)
         },
         log_notification_failure,
     )
