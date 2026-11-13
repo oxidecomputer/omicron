@@ -9296,7 +9296,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     underlay_group_id UUID,
 
     /* DPD tag to couple external/underlay state for this group */
-    tag STRING(63),
+    tag STRING(80),
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
@@ -9349,7 +9349,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
-    tag STRING(63),
+    tag STRING(80),
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
@@ -9980,7 +9980,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '319.0.0', NULL)
+    (TRUE, NOW(), NOW(), '320.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
