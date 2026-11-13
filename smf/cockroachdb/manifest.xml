@@ -22,6 +22,7 @@
     <method_context working_directory="/">
       <method_environment>
         <envvar name="GOTRACEBACK" value="crash" />
+        <envvar name="COCKROACH_SQL_TCP_KEEP_ALIVE" value="30s" />
       </method_environment>
     </method_context>
   </exec_method>
