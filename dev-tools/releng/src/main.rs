@@ -31,6 +31,8 @@ use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
+use reqwest::header::ACCEPT;
+use reqwest::header::LINK;
 use semver::Version;
 use slog::Drain;
 use slog::Logger;
@@ -101,6 +103,7 @@ const TUF_PACKAGES: [&PackageName; 12] = [
 
 const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/3/dev/";
 const HELIOS_REPO: &str = "https://github.com/oxidecomputer/helios.git";
+const GITHUB_API: &str = "https://api.github.com";
 
 static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
@@ -208,6 +211,130 @@ impl Args {
     }
 }
 
+struct OpteDetails {
+    version: String,
+    override_: Option<OpteOverride>,
+}
+
+/// Get a file from the public repo at the provided commit.
+async fn file_at_commit(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    sha: &str,
+    path: &str,
+) -> Result<String> {
+    client
+        .get(format!("{GITHUB_API}/repos/{owner}/{repo}/contents/{path}"))
+        .query(&[("ref", sha)])
+        .header(ACCEPT, "application/vnd.github.raw")
+        .send()
+        .await
+        .with_context(|| format!("fetching {path} from repo {repo}"))?
+        .error_for_status()?
+        .text()
+        .await
+        .context("converting GitHub response to text")
+}
+
+/// Get the number of commits in the repo from the provided commit backwards.
+async fn get_commit_count(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    sha: &str,
+) -> Result<Option<u64>> {
+    let resp = client
+        .get(format!("{GITHUB_API}/repos/{owner}/{repo}/commits"))
+        .query(&[("sha", sha), ("per_page", "1")])
+        .header(ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .with_context(|| format!("fetching commit count from repo {repo}"))?
+        .error_for_status()?;
+
+    // If there's no link to follow, then there's just a single commit.
+    let Some(link) = resp.headers().get(LINK) else {
+        return Ok(Some(1));
+    };
+
+    // We have a link to follow, which looks like this:
+    //
+    // `<...&page=2>; rel="next", <...&page=530>; rel="last"`
+    let count = link.to_str().ok().and_then(parse_commit_count_from_link);
+    Ok(count)
+}
+
+fn parse_commit_count_from_link(link: &str) -> Option<u64> {
+    link.rsplit(',')
+        .next()
+        // Pull out the URL itself, <https://...>
+        .and_then(|last| last.split(';').next())
+        // Then remove the <>
+        .map(|url| url.trim().trim_start_matches('<').trim_end_matches('>'))
+        // Parse into a URL
+        .and_then(|url| reqwest::Url::parse(url).ok())
+        // Find the `page=` query parameter
+        .and_then(|url| {
+            url.query_pairs()
+                .find(|(k, _)| k == "page")
+                .map(|(_, v)| v.into_owned())
+        })
+        // And parse it to a commit count.
+        .and_then(|n| n.parse().ok())
+}
+
+fn parse_api_version_string(line: &str) -> Option<u64> {
+    let suffix = line.strip_prefix("pub const API_VERSION: u64 = ")?;
+    suffix.trim().strip_suffix(";")?.trim().parse().ok()
+}
+
+async fn fetch_opte_override_version(
+    commit: &str,
+    client: &reqwest::Client,
+) -> Result<String> {
+    const OWNER: &str = "oxidecomputer";
+    const REPO: &str = "opte";
+    const LIB_FILE: &str = "crates/opte-api/src/lib.rs";
+    let contents =
+        file_at_commit(client, OWNER, REPO, commit, LIB_FILE).await?;
+    let api_version: u64 = contents
+        .lines()
+        .find_map(parse_api_version_string)
+        .context("looking for OPTE API_VERSION in source file")?;
+    let n_commits = get_commit_count(client, OWNER, REPO, commit)
+        .await
+        .context("getting OPTE commit count")?
+        .context("extracting LINK header from GitHub response")?;
+    Ok(format!("0.{api_version}.{n_commits}"))
+}
+
+async fn fetch_opte_details(
+    logger: &Logger,
+    client: &reqwest::Client,
+) -> Result<OpteDetails> {
+    // Parse tools/opte_version_override for OPTE_COMMIT. When set, we
+    // download the override p5p from buildomat and use it as a package
+    // source during image build instead of the helios pkg repo version.
+    let override_ = parse_opte_version_override(
+        &WORKSPACE_DIR.join("tools/opte_version_override"),
+    )
+    .await?;
+
+    // If we have an override, get the version from GitHub, otherwise use the
+    // file in the repo.
+    let version = if let Some(ov) = &override_ {
+        info!(logger, "OPTE override active: commit={}", ov.commit);
+        fetch_opte_override_version(&ov.commit, client).await?
+    } else {
+        fs::read_to_string(WORKSPACE_DIR.join("tools/opte_version"))
+            .await?
+            .trim()
+            .to_string()
+    };
+    Ok(OpteDetails { version, override_ })
+}
+
 #[expect(
     clippy::disallowed_macros,
     reason = "this is a dev-tool, and avoiding a dependency on \
@@ -277,27 +404,21 @@ async fn main() -> Result<()> {
         &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
             .await?,
     )?);
-    let opte_version =
-        fs::read_to_string(WORKSPACE_DIR.join("tools/opte_version")).await?;
-
-    // Parse tools/opte_version_override for OPTE_COMMIT. When set, we
-    // download the override p5p from buildomat and use it as a package
-    // source during image build instead of the helios pkg repo version.
-    let opte_override = parse_opte_version_override(
-        &WORKSPACE_DIR.join("tools/opte_version_override"),
-    )
-    .await?;
-    if let Some(ov) = &opte_override {
-        info!(logger, "OPTE override active: commit={}", ov.commit);
-    }
-    let opte_version = opte_version.trim();
-
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(120))
         .tcp_keepalive(Duration::from_secs(60))
+        .user_agent("omicron-releng")
         .build()
         .context("failed to build reqwest client")?;
+
+    // Get the details about the OPTE package we're building.
+    //
+    // We need to specify an actual version for the packaging machinery, but
+    // also respect the OPTE override commit, which might refer to a different
+    // version. If so, fetch that from GitHub and use its version instead of the
+    // one in our version file.
+    let opte_details = fetch_opte_details(&logger, &client).await?;
 
     // PREFLIGHT ==============================================================
     let mut preflight_ok = true;
@@ -669,7 +790,7 @@ async fn main() -> Result<()> {
             .arg("-o") // output directory for image
             .arg(&output_dir)
             .arg("-F") // pass extra image builder features
-            .arg(format!("optever={opte_version}"))
+            .arg(format!("optever={}", opte_details.version))
             .arg("-P") // include all files from extra proto area
             .arg(proto_dir.join("root"))
             .arg("-N") // image name
@@ -729,7 +850,7 @@ async fn main() -> Result<()> {
 
         // When OPTE_COMMIT is set, download the override p5p from buildomat
         // and add it as a package source for the image build.
-        if let Some(ov) = &opte_override {
+        if let Some(ov) = &opte_details.override_ {
             let p5p_path = tempdir.path().join(format!("opte-{target}.p5p"));
             jobs.push(
                 format!("{target}-opte-p5p"),
@@ -750,7 +871,7 @@ async fn main() -> Result<()> {
             .after("helios-incorp")
             .after(format!("{target}-proto"));
 
-        if opte_override.is_some() {
+        if opte_details.override_.is_some() {
             image_job.after(format!("{target}-opte-p5p"));
         }
 
@@ -1289,4 +1410,66 @@ async fn git_resolve_commit(
         .await?
         .trim()
         .to_owned())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// The response we get from the current master branch of OPTE as of 13 Nov
+    /// 2026. Run
+    ///
+    /// ```text
+    /// GET
+    /// /repos/oxidecomputer/opte/commits?sha=8e4ceedb27d58a82b7b8e99231c494f44d103f15&per_page=1:
+    /// ```
+    ///
+    /// to see what this returns.
+    const LINK: &str = "<https://api.github.com/repositories/394728713/commits?sha=8e4ceedb27d58a82b7b8e99231c494f44d103
+  f15&per_page=1&page=2>; rel=\"next\", <https://api.github.com/repositories/394728713/commits?sha=8e4ceedb27d58a82b7b
+  8e99231c494f44d103f15&per_page=1&page=529>; rel=\"last\"";
+    const EXPECTED_COMMIT_COUNT: u64 = 529;
+
+    #[test]
+    fn extract_correct_opte_commit_count() {
+        let n_commits = parse_commit_count_from_link(LINK).unwrap();
+        assert_eq!(
+            n_commits, EXPECTED_COMMIT_COUNT,
+            "Parsed incorrect OPTE commit from GitHub response"
+        );
+    }
+
+    /// The expected format of the API_VERSION line in OPTE.
+    const API_VERSION_LINE: &str = "pub const API_VERSION: u64 = 46;";
+    const EXPECTED_VERSION: u64 = 46;
+
+    #[test]
+    fn extract_correct_opte_api_version() {
+        let version = parse_api_version_string(API_VERSION_LINE).unwrap();
+        assert_eq!(
+            version, EXPECTED_VERSION,
+            "Parsed incorrect OPTE API version from line"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires github access, which might be rate-limited and flaky"]
+    async fn extract_correct_opte_version_from_commit_sha() {
+        // This is `master` as of 13 Nov 2026.
+        const SHA: &str = "8e4ceedb27d58a82b7b8e99231c494f44d103f15";
+        let expected_version =
+            format!("0.{EXPECTED_VERSION}.{EXPECTED_COMMIT_COUNT}");
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(120))
+            .tcp_keepalive(Duration::from_secs(60))
+            .user_agent("omicron-releng")
+            .build()
+            .expect("failed to build reqwest client");
+        let version = fetch_opte_override_version(SHA, &client).await.unwrap();
+        assert_eq!(
+            version, expected_version,
+            "Didn't get correct OPTE version from SHA"
+        );
+    }
 }
