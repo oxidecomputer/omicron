@@ -216,6 +216,7 @@ fn sled_expunge_request_show_text(request: &SledExpungeRequest) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gateway_test_utils::setup::sim_gimlet_serial;
     use nexus_db_model::SledExpungePowerOffOutcome;
     use std::collections::BTreeSet;
 
@@ -240,7 +241,7 @@ mod tests {
             sled_id: SledUuid::from_u128(0x51ed_0000 + u128::from(index))
                 .into(),
             part_number: String::from("913-0000019"),
-            serial_number: format!("SimGimlet0{index}"),
+            serial_number: sim_gimlet_serial(u16::from(index)),
             tq_epoch: i64::from(index) + 1,
             state,
             power_off_outcome: None,
