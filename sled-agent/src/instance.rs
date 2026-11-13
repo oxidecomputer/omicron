@@ -172,16 +172,17 @@ async fn wait_for_http_server(
     // server that has a reasonable chance of starting.
     const TIMEOUT: Duration = Duration::from_mins(10);
 
-    let log_notification_failure = |error, requests, elapsed| {
+    let log_notification_failure = |error: anyhow::Error, requests, elapsed| {
         // Don't start spamming the log until we've waited a reasonable amount
         // of time first.
         const DONT_FREAK_OUT_FOR: Duration = Duration::from_mins(1);
+        let error = InlineErrorChain::new(&*error);
         if elapsed <= DONT_FREAK_OUT_FOR {
             debug!(
                 log,
                 "propolis HTTP server has not yet accepted a request after \
                  {elapsed:?}, will retry...";
-                "error" => InlineErrorChain::new(&error),
+                error,
                 "requests_sent" => requests,
             )
         } else {
@@ -189,7 +190,7 @@ async fn wait_for_http_server(
                 log,
                 "propolis HTTP server has still not yet accepted a request \
                  after {elapsed:?}, will continue retrying...";
-                "error" => InlineErrorChain::new(&error),
+                error,
                 "requests_sent" => requests,
             );
         }
