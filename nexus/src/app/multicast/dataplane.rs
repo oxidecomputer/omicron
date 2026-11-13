@@ -149,7 +149,6 @@ pub(crate) struct MulticastDataplaneClient {
 pub(crate) struct GroupUpdateParams<'a> {
     pub external_group: &'a ExternalMulticastGroup,
     pub underlay_group: &'a UnderlayMulticastGroup,
-    pub new_name: &'a str,
     pub source_filter: &'a SourceFilterState,
 }
 
@@ -569,7 +568,10 @@ impl MulticastDataplaneClient {
             vni: Vni::from(u32::from(params.external_group.vni.0)),
         };
 
-        let new_name_str = params.new_name.to_string();
+        let external_tag =
+            params.external_group.tag.clone().ok_or_else(|| {
+                Error::internal_error("multicast group missing tag")
+            })?;
         let external_group_ip = params.external_group.multicast_ip.ip();
 
         // Source filtering per RFC 4607:
@@ -601,7 +603,7 @@ impl MulticastDataplaneClient {
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
-                let new_name = new_name_str.clone();
+                let external_tag = external_tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
@@ -700,7 +702,7 @@ impl MulticastDataplaneClient {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
-                        tag: Some(new_name.clone()),
+                        tag: Some(external_tag),
                         sources,
                     };
 
@@ -731,7 +733,7 @@ impl MulticastDataplaneClient {
                 "external_group_id" => %params.external_group.id(),
                 "external_multicast_ip" => %params.external_group.multicast_ip.ip(),
                 "underlay_multicast_ip" => %params.underlay_group.multicast_ip.ip(),
-                "update_operation" => "modify_tag_and_sources",
+                "update_operation" => "modify_sources",
                 "switch_count" => self.switch_count(),
                 "dpd_error" => %e
             );
@@ -750,7 +752,6 @@ impl MulticastDataplaneClient {
             "successfully updated multicast groups on all switches";
             "external_group_id" => %params.external_group.id(),
             "switches_updated" => results_len,
-            "new_name" => params.new_name,
             "dpd_operation" => "update_groups"
         );
 
