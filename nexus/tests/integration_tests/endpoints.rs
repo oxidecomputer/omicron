@@ -80,6 +80,10 @@ type DiskTest<'a> =
 
 pub static HARDWARE_RACK_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
+pub static HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/support-shell/tunnel", RACK_UUID)
+    });
 pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: LazyLock<String> =
@@ -1776,6 +1780,11 @@ pub enum AllowedMethod {
     GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
+    /// HTTP "GET" method with websocket handshake headers, for an
+    /// endpoint that tunnels to a service the test environment does
+    /// not run. Privileged requests are expected to fail with 503
+    /// after authorization, rather than upgrade.
+    GetWebsocketUnavailable,
     /// HTTP "HEAD" method
     #[allow(dead_code)]
     Head,
@@ -1803,7 +1812,8 @@ impl AllowedMethod {
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
-            | AllowedMethod::GetWebsocket => &Method::GET,
+            | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable => &Method::GET,
             AllowedMethod::Head | AllowedMethod::HeadNonexistent => {
                 &Method::HEAD
             }
@@ -1825,6 +1835,7 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable
             | AllowedMethod::Head
             | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
@@ -1832,6 +1843,36 @@ impl AllowedMethod {
             AllowedMethod::Patch(body) => Some(&body),
         }
     }
+
+    /// Returns what kind of websocket handshake, if any, to use for this method
+    pub fn websocket_handshake(&self) -> Option<WebsocketHandshake> {
+        match self {
+            AllowedMethod::GetWebsocket => {
+                Some(WebsocketHandshake::ExpectUpgrade)
+            }
+            AllowedMethod::GetWebsocketUnavailable => {
+                Some(WebsocketHandshake::HeadersOnly)
+            }
+            AllowedMethod::Delete
+            | AllowedMethod::Get
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetVolatile
+            | AllowedMethod::Head
+            | AllowedMethod::HeadNonexistent
+            | AllowedMethod::Post(_)
+            | AllowedMethod::Put(_)
+            | AllowedMethod::Patch(_) => None,
+        }
+    }
+}
+
+/// Describes the websocket handshake a test request should make
+pub enum WebsocketHandshake {
+    /// Send handshake headers and expect an upgrade
+    ExpectUpgrade,
+    /// Send handshake headers but keep the request's expected status
+    HeadersOnly,
 }
 
 pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
@@ -2979,6 +3020,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetWebsocketUnavailable],
             },
             VerifyEndpoint {
                 url: &HARDWARE_RACK_MEMBERSHIP_URL,
