@@ -427,6 +427,7 @@ mod tests {
             ereports: Default::default(),
             alerts_requested: Default::default(),
             support_bundles_requested: Default::default(),
+            problems: Default::default(),
             facts: fact_map,
         }
     }

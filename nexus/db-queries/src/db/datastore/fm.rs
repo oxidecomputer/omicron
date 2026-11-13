@@ -48,7 +48,6 @@ use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
 use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
 use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
 use nexus_db_schema::schema::fm_fact_smf_service::dsl as fact_smf_dsl;
-use nexus_db_schema::schema::fm_problem::dsl as problem_dsl;
 use nexus_db_schema::schema::fm_problem_alert::dsl as problem_alert_dsl;
 use nexus_db_schema::schema::fm_problem_request::dsl as problem_dsl;
 use nexus_db_schema::schema::fm_problem_revision_request::dsl as problem_rev_dsl;
@@ -3820,6 +3819,7 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                problems: Default::default(),
                 facts,
             }
         };
