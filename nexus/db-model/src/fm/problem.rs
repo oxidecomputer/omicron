@@ -25,7 +25,14 @@ use omicron_uuid_kinds::{
     AlertKind, ProblemKind, ProblemUuid, SitrepKind, SupportBundleKind,
 };
 
-/// A problem in a fault management sitrep.
+/// An active problem requested by a fault management diagnosis engine.
+///
+/// This is the sitrep's internal representation of a problem. In contrast, the
+/// [`crate::Problem`] type represents an external-API-visible representation of
+/// that problem. An entry in this table indicates that the sitrep wishes for a
+/// corresponding entry in the `omicron.public.problem` table to exist for this
+/// problem. Sitrep rendezvous creates the corresponding [`crate::Problem`]
+/// records for all problems requested in the current sitrep.
 ///
 /// This corresponds to a record in the `fm_problem_request` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -48,13 +55,31 @@ pub struct FmProblemRequest {
     pub comment: String,
 }
 
-/// A revision of a problem in a fault management sitrep.
+/// A request from a fault management diagnosis engine to create a revision of
+/// an active problem.
+///
+/// This is the sitrep's internal representation of a revision. Rendezvous
+/// creates the externally visible [`crate::ProblemRevision`] records for every
+/// revision requested in the sitrep being executed. Revision requests are
+/// carried forward into subsequent sitreps until the problem has been resolved
+/// *and* the externally visible revision record has been created.
+///
+/// Diagnosis engines may not request a revision that un-resolves a resolved
+/// problem. Once the `time_resolved` field has been set in the most recent
+/// revision, the sitrep builder will reject requests to create additional
+/// revisions of the problem.
 ///
 /// This corresponds to a record in the `fm_problem_revision_request` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = fm_problem_revision_request)]
 pub struct FmProblemRevisionRequest {
     pub problem_id: DbTypedUuid<ProblemKind>,
+    /// The revision number.
+    ///
+    /// This must be greater than zero, which is enforced by a `CHECK`
+    /// constraint in the database. The problem record, on the other hand, may
+    /// have a revision of zero, but this is reserved for problems whose initial
+    /// revision have not yet been created.
     pub revision: DbTypedGeneration<ProblemRevKind>,
 
     /// The sitrep that this record is part of.
@@ -68,13 +93,21 @@ pub struct FmProblemRevisionRequest {
     /// The time at which the problem was resolved, if it is resolved as of
     /// this revision.
     ///
-    /// If this is `None`, the problem will remain active when the revision is
-    /// created.
+    /// If this is `None`, the problem is active as of this revision. If it is
+    /// `Some`, the problem is resolved.
     pub time_resolved: Option<DateTime<Utc>>,
     /// The problem's problem code as of this revision.
+    ///
+    /// This determines the problem's class, as well as its documentation.
     pub code: SqlU32,
+    /// A one-sentence, human-readable summary of the problem as of this
+    /// revision.
     pub summary: String,
+    /// A human-readable description (one or more paragraphs) of the problem as
+    /// of this revision.
     pub description: String,
+    /// A human-readable description (one or more paragraphs) of any operator
+    /// actions required to address the problem.
     pub action_required: String,
 
     /// An internal human-readable comment explaining why the diagnosis engine
@@ -85,10 +118,23 @@ pub struct FmProblemRevisionRequest {
     pub comment: String,
 }
 
-/// A link between a problem in a fault management sitrep, and an alert.
+/// A request in a fault management sitrep that an alert be linked to a problem.
+///
+/// This is a sitrep-internal representation of a *request* that an alert be
+/// linked to the problem. The existence of this record does not create an
+/// external-API-visible link between the alert and the problem. Instead, this
+/// record will be created by rendezvous when executing the sitrep that contains
+/// this record.
+///
 /// The referenced alert need not be one requested in the same sitrep, and a
 /// link will be created when the sitrep is executed as long as the referenced
-/// alert still exists.
+/// alert still exists. Rendezvous must not create the externally visible link
+/// until both the problem and the alert exist. Otherwise, a caller listing a
+/// problem's alerts may see an alert that does not exist yet.
+///
+/// Once the problem is no longer part of the sitrep *and* rendezvous has
+/// created the link, this record need not be carried forward into subsequent
+/// sitreps.
 ///
 /// This corresponds to a record in the `fm_problem_alert` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -106,14 +152,34 @@ pub struct FmProblemAlert {
     /// This is *not* the sitrep that requested the alert.
     pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     /// The problem revision with which the alert is associated.
+    ///
+    /// This is used to order a problem's alerts by revision, and must be
+    /// greater than zero.
     pub revision: DbTypedGeneration<ProblemRevKind>,
+    /// A human-readable comment explaining why the alert is linked to the
+    /// problem, for debugging purposes.
     pub comment: String,
 }
 
 /// A link between a problem in a fault management sitrep and a support
-/// bundle. The support bundle need not have been requested in the same sitrep,
+/// bundle.
+///
+/// This is a sitrep-internal representation of a *request* that a support
+/// bundle be linked to the problem. The existence of this record does not
+/// create an external-API-visible link between the support bundle and the
+/// problem. Instead, this record will be created by rendezvous when executing
+/// the sitrep that contains this record.
+///
+/// The referenced support bundle need not be one requested in the same sitrep,
 /// and a link will be created when the sitrep is executed as long as the
-/// referenced support bundle still exists.
+/// referenced alert still exists. Rendezvous must not create the externally
+/// visible link until both the problem and the support bundle exist. Otherwise,
+/// a caller listing a problem's support bundle may see one that does not exist
+/// yet.
+///
+/// Once the problem is no longer part of the sitrep *and* rendezvous has
+/// created the link, this record need not be carried forward into subsequent
+/// sitreps.
 ///
 /// This corresponds to a record in the `fm_problem_support_bundle` table.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -131,7 +197,12 @@ pub struct FmProblemSupportBundle {
     /// This is *not* the sitrep that requested the support bundle.
     pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
     /// The problem revision with which the support bundle is associated.
+    ///
+    /// This is used to order a problem's support bundles by revision, and must
+    /// be greater than zero.
     pub revision: DbTypedGeneration<ProblemRevKind>,
+    /// A human-readable comment explaining why the support bundle is linked
+    /// to the problem, for debugging purposes.
     pub comment: String,
 }
 
