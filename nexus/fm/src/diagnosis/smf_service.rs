@@ -429,7 +429,6 @@ mod tests {
             support_bundles_requested: Default::default(),
             problems: Default::default(),
             facts: fact_map,
-            problems: Default::default(),
         }
     }
 
