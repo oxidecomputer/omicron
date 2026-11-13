@@ -68,7 +68,7 @@ const QUEUE_SIZE: usize = 32;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    WaitForServiceTimeout(#[from] illumos_utils::svc::WaitForServiceTimeout),
+    WaitForService(#[from] illumos_utils::svc::WaitForServiceError),
 
     #[error("Propolis HTTP server did not start within {0:?}")]
     PropolisHttpServerTimeout(Duration),
