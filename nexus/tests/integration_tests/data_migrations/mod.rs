@@ -30,6 +30,7 @@ mod add_sled_update_disposition;
 mod bgp_unnumbered_peer_cleanup;
 mod blueprint_zone_multiple_external_ips;
 mod delete_nexus_default_allow_firewall_rule;
+mod drop_multicast_deleted_state;
 mod drop_uninitialized_svc_enabled_not_online_state;
 mod ereport_everyone_gets_a_slot;
 mod ereport_trim_serial_trailing_nulls;
@@ -93,6 +94,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(inv_service_processor_rack_id);
     register!(add_rack_id_to_inv_sled_agent);
     register!(support_bundle_sp_components);
+    register!(drop_multicast_deleted_state);
     register!(widen_lldp_system_description);
 
     map

@@ -195,6 +195,31 @@
           }
         }
       }
+    },
+    "/sled-agent-start-status": {
+      "get": {
+        "summary": "Get the status of this sled's attempt to start its sled agent.",
+        "description": "On a cold boot a sled will not start its sled agent (and will therefore not join the underlay) until trust quorum can reconstruct the rack secret. This endpoint is served on the bootstrap network, and is the only way to distinguish a sled that is waiting for unlock from one that has been expunged.",
+        "operationId": "sled_agent_start_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledAgentStartStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4060,6 +4085,117 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "SledAgentStartStatus": {
+        "description": "The status of starting sled agent",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_started"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "connected_peers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BaseboardId"
+                },
+                "uniqueItems": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_trust_quorum_config"
+                ]
+              }
+            },
+            "required": [
+              "connected_peers",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "connected_peers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BaseboardId"
+                },
+                "uniqueItems": true
+              },
+              "latest_committed_epoch": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_rack_unlock"
+                ]
+              }
+            },
+            "required": [
+              "connected_peers",
+              "latest_committed_epoch",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "epoch": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "from": {
+                "$ref": "#/components/schemas/BaseboardId"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "epoch",
+              "from",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "state"
             ]
           }
         ]
