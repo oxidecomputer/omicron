@@ -1579,9 +1579,11 @@ impl SledAgentApi for SledAgentImpl {
                     }
                     CoordinatorStatusSnapshot::NotCoordinating {
                         latest_config_epoch,
+                        latest_committed_epoch,
                     } => {
                         TrustQuorumCoordinatorStatusResponse::NotCoordinating {
                             latest_config_epoch,
+                            latest_committed_epoch,
                         }
                     }
                 };

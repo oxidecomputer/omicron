@@ -437,6 +437,27 @@ pub struct BaseboardIds {
     pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
 }
 
+/// The status of starting sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum SledAgentStartStatus {
+    NotStarted,
+    WaitingForTrustQuorumConfig {
+        connected_peers: BTreeSet<BaseboardId>,
+    },
+    WaitingForRackUnlock {
+        connected_peers: BTreeSet<BaseboardId>,
+        latest_committed_epoch: Epoch,
+    },
+    Expunged {
+        epoch: Epoch,
+        from: BaseboardId,
+    },
+    Started {
+        sled_id: SledUuid,
+    },
+}
+
 /// The state of the commit phase of the trust quorum protocol
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct CommitState {
