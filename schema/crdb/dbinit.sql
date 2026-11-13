@@ -1294,6 +1294,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
 ) WHERE
     time_deleted IS NULL;
 
+/**
+ * A view of the amount of provisioned resources on a given project.
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.project_utilization
+AS SELECT
+    p.id AS project_id,
+    s.silo_id AS silo_id,
+    c.cpus_provisioned AS cpus_provisioned,
+    c.ram_provisioned AS memory_provisioned,
+    c.virtual_disk_bytes_provisioned AS storage_provisioned
+FROM
+    omicron.public.virtual_provisioning_collection AS c
+    INNER JOIN omicron.public.project AS p
+    ON c.id = p.id
+    INNER JOIN omicron.public.silo_utilization AS s
+    ON p.silo_id = s.silo_id
+WHERE
+    c.collection_type = 'Project'
+    AND (
+        s.silo_discoverable IS TRUE
+            OR s.cpus_allocated > 0
+            OR s.memory_allocated > 0
+            OR s.storage_allocated > 0
+    )
+    AND p.time_deleted IS NULL;
+
 /*
  * Instances
  */
@@ -1317,7 +1343,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     /* The instance has been destroyed. */
     'destroyed',
 
-    /* 
+    /*
      * The instance has no active VMM due to a sled being evacutated.
      * Corresponds to the "rebooting" external state.
      */
@@ -3362,6 +3388,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (bundle_id)
 );
@@ -8530,7 +8557,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
     'physical_disk',
     'saga',
-    'certificate'
+    'certificate',
+    'smf_service'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8719,6 +8747,43 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_certificate (
     PRIMARY KEY (sitrep_id, id)
 );
 
+-- The SMF service diagnosis engine's facts.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_smf_service_kind AS ENUM (
+    'in_maintenance'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_smf_service (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The SMF service instance this fact is about. Common to every kind of
+    -- SMF service fact (the case is keyed by it), so it is always present
+    -- regardless of `kind`.
+    sled_id UUID NOT NULL,
+    zone_name TEXT NOT NULL,
+    fmri TEXT NOT NULL,
+
+    -- Which SMF service fact this row represents.
+    kind omicron.public.fm_fact_smf_service_kind NOT NULL,
+
+    -- The inventory collection in which the service was observed, and when
+    -- the sled agent observed it.
+    observed_in_inv UUID NOT NULL,
+    time_observed TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
     -- association is assigned a UUID. These are used primarily to aid in
@@ -8846,6 +8911,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (sitrep_id, request_id)
 );
@@ -9194,8 +9260,7 @@ CREATE SEQUENCE IF NOT EXISTS omicron.public.multicast_group_version START 1 INC
 CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_state AS ENUM (
     'creating',
     'active',
-    'deleting',
-    'deleted'
+    'deleting'
 );
 
 -- Multicast group member state for RPW pattern
@@ -9233,16 +9298,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* DPD tag to couple external/underlay state for this group */
     tag STRING(63),
 
-    /* Current state of the multicast group (for RPW) */
-    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
-
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
     /* Salt for underlay IP collision avoidance (XORed into mapping) */
-    /* Note: Column added via migration, must be at end for schema compatibility */
     underlay_salt INT2,
+
+    /* Current state of the multicast group (for RPW) */
+    /* Note: Recreated by migration, must be at end for schema compatibility */
+    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
 
     /* Constraints */
     -- External groups: IPv4 multicast or non-admin-local IPv6
@@ -9825,70 +9890,86 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     )
 );
 
--- Tracks other racks that have joined the underlay network but haven't been
--- adopted into the multirack cluster.
+-- A problem detected by the fault management subsystem (see RFD 699).
 --
--- If/when a rack is adopted, its row in this table should be marked deleted,
--- and a corresponding row should be inserted into the `rack` table.
-CREATE TABLE IF NOT EXISTS omicron.public.unadopted_rack (
-    -- This should be the same id that gets used for the `rack` table, as well
-    -- as the `rack_id` column in `unadopted_sled`:
+-- This table contains relatively little data, because most of the data
+-- associated with a problem exists at a given revision. In order to allow
+-- exporting the historical revisions of a problem, we store all revisions of
+-- the problem since it was created. Therefore, this table basically just stores
+-- the unique ID of the problem and the latest revision number, and can be
+-- JOINed with `problem_revision` and other tables to fetch the latest revision.
+--
+-- Everything which may be changed across revisions lives instead in the
+-- `problem_revision` table and its friends.
+CREATE TABLE IF NOT EXISTS omicron.public.problem (
     id UUID PRIMARY KEY,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    -- The IPv6 underlay /56 prefix for the rack:
-    rack_subnet INET NOT NULL,
+    -- The latest revision number of this problem. This can be used to
+    -- select the current revision from the `problem_revision` table.
+    current_revision INT8 NOT NULL,
 
-    -- Underlay address of the particular sled-agent instance on the unadopted
-    -- rack that's running the multirack join service:
-    join_service_ip INET NOT NULL
+    CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_rack_by_id ON omicron.public.unadopted_rack (
-    id
-) WHERE time_deleted IS NULL;
+CREATE INDEX IF NOT EXISTS
+    lookup_problem_by_time_created
+ON
+    omicron.public.problem (time_created)
+WHERE
+    time_deleted IS NULL;
 
--- Tracks sleds from other racks that have joined the underlay network but
--- haven't been adopted into the multirack cluster.
---
--- If/when these sleds are adopted, these rows should be marked deleted, and
--- there will subsequently be corresponding rows created in the `sled` and
--- `inv_sled_agent` tables via the normal mechanisms.
-CREATE TABLE IF NOT EXISTS omicron.public.unadopted_sled (
-    id UUID PRIMARY KEY,
-    -- Foreign key into the `unadopted_rack` table (though, also, the rack ID
-    -- that gets used in the `rack` table should be the same if/when the rack
-    -- is adopted)
-    rack_id UUID NOT NULL,
+-- A revision of a problem (see RFD 699). This table allows us to store the
+-- revision history of a given problem, along with the current revision.
+-- Querying the current version is done by looking up the problem from the
+-- `problem` table and then selecting the entry from *this* table as of the
+-- `current_revision` revision.
+CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `problem` table.
+    revision INT8 NOT NULL,
 
+    -- The time at which *this revision* was created. This is **not** the time
+    -- the problem itself was created, and will correspond to the `time_modified`
+    -- at which this revision was made current.
+    --
+    -- This column is used primarily when exporting the complete revision
+    -- history of a problem.
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ,
 
-    -- Baseboard information about the sled
-    serial_number STRING(63) NOT NULL,
-    part_number STRING(63) NOT NULL,
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
+    time_resolved TIMESTAMPTZ,
 
-    sled_agent_ip INET NOT NULL,
+    -- The problem's problem code as of this revision.
+    --
+    -- This determines the problem class, as well as the problem's
+    -- documentation.
+    code INT8 NOT NULL,
 
-    -- This tracks whether this particular sled's sled-agent has been
-    -- successfully started by the multirack join service:
-    sled_agent_started BOOL NOT NULL,
-    -- This nullable column should be set to the last error we've seen for this
-    -- particular sled's sled-agent startup process, if any:
-    last_start_error_seen TEXT,
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
 
-    CONSTRAINT start_error_is_null_if_started CHECK (
-        (NOT sled_agent_started) OR (last_start_error_seen IS NULL)
-    )
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (problem_id, revision)
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_unadopted_sled_by_id ON omicron.public.unadopted_sled (
-    id
-) WHERE time_deleted IS NULL;
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
@@ -9899,7 +9980,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '313.0.0', NULL)
+    (TRUE, NOW(), NOW(), '319.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
