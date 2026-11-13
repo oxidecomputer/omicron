@@ -9962,6 +9962,7 @@ dependencies = [
  "daft",
  "diesel",
  "display-error-chain",
+ "dpd-types",
  "dropshot 0.18.0",
  "dyn-clone",
  "erebor",
