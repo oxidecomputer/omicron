@@ -175,7 +175,7 @@ impl BlueprintPlanner {
                     opctx.log,
                     "reconfigurator config not yet loaded; doing nothing"
                 );
-                return Ok(BlueprintPlannerStatus::Disabled);
+                return Ok(BlueprintPlannerStatus::ConfigNotYetLoaded);
             }
             ReconfiguratorConfigLoaderState::Loaded(config) => config.clone(),
         };
