@@ -17,6 +17,7 @@ use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
 use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
@@ -576,6 +577,7 @@ pub enum FailedMgsUpdateReason {
     /// for the sled to evacuate
     #[error("cannot update {component} until sled is evacuated")]
     WaitingOnSledEvacuation {
+        sled_id: SledUuid,
         component: MgsUpdateComponent,
         #[source]
         details: WaitingOnSledEvacuationDetails,
@@ -957,9 +959,31 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
 pub struct PlanningMgsUpdatesStepReport {
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     pub pending_mgs_updates: PendingMgsUpdates,
-    #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
-    pub update_disposition_changes:
-        BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub update_disposition_changes: IdOrdMap<SledUpdateDispositionChange>,
+}
+
+/// Describes a change to a sled's update disposition (e.g., marking it for
+/// evacuation so that it can be updated)
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub struct SledUpdateDispositionChange {
+    /// id of the sled whose update disposition is changing
+    pub sled_id: SledUuid,
+    /// id of the sled's baseboard
+    pub baseboard_id: Arc<BaseboardId>,
+    /// the sled's new update disposition
+    pub kind: BlueprintSledUpdateDispositionKind,
+}
+
+impl IdOrdItem for SledUpdateDispositionChange {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
 }
 
 impl PlanningMgsUpdatesStepReport {
@@ -967,7 +991,7 @@ impl PlanningMgsUpdatesStepReport {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
-            update_disposition_changes: BTreeMap::new(),
+            update_disposition_changes: IdOrdMap::new(),
         }
     }
 
@@ -1021,8 +1045,8 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let n = update_disposition_changes.len();
             let s = plural(n);
             writeln!(f, "* {n} sled{s} changed update disposition:")?;
-            for (sled_id, new_disposition) in update_disposition_changes {
-                writeln!(f, "  * {sled_id}: {new_disposition}")?;
+            for change in update_disposition_changes.iter() {
+                writeln!(f, "  * {}: {}", change.sled_id, change.kind)?;
             }
         }
 
@@ -1728,7 +1752,12 @@ pub enum ZoneUpdatesWaitingOn {
     DiscretionaryZones,
 
     /// Waiting on zones to propagate to inventory.
-    InventoryPropagation,
+    InventoryPropagation {
+        /// kinds of the zones whose blueprint config is not yet reflected in
+        /// inventory
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        kinds: BTreeSet<ZoneKind>,
+    },
 
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
@@ -1750,7 +1779,9 @@ impl ZoneUpdatesWaitingOn {
                 "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::DiscretionaryZones => "discretionary zones",
-            Self::InventoryPropagation => "zone propagation to inventory",
+            Self::InventoryPropagation { .. } => {
+                "zone propagation to inventory"
+            }
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
@@ -1774,6 +1805,17 @@ pub enum ZoneUnsafeToShutdown {
     Cockroachdb { reason: CockroachdbUnsafeToShutdown },
     BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
     InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
+}
+
+impl ZoneUnsafeToShutdown {
+    /// Returns the kind of zone that this reason applies to
+    pub fn zone_kind(&self) -> ZoneKind {
+        match self {
+            ZoneUnsafeToShutdown::Cockroachdb { .. } => ZoneKind::CockroachDb,
+            ZoneUnsafeToShutdown::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            ZoneUnsafeToShutdown::InternalDns { .. } => ZoneKind::InternalDns,
+        }
+    }
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
