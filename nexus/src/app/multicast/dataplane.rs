@@ -179,11 +179,9 @@ impl MulticastDataplaneClient {
     fn select_one_switch(
         &self,
     ) -> MulticastDataplaneResult<(&SwitchSlot, &dpd_client::Client)> {
-        let mut switches: Vec<_> = self.dpd_clients.iter().collect();
-        switches.sort_by_key(|(loc, _)| *loc);
-        switches
-            .into_iter()
-            .next()
+        self.dpd_clients
+            .iter()
+            .min_by_key(|(loc, _)| *loc)
             .ok_or_else(|| Error::internal_error("no DPD clients available"))
     }
 
