@@ -931,6 +931,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(silo_group, silo);
 allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_user);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_group);
 
 table! {
     identity_provider (silo_id, id) {
