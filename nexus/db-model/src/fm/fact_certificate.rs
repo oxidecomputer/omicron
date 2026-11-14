@@ -15,9 +15,8 @@ use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_certificate;
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
-    CertificateExpiryFactPayload, CertificateFact, FactPayload,
+    CertificateExpiryFactPayload, CertificateFact, FactMetadata, FactPayload,
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::SiloKind;
@@ -127,7 +126,7 @@ impl FmFactRow for FmFactCertificate {
             }
         };
         Ok(fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,

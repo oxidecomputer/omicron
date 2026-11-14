@@ -2874,7 +2874,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative fact for case 1".to_string(),
@@ -2963,7 +2963,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative not-progressing saga fact"
@@ -2984,7 +2984,7 @@ mod tests {
                 .unwrap();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative orphaned saga fact"
@@ -3023,7 +3023,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative abandoned saga fact"
@@ -3063,7 +3063,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: format!("a representative {comment} fact"),
@@ -3106,7 +3106,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative in-maintenance fact"

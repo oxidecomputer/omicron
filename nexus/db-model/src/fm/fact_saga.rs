@@ -17,9 +17,8 @@ use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_saga;
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
-    FactPayload, SagaAbandonedFactPayload, SagaFact,
+    FactMetadata, FactPayload, SagaAbandonedFactPayload, SagaFact,
     SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
 };
 use nexus_types::observed_saga::{OrphanedReason, SagaProgressState};
@@ -218,7 +217,7 @@ impl FmFactRow for FmFactSaga {
             ),
         };
         Ok(fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,

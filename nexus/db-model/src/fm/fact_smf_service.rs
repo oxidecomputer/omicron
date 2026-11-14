@@ -14,8 +14,9 @@ use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_smf_service;
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
-use nexus_types::fm::{FactPayload, SmfServiceFact, SmfServiceFactPayload};
+use nexus_types::fm::{
+    FactMetadata, FactPayload, SmfServiceFact, SmfServiceFactPayload,
+};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
     CaseKind, CaseUuid, CollectionKind, FactKind, FactUuid, SitrepKind,
@@ -116,7 +117,7 @@ impl FmFactRow for FmFactSmfService {
             }
         };
         Ok(fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,
