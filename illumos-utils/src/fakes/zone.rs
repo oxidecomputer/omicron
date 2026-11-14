@@ -128,7 +128,7 @@ impl Api for Zones {
         _zone: Option<&str>,
         _fmri: &str,
         _log: Logger,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), crate::svc::WaitForServiceTimeout> {
         Ok(())
     }
 

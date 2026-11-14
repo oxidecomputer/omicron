@@ -296,7 +296,8 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    err @ (InstanceError::Timeout(_)
+                    err @ (InstanceError::WaitForServiceTimeout(_)
+                    | InstanceError::PropolisHttpServerTimeout
                     | InstanceError::VnicCreation(_)
                     | InstanceError::Notification(_)
                     | InstanceError::Migration(_)
