@@ -8,12 +8,14 @@
 //!
 //! - Sled move detection: When a sled moves to a different switch port, the
 //!   reconciler detects this via inventory and updates DPD port mappings
-//! - Cache TTL refresh: Verifies caches are refreshed when TTL expires
-//! - Backplane cache expiry: Tests that stale backplane mappings are cleaned up
+
+// TODO (mcast): Remove this module once the multicast RPW no longer maps sleds
+// to rear ports by way of the inventory, even as a fallback.
 
 use http::{Method, StatusCode};
 
-use gateway_client::types::{PowerState, RotState, SpState};
+use gateway_types::component::{PowerState, SpState};
+use gateway_types::rot::RotState;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::{
@@ -26,9 +28,40 @@ use nexus_types::inventory::SpType;
 use omicron_nexus::Server;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
+use sp_sim::SimulatedSp;
 
 use super::*;
 use crate::integration_tests::instances::instance_wait_for_state;
+
+async fn insert_initial_inventory(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+    let gateway =
+        cptestctx.gateway.values().next().expect("Should have a gateway");
+    let mut builder =
+        nexus_inventory::CollectionBuilder::new("multicast-cache-test");
+
+    for (slot, sp) in gateway.simrack.gimlets.iter().enumerate() {
+        builder.found_sp_state(
+            "test-sp",
+            nexus_test_utils::RACK_UUID,
+            SpType::Sled,
+            slot.try_into().unwrap(),
+            sp.state().await,
+        );
+    }
+
+    datastore
+        .inventory_insert_collection(&opctx, &builder.build())
+        .await
+        .expect("Should insert initial inventory collection");
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
+}
 
 /// Test that multicast operations can handle physical sled movement.
 ///
@@ -39,15 +72,23 @@ use crate::integration_tests::instances::instance_wait_for_state;
 /// - Insert a new inventory collection with a different `sp_slot` for the same sled
 /// - Reconciler detects sled location change and invalidates caches automatically
 /// - Verify DPD now uses the new rear port matching the new `sp_slot`
-#[nexus_test(server = Server)]
-async fn test_sled_move_updates_multicast_port_mapping(
-    cptestctx: &ControlPlaneTestContext,
-) {
+#[tokio::test]
+async fn test_sled_move_updates_multicast_port_mapping() {
     const PROJECT_NAME: &str = "test-project";
     const GROUP_NAME: &str = "sled-move-test-group";
     const INSTANCE_NAME: &str = "sled-move-test-instance";
 
-    ensure_multicast_test_ready(cptestctx).await;
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_sled_move_updates_multicast_port_mapping",
+    )
+    .customize_nexus_config(&|config| {
+        config.pkg.background_tasks.inventory.disable_collect = true;
+    })
+    .start::<Server>()
+    .await;
+
+    insert_initial_inventory(&cptestctx).await;
+    ensure_multicast_test_ready(&cptestctx).await;
 
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
@@ -65,7 +106,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
 
     // Create instance (no multicast groups at creation - implicit model)
     let instance = instance_for_multicast_groups(
-        cptestctx,
+        &cptestctx,
         PROJECT_NAME,
         INSTANCE_NAME,
         true,
@@ -82,7 +123,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
 
     // Wait for member to join
     wait_for_member_state(
-        cptestctx,
+        &cptestctx,
         GROUP_NAME,
         instance.identity.id,
         nexus_db_model::MulticastGroupMemberState::Joined,
@@ -90,7 +131,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     .await;
 
     // Verify initial port mapping (based on current inventory `sp_slot`)
-    verify_inventory_based_port_mapping(cptestctx, &instance_uuid)
+    verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
         .await
         .expect("Should verify initial port mapping");
 
@@ -102,7 +143,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify port mapping is unchanged (no spurious cache invalidation)
-    verify_inventory_based_port_mapping(cptestctx, &instance_uuid)
+    verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
         .await
         .expect("Port mapping should be unchanged when inventory unchanged");
 
@@ -151,7 +192,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let sled_part_number = sled.part_number().to_string();
 
     // Verify DPD has the original port before the move
-    let dpd = nexus_test_utils::dpd_client(cptestctx);
+    let dpd = nexus_test_utils::dpd_client(&cptestctx);
     let original_port_id = dpd_client::types::PortId::Rear(
         dpd_client::types::Rear::try_from(format!("rear{original_slot}"))
             .expect("Should be valid rear port string"),
@@ -201,10 +242,6 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let new_collection = builder.build();
 
     // Insert the new inventory collection
-    //
-    // TODO: This is flaky since the background task can kick off an inventory
-    // collection as well. Before enabling this test, fix the flake by disabling
-    // the collection bg task.
     datastore
         .inventory_insert_collection(&opctx, &new_collection)
         .await
@@ -223,7 +260,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     // Verify that DPD now uses the new rear port (matching new `sp_slot`)
     // This helper reads the latest inventory and asserts DPD has a member
     // on rear{`sp_slot`}, so it will verify the new mapping is right
-    verify_inventory_based_port_mapping(cptestctx, &instance_uuid)
+    verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
         .await
         .expect("Port mapping should be updated after cache invalidation");
 
@@ -268,7 +305,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
         .await
         .expect("Should fetch underlay multicast group");
 
-    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+    let dpd_client = nexus_test_utils::dpd_client(&cptestctx);
     let underlay_group_response = dpd_client
         .multicast_group_get(&underlay_group.multicast_ip.ip())
         .await
@@ -294,53 +331,50 @@ async fn test_sled_move_updates_multicast_port_mapping(
         !has_old_port_member,
         "Old underlay member with rear{original_slot} should have been removed after sled move"
     );
+
+    cptestctx.teardown().await;
 }
 
-/// Test for cache TTL behavior.
+/// Test demonstrating that loading a new inventory collection invalidates
+/// the multicast caches without an explicit invalidation call.
 ///
-/// This test verifies that both sled and backplane cache TTL expiry work correctly:
+/// The inventory loader wakes the reconciler through the inventory-load
+/// watcher, which then catches the sled's new `sp_slot` and invalidates
+/// the sled and backplane caches.
 ///
-/// Sled cache TTL with inventory change:
-/// - Start test server with short TTLs (sled=2s, backplane=1s)
-/// - Create multicast group and instance, wait for member to join
-/// - Insert new inventory with different `sp_slot` (simulating sled move)
-/// - Wait for sled cache TTL to expire
-/// - Verify DPD uses the new rear port after reconciler refreshes cache
-///
-/// Backplane cache TTL without change:
-/// - Wait for backplane cache TTL to expire (tests independent expiry)
-/// - Activate reconciler (refreshes expired backplane cache from DPD)
-/// - Verify port mapping still works after cache refresh
+/// Note: only the sled cache is checked here, as backplane map is the same
+/// before and after the transition.
 #[tokio::test]
-async fn test_cache_ttl_behavior() {
-    const PROJECT_NAME: &str = "ttl-test-project";
-    const GROUP_NAME: &str = "ttl-test-group";
-    const INSTANCE_NAME: &str = "ttl-test-instance";
+async fn test_inventory_load_invalidates_multicast_caches() {
+    const PROJECT_NAME: &str = "inventory-load-project";
+    const GROUP_NAME: &str = "inventory-load-group";
+    const INSTANCE_NAME: &str = "inventory-load-instance";
 
     // Start test server with custom config
-    let cptestctx =
-        nexus_test_utils::ControlPlaneBuilder::new("test_cache_ttl_behavior")
-            .customize_nexus_config(&|config| {
-                // Set short cache TTLs for testing
-                config
-                    .pkg
-                    .background_tasks
-                    .multicast_reconciler
-                    .sled_cache_ttl_secs =
-                    chrono::TimeDelta::seconds(2).to_std().unwrap();
-                config
-                    .pkg
-                    .background_tasks
-                    .multicast_reconciler
-                    .backplane_cache_ttl_secs =
-                    chrono::TimeDelta::seconds(1).to_std().unwrap();
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_inventory_load_invalidates_multicast_caches",
+    )
+    .customize_nexus_config(&|config| {
+        config.pkg.background_tasks.inventory.disable_collect = true;
 
-                // Ensure multicast is enabled
-                config.pkg.multicast.enabled = true;
-            })
-            .start::<omicron_nexus::Server>()
-            .await;
+        // TTLs set well past `MULTICAST_OPERATION_TIMEOUT` to rule out cache
+        // expiry as a refresh path. The inventory-load watcher has to refresh
+        // the caches before the wait times out.
+        config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
+            std::time::Duration::from_secs(3600);
+        config
+            .pkg
+            .background_tasks
+            .multicast_reconciler
+            .backplane_cache_ttl_secs = std::time::Duration::from_secs(3600);
 
+        // Ensure multicast is enabled
+        config.pkg.multicast.enabled = true;
+    })
+    .start::<omicron_nexus::Server>()
+    .await;
+
+    insert_initial_inventory(&cptestctx).await;
     ensure_multicast_test_ready(&cptestctx).await;
 
     // Local handles for DB and opctx
@@ -355,7 +389,7 @@ async fn test_cache_ttl_behavior() {
     ops::join3(
         create_default_ip_pools(client),
         create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool(client, "ttl-test-pool"),
+        create_multicast_ip_pool(client, "inventory-load-pool"),
     )
     .await;
 
@@ -369,14 +403,13 @@ async fn test_cache_ttl_behavior() {
     )
     .await;
 
-    // Add instance to multicast group via instance-centric API
+    // Create a multicast group and wait for the member to join
     multicast_group_attach(&cptestctx, PROJECT_NAME, INSTANCE_NAME, GROUP_NAME)
         .await;
     wait_for_group_active(client, GROUP_NAME).await;
 
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
-    // Wait for member to join
     wait_for_member_state(
         &cptestctx,
         GROUP_NAME,
@@ -389,8 +422,6 @@ async fn test_cache_ttl_behavior() {
     verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
         .await
         .expect("Should verify initial port mapping");
-
-    // Test sled cache TTL with inventory change
 
     // Get the sled this instance is running on
     let sled_id = nexus
@@ -443,15 +474,14 @@ async fn test_cache_ttl_behavior() {
         .collect();
     valid_slots.sort_unstable();
     valid_slots.dedup();
-    let new_slot = valid_slots
-        .iter()
-        .copied()
-        .find(|s| *s != original_slot)
-        .unwrap_or(original_slot);
+    let new_slot =
+        valid_slots.iter().copied().find(|s| *s != original_slot).expect(
+            "Backplane map should have a rear port besides the original",
+        );
 
     // Build a new inventory collection with the sled in a different slot
     let mut builder =
-        nexus_inventory::CollectionBuilder::new("ttl-refresh-test");
+        nexus_inventory::CollectionBuilder::new("inventory-load-test");
     builder.found_sp_state(
         "test-sp",
         nexus_test_utils::RACK_UUID,
@@ -472,19 +502,19 @@ async fn test_cache_ttl_behavior() {
 
     let new_collection = builder.build();
 
-    // Insert the new inventory collection
-    //
-    // TODO: This is flaky since the background task can kick off an inventory
-    // collection as well. Before enabling this test, fix the flake by disabling
-    // the collection bg task.
+    // Insert a new inventory collection with a different `sp_slot` for the sled
     datastore
         .inventory_insert_collection(&opctx, &new_collection)
         .await
         .expect("Should insert new inventory collection");
 
-    // Wait for sled cache TTL to expire (2 seconds)
-    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    // Run the inventory loader without calling `invalidate_multicast_caches`
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
 
+    // Verify DPD moves the member to the rear port for the new `sp_slot`
     wait_for_condition_with_reconciler(
         &cptestctx.lockstep_client,
         || async {
@@ -507,22 +537,7 @@ async fn test_cache_ttl_behavior() {
         &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
-    .expect("DPD should update with new rear port after sled cache TTL expiry");
-
-    // Test backplane cache TTL without change
-
-    // Wait for backplane cache TTL to expire (1 second)
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-    // Force cache access by activating reconciler
-    // This will cause the reconciler to check backplane cache, find it expired,
-    // and refresh from DPD.
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Verify member is still on the right port after backplane cache refresh
-    verify_inventory_based_port_mapping(&cptestctx, &instance_uuid)
-        .await
-        .expect("Port mapping should work after backplane cache TTL expiry");
+    .expect("DPD should update with new rear port after the inventory load");
 
     // Verify member is still in "Joined" state after all cache operations
     let members = list_multicast_group_members(client, GROUP_NAME).await;

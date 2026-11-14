@@ -237,7 +237,7 @@ impl TestInput {
             .context("failed while streaming ipv4 addrs")?
         {
             let mut entries =
-                client.nat_ipv4_list_stream(&ip, SINGLE_REQUEST_LIMIT);
+                client.nat_ipv4_list_stream(&ip.address, SINGLE_REQUEST_LIMIT);
             while let Some(e) = entries
                 .try_next()
                 .await
@@ -260,7 +260,7 @@ impl TestInput {
             .context("failed while streaming ipv6 addrs")?
         {
             let mut entries =
-                client.nat_ipv6_list_stream(&ip, SINGLE_REQUEST_LIMIT);
+                client.nat_ipv6_list_stream(&ip.address, SINGLE_REQUEST_LIMIT);
             while let Some(e) = entries
                 .try_next()
                 .await

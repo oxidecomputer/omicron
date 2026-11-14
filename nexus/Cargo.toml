@@ -7,9 +7,6 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-[features]
-multicast = []
-
 [build-dependencies]
 omicron-rpaths.workspace = true
 
