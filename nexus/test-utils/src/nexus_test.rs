@@ -417,11 +417,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.gateway
             .values()
             // because all gateways in a given `ControlPlaneTestContext` share
-            // the same sp-sim config, just pick the first one.
-            //
-            // N.B. that if this changes in the future (such as if we add
-            // support for simulating management network partitions?) this may
-            // become wrong!
+            // one simulated rack, just pick the first one.
             .next()
             .map(|gwctx| gwctx.simrack.num_sps())
             .unwrap_or(0)
