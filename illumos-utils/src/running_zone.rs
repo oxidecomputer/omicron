@@ -57,10 +57,8 @@ pub enum BootError {
     #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
-    #[error(
-        "Zone booted, but timed out waiting for the 'single-user' milestone"
-    )]
-    Timeout(#[from] crate::svc::WaitForServiceTimeout),
+    #[error(transparent)]
+    WaitForService(#[from] crate::svc::WaitForServiceError),
 
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
