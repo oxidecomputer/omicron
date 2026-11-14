@@ -13,6 +13,7 @@ use anyhow::bail;
 use futures::Future;
 use futures::future;
 use gateway_messages::SpPort;
+use gateway_messages::ignition::SystemPowerState;
 use gateway_messages::sp_impl;
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -209,6 +210,30 @@ where
     if should_respond.load(Ordering::SeqCst) { Ok(response) } else { Ok(None) }
 }
 
+// TODO-RAINCLAUDE: an SP whose ignition target is not On has no power, so like a real one it drops every request, whatever the test-controlled responsiveness says.
+pub(crate) fn is_ignition_powered(
+    ignition_power: &watch::Receiver<SystemPowerState>,
+) -> bool {
+    match *ignition_power.borrow() {
+        SystemPowerState::On => true,
+        SystemPowerState::Off
+        | SystemPowerState::Aborted
+        | SystemPowerState::PoweringOff
+        | SystemPowerState::PoweringOn => false,
+    }
+}
+
+fn powered_responsiveness(
+    ignition_power: &watch::Receiver<SystemPowerState>,
+    responsiveness: Responsiveness,
+) -> Responsiveness {
+    if is_ignition_powered(ignition_power) {
+        responsiveness
+    } else {
+        Responsiveness::Unresponsive
+    }
+}
+
 pub(crate) trait SimSpHandler: SpHandler {
     fn set_sp_should_fail_to_respond_signal(
         &mut self,
@@ -246,6 +271,7 @@ pub(crate) struct UdpTask<H> {
     udp1: UdpServer,
     ereport_servers: Option<[UdpServer; 2]>,
     ereport_state: EreportState,
+    ignition_power: watch::Receiver<SystemPowerState>,
     handler: Arc<TokioMutex<H>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
@@ -261,6 +287,7 @@ where
         servers: [UdpServer; 2],
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
+        ignition_power: watch::Receiver<SystemPowerState>,
         handler: Arc<TokioMutex<H>>,
         commands: mpsc::UnboundedReceiver<Command>,
     ) -> (Self, watch::Receiver<usize>) {
@@ -273,6 +300,7 @@ where
                 udp1,
                 ereport_servers,
                 ereport_state,
+                ignition_power,
                 handler,
                 commands,
                 responses_sent_count,
@@ -307,6 +335,7 @@ where
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
+                    let responsiveness = powered_responsiveness(&self.ignition_power, responsiveness);
                     if let Some((resp, addr)) = handle_request(
                         &mut *self.handler.lock().await,
                         recv0,
@@ -321,6 +350,7 @@ where
                 }
 
                 recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
+                    let responsiveness = powered_responsiveness(&self.ignition_power, responsiveness);
                     if let Some((resp, addr)) = handle_request(
                         &mut *self.handler.lock().await,
                         recv1,
@@ -336,12 +366,18 @@ where
 
                 recv = self.ereport_state.recv_request(ereport0) => {
                     let (req, addr, sock) = recv?;
+                    if !is_ignition_powered(&self.ignition_power) {
+                        continue;
+                    }
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
                 recv = self.ereport_state.recv_request(ereport1) => {
                     let (req, addr, sock) = recv?;
+                    if !is_ignition_powered(&self.ignition_power) {
+                        continue;
+                    }
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }

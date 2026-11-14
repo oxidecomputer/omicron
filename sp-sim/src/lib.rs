@@ -144,13 +144,21 @@ pub struct SimRack {
 
 impl SimRack {
     pub async fn start(config: &Config, log: &Logger) -> Result<Self> {
+        let rack_ignition_power =
+            sidecar::RackIgnitionPower::new(&config.simulated_sps);
+        let mut ignition_power = rack_ignition_power.subscribe_all();
+
         let mut sidecars =
             Vec::with_capacity(config.simulated_sps.sidecar.len());
         for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
             sidecars.push(
                 Sidecar::spawn(
-                    config,
                     sidecar,
+                    i,
+                    rack_ignition_power.clone(),
+                    ignition_power.next().expect(
+                        "each simulated sidecar has an ignition target",
+                    ),
                     log.new(slog::o!("slot" => format!("sidecar {}", i))),
                 )
                 .await?,
@@ -167,6 +175,9 @@ impl SimRack {
                     // For now, just use the fastest version (assume contents
                     // are always hashed).
                     HostFlashHashPolicy::assume_already_hashed(),
+                    ignition_power
+                        .next()
+                        .expect("each simulated gimlet has an ignition target"),
                     log.new(slog::o!("slot" => format!("gimlet {}", i))),
                 )
                 .await?,
@@ -176,7 +187,16 @@ impl SimRack {
         let mut pscs = Vec::with_capacity(config.simulated_sps.psc.len());
         for (i, psc) in config.simulated_sps.psc.iter().enumerate() {
             let log = log.new(slog::o!("slot" => format!("PSC {i}")));
-            pscs.push(Psc::spawn(psc, log).await?);
+            pscs.push(
+                Psc::spawn(
+                    psc,
+                    ignition_power
+                        .next()
+                        .expect("each simulated PSC has an ignition target"),
+                    log,
+                )
+                .await?,
+            );
         }
 
         Ok(Self { sidecars, gimlets, pscs })

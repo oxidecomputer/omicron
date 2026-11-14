@@ -15,6 +15,7 @@ use crate::server::UdpServer;
 use crate::server::UdpTask;
 use gateway_ereport_messages::Ena;
 use gateway_messages::SpPort;
+use gateway_messages::ignition::SystemPowerState;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -59,6 +60,7 @@ where
         servers: [UdpServer; 2],
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
+        ignition_power: watch::Receiver<SystemPowerState>,
         handler: H,
     ) -> Self {
         let local_addrs = servers.each_ref().map(UdpServer::local_addr);
@@ -72,6 +74,7 @@ where
             servers,
             ereport_servers,
             ereport_state,
+            ignition_power,
             handler.clone(),
             commands_rx,
         );

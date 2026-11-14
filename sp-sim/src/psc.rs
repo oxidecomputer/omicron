@@ -145,7 +145,11 @@ impl SimulatedSp for Psc {
 }
 
 impl Psc {
-    pub async fn spawn(psc: &PscConfig, log: Logger) -> Result<Self> {
+    pub(crate) async fn spawn(
+        psc: &PscConfig,
+        ignition_power: watch::Receiver<ignition::SystemPowerState>,
+        log: Logger,
+    ) -> Result<Self> {
         info!(log, "setting up simulated PSC");
 
         let baseboard_vpd =
@@ -191,6 +195,7 @@ impl Psc {
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_power,
                 handler,
             );
 

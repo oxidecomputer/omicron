@@ -5,7 +5,6 @@
 use crate::HostFlashHashPolicy;
 use crate::Responsiveness;
 use crate::SimulatedSp;
-use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
@@ -156,9 +155,11 @@ impl SimulatedSp for Sidecar {
 }
 
 impl Sidecar {
-    pub async fn spawn(
-        config: &Config,
+    pub(crate) async fn spawn(
         sidecar: &SidecarConfig,
+        index: usize,
+        rack_ignition_power: RackIgnitionPower,
+        ignition_power: watch::Receiver<ignition::SystemPowerState>,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated sidecar");
@@ -198,7 +199,7 @@ impl Sidecar {
             let handler = Handler::new(
                 baseboard_vpd,
                 sidecar.common.components.clone(),
-                FakeIgnition::new(&config.simulated_sps),
+                FakeIgnition::new(index, rack_ignition_power),
                 log,
                 sidecar.common.old_rot_state,
                 update_state,
@@ -207,6 +208,7 @@ impl Sidecar {
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_power,
                 handler,
             );
 
@@ -222,8 +224,7 @@ impl Sidecar {
             .await
             .expect("no network config provided when constructing sim sidecar")
             .ignition
-            .state
-            .clone()
+            .current_state()
     }
 }
 
@@ -351,20 +352,21 @@ impl SpHandler for Handler {
             "target" => target,
             "reply-state" => ?state,
         );
-        Ok(*state)
+        Ok(state)
     }
 
     fn bulk_ignition_state(
         &mut self,
         offset: u32,
     ) -> Result<Self::BulkIgnitionStateIter, SpError> {
+        let state = self.ignition.current_state();
         debug!(
             &self.log,
             "received bulk ignition state request";
             "offset" => offset,
-            "state" => ?self.ignition.state,
+            "state" => ?state,
         );
-        Ok(self.ignition.state.clone().into_iter().skip(offset as usize))
+        Ok(state.into_iter().skip(offset as usize))
     }
 
     fn ignition_link_events(
@@ -1058,9 +1060,50 @@ impl SimSpHandler for Handler {
     }
 }
 
+// TODO-RAINCLAUDE: the ignition power of each simulated SP's target, shared by every sidecar in the rack so both switches see the same power.
+#[derive(Clone)]
+pub(crate) struct RackIgnitionPower {
+    num_sidecars: usize,
+    targets: Arc<[RackIgnitionTarget]>,
+}
+
+struct RackIgnitionTarget {
+    system_type: ignition::SystemType,
+    power: watch::Sender<ignition::SystemPowerState>,
+}
+
+impl RackIgnitionPower {
+    // TODO-RAINCLAUDE: the one place that numbers rack targets: sidecars, then gimlets, then PSCs, in config order; SimRack::start hands out subscribe_all()'s receivers in the same order.
+    pub(crate) fn new(config: &SimulatedSpsConfig) -> Self {
+        let system_types = iter::empty()
+            .chain(config.sidecar.iter().map(|_| ignition::SystemType::Sidecar))
+            .chain(config.gimlet.iter().map(|_| ignition::SystemType::Gimlet))
+            .chain(config.psc.iter().map(|_| ignition::SystemType::Psc));
+        let targets: Arc<[RackIgnitionTarget]> = system_types
+            .map(|system_type| RackIgnitionTarget {
+                system_type,
+                power: watch::Sender::new(ignition::SystemPowerState::On),
+            })
+            .collect();
+        assert!(
+            targets.len() <= NUM_IGNITION_TARGETS,
+            "too many simulated SPs"
+        );
+        Self { num_sidecars: config.sidecar.len(), targets }
+    }
+
+    pub(crate) fn subscribe_all(
+        &self,
+    ) -> impl Iterator<Item = watch::Receiver<ignition::SystemPowerState>> + '_
+    {
+        self.targets.iter().map(|target| target.power.subscribe())
+    }
+}
+
 struct FakeIgnition {
-    state: Vec<IgnitionState>,
+    local_sidecar: usize,
     link_events: Vec<LinkEvents>,
+    rack_power: RackIgnitionPower,
 }
 
 fn empty_transceiver_events() -> ignition::TransceiverEvents {
@@ -1111,54 +1154,69 @@ fn initial_ignition_state(system_type: ignition::SystemType) -> IgnitionState {
 }
 
 impl FakeIgnition {
-    fn new(config: &SimulatedSpsConfig) -> Self {
-        let mut state = Vec::new();
+    fn new(local_sidecar: usize, rack_power: RackIgnitionPower) -> Self {
+        assert!(
+            local_sidecar < rack_power.num_sidecars,
+            "sidecar {local_sidecar} is one of the rack's {} sidecars",
+            rack_power.num_sidecars,
+        );
+        Self {
+            local_sidecar,
+            link_events: vec![empty_link_events(); NUM_IGNITION_TARGETS],
+            rack_power,
+        }
+    }
 
-        for _ in &config.sidecar {
-            state.push(initial_ignition_state(ignition::SystemType::Sidecar));
-        }
-        for _ in &config.gimlet {
-            state.push(initial_ignition_state(ignition::SystemType::Gimlet));
-        }
-        for _ in &config.psc {
-            state.push(initial_ignition_state(ignition::SystemType::Psc));
-        }
+    fn num_targets(&self) -> usize {
+        NUM_IGNITION_TARGETS
+    }
 
-        assert!(state.len() <= NUM_IGNITION_TARGETS, "too many simulated SPs");
-        while state.len() < NUM_IGNITION_TARGETS {
-            state.push(IgnitionState {
+    fn current_state(&self) -> Vec<IgnitionState> {
+        (0..NUM_IGNITION_TARGETS).map(|target| self.state_of(target)).collect()
+    }
+
+    fn get_target(&self, target: u8) -> Result<IgnitionState, SpError> {
+        let target = usize::from(target);
+        if target < NUM_IGNITION_TARGETS {
+            Ok(self.state_of(target))
+        } else {
+            Err(SpError::Ignition(IgnitionError::InvalidPort))
+        }
+    }
+
+    // TODO-RAINCLAUDE: MGS configs number switch targets per sidecar: target 0 is the local sidecar and target 1 its peer (gateway-test-utils config.test.toml; smf/mgs/config.toml uses 35/34 the same way), so swap target 0 with this sidecar's rack index; sled and PSC targets are the same from either switch.
+    fn rack_target(&self, target: usize) -> usize {
+        if target == 0 {
+            self.local_sidecar
+        } else if target == self.local_sidecar {
+            0
+        } else {
+            target
+        }
+    }
+
+    fn rack_target_of(&self, target: usize) -> Option<&RackIgnitionTarget> {
+        self.rack_power.targets.get(self.rack_target(target))
+    }
+
+    fn state_of(&self, target: usize) -> IgnitionState {
+        match self.rack_target_of(target) {
+            Some(rack_target) => {
+                let mut state = initial_ignition_state(rack_target.system_type);
+                if let Some(target_state) = state.target.as_mut() {
+                    target_state.power_state = *rack_target.power.borrow();
+                }
+                state
+            }
+            None => IgnitionState {
                 receiver: ignition::ReceiverStatus {
                     aligned: false,
                     locked: false,
                     polarity_inverted: false,
                 },
                 target: None,
-            });
+            },
         }
-
-        Self {
-            state,
-            link_events: vec![empty_link_events(); NUM_IGNITION_TARGETS],
-        }
-    }
-
-    fn num_targets(&self) -> usize {
-        self.state.len()
-    }
-
-    fn get_target(&self, target: u8) -> Result<&IgnitionState, SpError> {
-        self.state
-            .get(usize::from(target))
-            .ok_or(SpError::Ignition(IgnitionError::InvalidPort))
-    }
-
-    fn get_target_mut(
-        &mut self,
-        target: u8,
-    ) -> Result<&mut IgnitionState, SpError> {
-        self.state
-            .get_mut(usize::from(target))
-            .ok_or(SpError::Ignition(IgnitionError::InvalidPort))
     }
 
     fn command(
@@ -1166,18 +1224,19 @@ impl FakeIgnition {
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), SpError> {
-        let target = self
-            .get_target_mut(target)?
-            .target
-            .as_mut()
-            .ok_or(SpError::Ignition(IgnitionError::NoTargetPresent))?;
+        _ = self.get_target(target)?;
+        let power = &self
+            .rack_target_of(usize::from(target))
+            .ok_or(SpError::Ignition(IgnitionError::NoTargetPresent))?
+            .power;
 
         match command {
             IgnitionCommand::PowerOn | IgnitionCommand::PowerReset => {
-                target.power_state = ignition::SystemPowerState::On;
+                // TODO-RAINCLAUDE: power-on resumes the SP with the state it had before power-off (no simulated reboot), and a PowerReset of a powered target is a no-op.
+                power.send_replace(ignition::SystemPowerState::On);
             }
             IgnitionCommand::PowerOff => {
-                target.power_state = ignition::SystemPowerState::Off;
+                power.send_replace(ignition::SystemPowerState::Off);
             }
             IgnitionCommand::AlwaysTransmit { .. } => {
                 // This is only used in manufacturing; do nothing.
