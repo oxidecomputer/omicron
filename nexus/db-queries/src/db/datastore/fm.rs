@@ -292,7 +292,12 @@ macro_rules! fm_fact_tables {
     }};
 }
 
-fm_fact_tables! { PhysicalDisk, Saga, Certificate, SmfService }
+fm_fact_tables! {
+    PhysicalDisk,
+    Saga,
+    Certificate,
+    SmfService,
+}
 
 /// Per-child-table statistics from a single GC pass.
 #[derive(Clone, Copy, Debug, Default)]
