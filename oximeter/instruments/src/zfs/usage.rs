@@ -25,8 +25,8 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 use uuid::Uuid;
 
-oximeter::use_timeseries!("zfs_pool.toml");
-oximeter::use_timeseries!("zfs_dataset.toml");
+oximeter::use_timeseries!("zfs-pool.toml");
+oximeter::use_timeseries!("zfs-dataset.toml");
 
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
 const POLL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -140,11 +140,11 @@ async fn collect_datasets(
     target: &zfs_dataset::ZfsDataset,
 ) -> Result<Vec<Sample>, Error> {
     let pools = Zpool::list_with_info().await?;
-    let anchors: Vec<String> =
-        pools.iter().flat_map(|pool| dataset_anchors(pool.name())).collect();
+    let pool_names: Vec<String> =
+        pools.iter().map(|pool| pool.name().to_string()).collect();
     let datasets = Zfs::get_dataset_properties(
-        &anchors,
-        illumos_utils::zfs::WhichDatasets::SelfAndChildren,
+        &pool_names,
+        illumos_utils::zfs::WhichDatasets::Recursive,
     )
     .await
     .map_err(Error::GetDatasetProperties)?;
@@ -156,14 +156,6 @@ async fn collect_datasets(
         .flatten()
         .collect();
     Ok(samples)
-}
-
-fn dataset_anchors(pool_name: &str) -> Vec<String> {
-    vec![
-        pool_name.to_string(),
-        format!("{pool_name}/crypt"),
-        format!("{pool_name}/crypt/zone"),
-    ]
 }
 
 // Parse a zpool into bytes_allocated and bytes_total metrics.
@@ -195,78 +187,274 @@ fn zpool_samples(
     Ok(vec![Sample::new(target, &allocated)?, Sample::new(target, &total)?])
 }
 
-// Parse a dataset into a bytes_used metric.
+#[derive(Debug, Default, PartialEq)]
+struct DatasetAttributes {
+    dataset_id: Uuid,
+    dataset_kind: String,
+    pool_id: Uuid,
+    pool_kind: String,
+    zone_name: String,
+}
+
+// Parse a dataset into metric attributes.
 //
-// Note: we omit bytes_quota because no datasets currently set quotas;
-// we'll add this metric if it becomes relevant in the future.
-//
-// Note: we extract dataset, zpool, and zone metadata (kind, id) if
-// encoded in the dataset name as
-// ox(i|p)_<pool_uuid>/crypt/zone/<zone_uuid>. For datasets that don't
-// follow this naming pattern, we omit this metadata.
-fn dataset_samples(
-    target: &zfs_dataset::ZfsDataset,
-    props: &DatasetProperties,
-) -> Result<Vec<Sample>, Error> {
-    let mut dataset_kind = String::new();
+// This is necessarily a bit of a mess. Some datasets are managed by sled-agent, others by crucible, etc., and naming and metadata vary by source.
+fn parse_dataset_attributes(props: &DatasetProperties) -> DatasetAttributes {
+    let mut attributes = DatasetAttributes::default();
 
-    let mut pool_kind = String::new();
-    let mut pool_id = Uuid::nil();
+    // Zones managed by reconfigurator set a uuid via zfs metadata. Prefer this id if present; else we'll attempt to parse it from the dataset's name below.
+    if let Some(id) = props.id {
+        attributes.dataset_id = id.into_untyped_uuid();
+    }
 
-    let mut zone_name = String::new();
-
-    let dataset_id =
-        props.id.map(|id| id.into_untyped_uuid()).unwrap_or(Uuid::nil());
-
+    // If the dataset can be parsed by DatasetName, use its parsed metadata.
     let maybe_dataset = DatasetName::from_str(&props.name).ok();
     if let Some(dataset) = &maybe_dataset {
-        dataset_kind = match dataset.kind() {
+        attributes.dataset_kind = match dataset.kind() {
             DatasetKind::TransientZoneRoot => "transient_zone_root".to_string(),
             DatasetKind::TransientZone { .. } => "transient_zone".to_string(),
             other => other.to_string(),
         };
-        zone_name = match dataset.kind() {
-            DatasetKind::TransientZone { name } => name.to_string(),
-            _ => zone_name,
+        if let DatasetKind::TransientZone { name } = dataset.kind() {
+            attributes.zone_name = name.clone();
+        }
+    // Otherwise, check against known dataset naming patterns.
+    } else if let Some((_, rest)) = props.name.split_once('/') {
+        let parts: Vec<&str> = rest.split('/').collect();
+        let (dataset_kind, dataset_id) = match parts[..] {
+            // crucible/regions/<REGION_UUID> represents a crucible region.
+            ["crucible", "regions", id] => ("crucible_region", id),
+            // local_storage_unencrypted/<ALLOCATION_ID> represents the parent dataset for an unencrypted local storage disk.
+            ["local_storage_unencrypted", id] => {
+                ("local_storage_unencrypted_allocation", id)
+            }
+            // local_storage_unencrypted/<ALLOCATION_ID>/vol represents the zvol for an unencrypted local storage disk.
+            ["local_storage_unencrypted", id, "vol"] => {
+                ("local_storage_unencrypted_volume", id)
+            }
+            // The encrypted variants of the above.
+            ["crypt", "local_storage", id] => ("local_storage_allocation", id),
+            ["crypt", "local_storage", id, "vol"] => {
+                ("local_storage_volume", id)
+            }
+            _ => ("", ""),
         };
-    };
-
-    // Best-effort attempt at parsing the zpool. If we parsed the DatasetName,
-    // look up its associated zpool metadata. Otherwise, split the dataset name
-    // by /, and attempt to parse the 0th part as a ZpoolName. This allows us
-    // to extract pool metadata from datasets like
-    // ox(i|p)_<uuid>/(crypt|install|...), which don't parse to a DatasetName.
-    let maybe_pool =
-        maybe_dataset.as_ref().map(|dataset| *dataset.pool()).or_else(|| {
-            let prefix = props
-                .name
-                .split_once('/')
-                .map(|(part, _)| part)
-                .unwrap_or(&props.name);
-            ZpoolName::from_str(prefix).ok()
-        });
-    if let Some(pool) = maybe_pool {
-        pool_kind = pool.kind().to_string();
-        pool_id = pool.id().into_untyped_uuid();
+        attributes.dataset_kind = dataset_kind.to_string();
+        if attributes.dataset_id.is_nil() {
+            attributes.dataset_id = dataset_id.parse().unwrap_or_default();
+        }
     }
 
-    let used = zfs_dataset::BytesUsed {
-        dataset_name: props.name.clone().into(),
-        dataset_id,
-        dataset_kind: dataset_kind.into(),
-        pool_kind: pool_kind.clone().into(),
-        pool_id,
-        zone_name: zone_name.into(),
-        datum: props.used.to_bytes(),
-    };
-    Ok(vec![Sample::new(target, &used)?])
+    // Parse the zfs pool metadata from the dataset name.
+    let dataset_prefix =
+        props.name.split_once('/').map(|(part, _)| part).unwrap_or(&props.name);
+    if let Ok(pool) = ZpoolName::from_str(dataset_prefix) {
+        attributes.pool_id = pool.id().into_untyped_uuid();
+        attributes.pool_kind = pool.kind().to_string();
+    }
+
+    attributes
+}
+
+// Parse a dataset into metrics.
+fn dataset_samples(
+    target: &zfs_dataset::ZfsDataset,
+    props: &DatasetProperties,
+) -> Result<Vec<Sample>, Error> {
+    let attributes = parse_dataset_attributes(props);
+
+    let mut samples = Vec::<Sample>::new();
+
+    samples.push(Sample::new(
+        target,
+        &zfs_dataset::BytesUsed {
+            dataset_name: props.name.clone().into(),
+            dataset_id: attributes.dataset_id,
+            dataset_kind: attributes.dataset_kind.clone().into(),
+            pool_kind: attributes.pool_kind.clone().into(),
+            pool_id: attributes.pool_id,
+            zone_name: attributes.zone_name.clone().into(),
+            datum: props.used.to_bytes(),
+        },
+    )?);
+    samples.push(Sample::new(
+        target,
+        &zfs_dataset::BytesAvailable {
+            dataset_name: props.name.clone().into(),
+            dataset_id: attributes.dataset_id,
+            dataset_kind: attributes.dataset_kind.clone().into(),
+            pool_kind: attributes.pool_kind.clone().into(),
+            pool_id: attributes.pool_id,
+            zone_name: attributes.zone_name.clone().into(),
+            datum: props.avail.to_bytes(),
+        },
+    )?);
+    if let Some(reservation) = props.reservation {
+        samples.push(Sample::new(
+            target,
+            &zfs_dataset::BytesReserved {
+                dataset_name: props.name.clone().into(),
+                dataset_id: attributes.dataset_id,
+                dataset_kind: attributes.dataset_kind.clone().into(),
+                pool_kind: attributes.pool_kind.clone().into(),
+                pool_id: attributes.pool_id,
+                zone_name: attributes.zone_name.clone().into(),
+                datum: reservation.to_bytes(),
+            },
+        )?);
+    }
+    if let Some(quota) = props.quota {
+        samples.push(Sample::new(
+            target,
+            &zfs_dataset::BytesQuota {
+                dataset_name: props.name.clone().into(),
+                dataset_id: attributes.dataset_id,
+                dataset_kind: attributes.dataset_kind.into(),
+                pool_kind: attributes.pool_kind.into(),
+                pool_id: attributes.pool_id,
+                zone_name: attributes.zone_name.into(),
+                datum: quota.to_bytes(),
+            },
+        )?);
+    }
+
+    Ok(samples)
 }
 
 #[cfg(test)]
 mod tests {
     use omicron_uuid_kinds::DatasetUuid;
+    use rstest::rstest;
 
     use super::*;
+
+    const POOL: &str = "oxp_4c7ad252-55c2-4a1a-9d93-9dfcdfdfacca";
+    const POOL_ID: Uuid = uuid::uuid!("4c7ad252-55c2-4a1a-9d93-9dfcdfdfacca");
+    const M2_POOL_ID: Uuid =
+        uuid::uuid!("01376d9a-434a-42d3-a4c8-dc78edcdfd06");
+
+    fn props(name: &str, id: Option<Uuid>) -> DatasetProperties {
+        DatasetProperties {
+            id: id.map(DatasetUuid::from_untyped_uuid),
+            name: name.to_string(),
+            mounted: true,
+            avail: 0u32.into(),
+            used: 0u32.into(),
+            quota: None,
+            reservation: None,
+            compression: String::new(),
+            epoch: None,
+        }
+    }
+
+    fn external(
+        dataset_kind: &str,
+        dataset_id: Uuid,
+        zone_name: &str,
+    ) -> DatasetAttributes {
+        DatasetAttributes {
+            dataset_id,
+            dataset_kind: dataset_kind.to_string(),
+            pool_id: POOL_ID,
+            pool_kind: "external".to_string(),
+            zone_name: zone_name.to_string(),
+        }
+    }
+
+    #[rstest]
+    #[case::named_with_oxide_uuid(
+        props(
+            &format!("{POOL}/crucible"),
+            Some(uuid::uuid!("56d4dbcc-3b4a-4ed0-8795-7734aadcc4c0")),
+        ),
+        external(
+            "crucible",
+            uuid::uuid!("56d4dbcc-3b4a-4ed0-8795-7734aadcc4c0"),
+            "",
+        ),
+    )]
+    #[case::transient_zone_root(
+        props(
+            &format!("{POOL}/crypt/zone"),
+            Some(uuid::uuid!("3019d76f-20c1-4ac6-a39f-59b901195fc5")),
+        ),
+        external(
+            "transient_zone_root",
+            uuid::uuid!("3019d76f-20c1-4ac6-a39f-59b901195fc5"),
+            "",
+        ),
+    )]
+    #[case::propolis_zone(
+        props(
+            &format!(
+                "{POOL}/crypt/zone/oxz_propolis-server_0507dfc2-a99c-4e11-9065-f53a26f5b4b7"
+            ),
+            None,
+        ),
+        external(
+            "transient_zone",
+            Uuid::nil(),
+            "oxz_propolis-server_0507dfc2-a99c-4e11-9065-f53a26f5b4b7",
+        ),
+    )]
+    #[case::crucible_region(
+        props(
+            &format!("{POOL}/crucible/regions/0a3c50c6-35bd-4e74-a733-0341dc193538"),
+            None,
+        ),
+        external(
+            "crucible_region",
+            uuid::uuid!("0a3c50c6-35bd-4e74-a733-0341dc193538"),
+            "",
+        ),
+    )]
+    #[case::local_storage_unencrypted_allocation(
+        props(
+            &format!(
+                "{POOL}/local_storage_unencrypted/5ccb2f5c-b96e-4f16-a6ae-2531a97cb3ce"
+            ),
+            None,
+        ),
+        external(
+            "local_storage_unencrypted_allocation",
+            uuid::uuid!("5ccb2f5c-b96e-4f16-a6ae-2531a97cb3ce"),
+            "",
+        ),
+    )]
+    #[case::local_storage_unencrypted_volume(
+        props(
+            &format!(
+                "{POOL}/local_storage_unencrypted/5ccb2f5c-b96e-4f16-a6ae-2531a97cb3ce/vol"
+            ),
+            None,
+        ),
+        external(
+            "local_storage_unencrypted_volume",
+            uuid::uuid!("5ccb2f5c-b96e-4f16-a6ae-2531a97cb3ce"),
+            "",
+        ),
+    )]
+    #[case::unrecognized_u2(
+        props(&format!("{POOL}/crucible/regions"), None),
+        external("", Uuid::nil(), ""),
+    )]
+    #[case::m2_debug(
+        props("oxi_01376d9a-434a-42d3-a4c8-dc78edcdfd06/debug", None),
+        DatasetAttributes {
+            dataset_id: Uuid::nil(),
+            dataset_kind: String::new(),
+            pool_id: M2_POOL_ID,
+            pool_kind: "internal".to_string(),
+            zone_name: String::new(),
+        },
+    )]
+    #[case::rpool(props("rpool/zone", None), DatasetAttributes::default())]
+    fn test_parse_dataset_attributes(
+        #[case] props: DatasetProperties,
+        #[case] expected: DatasetAttributes,
+    ) {
+        assert_eq!(parse_dataset_attributes(&props), expected);
+    }
 
     #[test]
     fn test_dataset_samples() {
@@ -290,7 +478,7 @@ mod tests {
             epoch: None,
         };
         let samples = dataset_samples(&target, &props).unwrap();
-        assert_eq!(samples.len(), 1);
+        assert_eq!(samples.len(), 2);
 
         let sample = &samples[0];
         assert_eq!(sample.timeseries_name, "zfs_dataset:bytes_used");

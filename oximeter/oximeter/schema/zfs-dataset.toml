@@ -54,7 +54,34 @@ description = "Name of the associated zone"
 
 [[metrics]]
 name = "bytes_used"
-description = "Bytes used for the dataset"
+description = "Bytes used by the dataset"
+units = "bytes"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ "dataset_name", "pool_kind", "pool_id", "dataset_kind", "dataset_id", "zone_name" ] }
+]
+
+[[metrics]]
+name = "bytes_available"
+description = "Bytes available for the dataset"
+units = "bytes"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ "dataset_name", "pool_kind", "pool_id", "dataset_kind", "dataset_id", "zone_name" ] }
+]
+
+[[metrics]]
+name = "bytes_reserved"
+description = "Bytes reserved for the dataset"
+units = "bytes"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ "dataset_name", "pool_kind", "pool_id", "dataset_kind", "dataset_id", "zone_name" ] }
+]
+
+[[metrics]]
+name = "bytes_quota"
+description = "Quota for the dataset"
 units = "bytes"
 datum_type = "u64"
 versions = [
