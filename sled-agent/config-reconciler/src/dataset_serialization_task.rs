@@ -2052,6 +2052,14 @@ mod tests {
                         })
                     }
                 }
+                WhichDatasets::Recursive => {
+                    let datasets =
+                        datasets.iter().map(split_fn).collect::<Vec<_>>();
+                    &move |name| {
+                        let name = split_fn(name);
+                        datasets.iter().any(|dataset| name.starts_with(dataset))
+                    }
+                }
             };
 
             Ok(self

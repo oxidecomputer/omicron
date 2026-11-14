@@ -75,6 +75,7 @@ zone = ["kstat"]
 
 [dev-dependencies]
 rand.workspace = true
+rstest.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 oximeter.workspace = true

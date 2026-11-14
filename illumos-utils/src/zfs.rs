@@ -801,6 +801,7 @@ impl fmt::Display for PropertySource {
 pub enum WhichDatasets {
     SelfOnly,
     SelfAndChildren,
+    Recursive,
 }
 
 /// Renders an optional size as the string ZFS expects: the byte count, or
@@ -1376,6 +1377,9 @@ impl Zfs {
             WhichDatasets::SelfOnly => (),
             WhichDatasets::SelfAndChildren => {
                 cmd.args(&["-d", "1"]);
+            }
+            WhichDatasets::Recursive => {
+                cmd.args(&["-r"]);
             }
         }
         cmd.args(&["-Hpo", "name,property,value,source"]);
