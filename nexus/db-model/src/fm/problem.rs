@@ -172,7 +172,7 @@ pub struct FmProblemAlert {
 ///
 /// The referenced support bundle need not be one requested in the same sitrep,
 /// and a link will be created when the sitrep is executed as long as the
-/// referenced alert still exists. Rendezvous must not create the externally
+/// referenced support bundle still exists. Rendezvous must not create the externally
 /// visible link until both the problem and the support bundle exist. Otherwise,
 /// a caller listing a problem's support bundle may see one that does not exist
 /// yet.
