@@ -67,6 +67,7 @@ sled-agent-scrimlet-reconcilers.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+sp-sim.workspace = true
 tokio.workspace = true
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util.workspace = true

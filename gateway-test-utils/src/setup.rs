@@ -24,6 +24,7 @@ use std::convert::Infallible;
 use std::future;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -38,7 +39,7 @@ pub struct GatewayTestContext {
     pub client: gateway_client::Client,
     pub server: omicron_gateway::Server,
     port: u16,
-    pub simrack: SimRack,
+    pub simrack: Arc<SimRack>,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
     resolver: FixedResolver,
@@ -64,26 +65,30 @@ impl GatewayTestContext {
 pub fn load_test_config(
     sp_sim_config_file: Utf8PathBuf,
 ) -> (omicron_gateway::Config, sp_sim::Config) {
+    (load_mgs_test_config(), load_sp_sim_config(&sp_sim_config_file))
+}
+
+pub fn load_mgs_test_config() -> omicron_gateway::Config {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
     let config_path = manifest_dir.join("configs/config.test.toml");
-    let server_config = omicron_gateway::Config::from_file(&config_path)
-        .unwrap_or_else(|e| {
-            panic!(
-                "failed to load MGS config from {config_path}: {}",
-                InlineErrorChain::new(&e)
-            )
-        });
+    omicron_gateway::Config::from_file(&config_path).unwrap_or_else(|e| {
+        panic!(
+            "failed to load MGS config from {config_path}: {}",
+            InlineErrorChain::new(&e)
+        )
+    })
+}
 
-    let sp_sim_config = match sp_sim::Config::from_file(sp_sim_config_file) {
+pub fn load_sp_sim_config(sp_sim_config_file: &Utf8Path) -> sp_sim::Config {
+    match sp_sim::Config::from_file(sp_sim_config_file) {
         Ok(config) => config,
         Err(e) => panic!(
             "failed to load SP simulator config: {}",
             InlineErrorChain::new(&e)
         ),
-    };
-    (server_config, sp_sim_config)
+    }
 }
 
 pub async fn test_setup(
@@ -173,8 +178,52 @@ fn expected_location(
 pub async fn test_setup_with_config(
     test_name: &str,
     sp_port: SpPort,
-    mut server_config: omicron_gateway::Config,
+    server_config: omicron_gateway::Config,
     sp_sim_config: &sp_sim::Config,
+    listen_addr: Option<SocketAddrV6>,
+) -> GatewayTestContext {
+    // Use log settings from the server config and ignore log settings in
+    // sp_sim_config; we'll give it the same logger as the server
+    let logctx = LogContext::new(test_name, &server_config.log);
+
+    // Start fake rack of simulated SPs
+    let simrack =
+        Arc::new(SimRack::start(sp_sim_config, &logctx.log).await.unwrap());
+
+    test_setup_with_simrack_impl(
+        logctx,
+        sp_port,
+        server_config,
+        simrack,
+        listen_addr,
+    )
+    .await
+}
+
+/// Starts MGS against an existing rack over `sp_port`.
+pub async fn test_setup_with_simrack(
+    test_name: &str,
+    sp_port: SpPort,
+    server_config: omicron_gateway::Config,
+    simrack: Arc<SimRack>,
+    listen_addr: Option<SocketAddrV6>,
+) -> GatewayTestContext {
+    let logctx = LogContext::new(test_name, &server_config.log);
+    test_setup_with_simrack_impl(
+        logctx,
+        sp_port,
+        server_config,
+        simrack,
+        listen_addr,
+    )
+    .await
+}
+
+async fn test_setup_with_simrack_impl(
+    logctx: LogContext,
+    sp_port: SpPort,
+    mut server_config: omicron_gateway::Config,
+    simrack: Arc<SimRack>,
     listen_addr: Option<SocketAddrV6>,
 ) -> GatewayTestContext {
     // Can't be `const` because `SocketAddrV6::new()` isn't const yet
@@ -184,13 +233,7 @@ pub async fn test_setup_with_config(
         addresses.push(addr);
     };
 
-    // Use log settings from the server config and ignore log settings in
-    // sp_sim_config; we'll give it the same logger as the server
-    let logctx = LogContext::new(test_name, &server_config.log);
     let log = &logctx.log;
-
-    // Start fake rack of simulated SPs
-    let simrack = SimRack::start(sp_sim_config, log).await.unwrap();
 
     let expected_location = expected_location(&server_config, sp_port);
 
