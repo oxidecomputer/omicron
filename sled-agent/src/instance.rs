@@ -67,8 +67,11 @@ const QUEUE_SIZE: usize = 32;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to wait for service: {0}")]
-    Timeout(String),
+    #[error(transparent)]
+    WaitForServiceTimeout(#[from] illumos_utils::svc::WaitForServiceTimeout),
+
+    #[error("Timed out waiting for Propolis HTTP server to start")]
+    PropolisHttpServerTimeout,
 
     #[error("Failed to create VNIC")]
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
@@ -193,7 +196,7 @@ async fn wait_for_http_server(
         log_notification_failure,
     )
     .await
-    .map_err(|_| Error::Timeout("Propolis".to_string()))
+    .map_err(|_| Error::PropolisHttpServerTimeout)
 }
 
 fn service_name() -> &'static str {
@@ -2729,8 +2732,7 @@ impl InstanceRunner {
         self.zone_builder_factory
             .zones_api()
             .wait_for_service(Some(&zname), &fmri, self.log.clone())
-            .await
-            .map_err(|_| Error::Timeout(fmri.to_string()))?;
+            .await?;
         info!(self.log, "Propolis SMF service is online");
 
         // Notify the metrics task about the instance zone's datalinks.
