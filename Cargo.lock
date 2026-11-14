@@ -2225,13 +2225,13 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=a1ffb24212d9a2a03195131c8f6fe8d2d3a0556f#a1ffb24212d9a2a03195131c8f6fe8d2d3a0556f"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.15.1",
+ "progenitor 0.16.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -12364,6 +12364,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f7d37bf1319f2c7abbb95eb340a4be8545b78be1a5d1acde2dcc90b4a04f21d"
+dependencies = [
+ "progenitor-client 0.16.0",
+ "progenitor-impl 0.16.0",
+ "progenitor-macro 0.16.0",
+]
+
+[[package]]
 name = "progenitor-client"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12398,6 +12409,21 @@ name = "progenitor-client"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6aa13eb6d9499a851512ec8fa3280f586be059682da4f05d953924be45d736f0"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+]
+
+[[package]]
+name = "progenitor-client"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f4df47ce7fa035b40e92b2f23e3df1c6c7147c2412e6fccb5be886b26c47118"
 dependencies = [
  "bytes",
  "futures-core",
@@ -12489,6 +12515,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor-impl"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb884f6f3c6e929084116b4745cedf49736240bf783a2f35e058df1f63032c8"
+dependencies = [
+ "heck 0.5.0",
+ "http",
+ "indexmap 2.14.0",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "syn 3.0.3",
+ "thiserror 2.0.18",
+ "typify 0.8.0",
+ "unicode-ident",
+]
+
+[[package]]
 name = "progenitor-macro"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12533,6 +12581,24 @@ dependencies = [
  "openapiv3",
  "proc-macro2",
  "progenitor-impl 0.15.1",
+ "quote",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_tokenstream 0.3.0",
+ "serde_yaml",
+ "syn 3.0.3",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d3ac585095745668515f7600f3bc656a0f612f8875adf75830eaebdf1e61661"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.16.0",
  "quote",
  "schemars 0.8.22",
  "serde",
