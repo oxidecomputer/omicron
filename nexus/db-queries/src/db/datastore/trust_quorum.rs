@@ -2845,6 +2845,21 @@ mod tests {
             )
             .await,
         );
+        assert_unconverted(
+            "sled_get_rack_id_if_commissioned_conn",
+            DataStore::sled_get_rack_id_if_commissioned_conn(
+                conn,
+                &unconverted_test_baseboard(),
+            )
+            .await,
+        );
+    }
+
+    fn unconverted_test_baseboard() -> BaseboardId {
+        BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: "test-serial".to_string(),
+        }
     }
 
     #[tokio::test]
@@ -2856,6 +2871,24 @@ mod tests {
         let datastore = db.datastore();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let rack_id = RackUuid::new_v4();
+
+        // Warm Diesel's per-connection OID cache for the sled_policy and
+        // sled_state enums this query binds. Otherwise, Diesel would look
+        // them up inside the aborted transaction, and that lookup would fail
+        // with Diesel's SerializationError before the helper's query is sent,
+        // so the test wouldn't check how the helper converts the error.
+        //
+        // XXX: This is quite fragile! We should consider using the type system
+        // to make the bug class this test is trying to exercise moot.
+        assert_eq!(
+            DataStore::sled_get_rack_id_if_commissioned_conn(
+                &conn,
+                &unconverted_test_baseboard(),
+            )
+            .await
+            .expect("looked up a sled that does not exist"),
+            None,
+        );
 
         // Run a transaction starting with a failed statement. This leaves the
         // transaction in an aborted state, so that all the read methods in
