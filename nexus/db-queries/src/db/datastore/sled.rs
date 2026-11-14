@@ -36,8 +36,10 @@ use crate::db::true_or_cast_error::matches_sentinel;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::dsl::sql;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use diesel::sql_types::BigInt;
 use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -46,6 +48,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::DbTypedUuid;
+use nexus_db_model::Resources;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
@@ -68,6 +71,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::SeedableRng;
@@ -1097,6 +1101,13 @@ pub struct MigrateSuccessUpdate {
     pub instance_id: Uuid,
 }
 
+#[derive(Queryable)]
+pub struct SledVmmReservation {
+    pub sled_id: DbTypedUuid<SledKind>,
+    #[diesel(embed)]
+    pub resources: Resources,
+}
+
 impl DataStore {
     /// Stores a new sled in the database.
     ///
@@ -1964,6 +1975,39 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    pub async fn sled_vmm_reservation_list(
+        &self,
+        opctx: &OpContext,
+        sled_ids: &[SledUuid],
+    ) -> ListResultVec<SledVmmReservation> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
+        let sled_ids: Vec<Uuid> =
+            sled_ids.iter().map(|id| id.into_untyped_uuid()).collect();
+        dsl::sled_resource_vmm
+            .filter(dsl::sled_id.eq_any(sled_ids))
+            .group_by(dsl::sled_id)
+            // SUM() returns NUMERIC; cast to INT8 so that we can deserialize
+            // into Resources.
+            .select((
+                dsl::sled_id,
+                (
+                    sql::<BigInt>(
+                        "CAST(SUM(sled_resource_vmm.hardware_threads) AS INT8)",
+                    ),
+                    sql::<BigInt>(
+                        "CAST(SUM(sled_resource_vmm.rss_ram) AS INT8)",
+                    ),
+                    sql::<BigInt>(
+                        "CAST(SUM(sled_resource_vmm.reservoir_ram) AS INT8)",
+                    ),
+                ),
+            ))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Sets the provision policy for this sled.

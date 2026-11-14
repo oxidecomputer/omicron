@@ -509,6 +509,10 @@ async fn test_omdb_success_cases() {
         .field("triggered by", r"[\w ]+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
+    // The `capacity_metrics` task's sled sample count depends on how many
+    // sleds happened to register with Nexus before its first activation.
+    redactor.field("sled samples:", r"\d+");
+
     // The `fm_analysis` task's input report includes a line comparing the
     // current inventory collection against the parent sitrep's collection,
     // which can be either "same" or "different" depending on whether a new
