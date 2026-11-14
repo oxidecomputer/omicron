@@ -195,6 +195,28 @@ struct ValidatedConfig {
     commit_partially_epoch: Option<Epoch>,
 }
 
+/// The latest trust quorum configuration for a rack, once we've verified that a
+/// config is not currently preparing.
+enum LatestConfig {
+    /// The config is in the `Committing` (past K + Z prepare acks) or
+    /// `Committed` state. (The latest config can never be `CommittedPartially`,
+    /// because that state is only possible for non-latest epochs.)
+    ///
+    /// Here, "last committed" means the latest config that has irrevocably
+    /// moved past the `Preparing` state. This name is consistent with other
+    /// uses of "last committed".
+    LastCommitted(TrustQuorumConfig),
+    /// The config is in the `Aborted` state.
+    Aborted {
+        /// The epoch of the aborted configuration.
+        epoch: Epoch,
+
+        /// The configuration the aborted one was built on, or `None` for an
+        /// aborted LRTQ upgrade.
+        last_committed: Option<TrustQuorumConfig>,
+    },
+}
+
 impl DataStore {
     /// Return any active `RackUuid` for each trust quorum along with its latest
     /// `Epoch`.
@@ -628,6 +650,109 @@ impl DataStore {
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<ValidatedConfig, TransactionError<Error>> {
         //
+        // Check that there is not an in progress reconfiguration:
+        //
+        // We validate the current reconfiguration state before examining the
+        // proposal. This means that an in-flight reconfiguration is a 409 even
+        // when the proposal is also invalid.
+        let rack_id = proposed.rack_id;
+        let latest = match Self::tq_get_latest_config_with_members_conn(
+            conn, rack_id,
+        )
+        .await?
+        {
+            None => None,
+            Some(latest_config) => match latest_config.state {
+                TrustQuorumConfigState::Preparing
+                | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+                    // If the configuration is being prepared then it must be
+                    // aborted before a reconfiguration can occur.
+                    return Err(Error::conflict(format!(
+                        "Trust quorum reconfiguration in progress: still \
+                        preparing in epoch {}. Wait for it to finish and \
+                        retry, or abort it to reconfigure now.",
+                        latest_config.epoch
+                    ))
+                    .into());
+                }
+                TrustQuorumConfigState::Committing
+                | TrustQuorumConfigState::Committed
+                | TrustQuorumConfigState::CommittedPartially => {
+                    Some(LatestConfig::LastCommitted(latest_config))
+                }
+                TrustQuorumConfigState::Aborted => {
+                    let last_committed = match latest_config
+                        .last_committed_epoch
+                    {
+                        None => None,
+                        Some(epoch) => {
+                            let Some(config) =
+                                Self::tq_get_config_with_members_from_epoch_conn(
+                                    conn, rack_id, epoch,
+                                )
+                                .await?
+                            else {
+                                return Err(Error::internal_error(&format!(
+                                    "The latest trust quorum configuration \
+                                    for rack {rack_id} (epoch {}) is aborted \
+                                    and builds on epoch {epoch}, which does \
+                                    not exist.",
+                                    latest_config.epoch
+                                ))
+                                .into());
+                            };
+                            Some(config)
+                        }
+                    };
+                    Some(LatestConfig::Aborted {
+                        epoch: latest_config.epoch,
+                        last_committed,
+                    })
+                }
+            },
+        };
+
+        let last_committed_config = match &latest {
+            None | Some(LatestConfig::Aborted { last_committed: None, .. }) => {
+                None
+            }
+            Some(LatestConfig::LastCommitted(config))
+            | Some(LatestConfig::Aborted {
+                last_committed: Some(config),
+                ..
+            }) => Some(config),
+        };
+
+        if let Some(last_committed_config) = last_committed_config {
+            bail_unless!(
+                last_committed_config.state.is_committed()
+                    || last_committed_config.state.is_committing(),
+                "The last committed trust quorum configuration for rack {} \
+                (epoch {}) is not committed: it is {:?}",
+                rack_id,
+                last_committed_config.epoch,
+                last_committed_config.state
+            );
+
+            if last_committed_config.state.is_committing() {
+                let acked = last_committed_config.acked_commits();
+                // K + Z
+                let min = last_committed_config.threshold.0 as usize
+                    + last_committed_config.commit_crash_tolerance as usize;
+                if acked < min {
+                    return Err(Error::conflict(format!(
+                        "Trust quorum reconfiguration in progress: not \
+                        enough nodes have acked commit in epoch {}. \
+                        Expected at least {} acks, Got {} acks. If this \
+                        persists please contact Oxide support.",
+                        last_committed_config.epoch, min, acked
+                    ))
+                    .into());
+                }
+            }
+        }
+
+        //
         // Check validity of members in proposed config
         //
 
@@ -676,15 +801,13 @@ impl DataStore {
         }
 
         //
-        // Check that there is not an in progress reconfiguration:
+        // Check that the proposal builds on the latest configuration:
         //
-        let latest_config = Self::tq_get_latest_config_with_members_conn(
-            conn,
-            proposed.rack_id,
-        )
-        .await?;
-
-        let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
+        let latest_epoch = match &latest {
+            None => None,
+            Some(LatestConfig::LastCommitted(config)) => Some(config.epoch),
+            Some(LatestConfig::Aborted { epoch, .. }) => Some(*epoch),
+        };
         // Check for an outdated epoch.
         //
         // The proposed epoch is computed to be `latest + 1`, so another
@@ -718,30 +841,21 @@ impl DataStore {
             proposed.epoch
         );
 
-        // Helper variable to operate on the last committed config, no matter
-        // how we find it.
-        let mut last_committed_config: Option<TrustQuorumConfig> = None;
-
-        // Is there actually a latest configuration?
-        if let Some(latest_config) = latest_config {
-            // If the configuration is being prepared then it must be aborted
-            // before a reconfiguration can occur.
-            if latest_config.state.is_preparing() {
-                return Err(Error::conflict(format!(
-                    "Trust quorum reconfiguration in progress: still \
-                    preparing in epoch {}. Wait for it to finish and retry, \
-                    or abort it to reconfigure now.",
-                    latest_config.epoch
-                ))
-                .into());
+        match &latest {
+            None => {
+                if let Some(epoch) = proposed.last_committed_epoch() {
+                    return Err(Error::internal_error(&format!(
+                        "Trust Quorum proposed configuration contains a last \
+                        committed epoch ({epoch}) for a configuration that \
+                        does not exist."
+                    ))
+                    .into());
+                }
             }
-
             // If the latest configuration is at least committing, then the
             // proposed configuration must have the last committed configuration
             // set to match this.
-            if latest_config.state.is_committed()
-                || latest_config.state.is_committing()
-            {
+            Some(LatestConfig::LastCommitted(latest_config)) => {
                 bail_unless!(
                     Some(latest_config.epoch)
                         == proposed.last_committed_epoch(),
@@ -752,17 +866,14 @@ impl DataStore {
                     latest_config.epoch,
                     proposed.last_committed_epoch()
                 );
-
-                last_committed_config = Some(latest_config);
-            } else if latest_config.state.is_aborted() {
+            }
+            Some(LatestConfig::Aborted { epoch, last_committed }) => {
                 // In this case, the caller should retry.
-                if proposed.last_committed_epoch() == Some(latest_config.epoch)
-                {
+                if proposed.last_committed_epoch() == Some(*epoch) {
                     return Err(Error::conflict(format!(
                         "Trust quorum reconfiguration in progress: the \
-                        configuration at epoch {} that this one builds on was \
-                        aborted concurrently. Retry the request.",
-                        latest_config.epoch
+                        configuration at epoch {epoch} that this one builds \
+                        on was aborted concurrently. Retry the request.",
                     ))
                     .into());
                 }
@@ -770,39 +881,18 @@ impl DataStore {
                 // Inductively,the latest configuration should not have
                 // been written to the database unless its last committed
                 // configuration was valid.
+                let latest_last_committed_epoch =
+                    last_committed.as_ref().map(|config| config.epoch);
                 bail_unless!(
-                    latest_config.last_committed_epoch
+                    latest_last_committed_epoch
                         == proposed.last_committed_epoch(),
                     "Trust quorum proposed configuration has a last committed \
                     epoch that does not match the last committed epoch of the \
                     latest (aborted) configuration. \
                     Proposed = {:?}, Actual = {:?}",
                     proposed.last_committed_epoch(),
-                    latest_config.last_committed_epoch
+                    latest_last_committed_epoch
                 );
-            }
-        }
-
-        // The latest config was aborted or there wasn't one
-        if last_committed_config.is_none() {
-            // Do we need to load the last committed config?
-            if let Some(epoch) = proposed.last_committed_epoch() {
-                let config = Self::tq_get_config_with_members_from_epoch_conn(
-                    conn,
-                    proposed.rack_id,
-                    epoch,
-                )
-                .await?;
-
-                bail_unless!(
-                    config.is_some(),
-                    "Trust Quorum proposed configuration contains a last \
-                    committed epoch ({}) for a configuration that does \
-                    not exist.",
-                    epoch
-                );
-
-                last_committed_config = config;
             }
         }
 
@@ -816,30 +906,9 @@ impl DataStore {
         // configuration or there is not one.
         let possible_coordinators: BTreeSet<BaseboardId> =
             if let Some(last_committed_config) = last_committed_config {
-                bail_unless!(
-                    last_committed_config.state.is_committed()
-                        || last_committed_config.state.is_committing(),
-                    "Trust Quorum proposed configuration contains a last \
-                committed epoch ({}) for a configuration that is not \
-                committed",
-                    last_committed_config.epoch
-                );
-
+                // The in-flight checks above verified that a committing last
+                // committed configuration has at least K + Z commit acks.
                 if last_committed_config.state.is_committing() {
-                    let acked = last_committed_config.acked_commits();
-                    // K + Z
-                    let min = last_committed_config.threshold.0 as usize
-                        + last_committed_config.commit_crash_tolerance as usize;
-                    if acked < min {
-                        return Err(Error::conflict(format!(
-                            "Trust quorum reconfiguration in progress: not \
-                            enough nodes have acked commit in epoch {}. \
-                            Expected at least {} acks, Got {} acks. If this \
-                            persists please contact Oxide support.",
-                            last_committed_config.epoch, min, acked
-                        ))
-                        .into());
-                    }
                     commit_partially_epoch = Some(last_committed_config.epoch);
                 }
 
@@ -2161,27 +2230,17 @@ mod tests {
 
         datastore.tq_insert_latest_config(opctx, proposal(2, 1)).await.unwrap();
 
-        assert_conflict(
-            datastore.tq_insert_latest_config(opctx, proposal(3, 1)).await,
-            "Trust quorum reconfiguration in progress: still preparing in \
-             epoch 2. Wait for it to finish and retry, or abort it to \
-             reconfigure now.",
-        );
-        assert_conflict(
-            datastore.tq_insert_latest_config(opctx, proposal(2, 1)).await,
-            "Trust quorum reconfiguration in progress: a configuration at \
-             epoch 2 was proposed concurrently with this one (proposed epoch \
-             2). Retry the request.",
-        );
-        match datastore.tq_insert_latest_config(opctx, proposal(4, 1)).await {
-            Err(Error::InternalError { internal_message }) => assert!(
-                internal_message.starts_with(
-                    "Epochs for trust quorum configurations must be \
-                     sequential."
-                ),
-                "unexpected message {internal_message:?}",
-            ),
-            other => panic!("expected InternalError, got {other:?}"),
+        // The preparing check runs before any check of the proposal, so a stale
+        // epoch (2) or a skipped epoch (4) is also reported as still preparing.
+        for epoch in [3, 2, 4] {
+            assert_conflict(
+                datastore
+                    .tq_insert_latest_config(opctx, proposal(epoch, 1))
+                    .await,
+                "Trust quorum reconfiguration in progress: still preparing in \
+                 epoch 2. Wait for it to finish and retry, or abort it to \
+                 reconfigure now.",
+            );
         }
 
         // If epoch 2 is aborted before the insert, that's a lost race too.
@@ -2200,6 +2259,22 @@ mod tests {
              epoch 2 that this one builds on was aborted concurrently. Retry \
              the request.",
         );
+        assert_conflict(
+            datastore.tq_insert_latest_config(opctx, proposal(2, 1)).await,
+            "Trust quorum reconfiguration in progress: a configuration at \
+             epoch 2 was proposed concurrently with this one (proposed epoch \
+             2). Retry the request.",
+        );
+        match datastore.tq_insert_latest_config(opctx, proposal(4, 1)).await {
+            Err(Error::InternalError { internal_message }) => assert!(
+                internal_message.starts_with(
+                    "Epochs for trust quorum configurations must be \
+                     sequential."
+                ),
+                "unexpected message {internal_message:?}",
+            ),
+            other => panic!("expected InternalError, got {other:?}"),
+        }
         datastore.tq_insert_latest_config(opctx, proposal(3, 1)).await.unwrap();
 
         db.terminate().await;
