@@ -10,6 +10,8 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{CaseUuid, FactUuid, SitrepUuid};
 
 /// A row in one of the per-diagnosis-engine `fm_fact_*` tables.
+///
+/// See [`nexus_types::fm::fact`] for how to add a fact table.
 pub trait FmFactRow: Sized {
     /// The diagnosis engine's fact type stored in this table.
     type Payload;
