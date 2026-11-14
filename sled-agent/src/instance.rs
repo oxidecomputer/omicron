@@ -70,8 +70,8 @@ pub enum Error {
     #[error(transparent)]
     WaitForServiceTimeout(#[from] illumos_utils::svc::WaitForServiceTimeout),
 
-    #[error("Timed out waiting for Propolis HTTP server to start")]
-    PropolisHttpServerTimeout,
+    #[error("Propolis HTTP server did not start within {0:?}")]
+    PropolisHttpServerTimeout(Duration),
 
     #[error("Failed to create VNIC")]
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
@@ -167,6 +167,11 @@ async fn wait_for_http_server(
     log: &Logger,
     client: &PropolisClient,
 ) -> Result<(), Error> {
+    // Ten minutes seems like a *really* long time for Propolis to start its
+    // HTTP server, but let's try to err on the side of not giving up on a
+    // server that has a reasonable chance of starting.
+    const TIMEOUT: Duration = Duration::from_mins(10);
+
     let log_notification_failure = |error, delay| {
         warn!(
             log,
@@ -176,27 +181,50 @@ async fn wait_for_http_server(
     };
 
     backoff::retry_notify(
-        backoff::retry_policy_local(),
+        backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
             // error informs us the HTTP server is alive.
-            match client.instance_get().send().await {
-                Ok(_) => return Ok(()),
-                Err(value) => {
+            let request = client.instance_get().send();
+            // Note that we wrap the request to Propolis in its own timeout
+            // here, because the client we construct in `setup_propolis_zone`
+            // uses a `reqwest` client builder without a per-request timeout (so
+            // that the HTTP long-polling in the `instance_state_monitor`
+            // endpoint can work correctly). That means that if propolis simply
+            // never responds to our request here without closing the
+            // connection, we can potentially wait forever, despite the retry
+            // policy's timeout (which does not cancel the operation future
+            // itself). Thus, we add another TIMEOUT to the timeout so you can
+            // timeout while you timeout.
+            match tokio::time::timeout(TIMEOUT, request).await {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(value)) => {
                     if value.status().is_some() {
                         // This means the propolis server responded to our
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    return Err(backoff::BackoffError::transient(value));
+                    return Err(backoff::BackoffError::transient(
+                        anyhow::anyhow!(value),
+                    ));
+                }
+                Err(timed_out) => {
+                    // Well, that's kinda wild, but let's bail identically here
+                    // and let it go through the same logging code.
+                    return Err(backoff::BackoffError::transient(
+                        anyhow::anyhow!(
+                            "a single request to propolis did not complete \
+                             within {TIMEOUT:?}: {timed_out:?}"
+                        ),
+                    ));
                 }
             }
         },
         log_notification_failure,
     )
     .await
-    .map_err(|_| Error::PropolisHttpServerTimeout)
+    .map_err(|_| Error::PropolisHttpServerTimeout(TIMEOUT))
 }
 
 fn service_name() -> &'static str {
