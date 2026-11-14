@@ -10,7 +10,8 @@ use nexus_networking::InServiceSledClientError;
 use nexus_networking::sled_client_by_baseboard_id_and_rack_id_if_in_service_ext;
 use nexus_types::external_api::rack::SledAddPrecheckOverrides;
 use nexus_types::trust_quorum::{
-    IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
+    AddSledsError, LrtqUpgradeError, ProposedTrustQuorumConfig,
+    RemoveSledError, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
 use omicron_common::http_client::internal_http_client_builder;
@@ -19,7 +20,10 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::time::Duration;
+use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
+use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::membership::TrustQuorumMembers;
+use trust_quorum_types::membership::TrustQuorumMembersError;
 use trust_quorum_types::types::Epoch;
 
 impl super::Nexus {
@@ -46,13 +50,12 @@ impl super::Nexus {
         self.sled_check_versions(opctx, &new_sleds, override_prechecks).await?;
 
         let new_epoch = latest_epoch.next();
-        let proposed = self
-            .add_sleds_proposed_config(
-                latest_committed_config,
-                new_epoch,
-                new_sleds,
-            )
-            .await?;
+        let proposed = ProposedTrustQuorumConfig::add_sleds(
+            &latest_committed_config,
+            new_epoch,
+            new_sleds,
+        )
+        .map_err(tq_add_sleds_refusal)?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
@@ -98,7 +101,8 @@ impl super::Nexus {
             &latest_committed_config,
             new_epoch,
             &sled_to_remove,
-        )?;
+        )
+        .map_err(tq_remove_sled_refusal)?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
@@ -220,14 +224,10 @@ impl super::Nexus {
             .collect();
 
         // Create a proposed configuration for the upgrade and save it to the DB
-        let members = TrustQuorumMembers::new(members)
-            .map_err(|error| Error::internal_error(&error.to_string()))?;
-        let proposed = ProposedTrustQuorumConfig {
-            rack_id,
-            epoch: new_epoch,
-            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
-            members,
-        };
+        let proposed = ProposedTrustQuorumConfig::upgrade_from_lrtq(
+            rack_id, new_epoch, members,
+        )
+        .map_err(tq_upgrade_from_lrtq_refusal)?;
         self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
 
         // Read back the real configuration from the database. Importantly this
@@ -344,43 +344,6 @@ impl super::Nexus {
         )
         .await
     }
-
-    // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
-    // the membership. Return an error if any of the new sleds exist in the
-    // `latest_committed_config` membership already.
-    async fn add_sleds_proposed_config(
-        &self,
-        latest_committed_config: TrustQuorumConfig,
-        new_epoch: Epoch,
-        new_sleds: BTreeSet<BaseboardId>,
-    ) -> Result<ProposedTrustQuorumConfig, Error> {
-        let rack_id = latest_committed_config.rack_id;
-        let existing: BTreeSet<_> =
-            latest_committed_config.members.keys().cloned().collect();
-
-        let intersection: BTreeSet<_> =
-            existing.intersection(&new_sleds).collect();
-        if !intersection.is_empty() {
-            return Err(Error::invalid_request(format!(
-                "The following sleds are already members of the trust quorum: \
-                 {intersection:?}."
-            )));
-        }
-
-        let members = TrustQuorumMembers::new(
-            new_sleds.union(&existing).cloned().collect(),
-        )
-        .map_err(|error| Error::internal_error(&error.to_string()))?;
-
-        Ok(ProposedTrustQuorumConfig {
-            rack_id,
-            epoch: new_epoch,
-            is_lrtq_upgrade: IsLrtqUpgrade::No {
-                last_committed_epoch: latest_committed_config.epoch,
-            },
-            members,
-        })
-    }
 }
 
 /// Returns the trust quorum members from a [`TrustQuorumConfig`].
@@ -411,4 +374,96 @@ fn coordinator_not_in_service_error(config: &TrustQuorumConfig) -> Error {
          configuration; retry once it has been aborted.",
         config.coordinator, config.epoch, config.rack_id
     ))
+}
+
+/// Given an [`AddSledsError`] returned by
+/// [`ProposedTrustQuorumConfig::add_sleds`], returns the API's wording of the
+/// refusal.
+fn tq_add_sleds_refusal(refusal: AddSledsError) -> Error {
+    match refusal {
+        AddSledsError::AlreadyMembers { sleds } => {
+            Error::invalid_request(format!(
+                "The following sleds are already members of the trust quorum: \
+                 {sleds:?}."
+            ))
+        }
+        AddSledsError::InvalidMembership {
+            rack_id,
+            error: TrustQuorumMembersError::TooMany { num_members },
+        } => Error::invalid_request(format!(
+            "Cannot add sleds to the trust quorum for rack {rack_id}: \
+             {num_members} sleds would be members, but a trust quorum can \
+             have at most {TRUST_QUORUM_MAX_MEMBERS}."
+        )),
+        // Too few after adding is very strange -- the only way this can happen
+        // is via some kind of non-Nexus write path.
+        AddSledsError::InvalidMembership {
+            rack_id,
+            error: error @ TrustQuorumMembersError::TooFew { .. },
+        } => Error::internal_error(&format!(
+            "adding sleds to the trust quorum for rack {rack_id} would leave \
+             too few members; this is unexpected (Nexus cannot produce such a \
+             config, so was the db changed out from underneath?): {}",
+            InlineErrorChain::new(&error),
+        )),
+    }
+}
+
+/// Given an [`LrtqUpgradeError`] returned by
+/// [`ProposedTrustQuorumConfig::upgrade_from_lrtq`], returns the API's wording
+/// of the refusal.
+fn tq_upgrade_from_lrtq_refusal(refusal: LrtqUpgradeError) -> Error {
+    match refusal {
+        LrtqUpgradeError::InvalidMembership {
+            rack_id,
+            error: TrustQuorumMembersError::TooFew { num_members },
+        } => Error::conflict(format!(
+            "Cannot upgrade rack {rack_id} from LRTQ: {num_members} sleds are \
+             commissioned, but a trust quorum must have at least \
+             {TRUST_QUORUM_MIN_MEMBERS}."
+        )),
+        // Too many commissioned sleds is very strange -- a rack can't hold
+        // more sleds than a trust quorum allows, so the db must be wrong.
+        LrtqUpgradeError::InvalidMembership {
+            rack_id,
+            error: error @ TrustQuorumMembersError::TooMany { .. },
+        } => Error::internal_error(&format!(
+            "upgrading rack {rack_id} from LRTQ would leave too many members; \
+             this is unexpected (was the db changed out from underneath?): {}",
+            InlineErrorChain::new(&error),
+        )),
+    }
+}
+
+/// Given a [`RemoveSledError`] returned by
+/// [`ProposedTrustQuorumConfig::remove_sled`], returns the omdb remove path's
+/// wording of the refusal.
+fn tq_remove_sled_refusal(refusal: RemoveSledError) -> Error {
+    match refusal {
+        RemoveSledError::NotMember { sled } => Error::invalid_request(format!(
+            "Sled {sled} is not a member of the trust quorum."
+        )),
+        RemoveSledError::InvalidMembership {
+            rack_id,
+            sled,
+            error: TrustQuorumMembersError::TooFew { num_members: remaining },
+        } => Error::conflict(format!(
+            "Cannot remove sled {sled} from the trust quorum for rack \
+             {rack_id}: {remaining} sleds would remain, but a trust \
+             quorum must have at least {TRUST_QUORUM_MIN_MEMBERS}."
+        )),
+        // Too many after removing is very strange -- the only way this can
+        // happen is via some kind of non-Nexus write path.
+        RemoveSledError::InvalidMembership {
+            rack_id,
+            sled,
+            error: error @ TrustQuorumMembersError::TooMany { .. },
+        } => Error::internal_error(&format!(
+            "removing sled {sled} from the trust quorum for rack {rack_id} \
+             would leave too many members; this is unexpected (Nexus cannot \
+             produce such a config, so was the db changed out from \
+             underneath?): {}",
+            InlineErrorChain::new(&error),
+        )),
+    }
 }
