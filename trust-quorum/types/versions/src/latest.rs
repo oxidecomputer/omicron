@@ -53,6 +53,8 @@ pub mod status {
     pub use crate::v1::status::CoordinatorStatus;
     pub use crate::v1::status::NodePersistentStateSummary;
     pub use crate::v1::status::NodeStatus;
+
+    pub use crate::v2::status::NotCoordinatingStatus;
 }
 
 pub mod types {
