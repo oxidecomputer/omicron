@@ -7,7 +7,9 @@
 //! This version adds [`membership::TrustQuorumMembers`], a set of trust quorum
 //! members whose size is bounded by [`membership::TRUST_QUORUM_MIN_MEMBERS`]
 //! and [`membership::TRUST_QUORUM_MAX_MEMBERS`], and uses it for the members of
-//! [`messages::ReconfigureMsg`] and [`messages::LrtqUpgradeMsg`].
+//! [`messages::ReconfigureMsg`] and [`messages::LrtqUpgradeMsg`]. It also adds
+//! [`status::NotCoordinatingStatus`].
 
 pub mod membership;
 pub mod messages;
+pub mod status;
