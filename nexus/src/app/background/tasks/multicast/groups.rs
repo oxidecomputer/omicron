@@ -698,7 +698,6 @@ impl MulticastGroupReconciler {
                 .update_groups(GroupUpdateParams {
                     external_group: group,
                     underlay_group: &underlay_group,
-                    new_name: group.name().as_str(),
                     source_filter: &source_filter,
                 })
                 .await

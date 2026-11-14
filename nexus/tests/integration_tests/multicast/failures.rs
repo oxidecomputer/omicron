@@ -824,9 +824,37 @@ async fn test_drift_correction_missing_group_in_dpd(
     wait_for_group_active(client, group_name).await;
 
     // Verify drift was corrected: group now exists in DPD again
-    assert!(
-        dpd_client.multicast_group_get(&multicast_ip).await.is_ok(),
-        "Group should exist in DPD after drift correction"
+    let dpd_group = dpd_client
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("Group should exist in DPD after drift correction")
+        .into_inner();
+
+    let dpd_tag = match dpd_group {
+        dpd_client::types::MulticastGroupResponse::External { tag, .. } => {
+            tag.to_string()
+        }
+        other => {
+            panic!("Expected an external group in DPD, received {other:?}")
+        }
+    };
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+    let db_group = datastore
+        .multicast_group_fetch(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(active_group.identity.id),
+        )
+        .await
+        .expect("Should fetch group from the database");
+    assert_eq!(
+        Some(dpd_tag.as_str()),
+        db_group.tag.as_deref(),
+        "DPD should carry the database tag after drift correction, not the \
+         group name"
     );
 
     // Verify group is still "Active" in DB
