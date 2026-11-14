@@ -45,7 +45,7 @@ use std::time::Duration;
 use swrite::{SWrite, swrite, swriteln};
 use tokio::task::JoinSet;
 use trust_quorum_types::messages::{CommitRequest, PrepareAndCommitRequest};
-use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::{CommitStatus, NotCoordinatingStatus};
 use trust_quorum_types::types::Epoch;
 
 const MAX_SLED_AGENT_REQUEST_CONCURRENCY: usize = 5;
@@ -351,10 +351,12 @@ async fn prepare(
         .into_inner();
     let status = match response {
         TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
-        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
-            latest_config_epoch,
-            latest_committed_epoch: _,
-        } => {
+        TrustQuorumCoordinatorStatusResponse::NotCoordinating(
+            NotCoordinatingStatus {
+                latest_config_epoch,
+                latest_committed_epoch: _,
+            },
+        ) => {
             let latest_config_epoch = match latest_config_epoch {
                 Some(epoch) => epoch.to_string(),
                 None => "none".to_string(),
