@@ -87,8 +87,10 @@ impl From<v2026_06_08_00::instance::Instance> for Instance {
     }
 }
 
-impl From<Instance> for v2026_06_08_00::instance::Instance {
-    fn from(value: Instance) -> Self {
+impl TryFrom<Instance> for v2026_06_08_00::instance::Instance {
+    type Error = dropshot::HttpError;
+
+    fn try_from(value: Instance) -> Result<Self, dropshot::HttpError> {
         let Instance {
             identity,
             project_id,
@@ -100,17 +102,19 @@ impl From<Instance> for v2026_06_08_00::instance::Instance {
             auto_restart_status,
             cpu_platform,
             enable_jumbo_frames,
-            // `shutdown_policy` was added in this API version, so can't be
-            // returned to older clients. We omit it - this means they can't
-            // tell the difference between instances that have the default
-            // policy (e.g., that they created) and instances with a different
-            // policy (e.g., created by a newer client). Our only other option
-            // here is to make this fallible and only show them instances whose
-            // policy matches the default, which doesn't seem very sporting.
-            shutdown_policy: _,
-        } = value;
+            shutdown_policy: InstanceShutdownPolicy::HardOff,
+        } = value
+        else {
+            return Err(dropshot::HttpError::for_client_error(
+                Some(String::from("Not Acceptable")),
+                dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
+                String::from(
+                    "Instance shutdown policy not supported for client version",
+                ),
+            ));
+        };
 
-        v2026_06_08_00::instance::Instance {
+        Ok(v2026_06_08_00::instance::Instance {
             identity,
             project_id,
             ncpus,
@@ -121,7 +125,7 @@ impl From<Instance> for v2026_06_08_00::instance::Instance {
             auto_restart_status,
             cpu_platform,
             enable_jumbo_frames,
-        }
+        })
     }
 }
 
@@ -331,11 +335,11 @@ pub struct InstanceUpdate {
     /// take effect on the next instance restart.
     pub enable_jumbo_frames: bool,
 
-    /// The method by which the instance should be stopped. If omitted from the
-    /// update request, the instance's existing shutdown policy is left as-is.
+    /// The method by which the instance should be stopped. If `null`, the
+    /// instance's shutdown policy is reset to the default value.
     /// Changes to soft-shutdown timeout do not affect instances that are
     /// already in the process of shutting down until their next start.
-    pub shutdown_policy: Option<InstanceShutdownPolicy>,
+    pub shutdown_policy: Nullable<InstanceShutdownPolicy>,
 }
 
 impl From<v2026_06_08_00::instance::InstanceUpdate> for InstanceUpdate {
@@ -348,7 +352,7 @@ impl From<v2026_06_08_00::instance::InstanceUpdate> for InstanceUpdate {
             cpu_platform: old.cpu_platform,
             multicast_groups: old.multicast_groups,
             enable_jumbo_frames: old.enable_jumbo_frames,
-            shutdown_policy: None,
+            shutdown_policy: Nullable(Some(InstanceShutdownPolicy::default())),
         }
     }
 }

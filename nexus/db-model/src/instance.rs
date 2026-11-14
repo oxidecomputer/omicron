@@ -832,15 +832,14 @@ pub struct InstanceUpdate {
 
     pub enable_jumbo_frames: bool,
 
-    /// If this is `None`, the instance's shutdown policy will be unchanged by
-    /// this update request.
+    /// The shutdown policy for this instance. If this is `None`, it will
+    /// set the instance's shutdown policy to the default value (`hard_off`).
     ///
     /// Unlike `Instance` above, these fields are `pub` because we need direct
     /// access to them in the datastore crate. Consumers outside that crate
     /// should *not* access these; construction should go through the stronger
     /// types available via [`InstanceUpdate::new()`].
-    #[diesel(treat_none_as_null = false)]
-    pub shutdown_policy_action: Option<InstanceShutdownAction>,
+    pub shutdown_policy_action: InstanceShutdownAction,
     pub shutdown_policy_timeout: Option<TimeDelta>,
 }
 
@@ -852,16 +851,10 @@ impl InstanceUpdate {
         memory: external::ByteCount,
         cpu_platform: Option<instance_types::InstanceCpuPlatform>,
         enable_jumbo_frames: bool,
-        shutdown_policy: Option<instance_types::InstanceShutdownPolicy>,
+        shutdown_policy: instance_types::InstanceShutdownPolicy,
     ) -> Self {
         let (shutdown_policy_action, shutdown_policy_timeout) =
-            if let Some(shutdown_policy) = shutdown_policy {
-                let (action, timeout) =
-                    shutdown_policy_to_db_columns(shutdown_policy);
-                (Some(action), timeout)
-            } else {
-                (None, None)
-            };
+            shutdown_policy_to_db_columns(shutdown_policy);
         Self {
             boot_disk_id,
             auto_restart_policy: auto_restart_policy.map(From::from),

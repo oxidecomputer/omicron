@@ -295,7 +295,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: instance::InstanceShutdownPolicy::default(),
+        shutdown_policy: Nullable(instance::InstanceShutdownPolicy::default()),
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -6269,7 +6269,7 @@ async fn test_updating_missing_instance_is_not_found(
             memory: ByteCount::from_gibibytes_u32(0),
             multicast_groups: None,
             enable_jumbo_frames: false,
-            shutdown_policy: None,
+            shutdown_policy: Nullable(None),
         },
         http::StatusCode::NOT_FOUND,
     )
@@ -6297,7 +6297,7 @@ fn instance_compute_update(
         // be changed."
         multicast_groups: None,
         enable_jumbo_frames: instance.enable_jumbo_frames,
-        shutdown_policy: None,
+        shutdown_policy: Nullable(None),
     };
 
     edit_update(&mut update);
@@ -10700,7 +10700,9 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
             multicast_groups: None,
             enable_jumbo_frames: instance_soft.enable_jumbo_frames,
             // change shutdown policy to hard-off
-            shutdown_policy: Some(instance::InstanceShutdownPolicy::HardOff),
+            shutdown_policy: Nullable(Some(
+                instance::InstanceShutdownPolicy::HardOff,
+            )),
         },
     )
     .await;
@@ -10760,7 +10762,7 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
             multicast_groups: None,
             enable_jumbo_frames: instance_default.enable_jumbo_frames,
             // change shutdown policy to soft-off and different timeout
-            shutdown_policy: Some(new_policy),
+            shutdown_policy: Nullable(Some(new_policy)),
         },
     )
     .await;
@@ -10781,7 +10783,7 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
+async fn test_instances_shutdown_policy_defaulted_when_null_in_update(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -10791,7 +10793,7 @@ async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
     let policy = instance::InstanceShutdownPolicy::PowerButton {
         timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
     };
-    let (instance_default, propolis_addr) =
+    let (instance_soft, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
@@ -10800,31 +10802,30 @@ async fn test_instances_shutdown_policy_unchanged_when_omitted_in_update(
         )
         .await;
 
-    let instance_unchanged = expect_instance_reconfigure_ok(
+    let instance_default = expect_instance_reconfigure_ok(
         client,
-        &instance_default.identity.id,
+        &instance_soft.identity.id,
         instance::InstanceUpdate {
             auto_restart_policy: Nullable(None),
             boot_disk: Nullable(None),
             cpu_platform: Nullable(None),
-            ncpus: instance_default.ncpus,
-            memory: instance_default.memory,
+            ncpus: instance_soft.ncpus,
+            memory: instance_soft.memory,
             multicast_groups: None,
-            enable_jumbo_frames: instance_default.enable_jumbo_frames,
-            // no shutdown policy specified -> unchanged
-            shutdown_policy: None,
+            enable_jumbo_frames: instance_soft.enable_jumbo_frames,
+            shutdown_policy: Nullable(None),
         },
     )
     .await;
-    assert_eq!(instance_unchanged.shutdown_policy, policy);
+    assert_eq!(
+        instance_default.shutdown_policy,
+        instance::InstanceShutdownPolicy::HardOff
+    );
 
-    // test that hard-off is not sent for an unforced stop; that is, the
-    // 'None' shutdown policy in the update request didn't reset it to the
-    // default HardOff configuration.
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
         mock_get_last_state_requested(propolis_addr).await,
-        PropolisStateRequested::AcpiStop { timeout_secs: TIMEOUT_SECS }
+        PropolisStateRequested::Stop
     );
 }
 

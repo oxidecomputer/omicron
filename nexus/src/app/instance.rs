@@ -642,7 +642,7 @@ impl super::Nexus {
             *memory,
             **cpu_platform,
             *enable_jumbo_frames,
-            *shutdown_policy,
+            shutdown_policy.unwrap_or_default(),
         );
 
         // Update the instance configuration
