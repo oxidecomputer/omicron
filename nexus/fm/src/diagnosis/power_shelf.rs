@@ -1097,7 +1097,7 @@ mod tests {
             },
             cases,
             ereports_by_id: ereports.into_iter().collect(),
-            problems: IdOrdMap::new(),
+            problems: Default::default(),
         }
     }
 

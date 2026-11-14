@@ -294,7 +294,7 @@ pub(crate) mod test_utils {
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),
-            problems: IdOrdMap::new(),
+            problems: Default::default(),
         };
         datastore.fm_sitrep_insert(opctx, sitrep, None).await.unwrap();
 
