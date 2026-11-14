@@ -433,7 +433,7 @@ pub trait Api: Send + Sync {
         zone: Option<&str>,
         fmri: &str,
         log: Logger,
-    ) -> Result<(), crate::svc::WaitForServiceTimeout> {
+    ) -> Result<(), crate::svc::WaitForServiceError> {
         crate::svc::wait_for_service(zone, fmri, log).await
     }
 

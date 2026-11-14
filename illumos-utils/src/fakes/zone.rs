@@ -128,7 +128,7 @@ impl Api for Zones {
         _zone: Option<&str>,
         _fmri: &str,
         _log: Logger,
-    ) -> Result<(), crate::svc::WaitForServiceTimeout> {
+    ) -> Result<(), crate::svc::WaitForServiceError> {
         Ok(())
     }
 
