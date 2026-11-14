@@ -98,7 +98,8 @@ impl ClickHouseAdminArgs {
         let client = Client::new(
             &server_url,
             log.new(slog::o!("component" => "clickhouse-admin-client")),
-        );
+        )
+        .expect("clickhouse-admin client");
         Ok(client)
     }
 

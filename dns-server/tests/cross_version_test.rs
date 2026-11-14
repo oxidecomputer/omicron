@@ -233,9 +233,11 @@ async fn init_client_server(
     let v1_client = v1_client::Client::new(
         &format!("http://{}", dropshot_server.local_addr()),
         log.clone(),
-    );
+    )
+    .expect("v1 DNS client");
     let latest_client =
-        Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
+        Client::new(&format!("http://{}", dropshot_server.local_addr()), log)
+            .expect("latest DNS client");
 
     Ok(TestContext {
         v1_client,

@@ -1416,7 +1416,8 @@ mod test {
         // sled agent reports something specific (some non-degenerate case),
         // then it shows up in the resulting collection.
         let sled_url = format!("http://{}/", agent.http_server.local_addr());
-        let client = sled_agent_client::Client::new(&sled_url, log);
+        let client = sled_agent_client::Client::new(&sled_url, log)
+            .expect("sled agent client");
 
         let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
@@ -1675,7 +1676,7 @@ mod test {
         let bad_client = {
             // This IP range is guaranteed by RFC 6666 to discard traffic.
             let url = "http://[100::1]:12345";
-            gateway_client::Client::new(url, log.clone())
+            gateway_client::Client::new(url, log.clone()).expect("MGS client")
         };
         let mgs_clients = vec![bad_client, real_client];
         let sled_enum = StaticSledAgentEnumerator::empty();

@@ -655,7 +655,8 @@ mod test {
         let nexus_client = NexusClient::new(
             &format!("http://{}", nexus_server.local_addr()),
             log.clone(),
-        );
+        )
+        .expect("Nexus client");
 
         // Pretend we are retrieving the latest `SledAgentInfo` from hardware and
         // the VMM reservoir.

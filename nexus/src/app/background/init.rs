@@ -1638,7 +1638,8 @@ pub mod test {
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", initial_dns_dropshot_server.local_addr()),
             cptestctx.logctx.log.clone(),
-        );
+        )
+        .expect("DNS config client");
         let config = dns_config_client
             .dns_config_get()
             .await
@@ -1810,7 +1811,8 @@ pub mod test {
         let client = dns_service_client::Client::new(
             &format!("http://{}", addr),
             log.clone(),
-        );
+        )
+        .expect("DNS config client");
         let poll_max = Duration::from_secs(30);
         let result = poll::wait_for_condition(
             || async {

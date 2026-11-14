@@ -802,7 +802,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", internal_dns_address),
             log.clone(),
-        );
+        )
+        .expect("DNS config client");
 
         let dns_config = self
             .rack_init_builder
@@ -1064,7 +1065,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             let client = sled_agent_client::Client::new(
                 &format!("http://{}", sled_agent.local_addr()),
                 self.logctx.log.clone(),
-            );
+            )
+            .expect("sled agent client");
 
             let disks = from_clone!(sled_configs[&sled_id].disks);
             let datasets = from_clone!(sled_configs[&sled_id].datasets);

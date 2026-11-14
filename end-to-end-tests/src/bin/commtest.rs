@@ -94,7 +94,7 @@ async fn cleanup(cli: &Cli) -> Result<()> {
 }
 
 async fn wait_until_oxide_api_is_available(cli: &Cli) -> Result<()> {
-    let oxide = oxide_client::Client::new(&cli.oxide_api);
+    let oxide = oxide_client::Client::new(&cli.oxide_api)?;
     let start = Instant::now();
     loop {
         if let Ok(result) = oxide.ping().send().await.map(|x| x.into_inner()) {

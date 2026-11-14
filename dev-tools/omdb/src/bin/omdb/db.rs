@@ -6787,7 +6787,8 @@ async fn cmd_db_validate_regions(
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new(&url).expect("crucible agent client");
 
         let actual_region =
             match client.region_get(&RegionId(region.id().to_string())).await {
@@ -6904,7 +6905,8 @@ async fn cmd_db_validate_regions(
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new(&url).expect("crucible agent client");
 
         let actual_regions = match client.region_list().await {
             Ok(v) => v.into_inner(),
@@ -7054,7 +7056,8 @@ async fn cmd_db_validate_region_snapshots(
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new(&url).expect("crucible agent client");
 
         let actual_region_snapshots = match client
             .region_get_snapshots(&RegionId(
@@ -7250,7 +7253,8 @@ async fn cmd_db_validate_region_snapshots(
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
-        let client = CrucibleAgentClient::new(&url);
+        let client =
+            CrucibleAgentClient::new(&url).expect("crucible agent client");
 
         let actual_region_snapshots = match client
             .region_get_snapshots(&RegionId(region.id().to_string()))
@@ -7354,7 +7358,8 @@ async fn cmd_db_validate_artifact_replication(
         if let Some(output) = task_set
             .spawn(async move {
                 let url = format!("http://{}", sled.address());
-                let client = sled_agent_client::Client::new(&url, log);
+                let client = sled_agent_client::Client::new(&url, log)
+                    .expect("sled agent client");
                 let sled_config = client
                     .artifact_config_get()
                     .await

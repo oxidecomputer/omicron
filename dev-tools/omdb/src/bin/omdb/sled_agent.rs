@@ -151,7 +151,8 @@ impl SledAgentArgs {
                      OMDB_SLED_AGENT_URL"
                 );
             };
-            Ok(sled_agent_client::Client::new(sled_agent_url, log.clone()))
+            Ok(sled_agent_client::Client::new(sled_agent_url, log.clone())
+                .expect("sled agent client"))
         };
 
         // Helper to create a bootstrap-agent-lockstep client.
@@ -166,7 +167,8 @@ impl SledAgentArgs {
             Ok(bootstrap_agent_lockstep_client::Client::new(
                 bootstrap_lockstep_url,
                 log.clone(),
-            ))
+            )
+            .expect("bootstrap agent lockstep client"))
         };
 
         match &self.command {

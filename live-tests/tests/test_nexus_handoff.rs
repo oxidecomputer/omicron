@@ -592,7 +592,8 @@ async fn check_external_dns(
     // reachable from where we are.  So we can't directly look up names in DNS.
     // Instead, use the HTTP (config) interface.
     let url = format!("http://{}", dns_http_sockaddr);
-    let client = dns_service_client::Client::new(&url, log.clone());
+    let client = dns_service_client::Client::new(&url, log.clone())
+        .expect("DNS config client");
     let config = client
         .dns_config_get()
         .await

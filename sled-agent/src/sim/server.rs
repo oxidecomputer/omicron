@@ -142,7 +142,7 @@ impl Server {
         let nexus_client = Arc::new(NexusClient::new(
             &format!("http://{}", config.nexus_address),
             client_log,
-        ));
+        )?);
         let sa_log = log.new(o!(
             "component" => "SledAgent",
             "server" => config.id.clone().to_string()
@@ -358,7 +358,7 @@ async fn handoff_to_nexus(
     let nexus_client = nexus_lockstep_client::Client::new(
         &format!("http://{}", nexus_lockstep_address),
         log.new(o!("component" => "NexusLockstepClient")),
-    );
+    )?;
 
     let notify_nexus = || async {
         nexus_client

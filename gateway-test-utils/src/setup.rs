@@ -295,7 +295,8 @@ pub async fn test_setup_with_config(
     let client = gateway_client::Client::new(
         &format!("http://{server_addr}"),
         logctx.log.new(slog::o!("component" => "MgsClient")),
-    );
+    )
+    .expect("MGS client");
 
     let mut resolver = FixedResolver::new(std::iter::once(server_addr));
     let resolver_backends = resolver.monitor();
