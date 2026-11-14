@@ -295,7 +295,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
         enable_jumbo_frames: false,
-        shutdown_policy: Nullable(instance::InstanceShutdownPolicy::default()),
+        shutdown_policy: instance::InstanceShutdownPolicy::default(),
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
