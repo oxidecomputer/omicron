@@ -5,7 +5,7 @@
 //! Utilities for accessing services.
 
 use omicron_common::backoff;
-use slog::{Logger, warn};
+use slog::{Logger, debug, warn};
 use std::time::Duration;
 
 /// Errors returned by [`wait_for_service`].
@@ -50,18 +50,28 @@ pub async fn wait_for_service<'a>(
 
     let name = smf::PropertyName::new("restarter", "state").unwrap();
 
-    let log_notification_failure = |error, delay| {
-        warn!(
-            log,
-            "wait for service {} in zone {:?} failed: {}. retry in {:?}",
-            fmri,
-            zone,
-            error,
-            delay
-        );
+    let log_notification_failure = |error, _, elapsed| {
+        // Don't start spamming the log until we've waited a reasonable amount
+        // of time first.
+        const DONT_FREAK_OUT_FOR: Duration = Duration::from_mins(1);
+        if elapsed <= DONT_FREAK_OUT_FOR {
+            debug!(
+                log,
+                "wait for service {fmri} in zone {zone:?}: service has not \
+                 reached 'online' after {elapsed:?}";
+                "error" => %error,
+            );
+        } else {
+            warn!(
+                log,
+                "wait for service {fmri} in zone {zone:?}: service has not \
+                 reached 'online' after {elapsed:?}";
+                "error" => %error,
+            );
+        }
     };
     let online = smf::PropertyValue::Astring("online".to_string());
-    backoff::retry_notify(
+    backoff::retry_notify_ext(
         backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
             let mut p = smf::Properties::new();
