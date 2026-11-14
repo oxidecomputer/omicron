@@ -530,7 +530,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e577a94678bf0a8d64d719acd3e19edd965f66a3" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "f1b1706fda2fba927b82a1f4f00e06965fc816e5" }
 dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.9.1"
 dropshot-api-manager-types = "0.9.1"
@@ -643,10 +643,10 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
-ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "36722b8cd09de2e4b5a5ec7316e97e16cb89ebdf" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "36722b8cd09de2e4b5a5ec7316e97e16cb89ebdf" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "36722b8cd09de2e4b5a5ec7316e97e16cb89ebdf" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "36722b8cd09de2e4b5a5ec7316e97e16cb89ebdf" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
