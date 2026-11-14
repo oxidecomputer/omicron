@@ -54,8 +54,6 @@ derive_more = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
 dropshot = { version = "0.17.1", default-features = false, features = ["usdt-probes"] }
-ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
-ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -67,6 +65,7 @@ form_urlencoded = { version = "1.2.2" }
 fs-err = { version = "3.3.0", default-features = false, features = ["tokio"] }
 futures-channel = { version = "0.3.32", features = ["sink"] }
 futures-core = { version = "0.3.32" }
+futures-io = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
@@ -129,7 +128,7 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
-reqwest = { version = "0.13.5", features = ["blocking", "cookies", "json", "query", "rustls-no-provider", "stream"] }
+reqwest = { version = "0.13.5", features = ["blocking", "cookies", "form", "json", "query", "rustls-no-provider", "stream"] }
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs"] }
 rustls = { version = "0.23.46" }
@@ -138,7 +137,7 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
-serde_json = { version = "1.0.154", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.154", features = ["alloc", "float_roundtrip", "raw_value", "unbounded_depth"] }
 serde_spanned = { version = "1.1.1", default-features = false, features = ["serde", "std"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
@@ -170,7 +169,6 @@ toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11"
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
-tough = { git = "https://github.com/oxidecomputer/tough", branch = "oxide/develop", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
@@ -180,7 +178,7 @@ usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default
 usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.23.4", features = ["serde", "v4"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
-x509-cert = { version = "0.2.5" }
+x509-cert = { version = "0.2.5", features = ["sct"] }
 yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
 zerocopy = { version = "0.8.55", default-features = false, features = ["derive", "simd"] }
 zerofrom = { version = "0.1.6", default-features = false, features = ["alloc", "derive"] }
@@ -229,8 +227,6 @@ derive_more-impl = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
 dropshot = { version = "0.17.1", default-features = false, features = ["usdt-probes"] }
-ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
-ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -242,6 +238,7 @@ form_urlencoded = { version = "1.2.2" }
 fs-err = { version = "3.3.0", default-features = false, features = ["tokio"] }
 futures-channel = { version = "0.3.32", features = ["sink"] }
 futures-core = { version = "0.3.32" }
+futures-io = { version = "0.3.32" }
 futures-sink = { version = "0.3.32" }
 futures-task = { version = "0.3.32", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.32", features = ["channel", "io", "sink"] }
@@ -305,7 +302,7 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.12.3" }
 regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.10" }
-reqwest = { version = "0.13.5", features = ["blocking", "cookies", "json", "query", "rustls-no-provider", "stream"] }
+reqwest = { version = "0.13.5", features = ["blocking", "cookies", "form", "json", "query", "rustls-no-provider", "stream"] }
 rsa = { version = "0.9.10", features = ["serde", "sha2"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs"] }
 rustls = { version = "0.23.46" }
@@ -314,7 +311,7 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
-serde_json = { version = "1.0.154", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.154", features = ["alloc", "float_roundtrip", "raw_value", "unbounded_depth"] }
 serde_spanned = { version = "1.1.1", default-features = false, features = ["serde", "std"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 serde_with_macros = { version = "3.21.0", default-features = false, features = ["schemars_0_8"] }
@@ -349,7 +346,6 @@ toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.11"
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", default-features = false, features = ["serde", "std"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
-tough = { git = "https://github.com/oxidecomputer/tough", branch = "oxide/develop", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
@@ -361,7 +357,7 @@ uuid = { version = "1.23.4", features = ["serde", "v4"] }
 vergen = { version = "9.1.0", features = ["cargo", "rustc"] }
 vergen-lib = { version = "9.1.0", features = ["cargo", "git", "rustc"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
-x509-cert = { version = "0.2.5" }
+x509-cert = { version = "0.2.5", features = ["sct"] }
 yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
 zerocopy = { version = "0.8.55", default-features = false, features = ["derive", "simd"] }
 zerofrom = { version = "0.1.6", default-features = false, features = ["alloc", "derive"] }

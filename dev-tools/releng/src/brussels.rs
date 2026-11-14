@@ -10,24 +10,28 @@ use anyhow::bail;
 use anyhow::ensure;
 use camino::Utf8PathBuf;
 use camino_tempfile::NamedUtf8TempFile;
-use camino_tempfile::Utf8TempDir;
 use camino_tempfile::Utf8TempPath;
 use fs_err::tokio as fs;
 use fs_err::tokio::File;
 use futures::StreamExt;
-use sigstore_verify::GITHUB_DOT_COM;
-use sigstore_verify::SIGSTORE_PUBLIC_GOOD;
-use sigstore_verify::repr::bundle::Bundle;
-use sigstore_verify::repr::bundle::BundleContent;
-use sigstore_verify::repr::in_toto::InTotoPredicate;
-use sigstore_verify::repr::trusted_root::TrustedRoot;
-use sigstore_verify::verify_no_tlog_async;
+use sha2::Digest as _;
+use sha2::Sha256;
+use sigstore_verify::IdentityMatcher;
+use sigstore_verify::VerificationPolicy;
+use sigstore_verify::VerificationResult;
+use sigstore_verify::Verifier;
+use sigstore_verify::trust_root::TrustedRoot;
+use sigstore_verify::trust_root::TufConfig;
+use sigstore_verify::types::Bundle;
+use sigstore_verify::types::Sha256Hash;
+use sigstore_verify::types::SignatureContent;
 use slog::Logger;
 use slog::debug;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::io::SeekFrom;
 use std::time::Duration;
+use tokio::io::AsyncReadExt as _;
 use tokio::io::AsyncSeekExt as _;
 use tokio::io::AsyncWriteExt as _;
 use tufaceous_artifact::RotSlot;
@@ -139,11 +143,11 @@ fn kind_from_board_name(board: &str) -> Result<KnownArtifactKind> {
 struct Fetcher<'a> {
     log: Logger,
     client: reqwest::Client,
-    trusted_root: TrustedRoot,
+    verifier: Verifier,
     output_dir: &'a Utf8PathBuf,
     release_bundle: &'a Bundle,
-    tag: &'a str,
-    repo: &'a str,
+    tag: String,
+    repo: String,
     commit: String,
 }
 
@@ -154,47 +158,54 @@ impl<'a> Fetcher<'a> {
         bundle: &'a Bundle,
         output_dir: &'a Utf8PathBuf,
     ) -> Result<Self> {
-        let BundleContent::DsseEnvelope(envelope) = &bundle.content else {
+        let SignatureContent::DsseEnvelope(envelope) = &bundle.content else {
             bail!("not a release attestation (the content is not DSSE)");
         };
-        let in_toto = &envelope.payload.parsed;
+        ensure!(
+            envelope.payload_type == IN_TOTO_PAYLOAD_TYPE,
+            "not a release attestation (payload type is {})",
+            envelope.payload_type,
+        );
+        let in_toto: ReleaseStatement =
+            serde_json::from_slice(envelope.payload.as_bytes())
+                .context("failed to parse in-toto statement")?;
 
         // GitHub migrated over time from predicate version 0.1 to 0.2. For the
         // fields we care about, the difference between the two doesn't matter.
-        let (repo, tag) = match &in_toto.predicate {
-            InTotoPredicate::Release01(release) => (
-                release.predicate.repository.as_deref(),
-                release.predicate.tag.as_deref(),
-            ),
-            InTotoPredicate::Release02(release) => (
-                release.predicate.repository.as_deref(),
-                release.predicate.tag.as_deref(),
-            ),
-            _ => bail!("not a release attestation (bad predicate)"),
-        };
-        let repo = repo.ok_or_else(|| anyhow!("missing repo in predicate"))?;
-        let tag = tag.ok_or_else(|| anyhow!("missing tag in predicate"))?;
+        ensure!(
+            RELEASE_PREDICATE_TYPES.contains(&in_toto.predicate_type.as_str()),
+            "not a release attestation (bad predicate type {})",
+            in_toto.predicate_type,
+        );
+        let repo = in_toto
+            .predicate
+            .repository
+            .ok_or_else(|| anyhow!("missing repo in predicate"))?;
+        let tag = in_toto
+            .predicate
+            .tag
+            .ok_or_else(|| anyhow!("missing tag in predicate"))?;
 
         // The commit of the published release is not stored as a predicate for
         // some reason, but rather as a subject???
-        let commit = hex::encode(
-            in_toto
-                .subject
-                .iter()
-                .find(|sub| sub.uri == Some(format!("pkg:github/{repo}@{tag}")))
-                .ok_or_else(|| anyhow!("missing commit in in-toto subject"))?
-                .digest
-                .sha1
-                .as_ref()
-                .ok_or_else(|| {
-                    anyhow!("missing commit sha1 in in-toto subject")
-                })?,
-        );
+        let release_uri = format!("pkg:github/{repo}@{tag}");
+        let commit = in_toto
+            .subject
+            .iter()
+            .find(|sub| sub.uri.as_deref() == Some(release_uri.as_str()))
+            .ok_or_else(|| anyhow!("missing commit in in-toto subject"))?
+            .digest
+            .sha1
+            .clone()
+            .ok_or_else(|| anyhow!("missing commit sha1 in in-toto subject"))?;
+
+        let verifier = Verifier::new(&fetch_trusted_root(&client).await?)
+            .context("failed to prepare the sigstore trusted root")?;
 
         Ok(Fetcher {
             log,
             client,
-            trusted_root: fetch_trusted_root().await?,
+            verifier,
             output_dir,
             release_bundle: bundle,
             tag,
@@ -232,14 +243,22 @@ impl<'a> Fetcher<'a> {
                     format!("failed to parse attestation for {name}")
                 })?;
 
-        // Verify that the attestation for the artifact is valid.
-        let outcome = verify_no_tlog_async(
-            &self.trusted_root,
-            &bundle,
-            &mut File::open(&path).await?,
-        )
-        .await
-        .with_context(|| format!("failed to verify attestation of {name}"))?;
+        // Verify that the attestation for the artifact is valid, and that it
+        // was issued to GitHub Actions.
+        let digest = sha256_file(&mut File::open(&path).await?).await?;
+        let outcome = self
+            .verify(
+                &digest,
+                &bundle,
+                verification_policy().require_issuer(GITHUB_ACTIONS_ISSUER),
+            )
+            .with_context(|| {
+                format!("failed to verify attestation of {name}")
+            })?;
+        let claims = &outcome
+            .certificate()
+            .ok_or_else(|| anyhow!("attestation of {name} has no certificate"))?
+            .ci_claims;
 
         // Verify that the artifact was built by GitHub Actions in the correct
         // repository with the correct source commit (preventing a release from
@@ -255,19 +274,14 @@ impl<'a> Fetcher<'a> {
             }
         };
         check_claim(
-            "issuer_v2",
-            "https://token.actions.githubusercontent.com",
-            &outcome.claims.issuer_v2,
-        )?;
-        check_claim(
-            "subject_repository_uri",
+            "source_repository_uri",
             &format!("https://github.com/{}", self.repo),
-            &outcome.claims.source_repository_uri,
+            &claims.source_repository_uri,
         )?;
         check_claim(
             "source_repository_digest",
             &self.commit,
-            &outcome.claims.source_repository_digest,
+            &claims.source_repository_digest,
         )?;
 
         Ok(path)
@@ -301,19 +315,28 @@ impl<'a> Fetcher<'a> {
         //
         // This uses GitHub's release attestation, which contains the hashes of
         // all released files in the in-toto subject.
-        let claims = verify_no_tlog_async(
-            &self.trusted_root,
-            &self.release_bundle,
-            file.as_file_mut(),
+        let digest = sha256_file(file.as_file_mut()).await?;
+        self.verify(
+            &digest,
+            self.release_bundle,
+            verification_policy().require_identity(IdentityMatcher::Uri(
+                GITHUB_RELEASES_IDENTITY.into(),
+            )),
         )
-        .await?;
-        ensure!(
-            &["https://dotcom.releases.github.com"]
-                == &claims.claims.subject_alternative_names_uris[..],
-            "attestation is not for a GitHub release"
-        );
+        .with_context(|| {
+            format!("{name} is not part of the attested GitHub release")
+        })?;
 
         Ok(file.into_temp_path())
+    }
+
+    fn verify(
+        &self,
+        digest: &Sha256Hash,
+        bundle: &Bundle,
+        policy: VerificationPolicy,
+    ) -> Result<VerificationResult> {
+        Ok(self.verifier.verify(digest, bundle, &policy)?)
     }
 
     async fn fetch_url(&self, url: &str) -> Result<NamedUtf8TempFile<File>> {
@@ -345,26 +368,95 @@ impl<'a> Fetcher<'a> {
     }
 }
 
-async fn fetch_trusted_root() -> Result<TrustedRoot> {
-    // releng is designed to run in an ephemeral CI environment, so the TUF
-    // caching is not actually needed. "Store" it in a temporary directory.
-    let cache_dir = Utf8TempDir::new()?;
+/// OIDC issuer of the certificates GitHub Actions workflows sign with.
+const GITHUB_ACTIONS_ISSUER: &str =
+    "https://token.actions.githubusercontent.com";
 
-    let mut trusted_root = TrustedRoot::empty();
-    trusted_root.merge(
-        sigstore_verify::fetch_trusted_root(
-            cache_dir.as_ref(),
-            &SIGSTORE_PUBLIC_GOOD,
+/// Certificate identity GitHub uses to sign release attestations.
+const GITHUB_RELEASES_IDENTITY: &str = "https://dotcom.releases.github.com";
+
+const IN_TOTO_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
+
+const RELEASE_PREDICATE_TYPES: &[&str] = &[
+    "https://in-toto.io/attestation/release/v0.1",
+    "https://in-toto.io/attestation/release/v0.2",
+];
+
+/// The verification policy shared by every attestation we check.
+///
+/// GitHub's release attestations (and attestations for private repositories)
+/// are signed by GitHub's own Sigstore instance, which has no public
+/// transparency log and whose certificates carry no SCTs. Signing times are
+/// instead established by the RFC 3161 timestamps in the bundles, which are
+/// still verified against the trusted root.
+fn verification_policy() -> VerificationPolicy {
+    VerificationPolicy::any_identity().skip_tlog_unsafe().skip_sct()
+}
+
+/// The subset of a GitHub release in-toto statement we care about.
+///
+/// `sigstore_verify::types::Statement` does not expose the subject `uri`
+/// field, which is where GitHub stores the commit of the release.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReleaseStatement {
+    subject: Vec<ReleaseSubject>,
+    predicate_type: String,
+    predicate: ReleasePredicate,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ReleaseSubject {
+    uri: Option<String>,
+    digest: ReleaseSubjectDigest,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ReleaseSubjectDigest {
+    sha1: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ReleasePredicate {
+    repository: Option<String>,
+    tag: Option<String>,
+}
+
+async fn sha256_file(file: &mut File) -> Result<Sha256Hash> {
+    file.seek(SeekFrom::Start(0)).await?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(Sha256Hash::new(hasher.finalize().into()))
+}
+
+async fn fetch_trusted_root(client: &reqwest::Client) -> Result<TrustedRoot> {
+    // releng is designed to run in an ephemeral CI environment, so the TUF
+    // caching is not actually needed.
+    let fetch = |config: TufConfig| async move {
+        TrustedRoot::from_tuf(
+            config.without_cache().with_http_client(client.clone()),
         )
-        .await?,
-    );
-    trusted_root.merge(
-        sigstore_verify::fetch_trusted_root(
-            cache_dir.as_ref(),
-            &GITHUB_DOT_COM,
-        )
-        .await?,
-    );
+        .await
+    };
+
+    let mut trusted_root = fetch(TufConfig::production())
+        .await
+        .context("failed to fetch the Sigstore public good trusted root")?;
+    let github = fetch(TufConfig::github())
+        .await
+        .context("failed to fetch the GitHub trusted root")?;
+
+    trusted_root.tlogs.extend(github.tlogs);
+    trusted_root.certificate_authorities.extend(github.certificate_authorities);
+    trusted_root.ctlogs.extend(github.ctlogs);
+    trusted_root.timestamp_authorities.extend(github.timestamp_authorities);
 
     Ok(trusted_root)
 }
