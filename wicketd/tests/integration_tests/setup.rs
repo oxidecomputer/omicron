@@ -79,6 +79,7 @@ impl WicketdTestContext {
                 &endpoint,
                 log.new(slog::o!("component" => "wicketd test client")),
             )
+            .expect("wicketd client")
         };
 
         let artifact_addr =
@@ -93,6 +94,7 @@ impl WicketdTestContext {
                 &endpoint,
                 log.new(slog::o!("component" => "artifact test client")),
             )
+            .expect("installinator client")
         };
 
         let wicketd_raw_client = ClientTestContext::new(
@@ -112,6 +114,7 @@ impl WicketdTestContext {
                 &endpoint,
                 log.new(slog::o!("component" => "commission test client")),
             )
+            .expect("wicketd commission client")
         };
 
         Self {

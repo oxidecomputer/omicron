@@ -527,7 +527,8 @@ mod test {
             let config_client = dns_service_client::Client::new(
                 &format!("http://{}", dropshot_server.local_addr()),
                 log.new(o!("component" => "dns_client")),
-            );
+            )
+            .expect("DNS config client");
 
             Self {
                 storage_path: Some(storage_path),

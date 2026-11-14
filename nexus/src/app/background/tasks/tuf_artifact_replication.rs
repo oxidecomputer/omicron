@@ -780,7 +780,8 @@ mod tests {
                 client: sled_agent_client::Client::new(
                     "http://invalid.test",
                     slog::Logger::root(slog::Discard, slog::o!()),
-                ),
+                )
+                .expect("sled agent client"),
                 depot_base_url: String::new(),
             })
             .collect()

@@ -78,6 +78,7 @@ impl LiveTestContext {
         let url = format!("http://{}", sockaddr);
         let log = self.logctx.log.new(o!("nexus_internal_url" => url.clone()));
         nexus_lockstep_client::Client::new(&url, log)
+            .expect("Nexus lockstep client")
     }
 
     /// Returns a list of clients for the internal APIs for all Nexus instances

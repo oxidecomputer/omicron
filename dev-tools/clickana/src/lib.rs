@@ -70,7 +70,8 @@ impl Clickana {
     pub async fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
         let admin_url = format!("http://{}", self.clickhouse_addr);
         let log = self.new_logger()?;
-        let client = ClickhouseServerClient::new(&admin_url, log.clone());
+        let client = ClickhouseServerClient::new(&admin_url, log.clone())
+            .expect("ClickHouse admin client");
 
         let tick_interval = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();

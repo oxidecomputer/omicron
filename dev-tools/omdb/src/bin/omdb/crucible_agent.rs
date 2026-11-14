@@ -69,7 +69,8 @@ impl CrucibleAgentArgs {
                 OMDB_CRUCIBLE_AGENT_URL"
             );
         };
-        let client = Client::new(crucible_agent_url);
+        let client =
+            Client::new(crucible_agent_url).expect("crucible agent client");
 
         match &self.command {
             CrucibleAgentCommands::Regions(RegionCommands::List) => {

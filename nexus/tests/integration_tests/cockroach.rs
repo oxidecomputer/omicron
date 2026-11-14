@@ -21,7 +21,8 @@ async fn test_cockroach_admin_server(cptestctx: &ControlPlaneTestContext) {
     let admin_url = format!("http://{}", admin_addr);
 
     let client =
-        CockroachAdminClient::new(&admin_url, cptestctx.logctx.log.clone());
+        CockroachAdminClient::new(&admin_url, cptestctx.logctx.log.clone())
+            .expect("cockroach admin client");
 
     // Test the /proxy/status/vars endpoint (proxy to CockroachDB's /_status/vars)
     let vars_response = client

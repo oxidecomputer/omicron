@@ -677,7 +677,8 @@ async fn get_saga_sec_status(
     let client = nexus_lockstep_client::Client::new(
         &format!("http://[{addr}]:{port}/"),
         opctx.log.clone(),
-    );
+    )
+    .expect("Nexus lockstep client");
 
     match client.ping().await {
         Ok(_) => {

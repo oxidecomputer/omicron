@@ -758,7 +758,8 @@ impl NexusArgs {
         };
         eprintln!("note: using Nexus URL {}", nexus_url);
         let client =
-            nexus_lockstep_client::Client::new(&nexus_url, log.clone());
+            nexus_lockstep_client::Client::new(&nexus_url, log.clone())
+                .expect("Nexus lockstep client");
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
