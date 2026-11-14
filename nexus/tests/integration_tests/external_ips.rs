@@ -1172,6 +1172,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: instance::InstanceShutdownPolicy::default(),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -1710,6 +1711,7 @@ async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
         None,
         None,
         vec![],
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -1778,6 +1780,7 @@ async fn cannot_attach_floating_ipv6_to_instance_missing_ipv6_stack(
         None,
         None,
         vec![],
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -1844,6 +1847,7 @@ async fn cannot_attach_ephemeral_ipv4_to_instance_missing_ipv4_stack(
         None,
         None,
         vec![],
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -1899,6 +1903,7 @@ async fn cannot_attach_ephemeral_ipv6_to_instance_missing_ipv6_stack(
         None,
         None,
         vec![],
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -2093,6 +2098,8 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         /* auto_restart_policy = */ Default::default(),
         /* instance_cpu_platform = */ None,
         /* multicast_groups = */ vec![],
+        /* shutdown_policy = */
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -2196,6 +2203,8 @@ async fn can_create_instance_with_floating_ipv6_address(
         /* auto_restart_policy = */ Default::default(),
         /* instance_cpu_platform = */ None,
         /* multicast_groups = */ vec![],
+        /* shutdown_policy = */
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 
@@ -2302,6 +2311,7 @@ async fn instance_for_external_ips(
         Default::default(),
         None,
         Vec::new(),
+        instance::InstanceShutdownPolicy::default(),
     )
     .await
 }
@@ -2479,6 +2489,7 @@ async fn no_automatic_snat_for_ipv6(cptestctx: &ControlPlaneTestContext) {
         None,
         None,
         vec![],
+        instance::InstanceShutdownPolicy::default(),
     )
     .await;
 

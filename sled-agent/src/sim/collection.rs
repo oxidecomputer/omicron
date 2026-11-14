@@ -374,6 +374,7 @@ mod test {
     use futures::channel::mpsc::Receiver;
     use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::instance::InstanceShutdownPolicy::HardOff;
     use sled_agent_types::instance::SledVmmState;
     use sled_agent_types::instance::VmmRuntimeState;
     use sled_agent_types::instance::VmmState;
@@ -418,7 +419,9 @@ mod test {
         // Stopping an instance that was never started synchronously destroys
         // its VMM.
         let rprev = r1;
-        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
+        let dropped = instance
+            .transition(VmmStateRequested::Stopped { method: HardOff })
+            .unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
@@ -503,7 +506,9 @@ mod test {
         // If we go back to any stopped state, we go through the async process
         // again.
         assert!(rx.try_recv().is_err());
-        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
+        let dropped = instance
+            .transition(VmmStateRequested::Stopped { method: HardOff })
+            .unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         let rnext = instance.object.current();
@@ -575,7 +580,10 @@ mod test {
         // Now reboot the instance. This is dispatched to Propolis, which will
         // move to the Rebooting state and then back to Running.
         assert!(
-            instance.transition(VmmStateRequested::Reboot).unwrap().is_none()
+            instance
+                .transition(VmmStateRequested::Reboot { method: HardOff })
+                .unwrap()
+                .is_none()
         );
         let (rprev, rnext) = (rnext, instance.object.current());
         assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);

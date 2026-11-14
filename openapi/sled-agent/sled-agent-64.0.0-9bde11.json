@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "63.0.0"
+    "version": "64.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -2914,6 +2914,13 @@
   },
   "components": {
     "schemas": {
+      "AcpiTimeoutSecs": {
+        "description": "ACPI power button timeout in seconds.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 1,
+        "maximum": 3600
+      },
       "AddSledRequest": {
         "description": "A request to Add a given sled after rack initialization has occurred",
         "type": "object",
@@ -6187,6 +6194,45 @@
         "required": [
           "group_ip",
           "sources"
+        ]
+      },
+      "InstanceShutdownPolicy": {
+        "description": "Instance-stopping method choices",
+        "oneOf": [
+          {
+            "description": "Instance's VM is forcefully terminated immediately.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "$ref": "#/components/schemas/AcpiTimeoutSecs"
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
         ]
       },
       "InstanceSledLocalConfig": {
@@ -10968,7 +11014,7 @@
         ]
       },
       "VmmStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
+        "description": "Requestable running state of an Instance.",
         "oneOf": [
           {
             "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
@@ -11013,10 +11059,27 @@
                 "enum": [
                   "stopped"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "description": "The method by which the instance should be stopped *this* time. May be `HardOff` for an instance whose policy is `PowerButton` if the operator wants to use force.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "method"
+                ]
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -11028,10 +11091,27 @@
                 "enum": [
                   "reboot"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "description": "The method by which the instance should be rebooted *this* time. May be `HardOff` for an instance whose policy is `PowerButton` if the operator wants to use force.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "method"
+                ]
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           }
         ]

@@ -65,6 +65,7 @@ progenitor::generate_api!(
         Generation = omicron_generation_kinds::Generation,
         Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
+        InstanceShutdownPolicy = sled_agent_types_versions::latest::instance::InstanceShutdownPolicy,
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,
         InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
         InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,

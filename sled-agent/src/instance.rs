@@ -766,7 +766,8 @@ fn classify_vmm_state_publish_error(
 
 impl InstanceRunner {
     /// How long to wait for VMM shutdown to complete before forcefully
-    /// terminating the zone.
+    /// terminating the zone. This is added to the stop request's ACPI
+    /// shutdown timeout, if any.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
     #[expect(clippy::too_many_arguments)]
@@ -896,23 +897,9 @@ impl InstanceRunner {
         let terminator = self.terminator.clone();
         let mut state_owner = VmmStateOwner::Runner;
 
-        // Timeout for stopping the instance gracefully.
-        //
-        // When we send Propolis a put-state request to transition to
-        // Stopped`, we start this timer. If Propolis does not report back
-        // that it has stopped the instance within `STOP_GRACE_PERIOD`, we
-        // will forcibly terminate the VMM. This is to ensure that a totally
-        // stuck VMM does not prevent the Propolis zone from being cleaned up.
-        let mut stop_timeout = None;
-        async fn stop_timeout_completed(
-            stop_timeout: &mut Option<Pin<Box<tokio::time::Sleep>>>,
-        ) {
-            if let Some(timeout) = stop_timeout {
-                timeout.await
-            } else {
-                std::future::pending().await
-            }
-        }
+        // Timeout for stopping the instance gracefully before escalating to
+        // forcibly destroying the zone.
+        let mut force_stop_timer = UngracefulTermGraceTime::default();
 
         while !self.is_terminating() {
             tokio::select! {
@@ -931,11 +918,12 @@ impl InstanceRunner {
                 // instance monitor requests, as we would prefer to honor a
                 // message from the instance monitor indicating a successful
                 // stop, even if we have reached the timeout.
-                _ = stop_timeout_completed(&mut stop_timeout) => {
+                time = force_stop_timer.stop_timeout_completed() => {
                     warn!(
                         self.log,
-                        "Instance failed to stop within the grace period, \
-                         terminating it violently!",
+                        "Instance failed to stop within the {}-second \
+                        grace period, terminating it violently!",
+                        time.as_secs(),
                     );
 
                     // This looks kind of like a failure condition (the VMM
@@ -1009,19 +997,30 @@ impl InstanceRunner {
                                 // If we're going to stop the instance, start
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
-                                if let VmmStateRequested::Stopped = state {
-                                    // Only start the stop timeout if there
-                                    // isn't one already, so that additional
-                                    // requests to stop coming in don't reset
-                                    // the clock.
-                                    if stop_timeout.is_none() {
-                                        stop_timeout = Some(Box::pin(tokio::time::sleep(
-                                            Self::STOP_GRACE_PERIOD
-                                        )));
+                                if let VmmStateRequested::Stopped { method } = state {
+                                    force_stop_timer.set_stop_timeout(method);
+                                }
+
+                                let propolis_result = self
+                                    .put_state(state)
+                                    .await;
+
+                                // If we receive a reboot request while a stop
+                                // timeout is running that was initiated by an
+                                // ACPI shutdown, disarm the timeout, but only
+                                // if Propolis was still there and honored the
+                                // request.
+                                if let (
+                                    VmmStateRequested::Reboot { method: _ },
+                                    Ok(sled_vmm_state),
+                                ) = (state, &propolis_result)
+                                {
+                                    if sled_vmm_state.vmm_state.state != VmmState::Failed {
+                                        force_stop_timer.disarm();
                                     }
                                 }
 
-                                tx.send(self.put_state(state).await
+                                tx.send(propolis_result
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -2406,6 +2405,7 @@ impl InstanceRunner {
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
+        use sled_agent_types::instance::InstanceShutdownPolicy::PowerButton;
         let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
@@ -2438,7 +2438,7 @@ impl InstanceRunner {
 
                 (Some(PropolisRequest::Run), None)
             }
-            VmmStateRequested::Stopped => {
+            VmmStateRequested::Stopped { method } => {
                 // If there's no running Propolis yet, unregister this instance
                 // straightaway. Since nothing will ever send a state update in
                 // this case, force the VMM into a terminal Destroyed state,
@@ -2449,21 +2449,24 @@ impl InstanceRunner {
                     self.terminate().await;
                     (None, None)
                 } else {
-                    (
-                        Some(PropolisRequest::Stop),
-                        Some(PublishedVmmState::Stopping),
-                    )
+                    let p = if let PowerButton { timeout_secs: s } = method {
+                        PropolisRequest::AcpiStop { timeout_secs: s.into() }
+                    } else {
+                        PropolisRequest::Stop
+                    };
+                    (Some(p), Some(PublishedVmmState::Stopping))
                 }
             }
-            VmmStateRequested::Reboot => {
+            VmmStateRequested::Reboot { method } => {
                 if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
-
-                (
-                    Some(PropolisRequest::Reboot),
-                    Some(PublishedVmmState::Rebooting),
-                )
+                let p = if let PowerButton { timeout_secs: s } = method {
+                    PropolisRequest::AcpiReboot { timeout_secs: s.into() }
+                } else {
+                    PropolisRequest::Reboot
+                };
+                (Some(p), Some(PublishedVmmState::Rebooting))
             }
         };
 
@@ -3010,6 +3013,78 @@ async fn zpool_monitor(
     }
 }
 
+/// Timeout for stopping the instance gracefully.
+///
+/// When we send Propolis a put-state request to transition to
+/// `Stopped`, we start this timer. If Propolis does not report back
+/// that it has stopped the instance within `STOP_GRACE_PERIOD`
+/// (plus any additional time spent waiting for the instance's configured
+/// ACPI shutdown policy, where applicable), we will forcibly terminate
+/// the VMM. This is to ensure that a totally stuck VMM does not prevent
+/// the Propolis zone from being cleaned up.
+///
+/// The timeout is abandoned if a reboot request is accepted by propolis
+/// while the instance was still gracefully stopping from a prior ACPI
+/// shutdown request.
+///
+/// If a stop request *without* an ACPI shutdown timeout is received
+/// while a prior ACPI shutdown timeout is running, the timeout becomes
+/// the shorter of itself or `STOP_GRACE_PERIOD`.
+#[derive(Default)]
+struct UngracefulTermGraceTime {
+    timeout_duration: std::time::Duration,
+    stop_req_method: InstanceShutdownPolicy,
+    stop_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl UngracefulTermGraceTime {
+    fn set_stop_timeout(&mut self, method: InstanceShutdownPolicy) {
+        let acpi_timeout = match method {
+            InstanceShutdownPolicy::HardOff => 0u64,
+            InstanceShutdownPolicy::PowerButton { timeout_secs } => {
+                timeout_secs.into()
+            }
+        };
+
+        let duration = Duration::from_secs(acpi_timeout)
+            + InstanceRunner::STOP_GRACE_PERIOD;
+
+        let new_sleep = Box::pin(tokio::time::sleep(duration));
+
+        // Only start the stop timeout if there isn't one already, so that
+        // additional requests to stop coming in don't reset the clock,
+        // *unless* the prior timeout was for an ACPI shutdown and this is
+        // a hard-stop request that would terminate sooner.
+        if let Some(old_sleep) = &self.stop_timeout {
+            if self.stop_req_method == InstanceShutdownPolicy::HardOff
+                || method != InstanceShutdownPolicy::HardOff
+                || new_sleep.deadline() > old_sleep.deadline()
+            {
+                return;
+            }
+        }
+
+        self.stop_timeout = Some(new_sleep);
+        self.timeout_duration = duration;
+        self.stop_req_method = method;
+    }
+
+    fn disarm(&mut self) {
+        if self.stop_req_method != InstanceShutdownPolicy::HardOff {
+            self.stop_timeout = None;
+        }
+    }
+
+    async fn stop_timeout_completed(&mut self) -> Duration {
+        if let Some(timeout) = &mut self.stop_timeout {
+            timeout.await;
+            self.timeout_duration
+        } else {
+            std::future::pending().await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3045,6 +3120,7 @@ mod tests {
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::instance::InstanceShutdownPolicy;
     use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
@@ -3779,7 +3855,12 @@ mod tests {
         // Request the VMM stop
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Stopped)
+            .ensure_state(
+                propolis_id,
+                VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
+            )
             .await
             .unwrap();
 
@@ -3829,8 +3910,140 @@ mod tests {
             ),
         )
         .await
-        .expect("timed out waiting for VmmState::Stopped in FakeNexus")
+        .expect("timed out waiting for VmmState::Destroyed in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
+
+        logctx.cleanup_successful();
+    }
+
+    // Tests a scenario in which an ACPI shutdown is followed by a Reboot.
+    // This test asserts that the sled-agent will *not* forcibly terminate
+    // the VMM process if we have made its post-shutdown fate a reboot.
+    #[tokio::test]
+    async fn test_instance_manager_disarm_acpistop_timeout_on_reboot() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_acpistop_timeout_on_reboot",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let mut test_objects = InstanceTestObjects::new(&log).await;
+
+        let (propolis_server, propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let (ensure_body, sled_identifiers) =
+            fake_instance_ensure_body(instance_id, propolis_addr);
+
+        test_objects
+            .instance_manager
+            .ensure_registered(propolis_id, ensure_body, sled_identifiers)
+            .await
+            .unwrap();
+
+        test_objects
+            .instance_manager
+            .ensure_state(propolis_id, VmmStateRequested::Running)
+            .await
+            .unwrap();
+
+        timeout(
+            TIMEOUT_DURATION,
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Running
+                    }
+                    _ => false,
+                },
+            ),
+        )
+        .await
+        .expect("timed out waiting for InstanceState::Running in FakeNexus")
+        .expect("failed to receive VmmState' InstanceState");
+
+        // Place the mock propolis in single-step mode.
+        propolis_mock_set_mode(
+            &propolis_client,
+            propolis_mock_server::MockMode::SingleStep,
+        )
+        .await;
+
+        // Request the VMM stop, with a timeout
+        test_objects
+            .instance_manager
+            .ensure_state(
+                propolis_id,
+                VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::PowerButton {
+                        timeout_secs: 1.try_into().unwrap(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        // Single-step once.
+        propolis_mock_step(&propolis_client).await;
+
+        timeout(
+            TIMEOUT_DURATION,
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Stopping
+                    }
+                    _ => false,
+                },
+            ),
+        )
+        .await
+        .expect("timed out waiting for VmmState::Stopping in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
+
+        // NOW WE STOP ADVANCING THE MOCK PROPOLIS STATE MACHINE --- IT WILL
+        // NEVER REACH `Stopped`.
+
+        // Request the VMM reboot that should abandon the stop timeout
+        test_objects
+            .instance_manager
+            .ensure_state(
+                propolis_id,
+                VmmStateRequested::Reboot {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
+            )
+            .await
+            .expect("failed to send reboot request");
+
+        // Now, pause time and advance the Tokio clock past the stop grace
+        // period. This *would* cause the stop timeout to fire, without requiring
+        // the test to actually wait for ten minutes.
+        tokio::time::pause();
+        tokio::time::advance(
+            super::InstanceRunner::STOP_GRACE_PERIOD + Duration::from_secs(2),
+        )
+        .await;
+        tokio::time::resume();
+
+        timeout(
+            TIMEOUT_DURATION,
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Destroyed
+                    }
+                    _ => false,
+                },
+            ),
+        )
+        .await
+        .expect_err(
+            "Should have timed out waiting for VmmState::Destroyed \
+            in FakeNexus (after canceled stop timeout)",
+        );
 
         logctx.cleanup_successful();
     }
