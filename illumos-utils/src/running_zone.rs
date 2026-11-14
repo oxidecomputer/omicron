@@ -52,7 +52,7 @@ pub struct RunCommandError {
 }
 
 /// Errors returned from [`RunningZone::boot`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum BootError {
     #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
@@ -130,7 +130,14 @@ mod zenter {
 /// Represents a running zone.
 #[derive(Debug)]
 pub struct RunningZone {
-    // The `zoneid_t` for the zone, while it's running, or `None` if not.
+    /// The `zoneid_t` for the zone, while it's running, or `None` if not.
+    ///
+    /// This is passed to `zenter` in [`RunningZone::run_cmd()`]. Calling
+    /// [`RunningZone::stop()`] will clear this zone ID immediately, even if the
+    /// call to `halt_and_remove_zone` ultimately returns an error. This is in
+    /// order to ensure that we never attempt to `zenter` a zone ID that
+    /// corresponds to a zone that may have been removed, in case the kernel
+    /// reuses that zone ID for a new zone.
     id: Option<i32>,
     inner: InstalledZone,
 }
@@ -270,35 +277,67 @@ impl RunningZone {
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
-    pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
+    ///
+    /// If booting the zone fails, this function attempts to remove the zone
+    /// corresponding to the `InstalledZone` immediately.
+    pub async fn boot(mut zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
         info!(zone.log, "Booting {} zone", zone.name);
 
-        zone.zones_api.boot(&zone.name).await?;
+        let id = async {
+            zone.zones_api.boot(&zone.name).await?;
 
-        // Wait until the zone reaches the 'single-user' SMF milestone.
-        // At this point, we know that the dependent
-        //  - svc:/milestone/network
-        //  - svc:/system/manifest-import
-        // services are up, so future requests to create network addresses
-        // or manipulate services will work.
-        let fmri = "svc:/milestone/single-user:default";
-        zone.zones_api
-            .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
-            .await
-            .map_err(|_| BootError::Timeout {
-                service: fmri.to_string(),
-                zone: zone.name.to_string(),
-            })?;
+            // Wait until the zone reaches the 'single-user' SMF milestone.
+            // At this point, we know that the dependent
+            //  - svc:/milestone/network
+            //  - svc:/system/manifest-import
+            // services are up, so future requests to create network addresses
+            // or manipulate services will work.
+            let fmri = "svc:/milestone/single-user:default";
+            zone.zones_api
+                .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
+                .await
+                .map_err(|_| BootError::Timeout {
+                    service: fmri.to_string(),
+                    zone: zone.name.to_string(),
+                })?;
 
-        let id =
-            zone.zones_api.id(&zone.name).await?.ok_or_else(|| {
-                BootError::NoZoneId { zone: zone.name.clone() }
-            })?;
-
-        let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        Ok(running_zone)
+            zone.zones_api
+                .id(&zone.name)
+                .await?
+                .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })
+        }
+        .await;
+        match id {
+            // We successfully booted the zone, so return the `RunningZone`.
+            Ok(id) => {
+                let running_zone = RunningZone { id: Some(id), inner: zone };
+                Ok(running_zone)
+            }
+            // We failed to boot the zone. Halt and remove it now if possible,
+            // and then return the error. Attempting to remove a failed zone
+            // synchronously here reduces the risk that a caller will retry
+            // creating and booting a zone with the same name *before* the task
+            // spawned to destroy the zone in `InstalledZone`'s `Drop` impl
+            // runs.
+            Err(boot_err) => {
+                if let Err(remove_err) = zone.halt_and_remove().await {
+                    warn!(
+                        zone.log,
+                        "Failed to uninstall zone after booting it failed";
+                        "boot_error" => &boot_err,
+                        "error" => %remove_err,
+                    );
+                } else {
+                    info!(
+                        zone.log,
+                        "Uninstalled zone after booting it failed";
+                        "boot_error" => &boot_err,
+                    );
+                }
+                Err(boot_err)
+            }
+        }
     }
 
     /// Create a fake running zone for use in tests.
@@ -428,16 +467,8 @@ impl RunningZone {
     ///
     /// Allows callers to synchronously stop a zone, and inspect an error.
     pub async fn stop(&mut self) -> Result<(), String> {
-        if let Some(_) = self.id.take() {
-            let log = self.inner.log.clone();
-            let name = self.name().to_string();
-            self.inner
-                .zones_api
-                .halt_and_remove_logged(&log, &name)
-                .await
-                .map_err(|err| err.to_string())?;
-        }
-        Ok(())
+        self.id = None;
+        self.inner.halt_and_remove().await.map_err(|e| e.to_string())
     }
 
     /// Return a reference to the links for this zone.
@@ -548,35 +579,6 @@ impl RunningZone {
     }
 }
 
-impl Drop for RunningZone {
-    fn drop(&mut self) {
-        if let Some(_) = self.id.take() {
-            let log = self.inner.log.clone();
-            let name = self.name().to_string();
-            let zones_api = self.inner.zones_api.clone();
-
-            // Take the OPTE ports and move them into the scope of the spawned
-            // task below, where we'll drop them _after_ the zone is removed.
-            // The order matters, because deleting the ports while the zone owns
-            // them will return `EBUSY`. See
-            // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
-            // and the surrounding thread for context.
-            let opte_ports = std::mem::take(&mut self.inner.opte_ports);
-            tokio::task::spawn(async move {
-                match zones_api.halt_and_remove_logged(&log, &name).await {
-                    Ok(()) => {
-                        info!(log, "Stopped and uninstalled zone")
-                    }
-                    Err(e) => {
-                        warn!(log, "Failed to stop zone: {}", e)
-                    }
-                }
-                drop(opte_ports);
-            });
-        }
-    }
-}
-
 /// A process running in the zone associated with an SMF service.
 #[derive(Clone, Debug)]
 pub struct ServiceProcess {
@@ -645,6 +647,10 @@ pub struct InstalledZone {
 
     // API to underlying zone commands
     zones_api: DebugIgnore<Arc<dyn crate::zone::Api>>,
+
+    // If `true`, this zone has been successfully removed, and dropping the
+    // `InstalledZone` does not need to halt and remove it.
+    has_been_removed: bool,
 }
 
 impl InstalledZone {
@@ -695,6 +701,62 @@ impl InstalledZone {
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
         &self.links
+    }
+
+    async fn halt_and_remove(&mut self) -> Result<(), crate::zone::AdmError> {
+        if self.has_been_removed {
+            return Ok(());
+        }
+
+        self.zones_api.halt_and_remove_logged(&self.log, &self.name()).await?;
+
+        // If we have successfully removed the zone, set the flag so that the
+        // `Drop` impl does not attempt to do it again.
+        self.has_been_removed = true;
+        Ok(())
+    }
+}
+
+impl Drop for InstalledZone {
+    fn drop(&mut self) {
+        // If this zone has already been stopped successfully, we don't need to
+        // try to halt and remove it a second time.
+        if self.has_been_removed {
+            return;
+        }
+
+        let log = self.log.clone();
+        let name = self.name().to_string();
+        let zones_api = self.zones_api.clone();
+
+        // Take the OPTE ports and move them into the scope of the spawned
+        // task below, where we'll drop them _after_ the zone is removed.
+        // The order matters, because deleting the ports while the zone owns
+        // them will return `EBUSY`. See
+        // https://github.com/oxidecomputer/omicron/issues/7726#issuecomment-2702320286
+        // and the surrounding thread for context.
+        let opte_ports = std::mem::take(&mut self.opte_ports);
+        tokio::task::spawn(async move {
+            // Regardless of whether or not this InstalledZone` has been booted
+            // and is owned by a `RunningZone`, `halt_and_remove_logged` will do
+            // the correct thing: if the zone is `Ready` or `Running`, it will
+            // halt and uninstall it; if the zone is `Configured` and has not
+            // yet been installed, it will just be deleted; and otherwise, it
+            // will be uninstalled.
+            //
+            // Thus, this drop impl should be sufficient to properly remove the
+            // zone *regardless* of whether it is dropped before it is booted or
+            // if it is part of a `RunningZone` which is being dropped.
+            match zones_api.halt_and_remove_logged(&log, &name).await {
+                Ok(()) => {
+                    info!(log, "Stopped and uninstalled zone")
+                }
+                Err(e) => {
+                    warn!(log, "Failed to stop zone: {}", e)
+                }
+            }
+            drop(opte_ports);
+        });
     }
 }
 
@@ -930,6 +992,7 @@ impl<'a> ZoneBuilder<'a> {
                 opte_ports: self.opte_ports?,
                 links: self.links?,
                 zones_api: DebugIgnore(zones_api),
+                has_been_removed: false,
             };
             let xml_path = iz.site_profile_xml_path().parent()?.to_path_buf();
             std::fs::create_dir_all(&xml_path)
@@ -1037,6 +1100,7 @@ impl<'a> ZoneBuilder<'a> {
             opte_ports,
             links,
             zones_api: DebugIgnore(zones_api),
+            has_been_removed: false,
         })
     }
 }

@@ -524,7 +524,7 @@ derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.3.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.4.0", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.5.0"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }

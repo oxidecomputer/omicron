@@ -98,7 +98,6 @@
 //! | 4 | None | Valid | "Active" | Reactivate member | "Joining" |
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -335,31 +334,29 @@ impl MulticastGroupReconciler {
 
         // Batch-fetch instance states for all members to avoid N+1 queries
         let instance_states =
-            Arc::new(self.batch_fetch_instance_states(opctx, &members).await?);
+            self.batch_fetch_instance_states(opctx, &members).await?;
 
         // Process members concurrently with configurable parallelism
-        let results = stream::iter(members)
+        let mut results = stream::iter(members)
             .map(|member| {
-                let instance_states = Arc::clone(&instance_states);
+                let instance_states = &instance_states;
                 async move {
                     let res = self
                         .process_member_state(
                             opctx,
                             group,
                             &member,
-                            &instance_states,
+                            instance_states,
                             dataplane_client,
                         )
                         .await;
                     (member, res)
                 }
             })
-            .buffer_unordered(self.member_concurrency_limit) // Configurable concurrency
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(self.member_concurrency_limit); // Configurable concurrency
 
         // Process results and update counters
-        for (member, result) in results {
+        while let Some((member, result)) = results.next().await {
             match result {
                 Ok(transition) => match transition {
                     StateTransition::StateChanged
