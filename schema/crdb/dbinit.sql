@@ -8504,7 +8504,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- from a stale sitrep. (It is the `rendezvous_support_bundle_created`
     -- marker, not this generation, that prevents a deleted bundle from being
     -- resurrected.)
-    support_bundle_generation INT8 NOT NULL
+    support_bundle_generation INT8 NOT NULL,
+
+    -- Generation counter for the set of requested Problems. This is incremented
+    -- every time the set of problems which exist in the sitrep differs from the
+    -- parent, like the alert and support bundle generations. Note that this
+    -- generation only applies to the set of problems which *exist*; changes to
+    -- problems once they are created are tracked by the individual problems'
+    -- revision counters.
+    problem_generation INT8 NOT NULL
 );
 
 -- Index for looking up all potential children of a given parent sitrep.
@@ -9912,6 +9920,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem (
     -- select the current revision from the `problem_revision` table.
     current_revision INT8 NOT NULL,
 
+    -- A problem is allowed to exist at its zeroth revision if and only if it
+    -- is in the process of being created. Such problems are not returned when
+    -- listing problems.
     CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
 );
 
@@ -9971,6 +9982,255 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
     PRIMARY KEY (problem_id, revision)
 );
 
+-- A request from a fault management diagnosis engine that an active problem be
+-- created if it does not already exist.
+--
+-- This is the sitrep's internal representation of a problem. The
+-- external-API-visible representation of the problem is an entry in the
+-- `omicron.public.problem` table. An entry in this table indicates that the
+-- sitrep wishes for a corresponding entry in the `omicron.public.problem` table
+-- to exist for this problem. Sitrep rendezvous creates entries in
+-- `omicron.public.problem` for all problems requested in the current sitrep.
+--
+-- Records in this table are inserted when a sitrep is created, and are deleted
+-- when the sitrep corresponding to the record's `sitrep_id` is deleted.
+--
+-- Problems are carried forwards into subsequent sitreps until *both* of the
+-- following conditions are met:
+--
+-- 1. The problem's latest revision has transitioned it to the `resolved` state
+--    (i.e. the revision's `time_resolved` is non-null), and,
+-- 2. All requested revisions of the problem have been created by rendezvous.
+--
+-- Once a problem has been resolved, diagnosis engines should no longer request
+-- further revisions of that problem. However, resolved problems must still be
+-- tracked by the sitrep until all records in the externally-visible tables have
+-- been created.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_request (
+    -- UUID of the problem.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this record is part of.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the problem was first requested.
+    requested_sitrep_id UUID NOT NULL,
+
+    -- A human-readable comment explaining why the diagnosis engine created
+    -- this problem. This is *not* part of the externally visible problem, and
+    -- is only used for debugging the sitrep itself.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+-- Marker written by `SitrepGuardedInsert` atomically with a corresponding
+-- problem row when FM rendezvous successfully creates a problem requested by
+-- the sitrep. This serves as a guard against resurrection: if the problem is
+-- deleted after its initial creation, but an executing sitrep still contains an
+-- fm_problem_request record for the same problem, this marker prevents
+-- `SitrepGuardedInsert` from re-creating the problem.
+--
+-- A marker can be GC'ed in FM rendezvous when:
+--   * its problem_id is not present in any fm_problem_request record in
+--     the executing sitrep,
+--   * its created_at_generation is less than that of the
+--     problem_generation on the sitrep being executed.
+-- Taken together, these two conditions ensure that no sitrep will ever attempt
+-- to resurrect a deleted problem, meaning the marker is no longer needed.
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_problem_created (
+    problem_id UUID PRIMARY KEY,
+    created_at_generation INT8 NOT NULL
+);
+
+-- A request from a fault management diagnosis engine to create a revision of
+-- an active problem if it does not already exist.
+--
+-- This table is part of the fault management sitrep, and is the sitrep's
+-- internal representation of a revision of a problem. The
+-- external-API-visible representation of the problem is an entry in the
+-- `omicron.public.problem_revision` table. An entry in *this* table indicates
+-- that the sitrep wishes for a corresponding entry in the
+-- `omicron.public.problem_revision` table to exist for this revision. Sitrep
+-- rendezvous creates entries in `omicron.public.problem_revision` for all
+-- revision requests in the current sitrep.
+--
+-- Records in this table are inserted when a sitrep is created, and are deleted
+-- when the sitrep corresponding to the record's `sitrep_id` is deleted.
+--
+-- Revision request records are carried forwards into subsequent sitreps until
+-- the problem has transitioned to the `resolved` state (i.e., its current
+-- revision has a non-NULL `time_resolved`), and the corresponding public
+-- revision record has been created by sitrep rendezvous.
+--
+-- Diagnosis engines may not request revisions that un-resolve a resolved
+-- problem. If the current revision of a problem has a non-NULL `time_resolved`,
+-- the sitrep builder should not permit additional revision requests for that
+-- problem.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision_request (
+    -- UUID of the problem.
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `problem` table.
+    revision INT8 NOT NULL,
+
+    -- UUID of the current sitrep that this record is part of.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which this revision of the problem was
+    -- first requested.
+    requested_sitrep_id UUID NOT NULL,
+
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
+    time_resolved TIMESTAMPTZ,
+
+    -- The problem's problem code as of this revision.
+    --
+    -- This determines the problem class as well as the problem's
+    -- documentation.
+    code INT8 NOT NULL,
+
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    -- A human-readable comment explaining why the diagnosis engine requested
+    -- this revision to the problem. This is *not* part of the externally
+    -- visible problem revision, and is only used for debugging the sitrep
+    -- itself.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, revision)
+);
+
+-- Associations (many-to-many) between cases and problems.
+--
+-- These are tracked for internal use by diagnosis engines, such as to determine
+-- which of their open cases have existing problems. Unlike problem revision
+-- requests, alert links, and support bundle links, these records do *not*
+-- correspond to any records in tables outside of the sitrep. They are used by
+-- diagnosis engines for internal bookkeeping only, and do not represent
+-- requests for rendezvous to perform any externally visible actions.
+--
+-- Entries in this table are part of a fault management sitrep, and live as long
+-- as the sitrep with `sitrep_id` exists.
+--
+-- The lifetime of this association is tied to that of the case: when the linked
+-- case is no longer present in the current sitrep, these associations are not
+-- carried forward into the next sitrep. However, they may outlive the presence
+-- of the linked *problem* in the sitrep: if the problem is resolved, this
+-- record should be kept to represent that a resolved problem was created for
+-- the case.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case_problem (
+    -- The ID of the case associated with this problem.
+    case_id UUID NOT NULL,
+    -- The ID of the problem associated with this case.
+    problem_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this association exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this association between the case
+    -- and the problem was created. This is *not* the sitrep in which either
+    -- the case or the problem was created.
+    linked_sitrep_id UUID NOT NULL,
+
+    -- A human-readable comment explaining why the problem is related to the
+    -- case.
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, case_id, problem_id)
+);
+
+-- Links between problems and alerts in a sitrep.
+--
+-- An alert may be linked to a problem either in the sitrep that
+-- requests the alert, or in any later sitrep, so a link refers to the alert
+-- only by its ID and does not require a corresponding `fm_alert_request` row
+-- in the same sitrep.
+--
+-- A link exists for as long as the problem it belongs to remains in the
+-- sitrep, and is never removed or modified once created.
+-- Therefore, rendezvous can create link records without needing a separate
+-- generation counter: as long as the problem itself exists, its links
+-- may be created during execution.
+--
+-- If the problem with `problem_id` is no longer part of the next sitrep, *and
+-- the requested link record has been created by rendezvous*, these records need
+-- not be carried forward into the next sitrep.
+--
+-- Rendezvous should not create externally-visible alert link records until both
+-- the problem record *and* the alert record have already been created.
+-- Otherwise, external API callers listing alerts for a problem may see alerts
+-- that do not yet exist.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_alert (
+    -- The ID of the problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the linked alert.
+    alert_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this link exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created. This is
+    -- *not* the sitrep that requested the alert.
+    linked_sitrep_id UUID NOT NULL,
+    -- The problem revision with which the alert is associated, used to
+    -- order a problem's alerts by revision.
+    revision INT8 NOT NULL,
+
+    -- A human-readable comment explaining why the alert is linked to the
+    -- problem.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, alert_id)
+);
+
+-- Links between problems and support bundles in a sitrep.
+--
+-- Like `fm_problem_alert`, a link may be created in the sitrep that
+-- requests the support bundle or in any later sitrep, and does not require a
+-- corresponding `fm_support_bundle_request` row in the same sitrep.
+--
+-- If the problem with `problem_id` is no longer part of the next sitrep, *and
+-- the requested link record has been created by rendezvous*, these records need
+-- not be carried forward into the next sitrep.
+--
+-- Rendezvous should not create externally-visible support bundle link records
+-- until both the problem record *and* the support bundle record have already
+-- been created. Otherwise, external API callers listing support bundles for a
+-- problem may see support bundles that do not yet exist.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_support_bundle (
+    -- The ID of the problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the linked support bundle.
+    support_bundle_id UUID NOT NULL,
+    -- The ID of the current sitrep in which this link exists.
+    sitrep_id UUID NOT NULL,
+    -- The ID of the *first* sitrep in which this link was created. This is
+    -- *not* the sitrep that requested the support bundle.
+    linked_sitrep_id UUID NOT NULL,
+    -- The problem revision with which the support bundle is associated.
+    revision INT8 NOT NULL,
+
+    -- A human-readable comment explaining why the support bundle is linked to
+    -- the problem.
+    comment TEXT NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (sitrep_id, problem_id, support_bundle_id)
+);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9980,7 +10240,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '320.0.0', NULL)
+    (TRUE, NOW(), NOW(), '321.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

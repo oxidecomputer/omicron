@@ -3360,6 +3360,7 @@ table! {
         next_inv_min_time_started -> Timestamptz,
         alert_generation -> Int8,
         support_bundle_generation -> Int8,
+        problem_generation -> Int8,
     }
 }
 
@@ -3571,6 +3572,62 @@ table! {
     }
 }
 
+table! {
+    fm_problem_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_problem_revision_request (sitrep_id, problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_case_problem (sitrep_id, case_id, problem_id) {
+        case_id -> Uuid,
+        problem_id -> Uuid,
+        sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_problem_alert (sitrep_id, problem_id, alert_id) {
+        problem_id -> Uuid,
+        alert_id -> Uuid,
+        sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
+        revision -> Int8,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_problem_support_bundle (sitrep_id, problem_id, support_bundle_id) {
+        problem_id -> Uuid,
+        support_bundle_id -> Uuid,
+        sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
+        revision -> Int8,
+        comment -> Text,
+    }
+}
+
 // Child data selection tables owned by `fm_support_bundle_request`. Each table
 // corresponds to a `BundleData` variant. Row existence means "include this
 // category in the referenced bundle."
@@ -3633,6 +3690,13 @@ allow_tables_to_appear_in_same_query!(alert, rendezvous_alert_created);
 table! {
     rendezvous_support_bundle_created (support_bundle_id) {
         support_bundle_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
+
+table! {
+    rendezvous_problem_created (problem_id) {
+        problem_id -> Uuid,
         created_at_generation -> Int8,
     }
 }
