@@ -45,8 +45,7 @@ use rand::rng;
 use rand::seq::IteratorRandom;
 use sled_hardware_types::BaseboardId;
 use std::collections::{BTreeMap, BTreeSet};
-use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
-use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::{
     crypto::{EncryptedRackSecrets, Salt, Sha3_256Digest},
     types::{Epoch, Threshold},
@@ -251,7 +250,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_tq: authz::TrustQuorumConfig,
-        initial_members: BTreeSet<BaseboardId>,
+        initial_members: TrustQuorumMembers,
         coordinator: BaseboardId,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
@@ -630,16 +629,6 @@ impl DataStore {
         // Check validity of members in proposed config
         //
 
-        // Check membership size
-        bail_unless!(
-            proposed.members.len() >= TRUST_QUORUM_MIN_MEMBERS
-                && proposed.members.len() <= TRUST_QUORUM_MAX_MEMBERS,
-            "Invalid Trust Quorum membership size ({}): \
-            must be between {TRUST_QUORUM_MIN_MEMBERS} and \
-            {TRUST_QUORUM_MAX_MEMBERS} nodes",
-            proposed.members.len()
-        );
-
         // Ensure all baseboards actually exist
         let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
             conn,
@@ -648,7 +637,8 @@ impl DataStore {
         .await?;
 
         bail_unless!(
-            hw_baseboard_ids.len() == proposed.members.len(),
+            hw_baseboard_ids.len()
+                == usize::from(proposed.members.num_members()),
             "Trust Quorum proposed configuration missing hw_baseboard_ids \
             in database. Do all physical sleds exist in this rack?"
         );
@@ -855,11 +845,12 @@ impl DataStore {
                         .collect();
                 proposed
                     .members
+                    .as_set()
                     .intersection(&committed_members)
                     .cloned()
                     .collect()
             } else {
-                proposed.members.clone()
+                proposed.members.as_set().clone()
             };
 
         bail_unless!(
@@ -1890,7 +1881,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             coordinator,
         )
         .await
@@ -1903,7 +1895,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(4),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         let e1 = datastore
             .tq_insert_latest_config(opctx, bad_config)
@@ -1923,7 +1916,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: bad_members,
+            members: TrustQuorumMembers::new(bad_members)
+                .expect("test members are within the size bounds"),
         };
         let e2 = datastore
             .tq_insert_latest_config(opctx, bad_config)
@@ -1938,7 +1932,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         let e3 = datastore
             .tq_insert_latest_config(opctx, bad_config)
@@ -1949,48 +1944,6 @@ mod tests {
         assert_ne!(e1, e2);
         assert_ne!(e1, e3);
         assert_ne!(e2, e3);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_tq_insert_latest_refuses_membership_size() {
-        let logctx =
-            test_setup_log("test_tq_insert_latest_refuses_membership_size");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-        let rack_id = RackUuid::new_v4();
-
-        for num_members in [2, 33] {
-            let members: BTreeSet<_> = (0..num_members)
-                .map(|i| BaseboardId {
-                    part_number: "test-part".to_string(),
-                    serial_number: format!("serial-{i}"),
-                })
-                .collect();
-            let proposed = ProposedTrustQuorumConfig {
-                rack_id,
-                epoch: Epoch(2),
-                is_lrtq_upgrade: IsLrtqUpgrade::No {
-                    last_committed_epoch: Epoch(1),
-                },
-                members,
-            };
-            let error = datastore
-                .tq_insert_latest_config(opctx, proposed)
-                .await
-                .expect_err("a proposal outside 3 to 32 members is refused");
-            assert_eq!(
-                error,
-                Error::InternalError {
-                    internal_message: format!(
-                        "Invalid Trust Quorum membership size \
-                         ({num_members}): must be between 3 and 32 nodes"
-                    ),
-                },
-            );
-        }
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2021,7 +1974,10 @@ mod tests {
             rack_id: proposed_rack_id,
             epoch: Epoch(2),
             is_lrtq_upgrade: IsLrtqUpgrade::Yes,
-            members: hw_ids.iter().cloned().map(BaseboardId::from).collect(),
+            members: TrustQuorumMembers::new(
+                hw_ids.iter().cloned().map(BaseboardId::from).collect(),
+            )
+            .expect("test members are within the size bounds"),
         };
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -2076,7 +2032,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             members.first().unwrap().clone(),
         )
         .await
@@ -2089,7 +2046,8 @@ mod tests {
                 is_lrtq_upgrade: IsLrtqUpgrade::No {
                     last_committed_epoch: Epoch(last_committed_epoch),
                 },
-                members: members.clone(),
+                members: TrustQuorumMembers::new(members.clone())
+                    .expect("test members are within the size bounds"),
             };
 
         datastore.tq_insert_latest_config(opctx, proposal(2, 1)).await.unwrap();
@@ -2156,7 +2114,8 @@ mod tests {
             rack_id,
             epoch: Epoch(2),
             is_lrtq_upgrade: IsLrtqUpgrade::Yes,
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
 
         // Insert should succeed
@@ -2204,7 +2163,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            committed_members.clone(),
+            TrustQuorumMembers::new(committed_members.clone())
+                .expect("test membership is within the size bounds"),
             committed_members.first().unwrap().clone(),
         )
         .await
@@ -2234,7 +2194,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: proposed_members,
+            members: TrustQuorumMembers::new(proposed_members)
+                .expect("test members are within the size bounds"),
         };
         assert_conflict(
             datastore.tq_insert_latest_config(opctx, proposal.clone()).await,
@@ -2306,7 +2267,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             coordinator,
         )
         .await
@@ -2319,7 +2281,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
@@ -2346,7 +2309,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         assert_conflict(
             datastore.tq_insert_latest_config(opctx, bad_config).await,
@@ -2562,7 +2526,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             coordinator,
         )
         .await
@@ -2575,7 +2540,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
@@ -2657,7 +2623,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(2),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         assert_conflict(
             datastore.tq_insert_latest_config(opctx, next_config.clone()).await,
@@ -3004,7 +2971,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             coordinator,
         )
         .await
@@ -3017,7 +2985,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
 
@@ -3094,7 +3063,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: members.clone(),
+            members: TrustQuorumMembers::new(members.clone())
+                .expect("test members are within the size bounds"),
         };
         datastore
             .tq_insert_latest_config(opctx, config2.clone())
@@ -3177,7 +3147,8 @@ mod tests {
                 opctx,
                 &conn,
                 make_authz_tq(rack_id),
-                members.clone(),
+                TrustQuorumMembers::new(members.clone())
+                    .expect("test membership is within the size bounds"),
                 coordinator,
             )
             .await
@@ -3191,7 +3162,8 @@ mod tests {
             is_lrtq_upgrade: IsLrtqUpgrade::No {
                 last_committed_epoch: Epoch(1),
             },
-            members: rack2_members,
+            members: TrustQuorumMembers::new(rack2_members)
+                .expect("test members are within the size bounds"),
         };
 
         datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
@@ -3247,7 +3219,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             coordinator,
         )
         .await
@@ -3444,7 +3417,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             coordinator,
         )
         .await
@@ -3531,7 +3505,8 @@ mod tests {
                     is_lrtq_upgrade: IsLrtqUpgrade::No {
                         last_committed_epoch: Epoch(1),
                     },
-                    members: without_member,
+                    members: TrustQuorumMembers::new(without_member)
+                        .expect("test members are within the size bounds"),
                 },
             )
             .await
@@ -3580,7 +3555,8 @@ mod tests {
             opctx,
             &conn,
             make_authz_tq(rack_id),
-            others.clone(),
+            TrustQuorumMembers::new(others.clone())
+                .expect("test membership is within the size bounds"),
             others.first().unwrap().clone(),
         )
         .await
@@ -3624,7 +3600,8 @@ mod tests {
                     is_lrtq_upgrade: IsLrtqUpgrade::No {
                         last_committed_epoch: Epoch(1),
                     },
-                    members: with_sled,
+                    members: TrustQuorumMembers::new(with_sled)
+                        .expect("test members are within the size bounds"),
                 },
             )
             .await

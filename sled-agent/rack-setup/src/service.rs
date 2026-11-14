@@ -135,6 +135,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
 /// Operations RSS performs on the local bootstrap agent during rack setup.
@@ -1076,19 +1077,18 @@ impl ServiceInner {
 
         let initial_trust_quorum_configuration =
             if let Some(peers) = &config.trust_quorum_peers {
-                let tq_members: BTreeSet<_> = peers.iter().cloned().collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
                 init_trust_quorum(
                     &self.log,
                     ctx.trust_quorum_handle.clone(),
-                    tq_members.clone(),
+                    peers.clone(),
                     rack_id,
                 )
                 .await?;
 
                 Some(InitialTrustQuorumConfig {
-                    members: tq_members.into_iter().collect(),
+                    members: peers.clone(),
                     coordinator: ctx.trust_quorum_handle.baseboard_id().clone(),
                 })
             } else {
@@ -1336,12 +1336,11 @@ impl ServiceInner {
 async fn init_trust_quorum(
     log: &Logger,
     trust_quorum_handle: trust_quorum::NodeTaskHandle,
-    members: BTreeSet<BaseboardId>,
+    members: TrustQuorumMembers,
     rack_id: RackUuid,
 ) -> Result<(), SetupServiceError> {
-    let threshold = trust_quorum_types::types::Threshold(
-        u8::try_from(members.len()).unwrap() / 2 + 1,
-    );
+    let threshold =
+        trust_quorum_types::types::Threshold(members.num_members() / 2 + 1);
 
     let initial_epoch = trust_quorum_types::types::Epoch(1);
 
@@ -1364,13 +1363,15 @@ async fn init_trust_quorum(
             .await?
             .expect("This node is a coordinator");
 
-        if status.acked_prepares == members {
+        if status.acked_prepares == *members.as_set() {
             info!(log, "RSS: trust quorum prepared at all nodes");
             break;
         }
 
-        let still_waiting =
-            itertools::join(members.difference(&status.acked_prepares), ",");
+        let still_waiting = itertools::join(
+            members.as_set().difference(&status.acked_prepares),
+            ",",
+        );
         info!(
             log,
             "RSS: Trust quorum coordinator waiting for PrepareAcks";

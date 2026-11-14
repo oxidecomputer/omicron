@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "63.0.0"
+    "version": "64.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6960,11 +6960,7 @@
             "minimum": 0
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
@@ -9101,11 +9097,7 @@
             "minimum": 0
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
@@ -10526,9 +10518,16 @@
             "description": "The node is not currently coordinating a reconfiguration or LRTQ upgrade.",
             "type": "object",
             "properties": {
+              "latest_committed_epoch": {
+                "nullable": true,
+                "description": "The latest configuration epoch this node has committed.\n\nThis is never greater than `latest_config_epoch`.\n\nIf this value is lower than N (see `latest_config_epoch`), it means that _this_ node has not committed N, not that _no_ node has. (For example, the coordinator may have crashed after Nexus started committing, but before its own commit arrived.)\n\nThis is `None` if the node has not committed a trust quorum configuration, including a node that has not yet upgraded from LRTQ.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
               "latest_config_epoch": {
                 "nullable": true,
-                "description": "The latest configuration epoch this node has persisted.\n\nIf this is greater than or equal to the epoch that Nexus is driving, the coordinator started that epoch and then stopped for some reason, and Nexus can abort this configuration. If lower than the Nexus epoch, then reconfiguration has not started yet.",
+                "description": "The latest configuration epoch this node has persisted.\n\nBelow, N is the epoch of a configuration this node was asked to coordinate.\n\n* If lower than N, then this node has not persisted that configuration: it never received or accepted it, or it stopped coordinating it (for example, by restarting) before collecting shares and persisting it.\n\n* If equal to N, then this node started coordinating that epoch but is no longer doing so: either it committed the epoch (see `latest_committed_epoch`), or it lost its coordination state, for example by restarting.\n\n* If greater than N, then this node has moved on to a newer configuration, and N has been superseded.\n\nThis is `None` if the node has not persisted a trust quorum configuration, including an LRTQ node that has not yet persisted an upgrade configuration.",
                 "type": "integer",
                 "format": "uint64",
                 "minimum": 0
@@ -10545,6 +10544,16 @@
             ]
           }
         ]
+      },
+      "TrustQuorumMembers": {
+        "description": "The members of a trust quorum.\n\nA trust quorum has between [`TRUST_QUORUM_MIN_MEMBERS`] and [`TRUST_QUORUM_MAX_MEMBERS`] members, inclusive.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TrustQuorumNetworkConfig": {
         "description": "Network configuration used to bring up the control plane.\n\nThis type mirrors `bootstore::schemes::v0::NetworkConfig` but adds `JsonSchema` for API compatibility.",

@@ -16,8 +16,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
-use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
-use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
@@ -145,14 +144,12 @@ impl TrustQuorumConfig {
         proposed: ProposedTrustQuorumConfig,
         coordinator: BaseboardId,
     ) -> Self {
-        let num_members = u8::try_from(proposed.members.len()).unwrap();
+        let num_members = proposed.members.num_members();
         let state = if proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes {
             TrustQuorumConfigState::PreparingLrtqUpgrade
         } else {
             TrustQuorumConfigState::Preparing
         };
-        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
-        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
         TrustQuorumConfig {
             rack_id: proposed.rack_id,
             epoch: proposed.epoch,
@@ -164,6 +161,7 @@ impl TrustQuorumConfig {
             encrypted_rack_secrets: None,
             members: proposed
                 .members
+                .into_set()
                 .into_iter()
                 .map(|id| {
                     (
@@ -187,12 +185,10 @@ impl TrustQuorumConfig {
 
     pub fn new_rss_committed_config(
         rack_id: RackUuid,
-        initial_members: BTreeSet<BaseboardId>,
+        initial_members: TrustQuorumMembers,
         coordinator: BaseboardId,
     ) -> TrustQuorumConfig {
-        let num_members = u8::try_from(initial_members.len()).unwrap();
-        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
-        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
+        let num_members = initial_members.num_members();
         let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,
@@ -204,6 +200,7 @@ impl TrustQuorumConfig {
             coordinator,
             encrypted_rack_secrets: None,
             members: initial_members
+                .into_set()
                 .into_iter()
                 .map(|id| {
                     (
@@ -263,7 +260,7 @@ pub struct ProposedTrustQuorumConfig {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub is_lrtq_upgrade: IsLrtqUpgrade,
-    pub members: BTreeSet<BaseboardId>,
+    pub members: TrustQuorumMembers,
 }
 
 impl ProposedTrustQuorumConfig {
@@ -294,6 +291,8 @@ impl ProposedTrustQuorumConfig {
                 sled_to_remove
             )));
         }
+        let members = TrustQuorumMembers::new(members)
+            .map_err(|error| Error::internal_error(&error.to_string()))?;
 
         Ok(ProposedTrustQuorumConfig {
             rack_id,
@@ -421,7 +420,8 @@ mod tests {
             }
             let mut config = TrustQuorumConfig::new_rss_committed_config(
                 rack_id,
-                members,
+                TrustQuorumMembers::new(members)
+                    .expect("test members are within the size bounds"),
                 other_members[0].clone(),
             );
             config.epoch = epoch;
@@ -513,7 +513,8 @@ mod tests {
         let coordinator = members.first().expect("at least one member").clone();
         let mut config = TrustQuorumConfig::new_rss_committed_config(
             RackUuid::new_v4(),
-            members,
+            TrustQuorumMembers::new(members)
+                .expect("test members are within the size bounds"),
             coordinator,
         );
         config.epoch = epoch;
@@ -541,13 +542,16 @@ mod tests {
                 is_lrtq_upgrade: IsLrtqUpgrade::No {
                     last_committed_epoch: Epoch(5),
                 },
-                members: [
-                    test_baseboard("member-0"),
-                    test_baseboard("member-1"),
-                    test_baseboard("member-3"),
-                ]
-                .into_iter()
-                .collect(),
+                members: TrustQuorumMembers::new(
+                    [
+                        test_baseboard("member-0"),
+                        test_baseboard("member-1"),
+                        test_baseboard("member-3"),
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
+                .expect("three members are within the size bounds"),
             }
         );
 

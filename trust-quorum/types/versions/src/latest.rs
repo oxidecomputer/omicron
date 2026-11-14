@@ -28,11 +28,19 @@ pub mod crypto {
     pub use crate::v1::crypto::Sha3_256Digest;
 }
 
+pub mod membership {
+    pub use crate::v2::membership::TRUST_QUORUM_MAX_MEMBERS;
+    pub use crate::v2::membership::TRUST_QUORUM_MIN_MEMBERS;
+    pub use crate::v2::membership::TrustQuorumMembers;
+    pub use crate::v2::membership::TrustQuorumMembersError;
+}
+
 pub mod messages {
     pub use crate::v1::messages::CommitRequest;
-    pub use crate::v1::messages::LrtqUpgradeMsg;
     pub use crate::v1::messages::PrepareAndCommitRequest;
-    pub use crate::v1::messages::ReconfigureMsg;
+
+    pub use crate::v2::messages::LrtqUpgradeMsg;
+    pub use crate::v2::messages::ReconfigureMsg;
 }
 
 pub mod persistent_state {
@@ -45,6 +53,8 @@ pub mod status {
     pub use crate::v1::status::CoordinatorStatus;
     pub use crate::v1::status::NodePersistentStateSummary;
     pub use crate::v1::status::NodeStatus;
+
+    pub use crate::v2::status::NotCoordinatingStatus;
 }
 
 pub mod types {

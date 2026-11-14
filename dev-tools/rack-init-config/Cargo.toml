@@ -21,3 +21,4 @@ toml.workspace = true
 [dev-dependencies]
 camino-tempfile.workspace = true
 sled-agent-rack-setup.workspace = true
+trust-quorum-types.workspace = true

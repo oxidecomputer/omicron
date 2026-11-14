@@ -18,5 +18,6 @@ reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+trust-quorum-types-versions.workspace = true
 wicketd-commission-types-versions.workspace = true
 omicron-workspace-hack.workspace = true

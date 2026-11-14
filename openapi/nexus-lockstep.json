@@ -5728,11 +5728,7 @@
             "$ref": "#/components/schemas/BaseboardId"
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           }
         },
         "required": [
@@ -10588,6 +10584,16 @@
           "prepared",
           "committed"
         ]
+      },
+      "TrustQuorumMembers": {
+        "description": "The members of a trust quorum.\n\nA trust quorum has between [`TRUST_QUORUM_MIN_MEMBERS`] and [`TRUST_QUORUM_MAX_MEMBERS`] members, inclusive.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TufRepoVersion": {
         "oneOf": [
