@@ -32,7 +32,9 @@ use trust_quorum_protocol::{
 };
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
-use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::status::{
+    CommitStatus, CoordinatorStatus, NodeStatus, NotCoordinatingStatus,
+};
 use trust_quorum_types::types::Epoch;
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
@@ -52,13 +54,8 @@ const CONN_TO_MAIN_CHANNEL_BOUND: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoordinatorStatusSnapshot {
-    Coordinating {
-        status: CoordinatorStatus,
-    },
-    NotCoordinating {
-        latest_config_epoch: Option<Epoch>,
-        latest_committed_epoch: Option<Epoch>,
-    },
+    Coordinating { status: CoordinatorStatus },
+    NotCoordinating(NotCoordinatingStatus),
 }
 
 #[derive(Debug, Clone)]
@@ -276,10 +273,12 @@ impl NodeTaskHandle {
             CoordinatorStatusSnapshot::Coordinating { status } => {
                 Ok(Some(status))
             }
-            CoordinatorStatusSnapshot::NotCoordinating {
-                latest_config_epoch: _,
-                latest_committed_epoch: _,
-            } => Ok(None),
+            CoordinatorStatusSnapshot::NotCoordinating(
+                NotCoordinatingStatus {
+                    latest_config_epoch: _,
+                    latest_committed_epoch: _,
+                },
+            ) => Ok(None),
         }
     }
 
@@ -748,17 +747,19 @@ impl NodeTask {
                             acked_prepares: cs.op().acked_prepares(),
                         },
                     },
-                    None => CoordinatorStatusSnapshot::NotCoordinating {
-                        latest_config_epoch: self
-                            .ctx
-                            .persistent_state()
-                            .latest_config()
-                            .map(|c| c.epoch),
-                        latest_committed_epoch: self
-                            .ctx
-                            .persistent_state()
-                            .latest_committed_epoch(),
-                    },
+                    None => CoordinatorStatusSnapshot::NotCoordinating(
+                        NotCoordinatingStatus {
+                            latest_config_epoch: self
+                                .ctx
+                                .persistent_state()
+                                .latest_config()
+                                .map(|c| c.epoch),
+                            latest_committed_epoch: self
+                                .ctx
+                                .persistent_state()
+                                .latest_committed_epoch(),
+                        },
+                    ),
                 };
                 let _ = tx.send(snapshot);
             }
@@ -1530,10 +1531,10 @@ mod tests {
         // coordinating nor has persisted any config.
         assert_eq!(
             coordinator.coordinator_status_snapshot().await.unwrap(),
-            CoordinatorStatusSnapshot::NotCoordinating {
+            CoordinatorStatusSnapshot::NotCoordinating(NotCoordinatingStatus {
                 latest_config_epoch: None,
                 latest_committed_epoch: None,
-            },
+            }),
         );
 
         coordinator.reconfigure(initial_config.clone()).await.unwrap();
@@ -1595,10 +1596,10 @@ mod tests {
         // reports both the persisted and the committed epoch.
         assert_eq!(
             coordinator.coordinator_status_snapshot().await.unwrap(),
-            CoordinatorStatusSnapshot::NotCoordinating {
+            CoordinatorStatusSnapshot::NotCoordinating(NotCoordinatingStatus {
                 latest_config_epoch: Some(Epoch(1)),
                 latest_committed_epoch: Some(Epoch(1)),
-            },
+            }),
         );
 
         // Now load the rack secret at all nodes
