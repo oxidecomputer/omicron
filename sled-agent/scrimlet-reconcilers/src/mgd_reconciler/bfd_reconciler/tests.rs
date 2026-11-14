@@ -558,8 +558,7 @@ async fn proptest_full_reconciliation() {
     let client = Client::new(
         &format!("http://{}", mgdctx.address()),
         logctx.log.clone(),
-    )
-    .expect("mgd client");
+    );
     let rt = tokio::runtime::Handle::current();
 
     proptest!(|(input: TestInput)| {
