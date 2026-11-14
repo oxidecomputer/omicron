@@ -297,7 +297,7 @@ impl From<Error> for dropshot::HttpError {
                         )
                     }
                     err @ (InstanceError::WaitForServiceTimeout(_)
-                    | InstanceError::PropolisHttpServerTimeout
+                    | InstanceError::PropolisHttpServerTimeout(_)
                     | InstanceError::VnicCreation(_)
                     | InstanceError::Notification(_)
                     | InstanceError::Migration(_)
