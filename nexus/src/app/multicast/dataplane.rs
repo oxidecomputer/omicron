@@ -31,15 +31,18 @@
 //! source filtering at the **group level** using the union of all member
 //! sources.
 //!
-//! - **SSM addresses** (232/8, ff3x::/32): Sources are **required** per-member.
-//!   Each member must specify at least one source IP.
+//! - **SSM addresses** ([`is_ssm_address`]) cover IPv4 232/8 plus IPv6 ff3x
+//!   and ffbx groups whose prefix-length octet is zero ([RFC 3306 §6],
+//!   [RFC 7371 §4.1.2]). Sources are **required**: each member must specify
+//!   at least one source IP.
 //! - **ASM addresses**: Sources are **optional** per-member. Empty sources
 //!   means receive from any source; non-empty enables source filtering.
 //!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`UNDERLAY_MULTICAST_SUBNET`]: dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET
+//! [RFC 3306 §6]: https://www.rfc-editor.org/rfc/rfc3306#section-6
+//! [RFC 7371 §4.1.2]: https://www.rfc-editor.org/rfc/rfc7371#section-4.1.2
 
 use std::collections::HashMap;
-use std::net::IpAddr;
 
 use futures::future::try_join_all;
 use oxnet::MulticastMac;
@@ -47,23 +50,27 @@ use slog::{Logger, debug, error, info};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
-    ExternalForwarding, InternalForwarding, IpSrc, MacAddr,
-    MulticastGroupCreateExternalEntry, MulticastGroupCreateUnderlayEntry,
-    MulticastGroupExternalResponse, MulticastGroupMember,
-    MulticastGroupResponse, MulticastGroupUnderlayResponse,
-    MulticastGroupUpdateExternalEntry, MulticastGroupUpdateUnderlayEntry,
-    MulticastTag, NatTarget, UnderlayMulticastIpv6, Vni,
+    ExternalForwarding, ExternalInternalForwarding, ExternalNatTarget, IpSrc,
+    MacAddr, MulticastGroupCreateExternalEntry,
+    MulticastGroupCreateUnderlayEntry, MulticastGroupExternalResponse,
+    MulticastGroupMember, MulticastGroupResponse,
+    MulticastGroupUnderlayResponse, MulticastGroupUpdateExternalEntry,
+    MulticastGroupUpdateUnderlayEntry,
+};
+use dpd_types::mcast::{
+    ExternalMulticastIp, MulticastTag, UnderlayMulticastIpv6, is_ssm_address,
 };
 use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
-use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::Error;
 use sled_agent_types::early_networking::SwitchSlot;
 
+use super::invalid_stored_address;
 use crate::app::dpd_clients;
+use crate::app::instance_network::to_dpd_vni;
 
 /// Trait for extracting external responses from mixed DPD response types.
 trait IntoExternalResponse {
@@ -96,27 +103,6 @@ impl IntoExternalResponse for MulticastGroupResponse {
             _ => {
                 Err(Error::internal_error("expected external group from get()"))
             }
-        }
-    }
-}
-
-/// Convert an [`IpAddr`] into a DPD [`UnderlayMulticastIpv6`],
-/// rejecting IPv4.
-///
-/// Note: named without the `Ipv6` suffix because the input type is the general
-/// `IpAddr`.
-trait IntoUnderlayMulticast {
-    /// Convert to [`UnderlayMulticastIpv6`], rejecting IPv4 addresses.
-    fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error>;
-}
-
-impl IntoUnderlayMulticast for IpAddr {
-    fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error> {
-        match self {
-            IpAddr::V6(ipv6) => Ok(UnderlayMulticastIpv6(ipv6)),
-            IpAddr::V4(_) => Err(Error::invalid_request(
-                "underlay multicast groups must use IPv6 addresses",
-            )),
         }
     }
 }
@@ -193,7 +179,7 @@ impl MulticastDataplaneClient {
         switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupUnderlayResponse> {
         let create = MulticastGroupCreateUnderlayEntry {
-            group_ip: ip.clone(),
+            group_ip: ip,
             members: Vec::new(),
             tag: Some(tag.to_string()),
         };
@@ -258,7 +244,7 @@ impl MulticastDataplaneClient {
                     "dpd_operation" => "dpd_ensure_external_created"
                 );
                 let response = client
-                    .multicast_group_get(&create.group_ip)
+                    .multicast_group_get(&create.group_ip.ip())
                     .await
                     .map_err(|e| {
                         error!(
@@ -290,7 +276,7 @@ impl MulticastDataplaneClient {
     async fn dpd_update_external_or_create(
         &self,
         client: &dpd_client::Client,
-        group_ip: IpAddr,
+        group_ip: ExternalMulticastIp,
         tag: &MulticastTag,
         update: &MulticastGroupUpdateExternalEntry,
         create: &MulticastGroupCreateExternalEntry,
@@ -311,7 +297,7 @@ impl MulticastDataplaneClient {
                         if resp.status() == reqwest::StatusCode::CONFLICT =>
                     {
                         let response = client
-                            .multicast_group_get(&group_ip)
+                            .multicast_group_get(&group_ip.ip())
                             .await
                             .map_err(|e| {
                                 error!(
@@ -395,31 +381,25 @@ impl MulticastDataplaneClient {
             Error::internal_error("multicast group missing tag")
         })?;
 
-        let underlay_ip_admin =
-            underlay_group.multicast_ip.ip().into_underlay_multicast()?;
-        let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
-            IpAddr::V6(ipv6) => ipv6,
-            IpAddr::V4(_) => {
-                return Err(Error::internal_error(
-                    "underlay multicast groups must use IPv6 addresses",
-                ));
-            }
-        };
+        let underlay_ip_admin = underlay_group
+            .dpd_multicast_ip()
+            .map_err(invalid_stored_address)?;
+        let underlay_ipv6 = underlay_ip_admin.ip();
 
-        let nat_target = NatTarget {
-            internal_ip: underlay_ipv6,
+        let nat_target = ExternalNatTarget {
+            internal_ip: underlay_ip_admin,
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-            vni: Vni::from(u32::from(external_group.vni.0)),
+            vni: to_dpd_vni(external_group.vni.0),
         };
 
-        let external_group_ip = external_group.multicast_ip.ip();
+        let external_group_mcast = external_group
+            .dpd_multicast_ip()
+            .map_err(invalid_stored_address)?;
 
         // Source filtering per RFC 4607:
-        // - SSM (232/8, ff3x::/32): always use specific sources. API
-        //   validation prevents SSM joins without sources.
-        // - ASM: use specific sources when all members specify sources,
-        //   otherwise None to allow any source at the switch level.
-        let sources_dpd = if is_ssm_address(external_group_ip) {
+        // - SSM (see `is_ssm_address`): always use specific sources.
+        //   API validation prevents SSM joins without sources.
+        let sources_dpd = if is_ssm_address(external_group_mcast.ip()) {
             Some(
                 source_filter
                     .specific_sources
@@ -428,7 +408,7 @@ impl MulticastDataplaneClient {
                     .collect::<Vec<_>>(),
             )
         } else if source_filter.has_any_source_member {
-            None
+            Some(vec![IpSrc::Any])
         } else {
             Some(
                 source_filter
@@ -444,7 +424,6 @@ impl MulticastDataplaneClient {
                 let tag = tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
-                let underlay_ip_admin = underlay_ip_admin.clone();
                 async move {
                     // Ensure underlay is present idempotently
                     let underlay_response = self
@@ -460,12 +439,12 @@ impl MulticastDataplaneClient {
                     // yet supported. When egress support is added, this should
                     // be populated from group configuration.
                     let external_entry = MulticastGroupCreateExternalEntry {
-                        group_ip: external_group_ip,
+                        group_ip: external_group_mcast,
                         external_forwarding: ExternalForwarding {
                             vlan_id: None,
                         },
-                        internal_forwarding: InternalForwarding {
-                            nat_target: Some(nat_target),
+                        internal_forwarding: ExternalInternalForwarding {
+                            nat_target,
                         },
                         tag: Some(tag.clone()),
                         sources,
@@ -551,33 +530,26 @@ impl MulticastDataplaneClient {
         // Pre-compute shared data once
         let underlay_ip_admin = params
             .underlay_group
-            .multicast_ip
-            .ip()
-            .into_underlay_multicast()?;
-        let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {
-            IpAddr::V6(ipv6) => ipv6,
-            IpAddr::V4(_) => {
-                return Err(Error::internal_error(
-                    "underlay multicast groups must use IPv6 addresses",
-                ));
-            }
-        };
+            .dpd_multicast_ip()
+            .map_err(invalid_stored_address)?;
+        let underlay_ipv6 = underlay_ip_admin.ip();
 
-        let nat_target = NatTarget {
-            internal_ip: underlay_ipv6,
+        let nat_target = ExternalNatTarget {
+            internal_ip: underlay_ip_admin,
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-            vni: Vni::from(u32::from(params.external_group.vni.0)),
+            vni: to_dpd_vni(params.external_group.vni.0),
         };
 
         let new_name_str = params.new_name.to_string();
-        let external_group_ip = params.external_group.multicast_ip.ip();
+        let external_group_mcast = params
+            .external_group
+            .dpd_multicast_ip()
+            .map_err(invalid_stored_address)?;
 
         // Source filtering per RFC 4607:
-        // - SSM (232/8, ff3x::/32): always use specific sources. API
-        //   validation prevents SSM joins without sources.
-        // - ASM: use specific sources when all members specify sources,
-        //   otherwise None to allow any source at the switch level.
-        let sources_dpd = if is_ssm_address(external_group_ip) {
+        // - SSM (see `is_ssm_address`): always use specific sources.
+        //   API validation prevents SSM joins without sources.
+        let sources_dpd = if is_ssm_address(external_group_mcast.ip()) {
             Some(
                 params
                     .source_filter
@@ -587,7 +559,7 @@ impl MulticastDataplaneClient {
                     .collect::<Vec<_>>(),
             )
         } else if params.source_filter.has_any_source_member {
-            None
+            Some(vec![IpSrc::Any])
         } else {
             Some(
                 params
@@ -604,7 +576,6 @@ impl MulticastDataplaneClient {
                 let new_name = new_name_str.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
-                let underlay_ip_admin = underlay_ip_admin.clone();
                 async move {
                     // Ensure/get underlay members, create if missing
                     let (members, existing_tag) = match client
@@ -632,7 +603,7 @@ impl MulticastDataplaneClient {
                             let created = self
                                 .dpd_ensure_underlay_created(
                                     client,
-                                    underlay_ip_admin.clone(),
+                                    underlay_ip_admin,
                                     db_tag,
                                     switch_slot,
                                 )
@@ -689,7 +660,7 @@ impl MulticastDataplaneClient {
                     let external_forwarding =
                         ExternalForwarding { vlan_id: None };
                     let internal_forwarding =
-                        InternalForwarding { nat_target: Some(nat_target) };
+                        ExternalInternalForwarding { nat_target };
 
                     let update_entry = MulticastGroupUpdateExternalEntry {
                         external_forwarding: external_forwarding.clone(),
@@ -697,7 +668,7 @@ impl MulticastDataplaneClient {
                         sources: sources.clone(),
                     };
                     let create_entry = MulticastGroupCreateExternalEntry {
-                        group_ip: external_group_ip,
+                        group_ip: external_group_mcast,
                         external_forwarding,
                         internal_forwarding,
                         tag: Some(new_name.clone()),
@@ -707,7 +678,7 @@ impl MulticastDataplaneClient {
                     let external_response = self
                         .dpd_update_external_or_create(
                             client,
-                            external_group_ip,
+                            external_group_mcast,
                             &tag,
                             &update_entry,
                             &create_entry,
@@ -776,17 +747,18 @@ impl MulticastDataplaneClient {
     {
         let dpd_clients = &self.dpd_clients;
         let operation_name = operation_name.to_string();
+        let underlay_ip_admin = underlay_group
+            .dpd_multicast_ip()
+            .map_err(invalid_stored_address)?;
 
         let modify_ops = dpd_clients.iter().map(|(switch_slot, client)| {
-            let underlay_ip = underlay_group.multicast_ip.ip();
+            let underlay_ip = underlay_ip_admin.ip();
             let member = member.clone();
             let log = self.log.clone();
             let modify_fn = modify_fn.clone();
             let operation_name = operation_name.clone();
 
             async move {
-                let underlay_ip_admin = underlay_ip.into_underlay_multicast()?;
-
                 // Get current underlay group state, create if missing
                 let current_group_res = client
                     .multicast_group_get_underlay(&underlay_ip_admin)
@@ -813,7 +785,7 @@ impl MulticastDataplaneClient {
                         );
 
                         let create_entry = MulticastGroupCreateUnderlayEntry {
-                            group_ip: underlay_ip_admin.clone(),
+                            group_ip: underlay_ip_admin,
                             members: Vec::new(),
                             tag: underlay_group.tag.clone(),
                         };
@@ -1031,7 +1003,7 @@ impl MulticastDataplaneClient {
     /// - Group has different configurations across switches (config drift)
     fn log_drift_issues<'a>(
         &self,
-        group_ip: IpAddr,
+        group_ip: ExternalMulticastIp,
         first_location: &SwitchSlot,
         first_config: &MulticastGroupResponse,
         found_results: &[&'a (
@@ -1080,7 +1052,7 @@ impl MulticastDataplaneClient {
     /// saga that will fix all switches atomically.
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
-        group_ip: IpAddr,
+        group_ip: ExternalMulticastIp,
     ) -> MulticastDataplaneResult<Option<MulticastGroupExternalResponse>> {
         debug!(
             self.log,
@@ -1093,7 +1065,7 @@ impl MulticastDataplaneClient {
         let fetch_ops = self.dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
             async move {
-                match client.multicast_group_get(&group_ip).await {
+                match client.multicast_group_get(&group_ip.ip()).await {
                     Ok(response) => {
                         Ok((switch_slot, Some(response.into_inner())))
                     }
@@ -1257,7 +1229,7 @@ impl MulticastDataplaneClient {
     /// order by switch location.
     pub(crate) async fn fetch_underlay_members(
         &self,
-        underlay_ip: IpAddr,
+        underlay_ip: UnderlayMulticastIpv6,
     ) -> MulticastDataplaneResult<Option<Vec<MulticastGroupMember>>> {
         let (switch_slot, client) = self.select_one_switch()?;
 
@@ -1269,12 +1241,7 @@ impl MulticastDataplaneClient {
             "dpd_operation" => "fetch_underlay_members"
         );
 
-        match client
-            .multicast_group_get_underlay(
-                &underlay_ip.into_underlay_multicast()?,
-            )
-            .await
-        {
+        match client.multicast_group_get_underlay(&underlay_ip).await {
             Ok(response) => {
                 let members = response.into_inner().members;
                 debug!(

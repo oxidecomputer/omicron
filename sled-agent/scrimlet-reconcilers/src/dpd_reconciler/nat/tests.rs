@@ -6,6 +6,7 @@ use super::*;
 use anyhow::Context;
 use gateway_messages::SpPort;
 use omicron_common::OMICRON_DPD_TAG;
+use omicron_common::api::external::Vni;
 use omicron_test_utils::dev;
 use proptest::prelude::any;
 use proptest::prelude::proptest as proptest_macro;
@@ -97,7 +98,7 @@ struct TestInput {
     #[strategy(proptest::collection::btree_set(
         any::<NatEntry>().prop_filter(
             "non-service VNI",
-            |entry| entry.vni != Vni::SERVICES_VNI
+            |entry| entry.vni != to_dpd_vni(Vni::SERVICES_VNI)
         ),
         0..32,
     ).prop_filter(
@@ -243,11 +244,7 @@ impl TestInput {
                 .await
                 .context("failed while streaming ipv4 NAT entries")?
             {
-                all_entries.insert(
-                    NatEntry::try_from(e.clone()).with_context(|| {
-                        format!("failed to convert {e:?} to NatEntry")
-                    })?,
-                );
+                all_entries.insert(NatEntry::from(e));
             }
         }
 
@@ -266,11 +263,7 @@ impl TestInput {
                 .await
                 .context("failed while streaming ipv6 NAT entries")?
             {
-                all_entries.insert(
-                    NatEntry::try_from(e.clone()).with_context(|| {
-                        format!("failed to convert {e:?} to NatEntry")
-                    })?,
-                );
+                all_entries.insert(NatEntry::from(e));
             }
         }
 
@@ -371,7 +364,8 @@ async fn proptest_full_reconciliation() {
             tag: OMICRON_DPD_TAG.to_owned(),
             log: logctx.log.clone(),
         },
-    );
+    )
+    .expect("built dpd client");
     let rt = tokio::runtime::Handle::current();
 
     let one_test_invocation = async |input: TestInput| {

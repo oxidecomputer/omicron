@@ -5,6 +5,7 @@
 //! Multicast group types for version INITIAL.
 
 use api_identity::ObjectIdentity;
+use dpd_types::mcast;
 use omicron_common::api::external::{
     IdentityMetadata, NameOrId, ObjectIdentity,
 };
@@ -197,8 +198,6 @@ where
     }
 }
 
-use crate::impls::multicast::{validate_multicast_ip, validate_source_ip};
-
 /// Deserializer for validating multicast IP addresses.
 pub(crate) fn validate_multicast_ip_param<'de, D>(
     deserializer: D,
@@ -208,7 +207,7 @@ where
 {
     let ip_opt = Option::<IpAddr>::deserialize(deserializer)?;
     if let Some(ip) = ip_opt {
-        validate_multicast_ip(ip).map_err(|e| de::Error::custom(e))?;
+        mcast::validate_external_multicast_ip(ip).map_err(de::Error::custom)?;
     }
     Ok(ip_opt)
 }
@@ -223,7 +222,7 @@ where
     let ips_opt = Option::<Vec<IpAddr>>::deserialize(deserializer)?;
     if let Some(ref ips) = ips_opt {
         for ip in ips {
-            validate_source_ip(*ip).map_err(|e| de::Error::custom(e))?;
+            mcast::ExactSource::new(*ip).map_err(de::Error::custom)?;
         }
     }
     Ok(ips_opt)

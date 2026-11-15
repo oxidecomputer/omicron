@@ -27,6 +27,8 @@ PACKAGES=(
 
 CRATES=(
   "dpd-client"
+  "dpd-types"
+  "dpd-types-versions"
 )
 
 REPO="oxidecomputer/dendrite"

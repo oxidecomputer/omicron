@@ -76,12 +76,13 @@
 //! The RPW ensures eventual consistency between database state and dataplane
 //! configuration (applied via DPD to switches).
 //!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`UNDERLAY_MULTICAST_SUBNET`]: dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
 use diesel::{AsExpression, FromSqlRow, Insertable, Queryable, Selectable};
+use dpd_types::mcast;
 use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -457,12 +458,17 @@ impl MemberParentRef {
 
 /// Database representation of an underlay multicast group.
 ///
-/// Underlay groups are system-generated admin-local IPv6 multicast addresses
-/// used as a NAT target for internal multicast traffic. Underlay groups are
-/// VNI-agnostic; the VNI is an overlay identifier carried by [ExternalMulticastGroup].
+/// Oxide-policy allocates underlay NAT targets from the admin-locally scoped
+/// ff04::/64 subnet. Dendrite's [`UnderlayMulticastIpv6`] enforces this
+/// allocation.
+///
+/// Underlay groups are VNI-agnostic: the VNI is an overlay identifier carried
+/// by [ExternalMulticastGroup].
 ///
 /// These are distinct from [ExternalMulticastGroup] which are external-facing
 /// addresses allocated from IP pools, specified by users or applications.
+///
+/// [`UnderlayMulticastIpv6`]: mcast::UnderlayMulticastIpv6
 #[derive(
     Queryable,
     Insertable,
@@ -498,4 +504,41 @@ pub struct UnderlayMulticastGroup {
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
+}
+
+impl ExternalMulticastGroup {
+    /// Validate the stored address using `dpd-types`.
+    ///
+    /// The `INET` column is read as `IpNetwork` without `dpd-types` address
+    /// validation. This method validates the stored address before use by DPD.
+    pub fn dpd_multicast_ip(
+        &self,
+    ) -> Result<mcast::ExternalMulticastIp, mcast::ExternalMulticastIpError>
+    {
+        mcast::ExternalMulticastIp::new(self.multicast_ip.ip())
+    }
+}
+
+impl UnderlayMulticastGroup {
+    /// Validate the stored underlay address using `dpd-types`.
+    pub fn dpd_multicast_ip(
+        &self,
+    ) -> Result<mcast::UnderlayMulticastIpv6, UnderlayMulticastIpError> {
+        match self.multicast_ip.ip() {
+            IpAddr::V6(ip) => Ok(mcast::UnderlayMulticastIpv6::new(ip)?),
+            IpAddr::V4(ip) => Err(UnderlayMulticastIpError::NotIpv6(ip)),
+        }
+    }
+}
+
+/// Failure to convert a stored underlay address into Dendrite's
+/// `UnderlayMulticastIpv6`.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum UnderlayMulticastIpError {
+    /// The stored address is IPv4.
+    #[error("underlay multicast address {0} is not IPv6")]
+    NotIpv6(std::net::Ipv4Addr),
+    /// Dendrite rejected the stored IPv6 address.
+    #[error(transparent)]
+    Underlay(#[from] mcast::UnderlayMulticastError),
 }

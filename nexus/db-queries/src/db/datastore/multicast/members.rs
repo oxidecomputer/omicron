@@ -41,11 +41,10 @@ use crate::db::pagination::paginated;
 /// Captures both the union of specific source IPs and whether any member
 /// wants "any source". Switch-level filtering behavior depends on address type:
 ///
-/// - **SSM (232.0.0.0/8, ff3x::/32)**: Always use `specific_sources` per RFC 4607.
+/// - **SSM ([`dpd_types::mcast::is_ssm_address`])**: Always use
+///   `specific_sources` per RFC 4607.
 ///   The `has_any_source_member` flag is ignored because API validation
 ///   prevents SSM joins without sources.
-/// - **ASM**: If `has_any_source_member` is true, passes `None` to DPD
-///   (no switch-level filtering). Otherwise uses `specific_sources`.
 /// - **OPTE**: Always uses per-member source lists for fine-grained filtering,
 ///   regardless of switch-level behavior.
 ///
@@ -61,8 +60,6 @@ pub struct SourceFilterState {
 
     /// True if any member has empty `source_ips` (wants any source).
     ///
-    /// For ASM groups: when true, switch-level source filtering is disabled
-    /// (sources passed as `None` to Dendrite).
     /// For SSM groups: ignored per RFC 4607 (API validation prevents SSM joins
     /// without sources).
     pub has_any_source_member: bool,
@@ -392,11 +389,6 @@ impl DataStore {
     ///
     /// Designed for batch lookups to avoid n+1 query patterns. Pass multiple
     /// group IDs to fetch in a single database round-trip.
-    ///
-    /// # DPD Source Filtering
-    ///
-    /// When `has_any_source_member` is true, pass `None` to DPD for sources
-    /// (disabling switch-level filtering). Otherwise, use `specific_sources`.
     ///
     /// # Parent Kinds
     ///

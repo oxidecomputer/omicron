@@ -532,8 +532,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-# TODO: point back at dendrite main once oxidecomputer/dendrite#371 merges.
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "51a30726e7776ad2bce29758a474c294c3d9acc6" }
+# TODO: -> dendrite main once oxidecomputer/dendrite#396 merges.
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "8a502d2768642cd2b7cf2d13d446e3a011af5a23" }
+dpd-types = { git = "https://github.com/oxidecomputer/dendrite", rev = "8a502d2768642cd2b7cf2d13d446e3a011af5a23" }
+dpd-types-versions = { git = "https://github.com/oxidecomputer/dendrite", rev = "8a502d2768642cd2b7cf2d13d446e3a011af5a23" }
 dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.9.1"
 dropshot-api-manager-types = "0.9.1"

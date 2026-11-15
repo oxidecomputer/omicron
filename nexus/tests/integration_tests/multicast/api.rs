@@ -22,6 +22,8 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
+use dpd_client::types::{IpSrc, MulticastGroupResponse};
+use dpd_types::mcast::is_ssm_address;
 use http::{Method, StatusCode};
 
 use nexus_test_utils::http_testing::{
@@ -41,7 +43,6 @@ use nexus_types::external_api::multicast::{
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types_versions::latest::instance::Instance;
-use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 
 use super::*;
@@ -625,7 +626,7 @@ async fn test_ssm_source_validation(cptestctx: &ControlPlaneTestContext) {
         let join_url = format!(
             "/v1/instances/ssm-inst-joiner/multicast-groups/{group_id}?project={project_name}"
         );
-        let error = NexusRequest::new(
+        let err = NexusRequest::new(
             RequestBuilder::new(client, Method::PUT, &join_url)
                 .body(Some(&join_body_no_sources))
                 .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -637,10 +638,10 @@ async fn test_ssm_source_validation(cptestctx: &ControlPlaneTestContext) {
         .parsed_body::<dropshot::HttpErrorResponseBody>()
         .unwrap();
         assert_eq!(
-            error.error_code,
+            err.error_code,
             Some("InvalidRequest".to_string()),
             "Expected InvalidRequest for join-by-ID, got: {:?}",
-            error.error_code
+            err.error_code
         );
     }
 
@@ -788,6 +789,47 @@ async fn test_join_by_ip_not_in_pool_fails(
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 }
 
+#[nexus_test]
+async fn test_join_by_invalid_group_ip_fails(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "join-by-invalid-ip-project";
+    let instance_name = "join-by-invalid-ip-inst";
+
+    ops::join2(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+    )
+    .await;
+    create_instance(client, project_name, instance_name).await;
+
+    for group_ip in ["ff04::1", "232.0.0.0"] {
+        let join_url = format!(
+            "/v1/instances/{instance_name}/multicast-groups/{group_ip}?project={project_name}"
+        );
+        let err = NexusRequest::new(
+            RequestBuilder::new(client, Method::PUT, &join_url)
+                .body(Some(&InstanceMulticastGroupJoin::default()))
+                .expect_status(Some(StatusCode::BAD_REQUEST)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("join with an invalid group IP should fail");
+
+        let err_body: dropshot::HttpErrorResponseBody =
+            err.parsed_body().expect("error body should parse");
+        assert!(
+            err_body.message.starts_with("invalid multicast group address"),
+            "{group_ip}: Received: {}",
+            err_body.message
+        );
+    }
+
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+}
+
 /// Test joining existing group by IP: second instance joins the same IP
 /// without specifying sources.
 #[nexus_test]
@@ -864,6 +906,23 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
 async fn test_join_by_ip_asm_with_sources_succeeds(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    async fn dpd_sources(
+        cptestctx: &ControlPlaneTestContext,
+        ip: IpAddr,
+    ) -> Option<Vec<IpSrc>> {
+        match nexus_test_utils::dpd_client(cptestctx)
+            .multicast_group_get(&ip)
+            .await
+            .expect("multicast group should exist in DPD")
+            .into_inner()
+        {
+            MulticastGroupResponse::External { sources, .. } => sources,
+            MulticastGroupResponse::Underlay { .. } => {
+                panic!("expected external multicast group")
+            }
+        }
+    }
+
     let client = &cptestctx.external_client;
     let project_name = "join-by-ip-asm-sources-project";
 
@@ -918,6 +977,12 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     expected_sources.sort();
     assert_eq!(actual_sources, expected_sources);
 
+    let expected_dpd_sources = Some(
+        expected_sources.iter().copied().map(IpSrc::Exact).collect::<Vec<_>>(),
+    );
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
+    assert_eq!(dpd_sources(cptestctx, explicit_ip).await, expected_dpd_sources);
+
     // Second instance joins without sources (any-source subscription)
     let join_url2 = format!(
         "/v1/instances/{}/multicast-groups/{explicit_ip}?project={project_name}",
@@ -968,6 +1033,13 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     listed_sources.sort();
     assert_eq!(listed_sources, expected_sources);
     assert!(listed_group.has_any_source_member);
+
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
+    assert_eq!(dpd_sources(cptestctx, explicit_ip).await, None);
+
+    object_delete(client, &join_url2).await;
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
+    assert_eq!(dpd_sources(cptestctx, explicit_ip).await, expected_dpd_sources);
 
     cleanup_instances(
         cptestctx,
