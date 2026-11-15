@@ -258,9 +258,6 @@ pub mod multicast {
     pub use crate::v2026_03_14_00::multicast::MulticastGroup;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupUpdate;
-
-    pub use crate::impls::multicast::validate_multicast_ip;
-    pub use crate::impls::multicast::validate_source_ip;
 }
 
 pub mod multirack {

@@ -1710,8 +1710,11 @@ impl MulticastGroupReconciler {
             "reason" => "sled_id_unavailable_or_resolution_failed"
         );
 
+        let underlay_ip = underlay_group
+            .dpd_multicast_ip()
+            .context("invalid stored underlay multicast address")?;
         let current_members = dataplane_client
-            .fetch_underlay_members(underlay_group.multicast_ip.ip())
+            .fetch_underlay_members(underlay_ip)
             .await
             .context("failed to fetch DPD state for member removal")?;
 
@@ -1985,8 +1988,11 @@ impl MulticastGroupReconciler {
 
         // Fetch current DPD state to identify stale ports
         // We fetch from one switch since all should be consistent
+        let underlay_ip = underlay_group
+            .dpd_multicast_ip()
+            .context("invalid stored underlay multicast address")?;
         let current_dpd_members = dataplane_client
-            .fetch_underlay_members(underlay_group.multicast_ip.ip())
+            .fetch_underlay_members(underlay_ip)
             .await
             .context(
                 "failed to fetch current underlay group members from DPD",

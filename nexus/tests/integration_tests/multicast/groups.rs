@@ -15,13 +15,13 @@
 //! - Pool deletion protection (cannot delete pool with active groups)
 //! - DPD(-client) integration: verifies groups are programmed on switches
 //! - SSM pool and group tests:
-//!   - SSM groups require sources (232/8 for IPv4, ff3x::/32 for IPv6)
+//!   - SSM groups (per `is_ssm_address`) require sources
 //!   - ASM groups have optional source filtering
 //!   - Multiple SSM groups can share the same pool
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use dpd_client::types as dpd_types;
+use dpd_client::types::{IpSrc, MulticastGroupResponse};
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
@@ -106,6 +106,28 @@ async fn test_multicast_ip_pool_range_validation(
     )
     .await;
 
+    let ipv4_interior_ssm_null = IpRange::V4(
+        Ipv4Range::new(
+            Ipv4Addr::new(231, 255, 255, 255),
+            Ipv4Addr::new(233, 0, 0, 1),
+        )
+        .unwrap_or_else(|err| panic!("failed to build range: {err}")),
+    );
+    let err = object_create_error(
+        client,
+        range_url,
+        &ipv4_interior_ssm_null,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        err.message.starts_with(
+            "Cannot add multicast range to IP pool: Address 232.0.0.0 "
+        ),
+        "Received: {}",
+        err.message
+    );
+
     // Valid IPv4 multicast range should be accepted (using ASM range)
     let valid_ipv4_range = IpRange::V4(
         Ipv4Range::new(
@@ -151,6 +173,28 @@ async fn test_multicast_ip_pool_range_validation(
     )
     .await;
 
+    let ipv6_interior_base_address = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff06, 0, 0, 0, 0, 0, 0, 1),
+        )
+        .unwrap_or_else(|err| panic!("failed to build range: {err}")),
+    );
+    let err = object_create_error(
+        client,
+        v6_range_url,
+        &ipv6_interior_base_address,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        err.message.starts_with(
+            "Cannot add multicast range to IP pool: Address ff06:: "
+        ),
+        "Received: {}",
+        err.message
+    );
+
     // Valid IPv6 site-local multicast range (ff05::/16) should be accepted
     let valid_ipv6_range = IpRange::V6(
         Ipv6Range::new(
@@ -161,6 +205,214 @@ async fn test_multicast_ip_pool_range_validation(
     );
     object_create::<_, IpPoolRange>(client, v6_range_url, &valid_ipv6_range)
         .await;
+}
+
+#[nexus_test]
+async fn test_multicast_admin_local_pool_allocation(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let pool_name = "admin-local-pool";
+    let pool: IpPool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6,
+            pool_type: IpPoolType::Multicast,
+            assignment: IpPoolAssignment::Silos,
+        },
+    )
+    .await;
+    let range_url = format!("/v1/system/ip-pools/{pool_name}/ranges/add");
+    let underlay_range = IpRange::V6(
+        Ipv6Range::new("ff04::1".parse().unwrap(), "ff04::2".parse().unwrap())
+            .unwrap(),
+    );
+    object_create_error(
+        client,
+        &range_url,
+        &underlay_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    let first: Ipv6Addr = "ff04:0:0:1::1".parse().unwrap();
+    let last: Ipv6Addr = "ff04:0:0:1::2".parse().unwrap();
+    let range = IpRange::V6(Ipv6Range::new(first, last).unwrap());
+    object_create::<_, IpPoolRange>(client, &range_url, &range).await;
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
+
+    let project_name = "admin-local-project";
+    create_project(client, project_name).await;
+    create_default_ip_pools(client).await;
+    let instance = instance_for_multicast_groups(
+        cptestctx,
+        project_name,
+        "admin-local-instance",
+        false,
+        &[],
+    )
+    .await;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    for (selector, expected) in [
+        (first.to_string(), IpAddr::V6(first)),
+        ("admin-local-auto".to_string(), IpAddr::V6(last)),
+    ] {
+        let join_url = format!(
+            "/v1/instances/{}/multicast-groups/{selector}\
+             ?project={project_name}",
+            instance.identity.id,
+        );
+        let member: MulticastGroupMember = put_upsert(
+            client,
+            &join_url,
+            &InstanceMulticastGroupJoin {
+                source_ips: None,
+                ip_version: Some(IpVersion::V6),
+            },
+        )
+        .await;
+        assert_eq!(member.instance_id, instance.identity.id);
+        assert_eq!(member.multicast_ip, expected);
+
+        let group: MulticastGroup = object_get(
+            client,
+            &format!("/v1/multicast-groups/{}", member.multicast_group_id),
+        )
+        .await;
+        assert_eq!(group.multicast_ip, expected);
+        assert_eq!(group.ip_pool_id, pool.identity.id);
+
+        wait_for_group_active(client, group.identity.name.as_str()).await;
+        let external = datastore
+            .multicast_group_lookup_by_ip(&opctx, expected)
+            .await
+            .expect("Should lookup external multicast group by IP");
+        let underlay = datastore
+            .underlay_multicast_group_fetch(
+                &opctx,
+                external
+                    .underlay_group_id
+                    .expect("Active group should have an underlay group"),
+            )
+            .await
+            .expect("Should fetch underlay multicast group");
+
+        let IpAddr::V6(underlay_ip) = underlay.multicast_ip.ip() else {
+            panic!("underlay address should be IPv6");
+        };
+        assert!(
+            dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET.contains(underlay_ip),
+            "Received: {underlay_ip}"
+        );
+    }
+}
+
+#[nexus_test]
+async fn test_multicast_pool_allocation_across_ipv6_scopes(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let pool_name = "cross-scope-pool";
+    let pool: IpPool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V6,
+            pool_type: IpPoolType::Multicast,
+            assignment: IpPoolAssignment::Silos,
+        },
+    )
+    .await;
+    let first: Ipv6Addr =
+        "ff15:ffff:ffff:ffff:ffff:ffff:ffff:fffe".parse().unwrap();
+    let last: Ipv6Addr = "ff16::1".parse().unwrap();
+    let range = Ipv6Range::new(first, last).unwrap();
+    let added: IpPoolRange = object_create(
+        client,
+        &format!("/v1/system/ip-pools/{pool_name}/ranges/add"),
+        &IpRange::V6(range),
+    )
+    .await;
+    assert_eq!(added.range, IpRange::V6(range));
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
+
+    let project_name = "cross-scope-project";
+    create_project(client, project_name).await;
+    create_default_ip_pools(client).await;
+    let instance = instance_for_multicast_groups(
+        cptestctx,
+        project_name,
+        "cross-scope-instance",
+        false,
+        &[],
+    )
+    .await;
+    let source: IpAddr = "2001:db8::1".parse().unwrap();
+
+    // Exercise allocation across the scope boundary with exact sources on ASM.
+    for (selector, expected) in [
+        (first.to_string(), Some(first)),
+        (last.to_string(), Some(last)),
+        ("cross-scope-auto".to_string(), None),
+    ] {
+        let member: MulticastGroupMember = put_upsert(
+            client,
+            &format!(
+                "/v1/instances/{}/multicast-groups/{selector}\
+                 ?project={project_name}",
+                instance.identity.id,
+            ),
+            &InstanceMulticastGroupJoin {
+                source_ips: Some(vec![source]),
+                ip_version: Some(IpVersion::V6),
+            },
+        )
+        .await;
+        let IpAddr::V6(address) = member.multicast_ip else {
+            panic!("expected an IPv6 group");
+        };
+        assert!(range.contains(address));
+        if let Some(expected) = expected {
+            assert_eq!(address, expected);
+        } else {
+            assert_ne!(address, first);
+            assert_ne!(address, last);
+        }
+        assert_eq!(member.source_ips, vec![source]);
+
+        let group: MulticastGroup = object_get(
+            client,
+            &format!("/v1/multicast-groups/{}", member.multicast_group_id),
+        )
+        .await;
+        assert_eq!(group.multicast_ip, member.multicast_ip);
+        assert_eq!(group.ip_pool_id, pool.identity.id);
+    }
 }
 
 #[nexus_test]
@@ -246,20 +498,15 @@ async fn test_multicast_group_member_operations(
         .iter()
         .find(|g| {
             let ip = match g {
-                dpd_types::MulticastGroupResponse::External {
-                    group_ip,
-                    ..
-                } => *group_ip,
-                dpd_types::MulticastGroupResponse::Underlay {
-                    group_ip,
-                    ..
-                } => IpAddr::V6(group_ip.0),
+                MulticastGroupResponse::External { group_ip, .. } => {
+                    group_ip.ip()
+                }
+                MulticastGroupResponse::Underlay { group_ip, .. } => {
+                    IpAddr::V6(group_ip.ip())
+                }
             };
             ip == external_multicast_ip
-                && matches!(
-                    g,
-                    dpd_types::MulticastGroupResponse::External { .. }
-                )
+                && matches!(g, MulticastGroupResponse::External { .. })
         })
         .expect(&expect_msg);
 
@@ -270,18 +517,15 @@ async fn test_multicast_group_member_operations(
         .iter()
         .find_map(|g| {
             match g {
-                dpd_types::MulticastGroupResponse::Underlay {
-                    group_ip,
-                    ..
-                } => {
+                MulticastGroupResponse::Underlay { group_ip, .. } => {
                     // Check if it starts with ff04 (admin-local multicast)
-                    if group_ip.0.segments()[0] == 0xff04 {
-                        Some(group_ip.clone())
+                    if group_ip.ip().segments()[0] == 0xff04 {
+                        Some(*group_ip)
                     } else {
                         None
                     }
                 }
-                dpd_types::MulticastGroupResponse::External { .. } => None,
+                MulticastGroupResponse::External { .. } => None,
             }
         })
         .expect("Should find underlay group IP in DPD response");
@@ -911,8 +1155,8 @@ async fn test_cannot_delete_multicast_pool_with_groups(
 /// - IPv4/IPv6 source address family validation
 /// - Multiple SSM groups from same pool with different sources
 ///
-/// SSM groups (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require source IPs
-/// to be specified on join. The group's `source_ips` field shows the union
+/// SSM groups (IPv4 232.0.0.0/8, IPv6 ff3x::/32 and ffbx::/32) require source
+/// IPs to be specified on join. The group's `source_ips` field shows the union
 /// of all member sources.
 #[nexus_test]
 async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
@@ -1059,8 +1303,8 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         .into_inner();
 
     let dpd_sources = match dpd_response {
-        dpd_types::MulticastGroupResponse::External { sources, .. } => sources,
-        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+        MulticastGroupResponse::External { sources, .. } => sources,
+        MulticastGroupResponse::Underlay { .. } => {
             panic!("Expected External group from DPD, got Underlay");
         }
     };
@@ -1070,8 +1314,8 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         .iter()
         .flatten()
         .filter_map(|src| match src {
-            dpd_types::IpSrc::Exact(ip) => Some(*ip),
-            dpd_types::IpSrc::Any => None, // Any-source (ASM) wildcard
+            IpSrc::Exact(ip) => Some(*ip),
+            IpSrc::Any => None, // Any-source (ASM) wildcard
         })
         .collect();
     dpd_source_ips.sort();

@@ -69,10 +69,10 @@
 
 use super::external_dns;
 
+use dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET;
 use nexus_config::ExternalHttpClientConfig;
 use nexus_config::TreatLoopbackAsExternal;
 use omicron_common::address::BOOTSTRAP_NETWORK_SUBNET;
-use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
 use omicron_common::address::UnderlaySubnets;
 use oxnet::Ipv6Net;
 
@@ -643,7 +643,6 @@ mod test {
     use internal_dns_types::config::DnsRecord;
     use omicron_common::address::{
         BOOTSTRAP_PREFIX, Ipv6Subnet, RACK_PREFIX_LENGTH, ReservedRackSubnet,
-        UNDERLAY_MULTICAST_SUBNET, UNDERLAY_MULTICAST_SUBNET_LAST,
     };
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
@@ -718,7 +717,7 @@ mod test {
             // ...one in the middle...
             format!("http://[{multicast_ip}]/"),
             // ...and the last.
-            format!("http://[{UNDERLAY_MULTICAST_SUBNET_LAST}]/"),
+            format!("http://[{}]/", UNDERLAY_MULTICAST_SUBNET.last_addr()),
             // Non-canonical textual forms are normalized by the URL parser
             // before we see them: uppercase/verbose...
             format!("http://[{}]/", verbose_upper(rack_ip)),
@@ -743,8 +742,9 @@ mod test {
         let below_az = Ipv6Addr::from(u128::from(az.first_addr()) - 1);
         let above_az = Ipv6Addr::from(u128::from(az.last_addr()) + 1);
         // The address immediately after the underlay multicast subnet.
-        let after_multicast =
-            Ipv6Addr::from(u128::from(UNDERLAY_MULTICAST_SUBNET_LAST) + 1);
+        let after_multicast = Ipv6Addr::from(
+            u128::from(UNDERLAY_MULTICAST_SUBNET.last_addr()) + 1,
+        );
         // A ULA that is *not* the underlay (e.g. a guest VPC prefix).
         // ULA-ness alone must not be the discriminator.
         let other_ula: Ipv6Addr = "fd12:3456:789a::1".parse().unwrap();

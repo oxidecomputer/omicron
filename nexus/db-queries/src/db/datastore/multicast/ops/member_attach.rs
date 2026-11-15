@@ -151,8 +151,8 @@ impl From<AttachMemberError> for external::Error {
 /// - `Some([a,b])` → set/replace with new source_ips
 ///
 /// Note: The address range (not sources) determines SSM vs ASM mode. SSM
-/// addresses (232/8, ff3x::/32) require sources and the app layer validates
-/// this before calling.
+/// addresses ([`dpd_types::mcast::is_ssm_address`]) require sources and the
+/// app layer validates this before calling.
 #[must_use = "Queries must be executed"]
 pub(crate) struct AttachMemberToGroupStatement {
     group_id: Uuid,

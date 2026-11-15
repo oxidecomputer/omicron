@@ -1113,7 +1113,10 @@ async fn test_multicast_group_underlay_collision_retry(
 
     // Pre-occupy B's target underlay IP by creating an underlay group with A's tag
     // B's target: ff04::e001:0203 (known mapping for 224.1.2.3 with salt=0)
-    let collision_ip: ipnetwork::IpNetwork = "ff04::e001:0203".parse().unwrap();
+    let collision_ip: dpd_types::mcast::UnderlayMulticastIpv6 =
+        "ff04::e001:0203".parse().unwrap_or_else(|err| {
+            panic!("failed to parse collision address: {err}")
+        });
     let res = datastore
         .ensure_underlay_multicast_group(
             &opctx,

@@ -9329,12 +9329,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
 
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-local IPv6
-    -- ff04::/16 (admin-local) is reserved for underlay multicast groups
+    -- Match Dendrite's ff04::/64 underlay reservation and external exclusion.
+    -- RFC 7346 section 2 defines admin-local scope 4, while the narrower /64 is
+    -- an Oxide policy.
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
-         NOT multicast_ip << 'ff04::/16')
+         NOT multicast_ip << 'ff04::/64')
     ),
 
     -- Reserved range validation for IPv4 (only link-local is blocked)
@@ -9375,9 +9376,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     version_removed INT8,
 
     /* Constraints */
-    -- Underlay groups: admin-local scoped IPv6 only (ff04::/16)
+    -- Match Dendrite's ff04::/64 underlay allocation.
     CONSTRAINT underlay_ipv6_admin_scoped CHECK (
-        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/16'
+        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/64'
     )
 );
 
@@ -10003,7 +10004,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '323.0.0', NULL)
+    (TRUE, NOW(), NOW(), '324.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

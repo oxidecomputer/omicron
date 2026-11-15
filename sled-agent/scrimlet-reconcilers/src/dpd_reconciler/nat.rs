@@ -12,11 +12,11 @@ use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::{
 };
 use daft::Diffable;
 use dpd_client::Client;
+use dpd_types::network;
 use futures::Stream;
 use futures::TryStreamExt;
 use macaddr::MacAddr6;
 use omicron_common::api::external::MacAddr;
-use omicron_common::api::external::Vni;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -289,7 +289,7 @@ async fn create_nat_entry(
     let nat_target = dpd_client::types::NatTarget {
         inner_mac: dpd_client::types::MacAddr { a: entry.nic_mac.into_array() },
         internal_ip: entry.sled_underlay_ip,
-        vni: entry.vni.as_u32().into(),
+        vni: entry.vni,
     };
     match entry.target_ip {
         IpAddr::V4(ip) => client
@@ -323,8 +323,13 @@ struct NatEntry {
     #[cfg_attr(test, strategy(proptest::strategy::Just(65535)))]
     last_port: u16,
     nic_mac: MacAddr,
-    vni: Vni,
+    #[daft(leaf)]
+    vni: network::Vni,
 }
+
+const _: () = assert!(
+    omicron_common::api::external::Vni::MAX_VNI == network::Vni::MAX_VNI
+);
 
 impl From<NatEntry> for DpdNatReconcilerStatusNatEntry {
     fn from(value: NatEntry) -> Self {
@@ -345,50 +350,39 @@ impl From<&'_ ServiceZoneNatEntry> for NatEntry {
             first_port,
             last_port,
             nic_mac: value.nic_mac,
-            vni: value.vni,
+            vni: to_dpd_vni(value.vni),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("invalid VNI: {0}")]
-struct BadVni(u32);
+fn to_dpd_vni(vni: omicron_common::api::external::Vni) -> network::Vni {
+    network::Vni::try_from(vni.as_u32())
+        .expect("omicron and dpd VNIs share the same 24-bit bound")
+}
 
-impl TryFrom<dpd_client::types::Ipv4Nat> for NatEntry {
-    type Error = BadVni;
-
-    fn try_from(
-        value: dpd_client::types::Ipv4Nat,
-    ) -> Result<Self, Self::Error> {
-        let vni = Vni::try_from(value.target.vni.0)
-            .map_err(|_| BadVni(value.target.vni.0))?;
-        Ok(Self {
+impl From<dpd_client::types::Ipv4Nat> for NatEntry {
+    fn from(value: dpd_client::types::Ipv4Nat) -> Self {
+        Self {
             sled_underlay_ip: value.target.internal_ip,
             target_ip: value.external.into(),
             nic_mac: MacAddr6::from(value.target.inner_mac.a).into(),
             first_port: value.low,
             last_port: value.high,
-            vni,
-        })
+            vni: value.target.vni,
+        }
     }
 }
 
-impl TryFrom<dpd_client::types::Ipv6Nat> for NatEntry {
-    type Error = BadVni;
-
-    fn try_from(
-        value: dpd_client::types::Ipv6Nat,
-    ) -> Result<Self, Self::Error> {
-        let vni = Vni::try_from(value.target.vni.0)
-            .map_err(|_| BadVni(value.target.vni.0))?;
-        Ok(Self {
+impl From<dpd_client::types::Ipv6Nat> for NatEntry {
+    fn from(value: dpd_client::types::Ipv6Nat) -> Self {
+        Self {
             sled_underlay_ip: value.target.internal_ip,
             target_ip: value.external.into(),
             nic_mac: MacAddr6::from(value.target.inner_mac.a).into(),
             first_port: value.low,
             last_port: value.high,
-            vni,
-        })
+            vni: value.target.vni,
+        }
     }
 }
 
@@ -399,7 +393,7 @@ impl TryFrom<dpd_client::types::Ipv6Nat> for NatEntry {
 /// dpd side: <https://github.com/oxidecomputer/dendrite/issues/255>.
 struct CurrentDpdEntriesAssembler<'a> {
     client: &'a Client,
-    service_vnis: BTreeSet<Vni>,
+    service_vnis: BTreeSet<network::Vni>,
     current_entries: BTreeSet<NatEntry>,
 }
 
@@ -426,8 +420,10 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
         // a Vni other than one of the ones present in `desired_nat_entries`.
         // `ServiceZoneNatEntries`, by construction, enforces that it's not
         // empty, which guarantees that this set will be nonempty too.
-        let service_vnis: BTreeSet<Vni> =
-            desired_nat_entries.iter().map(|entry| entry.vni).collect();
+        let service_vnis: BTreeSet<network::Vni> = desired_nat_entries
+            .iter()
+            .map(|entry| to_dpd_vni(entry.vni))
+            .collect();
         let mut builder =
             Self { client, service_vnis, current_entries: BTreeSet::new() };
         builder.read_ipv4_entries(log).await?;
@@ -502,22 +498,15 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
     ) -> Result<(), DpdClientError>
     where
         S: Stream<Item = Result<T, DpdClientError>> + Unpin,
-        T: TryInto<NatEntry, Error = BadVni>,
+        T: Into<NatEntry>,
     {
         while let Some(entry) = stream.try_next().await? {
-            // The only way we can fail to convert a dpd `NatEntry` is if the
-            // Vni from dpd isn't a valid omicron Vni (the `BadVni` in our
-            // generic bound). This should never happen, but if it does, we know
-            // this isn't an entry we care about: we're only looking for entries
-            // that match our services' Vni(s).
-            match entry.try_into() {
-                Ok(entry) if self.service_vnis.contains(&entry.vni) => {
-                    self.current_entries.insert(entry);
-                    counts.service_vni += 1;
-                }
-                Ok(_) | Err(BadVni(_)) => {
-                    counts.non_service_vni += 1;
-                }
+            let entry: NatEntry = entry.into();
+            if self.service_vnis.contains(&entry.vni) {
+                self.current_entries.insert(entry);
+                counts.service_vni += 1;
+            } else {
+                counts.non_service_vni += 1;
             }
         }
 

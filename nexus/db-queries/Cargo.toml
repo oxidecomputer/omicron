@@ -21,6 +21,7 @@ cockroach-admin-types.workspace = true
 const_format.workspace = true
 diesel.workspace = true
 diesel-dtrace.workspace = true
+dpd-types.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 hex.workspace = true
