@@ -148,6 +148,7 @@ pub fn dpd_client<N: NexusServer>(
 
     let addr = Ipv6Addr::LOCALHOST;
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
+        .expect("dpd client")
 }
 
 #[cfg(test)]
