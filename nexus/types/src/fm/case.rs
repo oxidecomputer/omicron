@@ -9,7 +9,7 @@ use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::fm::EreportId;
 use crate::fm::FactPayload;
-use crate::fm::{CertificateFact, DiskFact, SagaFact};
+use crate::fm::{CertificateFact, DiskFact, SagaFact, SmfServiceFact};
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
@@ -229,6 +229,12 @@ impl Fact {
     /// belongs to a different diagnosis engine.
     pub fn as_certificate(&self) -> Result<&CertificateFact, ForeignFact> {
         self.payload.as_certificate().ok_or_else(|| self.foreign_fact())
+    }
+
+    /// The SMF service payload, or a [`ForeignFact`] error if this fact
+    /// belongs to a different diagnosis engine.
+    pub fn as_smf_service(&self) -> Result<&SmfServiceFact, ForeignFact> {
+        self.payload.as_smf_service().ok_or_else(|| self.foreign_fact())
     }
 
     fn foreign_fact(&self) -> ForeignFact {

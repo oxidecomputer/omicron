@@ -23,6 +23,7 @@ use nexus_db_queries::db::model::SagaReasonAbandoned;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_types::deployment::SledFilter;
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::observed_certificate::ObservedCertificate;
@@ -36,9 +37,11 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -123,7 +126,7 @@ impl InputLoader {
         // Spawn each preparation step in parallel.
         //
         // N.B. that right now, the concurrency limit here is just the number of
-        // steps that are defined. Right now, there are only 7 preparation
+        // steps that are defined. Right now, there are only 8 preparation
         // steps, so that's fine. In the future, if there are a whole lot of
         // steps, we may eventually want to think about having a concurrency
         // limit here, especially if steps can recursively spawn other
@@ -170,6 +173,9 @@ impl InputLoader {
             match result {
                 Ok(LoadedInput::InServiceDisks(disks)) => {
                     builder = builder.in_service_disks(Arc::new(disks));
+                }
+                Ok(LoadedInput::InServiceSleds(sleds)) => {
+                    builder = builder.in_service_sleds(Arc::new(sleds));
                 }
                 Ok(LoadedInput::ObservedSagas(sagas)) => {
                     builder = builder.observed_sagas(Arc::new(sagas));
@@ -255,6 +261,10 @@ impl InputLoader {
                 .load_in_service_disks(opctx, &mut warnings)
                 .await
                 .map(LoadedInput::InServiceDisks),
+            InputStep::InServiceSleds => self
+                .load_in_service_sleds(opctx)
+                .await
+                .map(LoadedInput::InServiceSleds),
             InputStep::ObservedSagas => self
                 .prepare_observed_sagas(opctx)
                 .await
@@ -351,6 +361,22 @@ impl InputLoader {
             }
         }
         Ok(in_service_disks)
+    }
+
+    /// Load the IDs of all in-service sleds.
+    ///
+    /// Like [`Self::load_in_service_disks`], this reads the executed DB view
+    /// rather than the target blueprint.
+    async fn load_in_service_sleds(
+        &self,
+        opctx: &OpContext,
+    ) -> anyhow::Result<BTreeSet<SledUuid>> {
+        let sleds = self
+            .datastore
+            .sled_list_all_batched(opctx, SledFilter::InService)
+            .await
+            .context("failed to load in-service sleds")?;
+        Ok(sleds.into_iter().map(|sled| sled.id()).collect())
     }
 
     /// Build the certificate diagnosis engine's input: every silo, with the
@@ -698,6 +724,7 @@ struct StepOutput {
 #[strum_discriminants(strum(serialize_all = "snake_case"))]
 enum LoadedInput {
     InServiceDisks(IdOrdMap<InServiceDisk>),
+    InServiceSleds(BTreeSet<SledUuid>),
     ObservedSagas(IdOrdMap<ObservedSaga>),
     SiloCertificates(IdOrdMap<ObservedSiloCertificates>),
     EreporterRestarts(Vec<EreporterRestart>),
@@ -732,7 +759,6 @@ mod tests {
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use serde_json::json;
-    use std::collections::BTreeSet;
 
     /// Exercises the wiring in `load_existing_alert_markers`: alert request
     /// ids are collected from the parent sitrep's *closed* cases only, their

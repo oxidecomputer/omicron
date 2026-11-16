@@ -214,6 +214,7 @@ mod test {
     use crate::app::background::BackgroundTask;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::{
         Blueprint, BlueprintSource, BlueprintTarget,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
@@ -245,6 +246,7 @@ mod test {
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: Some(parent_blueprint_id),
+                reflects_collection: ReflectsCollection::Indeterminate,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
                 target_release_minimum_generation: TargetReleaseGeneration::new(

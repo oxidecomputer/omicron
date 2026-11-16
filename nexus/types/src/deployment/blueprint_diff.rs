@@ -74,6 +74,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             // changes from one blueprint to the next.
             id: _,
             parent_blueprint_id: _,
+            reflects_collection: _,
             internal_dns_version: _,
             external_dns_version: _,
             cockroachdb_fingerprint: _,

@@ -2985,6 +2985,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OperatorNexusConfig;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
     use nexus_types::external_api::project;
@@ -3335,6 +3336,7 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
+                ReflectsCollection::Indeterminate,
                 "test",
                 PlannerRng::from_entropy(),
             )
@@ -3444,6 +3446,7 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp2,
+                ReflectsCollection::Indeterminate,
                 "test",
                 PlannerRng::from_entropy(),
             )

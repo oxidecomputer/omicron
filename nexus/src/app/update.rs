@@ -13,7 +13,6 @@ use chrono::Utc;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::TufRepoUpload;
@@ -31,6 +30,7 @@ use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::Zpool;
+use nexus_types::inventory::is_propolis_zone;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
@@ -217,20 +217,6 @@ impl UpdateContactSupportChecksInput {
             missing_sleds,
         }
     }
-}
-
-// String matching here because it is the most straightforward way to check
-// if a zone is a propolis zone or not. This way of identifying a zone is not
-// ideal but in this case it makes sense. This `contact_support` field will only
-// be in use until a proper FM implementation is in place. The only consequence
-// of this pattern matching failing (e.g. the propolis zone prefix changes and
-// is also no longer set by this constant) would be that the contact_support
-// field reports a false positive, but would have no further impact than that.
-//
-// This function should not be used for anything other than filtering propolis
-// zones out of the `enabled_smf_services_not_online_by_sled` field
-fn is_propolis_zone(zone: &str) -> bool {
-    zone.starts_with(PROPOLIS_ZONE_PREFIX)
 }
 
 /// Identifies a saga that has been running or unwinding for too long.
@@ -902,6 +888,7 @@ async fn component_version_counts(
 mod test {
     use super::*;
     use chrono::Utc;
+    use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
     use nexus_db_model::saga_types::Saga;
     use nexus_db_model::saga_types::SecId;
     use nexus_inventory::CollectionBuilder;

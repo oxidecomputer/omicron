@@ -12,6 +12,7 @@ use nexus_lockstep_client::types::{
 };
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::{Blueprint, BlueprintSource};
 use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
@@ -110,6 +111,7 @@ fn blueprint_builder_based_on<'a>(
     BlueprintBuilder::new_based_on(
         log,
         parent,
+        ReflectsCollection::Indeterminate,
         "test-suite",
         PlannerRng::from_entropy(),
     )

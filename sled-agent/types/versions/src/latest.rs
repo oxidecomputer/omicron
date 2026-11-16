@@ -238,6 +238,8 @@ pub mod multirack {
     pub use crate::v60::multirack::MultirackJoinServiceStatus;
     pub use crate::v60::multirack::SledAgentInfo;
     pub use crate::v60::multirack::SledAgentStartState;
+
+    pub use crate::v63::multirack::MultirackJoinCompleteResponse;
 }
 
 pub mod probes {
@@ -297,8 +299,9 @@ pub mod trust_quorum {
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 
-    pub use crate::v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
     pub use crate::v61::trust_quorum::TrustQuorumNetworkConfigResponse;
+
+    pub use crate::v64::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 }
 
 pub mod uplink {

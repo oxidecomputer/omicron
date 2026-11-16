@@ -168,7 +168,7 @@ lookup_region_port.period_secs = 60
 # Therefore, disable the background task during tests.
 instance_updater.disable = true
 instance_updater.period_secs = 60
-# How frequently to attempt to restart Failed instances?
+# How frequently to attempt to restart instances that require it.
 #
 # The default activation period for this task is once every sixty seconds.
 # However, the task's unit tests rely on explicit activations of the task

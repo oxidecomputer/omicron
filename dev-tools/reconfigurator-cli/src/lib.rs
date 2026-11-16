@@ -38,6 +38,7 @@ use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -61,6 +62,7 @@ use omicron_common::update::OmicronInstallManifestSource;
 use omicron_generation_kinds::{
     Generation, NexusGeneration, TargetReleaseGeneration,
 };
+use omicron_repl_utils::parsed;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -394,13 +396,16 @@ impl CmdReconfiguratorSim {
         }
 
         if let Some(input_file) = &self.input_file {
-            run_repl_from_file(input_file, &mut |cmd: TopLevelArgs| {
-                process_command(&mut sim, cmd, &log_capture)
-            })
+            run_repl_from_file(
+                input_file,
+                parsed(|cmd: TopLevelArgs| {
+                    process_command(&mut sim, cmd, &log_capture)
+                }),
+            )
         } else {
-            run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+            run_repl_on_stdin(parsed(|cmd: TopLevelArgs| {
                 process_command(&mut sim, cmd, &log_capture)
-            })
+            }))
         }
     }
 }
@@ -2702,9 +2707,24 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder =
-        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
-            .context("creating blueprint builder")?;
+    // Specify an indeterminate value for `reflects_collection`.  This field
+    // normally indicates what inventory collection the planner used when
+    // constructing the blueprint, which implies that the blueprint reflects the
+    // state of the world described in that collection.  But we're changing the
+    // blueprint in some arbitrary way and it's no longer accurate to say that
+    // the new blueprint does reflect any particular state of the world.
+    // (That's not to say we couldn't allow the caller to specify a different
+    // value here.  After all, they're editing the blueprint to say whatever
+    // they want.  But it's not obviously useful to do this yet, either.)
+    let reflects_collection = ReflectsCollection::Indeterminate;
+    let mut builder = BlueprintBuilder::new_based_on(
+        &sim.log,
+        blueprint,
+        reflects_collection,
+        creator,
+        rng,
+    )
+    .context("creating blueprint builder")?;
 
     // We're acting as the planner here, so we need to update the builder for
     // any static changes in the input (e.g., new sleds, new DNS versions, ...).

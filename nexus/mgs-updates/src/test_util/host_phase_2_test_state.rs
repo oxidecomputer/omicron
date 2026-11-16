@@ -256,6 +256,7 @@ mod api_impl {
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRegistrationInfo;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::multirack::MultirackJoinCompleteResponse;
     use sled_agent_types::multirack::MultirackJoinServiceStatus;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
@@ -1146,7 +1147,8 @@ mod api_impl {
 
         async fn multirack_join_complete(
             _request_context: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError>
+        {
             unimplemented!()
         }
 

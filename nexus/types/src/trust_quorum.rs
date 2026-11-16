@@ -9,12 +9,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::bail;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
+use omicron_common::now_db_precision;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
+use trust_quorum_types::membership::TrustQuorumMembers;
+use trust_quorum_types::membership::TrustQuorumMembersError;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
@@ -142,14 +145,12 @@ impl TrustQuorumConfig {
         proposed: ProposedTrustQuorumConfig,
         coordinator: BaseboardId,
     ) -> Self {
-        let num_members = u8::try_from(proposed.members.len()).unwrap();
+        let num_members = proposed.members.num_members();
         let state = if proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes {
             TrustQuorumConfigState::PreparingLrtqUpgrade
         } else {
             TrustQuorumConfigState::Preparing
         };
-        assert!(num_members >= 3);
-        assert!(num_members <= 32);
         TrustQuorumConfig {
             rack_id: proposed.rack_id,
             epoch: proposed.epoch,
@@ -161,6 +162,7 @@ impl TrustQuorumConfig {
             encrypted_rack_secrets: None,
             members: proposed
                 .members
+                .into_set()
                 .into_iter()
                 .map(|id| {
                     (
@@ -174,7 +176,7 @@ impl TrustQuorumConfig {
                     )
                 })
                 .collect(),
-            time_created: Utc::now(),
+            time_created: now_db_precision(),
             time_committing: None,
             time_committed: None,
             time_aborted: None,
@@ -184,13 +186,11 @@ impl TrustQuorumConfig {
 
     pub fn new_rss_committed_config(
         rack_id: RackUuid,
-        initial_members: BTreeSet<BaseboardId>,
+        initial_members: TrustQuorumMembers,
         coordinator: BaseboardId,
     ) -> TrustQuorumConfig {
-        let num_members = u8::try_from(initial_members.len()).unwrap();
-        assert!(num_members >= 3);
-        assert!(num_members <= 32);
-        let now = Utc::now();
+        let num_members = initial_members.num_members();
+        let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,
             epoch: Epoch(1),
@@ -201,6 +201,7 @@ impl TrustQuorumConfig {
             coordinator,
             encrypted_rack_secrets: None,
             members: initial_members
+                .into_set()
                 .into_iter()
                 .map(|id| {
                     (
@@ -260,7 +261,7 @@ pub struct ProposedTrustQuorumConfig {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub is_lrtq_upgrade: IsLrtqUpgrade,
-    pub members: BTreeSet<BaseboardId>,
+    pub members: TrustQuorumMembers,
 }
 
 impl ProposedTrustQuorumConfig {
@@ -272,6 +273,125 @@ impl ProposedTrustQuorumConfig {
             }
         }
     }
+
+    pub fn remove_sled(
+        latest_committed_config: &TrustQuorumConfig,
+        new_epoch: Epoch,
+        sled_to_remove: &BaseboardId,
+    ) -> Result<Self, RemoveSledError> {
+        let rack_id = latest_committed_config.rack_id;
+        let mut members: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        if !members.remove(sled_to_remove) {
+            return Err(RemoveSledError::NotMember {
+                sled: sled_to_remove.clone(),
+            });
+        }
+        let members = TrustQuorumMembers::new(members).map_err(|error| {
+            RemoveSledError::InvalidMembership {
+                rack_id,
+                sled: sled_to_remove.clone(),
+                error,
+            }
+        })?;
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members,
+        })
+    }
+
+    /// Create a new `ProposedTrustQuorumConfig` including `new_sleds` in the
+    /// membership. Return an error if any of the new sleds exist in the
+    /// `latest_committed_config` membership already.
+    pub fn add_sleds(
+        latest_committed_config: &TrustQuorumConfig,
+        new_epoch: Epoch,
+        new_sleds: BTreeSet<BaseboardId>,
+    ) -> Result<Self, AddSledsError> {
+        let rack_id = latest_committed_config.rack_id;
+        let existing: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        let already_members: BTreeSet<_> =
+            existing.intersection(&new_sleds).cloned().collect();
+        if !already_members.is_empty() {
+            return Err(AddSledsError::AlreadyMembers {
+                sleds: already_members,
+            });
+        }
+
+        let members = TrustQuorumMembers::new(
+            new_sleds.union(&existing).cloned().collect(),
+        )
+        .map_err(|error| AddSledsError::InvalidMembership { rack_id, error })?;
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members,
+        })
+    }
+
+    /// Create a new `ProposedTrustQuorumConfig` that upgrades a rack from LRTQ,
+    /// with the rack's commissioned sleds as its members.
+    pub fn upgrade_from_lrtq(
+        rack_id: RackUuid,
+        new_epoch: Epoch,
+        commissioned_sleds: BTreeSet<BaseboardId>,
+    ) -> Result<Self, LrtqUpgradeError> {
+        let members =
+            TrustQuorumMembers::new(commissioned_sleds).map_err(|error| {
+                LrtqUpgradeError::InvalidMembership { rack_id, error }
+            })?;
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+            members,
+        })
+    }
+}
+
+/// Why [`ProposedTrustQuorumConfig::add_sleds`] refused to add sleds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AddSledsError {
+    /// Some of the sleds are already members of the trust quorum.
+    AlreadyMembers { sleds: BTreeSet<BaseboardId> },
+    /// The members after adding the sleds are outside the trust quorum size
+    /// bounds.
+    InvalidMembership { rack_id: RackUuid, error: TrustQuorumMembersError },
+}
+
+/// Why [`ProposedTrustQuorumConfig::upgrade_from_lrtq`] refused to upgrade a
+/// rack.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LrtqUpgradeError {
+    /// The commissioned sleds are outside the trust quorum size bounds.
+    InvalidMembership { rack_id: RackUuid, error: TrustQuorumMembersError },
+}
+
+/// Why [`ProposedTrustQuorumConfig::remove_sled`] refused to remove a sled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoveSledError {
+    /// The sled is not a member of the trust quorum.
+    NotMember { sled: BaseboardId },
+    /// The members left after removing `sled` are outside the trust quorum size
+    /// bounds.
+    InvalidMembership {
+        rack_id: RackUuid,
+        sled: BaseboardId,
+        error: TrustQuorumMembersError,
+    },
 }
 
 /// Given the current trust quorum config returned by
@@ -294,12 +414,40 @@ pub fn check_trust_quorum_allows_expunge(
         )));
     }
 
-    Ok(())
+    match state {
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+            // Trust quorum reconfiguration can still be aborted at this point,
+            // so it's not safe to expunge the sled at this point.
+            Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}: the latest trust quorum \
+                configuration for rack {rack_id} (epoch {epoch}, state \
+                {state:?}) does not include baseboard {baseboard_id}, but it \
+                has not started committing and can still be aborted. Wait for \
+                the configuration at epoch {epoch} to start committing, then \
+                retry. If it is stuck, abort the rack membership change and \
+                propose a new configuration that removes this sled."
+            )))
+        }
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially => Ok(()),
+        TrustQuorumConfigState::Aborted => {
+            Err(Error::internal_error(&format!(
+                "Cannot expunge sled {sled_id}: the trust quorum \
+                configuration for rack {rack_id} at epoch {epoch}, loaded as \
+                the latest possibly committed configuration, is aborted \
+                (this is a programming error because we expect the provided config \
+                to be non-aborted)"
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
 
     #[derive(Debug)]
     enum Membership {
@@ -311,6 +459,8 @@ mod tests {
     enum Expected {
         Allowed,
         MemberConflict,
+        PreparingConflict,
+        AbortedInternalError,
     }
 
     #[test]
@@ -335,9 +485,9 @@ mod tests {
 
         let cases = [
             (S::Preparing, Member, MemberConflict),
-            (S::Preparing, NonMember, Allowed),
+            (S::Preparing, NonMember, PreparingConflict),
             (S::PreparingLrtqUpgrade, Member, MemberConflict),
-            (S::PreparingLrtqUpgrade, NonMember, Allowed),
+            (S::PreparingLrtqUpgrade, NonMember, PreparingConflict),
             (S::Committing, Member, MemberConflict),
             (S::Committing, NonMember, Allowed),
             (S::Committed, Member, MemberConflict),
@@ -345,7 +495,7 @@ mod tests {
             (S::CommittedPartially, Member, MemberConflict),
             (S::CommittedPartially, NonMember, Allowed),
             (S::Aborted, Member, MemberConflict),
-            (S::Aborted, NonMember, Allowed),
+            (S::Aborted, NonMember, AbortedInternalError),
         ];
 
         for (state, membership, expected) in cases {
@@ -360,7 +510,8 @@ mod tests {
             }
             let mut config = TrustQuorumConfig::new_rss_committed_config(
                 rack_id,
-                members,
+                TrustQuorumMembers::new(members)
+                    .expect("test members are within the size bounds"),
                 other_members[0].clone(),
             );
             config.epoch = epoch;
@@ -386,12 +537,41 @@ mod tests {
                          (epoch 7, state {state:?})"
                     )],
                 ),
+                PreparingConflict => (
+                    result.expect_err(&description),
+                    vec![
+                        format!(
+                            "for rack {rack_id} (epoch 7, state {state:?}) \
+                             does not include baseboard {sled_baseboard}"
+                        ),
+                        "has not started committing and can still be aborted"
+                            .to_string(),
+                        "Wait for the configuration at epoch 7 to start \
+                         committing, then retry."
+                            .to_string(),
+                        "If it is stuck, abort the rack membership change and \
+                         propose a new configuration that removes this sled."
+                            .to_string(),
+                    ],
+                ),
+                AbortedInternalError => (
+                    result.expect_err(&description),
+                    vec![format!(
+                        "for rack {rack_id} at epoch 7, loaded as the latest \
+                         possibly committed configuration, is aborted"
+                    )],
+                ),
             };
 
             let message = match (&expected, &error) {
-                (MemberConflict, Error::Conflict { message }) => {
-                    message.external_message().to_string()
-                }
+                (
+                    MemberConflict | PreparingConflict,
+                    Error::Conflict { message },
+                ) => message.external_message().to_string(),
+                (
+                    AbortedInternalError,
+                    Error::InternalError { internal_message },
+                ) => internal_message.clone(),
                 (expected, error) => panic!(
                     "{description}: expected {expected:?}, got {error:?}"
                 ),
@@ -403,5 +583,197 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn test_baseboard(serial: &str) -> BaseboardId {
+        BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: serial.to_string(),
+        }
+    }
+
+    fn test_config(
+        num_members: usize,
+        epoch: Epoch,
+        state: TrustQuorumConfigState,
+    ) -> TrustQuorumConfig {
+        let members: BTreeSet<BaseboardId> = (0..num_members)
+            .map(|i| test_baseboard(&format!("member-{i}")))
+            .collect();
+        let coordinator = members.first().expect("at least one member").clone();
+        let mut config = TrustQuorumConfig::new_rss_committed_config(
+            RackUuid::new_v4(),
+            TrustQuorumMembers::new(members)
+                .expect("test members are within the size bounds"),
+            coordinator,
+        );
+        config.epoch = epoch;
+        config.state = state;
+        config
+    }
+
+    #[test]
+    fn test_proposed_config_remove_sled() {
+        let config =
+            test_config(4, Epoch(5), TrustQuorumConfigState::Committed);
+        let sled_to_remove = test_baseboard("member-2");
+
+        let proposed = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect("member sled is removed");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id: config.rack_id,
+                epoch: Epoch(6),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(5),
+                },
+                members: TrustQuorumMembers::new(
+                    [
+                        test_baseboard("member-0"),
+                        test_baseboard("member-1"),
+                        test_baseboard("member-3"),
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
+                .expect("three members are within the size bounds"),
+            }
+        );
+
+        let non_member = test_baseboard("not-a-member");
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &non_member,
+        )
+        .expect_err("removing a non-member sled is refused");
+        assert_eq!(error, RemoveSledError::NotMember { sled: non_member });
+
+        let minimum =
+            test_config(3, Epoch(5), TrustQuorumConfigState::Committed);
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &minimum,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect_err("removing from a minimum-size trust quorum is refused");
+        assert_eq!(
+            error,
+            RemoveSledError::InvalidMembership {
+                rack_id: minimum.rack_id,
+                sled: sled_to_remove,
+                error: TrustQuorumMembersError::TooFew { num_members: 2 },
+            },
+        );
+    }
+
+    #[test]
+    fn test_proposed_config_add_sleds() {
+        let config =
+            test_config(3, Epoch(5), TrustQuorumConfigState::Committed);
+        let new_sled = test_baseboard("new");
+
+        let proposed = ProposedTrustQuorumConfig::add_sleds(
+            &config,
+            Epoch(6),
+            BTreeSet::from([new_sled.clone()]),
+        )
+        .expect("a new sled is added");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id: config.rack_id,
+                epoch: Epoch(6),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(5),
+                },
+                members: TrustQuorumMembers::new(
+                    config
+                        .members
+                        .keys()
+                        .cloned()
+                        .chain([new_sled.clone()])
+                        .collect(),
+                )
+                .expect("four members are within the size bounds"),
+            }
+        );
+
+        let member = test_baseboard("member-1");
+        let error = ProposedTrustQuorumConfig::add_sleds(
+            &config,
+            Epoch(6),
+            BTreeSet::from([member.clone(), new_sled]),
+        )
+        .expect_err("adding a member sled is refused");
+        assert_eq!(
+            error,
+            AddSledsError::AlreadyMembers { sleds: BTreeSet::from([member]) }
+        );
+
+        let maximum = test_config(
+            TRUST_QUORUM_MAX_MEMBERS,
+            Epoch(5),
+            TrustQuorumConfigState::Committed,
+        );
+        let error = ProposedTrustQuorumConfig::add_sleds(
+            &maximum,
+            Epoch(6),
+            BTreeSet::from([test_baseboard("new")]),
+        )
+        .expect_err("adding to a maximum-size trust quorum is refused");
+        assert_eq!(
+            error,
+            AddSledsError::InvalidMembership {
+                rack_id: maximum.rack_id,
+                error: TrustQuorumMembersError::TooMany {
+                    num_members: TRUST_QUORUM_MAX_MEMBERS + 1,
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn test_proposed_config_upgrade_from_lrtq() {
+        let rack_id = RackUuid::new_v4();
+        let sleds: BTreeSet<_> =
+            (0..3).map(|i| test_baseboard(&format!("member-{i}"))).collect();
+
+        let proposed = ProposedTrustQuorumConfig::upgrade_from_lrtq(
+            rack_id,
+            Epoch(2),
+            sleds.clone(),
+        )
+        .expect("three commissioned sleds are upgraded");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id,
+                epoch: Epoch(2),
+                is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+                members: TrustQuorumMembers::new(sleds.clone())
+                    .expect("three members are within the size bounds"),
+            }
+        );
+
+        let too_few: BTreeSet<_> = sleds.into_iter().take(2).collect();
+        let error = ProposedTrustQuorumConfig::upgrade_from_lrtq(
+            rack_id,
+            Epoch(2),
+            too_few,
+        )
+        .expect_err("upgrading with too few sleds is refused");
+        assert_eq!(
+            error,
+            LrtqUpgradeError::InvalidMembership {
+                rack_id,
+                error: TrustQuorumMembersError::TooFew { num_members: 2 },
+            },
+        );
     }
 }

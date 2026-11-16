@@ -31,7 +31,6 @@ use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::multirack::SledAgentStartState;
-use sled_agent_types::rack_init::rack_init_bootstore_generation;
 use sled_agent_types::sled::{
     StartSledAgentRequest, StartSledAgentRequestBody,
 };
@@ -54,11 +53,13 @@ use tokio::{
     task::{JoinError, JoinSet},
 };
 use trust_quorum::{NodeApiError, ProxyError};
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::{
     messages::ReconfigureMsg as TqReconfigureMsg, types::Epoch,
 };
 
 const INITIAL_TRUST_QUORUM_EPOCH: Epoch = Epoch(1);
+const INITIAL_BOOTSTORE_GENERATION: u64 = 1;
 const TRUST_QUORUM_RETRY_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Describes errors which may occur while operating the multirack join service.
@@ -112,17 +113,14 @@ impl From<RunRssError> for MultirackJoinServiceError {
 // The value returned from `MultirackJoinServiceTask::tq_prepare`
 enum TqPrepareResult {
     Prepared,
-    ReconfigurationNeeded {
-        new_members: BTreeSet<BaseboardId>,
-        new_epoch: Epoch,
-    },
+    ReconfigurationNeeded { new_members: TrustQuorumMembers, new_epoch: Epoch },
 }
 
 // The value returned from `MultirackJoinServiceTask::tq_commit`
 enum TqCommitResult {
     Committed,
     ReconfigurationNeeded {
-        new_members: BTreeSet<BaseboardId>,
+        new_members: TrustQuorumMembers,
         new_epoch: Epoch,
         just_committed_epoch: Epoch,
     },
@@ -160,17 +158,40 @@ impl StartSledAgentInfo {
     }
 }
 
+/// A multirack join request accepted by sled-agent
+#[derive(Clone, Debug)]
+pub struct MultirackJoinInput {
+    pub request: MultirackJoinRequest,
+    /// The bootstore generation, decided when the input is accepted.
+    pub bootstore_generation: u64,
+}
+
+impl MultirackJoinInput {
+    /// Replace the request with an accepted change.
+    ///
+    /// We bump the bootstore gen for each accepted change, even if it
+    /// hasn't been written yet.
+    pub fn update(&mut self, request: MultirackJoinRequest) {
+        self.request = request;
+        self.bootstore_generation += 1;
+    }
+}
+
 /// The interface to the Multirack Join Service.
 pub struct MultirackJoinServiceHandle {
+    // Returns the final bootstore generation on success
     pub join_handle:
-        tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
-    pub input_tx: watch::Sender<MultirackJoinRequest>,
+        tokio::task::JoinHandle<Result<u64, MultirackJoinServiceError>>,
+    pub input_tx: watch::Sender<MultirackJoinInput>,
     pub output_rx: watch::Receiver<MultirackJoinServiceState>,
 
     // Once we've initialized trust quorum, we no longer allow membership
     // changes. This allows helpful responses to user requests in case a
     // membership change is attempted too late in the process.
     pub membership_change_still_possible: Arc<AtomicBool>,
+
+    // The last bootstore generation written, or 0 before the first write.
+    pub written_bootstore_generation_rx: watch::Receiver<u64>,
 
     // Once Nexus on an existing rack succcessfully learns about this sled-agent
     // it sends a signal indicating that the join is now complete.
@@ -183,14 +204,18 @@ pub struct MultirackJoinServiceHandle {
 
 impl MultirackJoinServiceHandle {
     pub fn spawn(ctx: RssContext, request: MultirackJoinRequest) -> Self {
-        let (input_tx, input_rx) = watch::channel(request);
+        let (input_tx, input_rx) = watch::channel(MultirackJoinInput {
+            request,
+            bootstore_generation: INITIAL_BOOTSTORE_GENERATION,
+        });
         let state = MultirackJoinServiceState::Requested;
         let (output_tx, output_rx) = watch::channel(state.clone());
         let membership_change_still_possible = Arc::new(AtomicBool::new(true));
         let mcsp = membership_change_still_possible.clone();
+        let (written_bootstore_generation_tx, written_bootstore_generation_rx) =
+            watch::channel(0);
         let (rack_join_successful_tx, rack_join_successful_rx) =
             oneshot::channel();
-        let bootstore_generation = rack_init_bootstore_generation::RSS_INITIAL;
         let join_handle = tokio::task::spawn(async move {
             let log =
                 ctx.base_log.new(o!("component" => "MultirackJoinService"));
@@ -201,8 +226,8 @@ impl MultirackJoinServiceHandle {
                 input_rx,
                 output_tx,
                 membership_change_still_possible: mcsp,
+                written_bootstore_generation_tx,
                 rack_join_successful_rx,
-                bootstore_generation,
             };
             task.run().await
         });
@@ -212,6 +237,7 @@ impl MultirackJoinServiceHandle {
             input_tx,
             output_rx,
             membership_change_still_possible,
+            written_bootstore_generation_rx,
             rack_join_successful_tx,
         }
     }
@@ -221,7 +247,7 @@ impl MultirackJoinServiceHandle {
 struct MultirackJoinServiceTask {
     log: Logger,
     ctx: RssContext,
-    input_rx: watch::Receiver<MultirackJoinRequest>,
+    input_rx: watch::Receiver<MultirackJoinInput>,
     output_tx: watch::Sender<MultirackJoinServiceState>,
 
     // Once we've initialized trust quorum, we no longer allow membership
@@ -229,19 +255,20 @@ struct MultirackJoinServiceTask {
     // membership change is attempted too late in the process.
     membership_change_still_possible: Arc<AtomicBool>,
 
+    // The last bootstore generation written, or 0 before the first write
+    written_bootstore_generation_tx: watch::Sender<u64>,
+
     // Signal that indicates that the rack join is complete and the network
     // configuration can no longer be changed.
     rack_join_successful_rx: oneshot::Receiver<()>,
-
-    // The bootstore generation must be bumped upon each change of the network
-    // configuration. This can happen if the user uploads a new configuration
-    // before the `rack_join_successful_rx` message is received.
-    bootstore_generation: u64,
 }
 
 impl MultirackJoinServiceTask {
     /// The main loop of the Multirack Join Service
-    pub async fn run(&mut self) -> Result<(), MultirackJoinServiceError> {
+    ///
+    /// Returns the bootstore generation of the last written network
+    /// configuration.
+    pub async fn run(&mut self) -> Result<u64, MultirackJoinServiceError> {
         self.output_tx
             .send_modify(|state| *state = MultirackJoinServiceState::Starting);
 
@@ -279,7 +306,7 @@ impl MultirackJoinServiceTask {
         // We're done
         self.ctx.write_rss_completed_ledger(&self.log).await?;
 
-        Ok(())
+        Ok(*self.written_bootstore_generation_tx.borrow())
     }
 
     /// Loop until a message is received stating the multirack join is complete.
@@ -332,7 +359,6 @@ impl MultirackJoinServiceTask {
                 }
                 res = self.input_rx.changed() => {
                     res?;
-                    self.bootstore_generation += 1;
 
                     // This isn't subject to futurelock because
                     // `self.rack_join_successful_rx` above does not block
@@ -352,8 +378,7 @@ impl MultirackJoinServiceTask {
     async fn configure_networking(
         &mut self,
     ) -> Result<(), MultirackJoinServiceError> {
-        let rack_network_config =
-            self.input_rx.borrow_and_update().rack_network_config.clone();
+        let input = self.input_rx.borrow_and_update().clone();
 
         self.output_tx.send_modify(|state| match state {
             MultirackJoinServiceState::TrustQuorumCommitting(_) => {
@@ -382,24 +407,27 @@ impl MultirackJoinServiceTask {
         });
 
         let config = SystemNetworkingConfig {
-            rack_network_config,
+            rack_network_config: input.request.rack_network_config,
             blueprint_external_networking_config: None,
         };
 
         info!(
             self.log,
             "Writing network configuration to bootstore";
-            "generation" => self.bootstore_generation
+            "generation" => input.bootstore_generation
         );
         self.ctx
             .bootstore_node_handle
             .update_network_config(
                 EarlyNetworkConfigEnvelope::from(&config)
                     .serialize_to_bootstore_with_generation(
-                        self.bootstore_generation,
+                        input.bootstore_generation,
                     ),
             )
             .await?;
+
+        self.written_bootstore_generation_tx
+            .send_replace(input.bootstore_generation);
 
         Ok(())
     }
@@ -420,7 +448,7 @@ impl MultirackJoinServiceTask {
         // config could come in right before this call. We'd miss that update in
         // `wait_for_networking` if we called `borrow_and_update` here, because
         // `changed()` wouldn't fire.
-        let req = self.input_rx.borrow().clone();
+        let req = self.input_rx.borrow().request.clone();
         let tq_members = req.trust_quorum_peers.clone();
         let status = assign_ids_and_subnets(
             self.ctx.trust_quorum_handle.baseboard_id(),
@@ -447,7 +475,7 @@ impl MultirackJoinServiceTask {
         );
 
         let mut missing_sleds = BTreeSet::new();
-        for baseboard_id in tq_members {
+        for baseboard_id in tq_members.into_set() {
             if !bootstrap_ips.contains_key(&baseboard_id) {
                 missing_sleds.insert(baseboard_id);
             }
@@ -583,8 +611,12 @@ impl MultirackJoinServiceTask {
         &mut self,
         rack_id: RackUuid,
     ) -> Result<(), MultirackJoinServiceError> {
-        let members =
-            self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+        let members = self
+            .input_rx
+            .borrow_and_update()
+            .request
+            .trust_quorum_peers
+            .clone();
         let epoch = INITIAL_TRUST_QUORUM_EPOCH;
         let last_committed_epoch = None;
 
@@ -595,42 +627,11 @@ impl MultirackJoinServiceTask {
     async fn tq_run(
         &mut self,
         rack_id: RackUuid,
-        mut members: BTreeSet<BaseboardId>,
+        mut members: TrustQuorumMembers,
         mut epoch: Epoch,
         mut last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
         loop {
-            // We put the check inside this loop, rather than in
-            // `init_trust_quorum` because the operator can change the
-            // membership at any time.
-            if members.len() < 3 || members.len() > 32 {
-                let msg = format!(
-                    "Rack membership must be between 3 and 32 sleds \
-                    (inclusive). Received {} sleds.",
-                    members.len()
-                );
-                error!(self.log, "{msg}");
-
-                // Inform the operator about the mess they've made
-                self.output_tx.send_modify(|state| {
-                    *state = MultirackJoinServiceState::InvalidMembershipSize {
-                        message: msg,
-                    }
-                });
-
-                // Wait for the operator to clean up said mess.
-                self.input_rx.changed().await?;
-                members = self
-                    .input_rx
-                    .borrow_and_update()
-                    .trust_quorum_peers
-                    .clone();
-
-                // We don't need to bump the epoch because we never attempted a
-                // reconfiguration with the invalid membership.
-                continue;
-            }
-
             self.tq_reconfigure(
                 rack_id,
                 members.clone(),
@@ -676,12 +677,11 @@ impl MultirackJoinServiceTask {
     async fn tq_reconfigure(
         &mut self,
         rack_id: RackUuid,
-        members: BTreeSet<BaseboardId>,
+        members: TrustQuorumMembers,
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
-        let threshold =
-            TrustQuorumConfig::threshold(members.len().try_into().unwrap());
+        let threshold = TrustQuorumConfig::threshold(members.num_members());
 
         info!(
             self.log,
@@ -720,15 +720,19 @@ impl MultirackJoinServiceTask {
 
     async fn tq_prepare(
         &mut self,
-        members: BTreeSet<BaseboardId>,
+        members: TrustQuorumMembers,
         epoch: Epoch,
     ) -> Result<TqPrepareResult, MultirackJoinServiceError> {
         // Read unconditionally from `input_rx` so that we can ensure we are up
         // to date with the latest membership. Then in the loop below, anytime
         // the watch channel indicates a change we know that it must have
         // changed. This makes our reasonining local to this function.
-        let new_members =
-            self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+        let new_members = self
+            .input_rx
+            .borrow_and_update()
+            .request
+            .trust_quorum_peers
+            .clone();
         if new_members != members {
             return Ok(TqPrepareResult::ReconfigurationNeeded {
                 new_members,
@@ -744,9 +748,9 @@ impl MultirackJoinServiceTask {
                 .await?
                 .ok_or(MultirackJoinServiceError::TqBadCoordinator)?;
 
-            let all_nodes_prepared = status.acked_prepares == members;
+            let all_nodes_prepared = status.acked_prepares == *members.as_set();
             let still_waiting = itertools::join(
-                members.difference(&status.acked_prepares),
+                members.as_set().difference(&status.acked_prepares),
                 ",",
             );
 
@@ -817,7 +821,7 @@ impl MultirackJoinServiceTask {
     async fn tq_commit(
         &mut self,
         rack_id: RackUuid,
-        members: BTreeSet<BaseboardId>,
+        members: TrustQuorumMembers,
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
     ) -> Result<TqCommitResult, MultirackJoinServiceError> {
@@ -836,16 +840,14 @@ impl MultirackJoinServiceTask {
         self.ctx.trust_quorum_handle.commit(rack_id, epoch).await?;
 
         // Peers that must proxy commit over sprockets
-        let mut remote_peers = members.clone();
+        let mut remote_peers = members.as_set().clone();
         let this_sled = self.ctx.trust_quorum_handle.baseboard_id().clone();
         remote_peers.remove(&this_sled);
         let mut set = JoinSet::new();
 
-        let threshold =
-            TrustQuorumConfig::threshold(members.len().try_into().unwrap());
-        let commit_crash_tolerance = TrustQuorumConfig::commit_crash_tolerance(
-            members.len().try_into().unwrap(),
-        );
+        let threshold = TrustQuorumConfig::threshold(members.num_members());
+        let commit_crash_tolerance =
+            TrustQuorumConfig::commit_crash_tolerance(members.num_members());
         let min_acks_to_commit =
             (threshold.0 + commit_crash_tolerance) as usize;
 
@@ -856,7 +858,7 @@ impl MultirackJoinServiceTask {
         // Update our state as we start
         let mut commit_state = CommitState {
             rack_id,
-            members: members.clone(),
+            members: members.as_set().clone(),
             epoch,
             last_committed_epoch,
             threshold,
@@ -962,7 +964,7 @@ impl MultirackJoinServiceTask {
                             commit_state.clone(),
                         )
                     });
-                    if commit_state.acked == members {
+                    if commit_state.acked == *members.as_set() {
                         info!(
                             self.log,
                             "Trust quorum committed at all nodes";
@@ -979,6 +981,7 @@ impl MultirackJoinServiceTask {
                     let new_members = self
                       .input_rx
                       .borrow_and_update()
+                      .request
                       .trust_quorum_peers.clone();
 
                     // Did the membership change?
@@ -1041,7 +1044,7 @@ impl MultirackJoinServiceTask {
         // changed we update our gate to prevent it from changing in the future.
         // Otherwise we start a reconfiguration.
         let guard = self.input_rx.borrow_and_update();
-        if guard.trust_quorum_peers == members {
+        if guard.request.trust_quorum_peers == members {
             // No membership change
             //
             // If an operator tries to change the set of peers for rack
@@ -1052,7 +1055,7 @@ impl MultirackJoinServiceTask {
             Ok(TqCommitResult::Committed)
         } else {
             // Membership change
-            let new_members = guard.trust_quorum_peers.clone();
+            let new_members = guard.request.trust_quorum_peers.clone();
             let just_committed_epoch = epoch;
             Ok(TqCommitResult::ReconfigurationNeeded {
                 new_members,
@@ -1068,11 +1071,15 @@ impl MultirackJoinServiceTask {
     // Return an error if checking for the update fails.
     async fn has_membership_changed(
         &mut self,
-        members: &BTreeSet<BaseboardId>,
-    ) -> Result<Option<BTreeSet<BaseboardId>>, MultirackJoinServiceError> {
+        members: &TrustQuorumMembers,
+    ) -> Result<Option<TrustQuorumMembers>, MultirackJoinServiceError> {
         if self.input_rx.has_changed()? {
-            let new_members =
-                self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+            let new_members = self
+                .input_rx
+                .borrow_and_update()
+                .request
+                .trust_quorum_peers
+                .clone();
             if new_members != *members {
                 return Ok(Some(new_members));
             }
@@ -1110,6 +1117,7 @@ fn assign_ids_and_subnets(
     })
     .chain(
         req.trust_quorum_peers
+            .into_set()
             .into_iter()
             .filter(|baseboard_id| baseboard_id != this_nodes_baseboard_id)
             .enumerate()
@@ -1183,22 +1191,26 @@ mod tests {
     #[test]
     fn new_start_sled_agent_status() {
         let req = MultirackJoinRequest {
-            trust_quorum_peers: trust_quorum_peers(),
+            trust_quorum_peers: TrustQuorumMembers::new(trust_quorum_peers())
+                .expect("test membership is within the size bounds"),
             rack_network_config: rack_network_config(),
         };
 
-        let coordinator = req.trust_quorum_peers.first().unwrap();
+        let coordinator = req.trust_quorum_peers.iter().next().unwrap();
         let status = assign_ids_and_subnets(
             coordinator,
             RackUuid::new_v4(),
             req.clone(),
         );
-        assert_eq!(status.sleds.len(), req.trust_quorum_peers.len());
+        assert_eq!(
+            status.sleds.len(),
+            usize::from(req.trust_quorum_peers.num_members())
+        );
 
         let actual_sled_subnets: BTreeSet<_> =
             status.sleds.iter().map(|s| s.sled_subnet.to_string()).collect();
         let expected_sled_subnets: BTreeSet<_> =
-            (0..req.trust_quorum_peers.len())
+            (0..usize::from(req.trust_quorum_peers.num_members()))
                 .into_iter()
                 .map(|i| format!("fd00:abcd:ffff:1{:02x}::/64", i + 1))
                 .collect();
@@ -1209,7 +1221,8 @@ mod tests {
     #[test]
     fn first_subnet_assigned_to_this_node() {
         let req = MultirackJoinRequest {
-            trust_quorum_peers: trust_quorum_peers(),
+            trust_quorum_peers: TrustQuorumMembers::new(trust_quorum_peers())
+                .expect("test membership is within the size bounds"),
             rack_network_config: rack_network_config(),
         };
 

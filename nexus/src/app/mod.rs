@@ -92,6 +92,7 @@ pub(crate) mod multicast;
 mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
+mod problem;
 mod project;
 mod quiesce;
 mod quota;

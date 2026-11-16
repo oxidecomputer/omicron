@@ -132,7 +132,7 @@ impl From<SpCommsError> for HttpError {
             ),
             SpCommsError::Timeout { .. } => http_err_with_message(
                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                "Timeout ",
+                "Timeout",
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::UpdateFailed { .. } => http_err_with_message(
@@ -270,7 +270,7 @@ impl From<SpLookupError> for HttpError {
             ),
             SpLookupError::DiscoveryFailed { .. } => http_err_with_message(
                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                "DiscoveryFailed ",
+                "DiscoveryFailed",
                 InlineErrorChain::new(&error).to_string(),
             ),
         }

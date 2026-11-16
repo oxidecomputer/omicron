@@ -574,6 +574,16 @@ table! {
 }
 
 table! {
+    project_utilization(project_id) {
+        project_id -> Uuid,
+        silo_id -> Uuid,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+    }
+}
+
+table! {
     silo_auth_settings(silo_id) {
         silo_id -> Uuid,
         time_created -> Timestamptz,
@@ -1653,6 +1663,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -2363,6 +2374,10 @@ table! {
         source -> crate::enums::BpSourceEnum,
 
         external_networking_generation -> Int8,
+
+        reflects_collection_id -> Nullable<Uuid>,
+        reflects_collection_time_started -> Nullable<Timestamptz>,
+        reflects_collection_time_done -> Nullable<Timestamptz>,
     }
 }
 
@@ -3173,10 +3188,10 @@ table! {
         multicast_ip -> Inet,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
-        state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
         underlay_salt -> Nullable<Int2>,
+        state -> crate::enums::MulticastGroupStateEnum,
     }
 }
 
@@ -3495,6 +3510,22 @@ table! {
 }
 
 table! {
+    fm_fact_smf_service (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        sled_id -> Uuid,
+        zone_name -> Text,
+        fmri -> Text,
+        kind -> crate::enums::FmFactSmfServiceKindEnum,
+        observed_in_inv -> Uuid,
+        time_observed -> Timestamptz,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3515,6 +3546,8 @@ allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_certificate);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_smf_service);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_smf_service);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3551,6 +3584,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -3604,6 +3638,32 @@ table! {
         created_at_generation -> Int8,
     }
 }
+
+table! {
+    problem (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        current_revision -> Int8,
+    }
+}
+
+table! {
+    problem_revision (problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        time_created -> Timestamptz,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(problem, problem_revision);
+joinable!(problem_revision -> problem (problem_id));
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

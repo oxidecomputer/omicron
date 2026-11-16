@@ -9,6 +9,8 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::multirack::UnadoptedRack;
+use crate::external_api::multirack::UnadoptedSled;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
@@ -22,6 +24,7 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
@@ -208,6 +211,19 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+}
+
+/// Returns whether `zone_name` names a Propolis zone.
+///
+/// Propolis zones come and go with their VMMs, so SMF services in them are
+/// excluded when judging sled health from
+/// [`SledAgent::smf_services_enabled_not_online`].
+///
+/// This matches on the zone name prefix. If that prefix ever changed without
+/// [`PROPOLIS_ZONE_PREFIX`] following, Propolis services would be reported as
+/// false positives.
+pub fn is_propolis_zone(zone_name: &str) -> bool {
+    zone_name.starts_with(PROPOLIS_ZONE_PREFIX)
 }
 
 impl Collection {
@@ -1311,6 +1327,20 @@ impl IdOrdItem for DiscoveredRack {
     id_upcast!();
 }
 
+impl From<DiscoveredRack> for UnadoptedRack {
+    fn from(value: DiscoveredRack) -> Self {
+        Self {
+            rack_id: value.rack_id,
+            rack_subnet: value.rack_subnet.net(),
+            unadopted_sleds: value
+                .discovered_sleds
+                .into_iter()
+                .map(UnadoptedSled::from)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DiscoveredSled {
     /// ID of the sled, which will be the same ID used by the sled-agent to
@@ -1331,6 +1361,24 @@ impl IdOrdItem for DiscoveredSled {
         self.sled_id
     }
     id_upcast!();
+}
+
+impl From<DiscoveredSled> for UnadoptedSled {
+    fn from(value: DiscoveredSled) -> Self {
+        let (sled_agent_started, last_start_err) =
+            match value.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error)
+                }
+            };
+        Self {
+            sled_id: value.sled_id,
+            baseboard_id: value.baseboard_id,
+            sled_agent_started,
+            last_start_err,
+        }
+    }
 }
 
 #[cfg(test)]

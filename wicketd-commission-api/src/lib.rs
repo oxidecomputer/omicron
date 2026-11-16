@@ -12,7 +12,7 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use slog_error_chain::InlineErrorChain;
-use wicketd_commission_types_versions::{latest, v1, v2, v3, v4};
+use wicketd_commission_types_versions::{latest, v1, v2, v3, v4, v5};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
@@ -30,6 +30,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (7, TRUST_QUORUM_MEMBERS),
     (6, UPDATE_PROGRESS_REPOSITORY),
     (5, MULTIRACK_JOIN),
     (4, UPDATE_ELAPSED),
@@ -404,7 +405,7 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = POST,
         path = "/multirack-join",
-        versions = VERSION_MULTIRACK_JOIN..,
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn post_run_multirack_join(
         rqctx: RequestContext<Self::Context>,
@@ -413,4 +414,41 @@ pub trait WicketdCommissionApi {
         HttpResponseOk<latest::rack_setup::RunMultirackJoinResponse>,
         HttpError,
     >;
+
+    /// Join this rack into an existing multirack cluster
+    ///
+    /// This is the multirack counterpart to running rack setup, and applies to
+    /// every rack but the first: it initializes this rack's trust quorum,
+    /// starts its sled-agents, and publishes its network configuration, but
+    /// places no control plane services. Reconfigurator adopts the rack
+    /// afterwards.
+    ///
+    /// Unlike rack setup, the configuration is not staged through this API
+    /// beforehand; it is posted here in full and forwarded to the bootstrap
+    /// agent. Progress is reported by `GET /rack-setup`, as a `RackOperation`
+    /// whose `kind` is `multirack-join`.
+    #[endpoint {
+        operation_id = "post_run_multirack_join",
+        method = POST,
+        path = "/multirack-join",
+        versions = VERSION_MULTIRACK_JOIN..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn post_run_multirack_join_v5(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v5::rack_setup::MultirackJoinRequest>,
+    ) -> Result<
+        HttpResponseOk<v5::rack_setup::RunMultirackJoinResponse>,
+        HttpError,
+    > {
+        Self::post_run_multirack_join(
+            rqctx,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
 }
