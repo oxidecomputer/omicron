@@ -64,6 +64,7 @@ members = [
     "dns-server/dnsadm",
     "dns-server/transient",
     "end-to-end-tests",
+    "end-to-end-tests/commtest",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -265,6 +266,7 @@ default-members = [
     "dns-server/dnsadm",
     "dns-server/transient",
     "end-to-end-tests",
+    "end-to-end-tests/commtest",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -497,6 +499,7 @@ cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
 cockroach-admin-types-versions = { path = "cockroach-admin/types/versions" }
 colored = "2.1"
+commtest = { path = "end-to-end-tests/commtest" }
 const_format = "0.2.34"
 cookie = "0.18"
 criterion = { version = "0.7.0", features = [ "async_tokio" ] }
