@@ -74,9 +74,13 @@ pub(super) fn read_disk_locations(
     Ok(labels)
 }
 
-/// The driver instance of an `nvme` node, from its `io/instance` property.
-/// `None`, with a log line, if the node has no such property or it is not the
-/// uint32 topo documents it as.
+/// Returns the driver instance of an `nvme` node, from its `io/instance`
+/// property.
+///
+/// If the node has no such property, if that property is not a `uint32`
+/// (which is the documented type in libtopo), if the property cannot be
+/// read, or if its value is out of range for an instance number, this
+/// function returns `None` and logs a message.
 fn nvme_instance_of(log: &Logger, node: &Node<'_>) -> Option<NvmeInstance> {
     let value =
         match node.property_u32(hc::TOPO_PGROUP_IO, hc::TOPO_IO_INSTANCE) {
@@ -111,13 +115,16 @@ fn nvme_instance_of(log: &Logger, node: &Node<'_>) -> Option<NvmeInstance> {
     }
 }
 
-/// The chassis location label for an `nvme` node.
+/// Returns the chassis location label for an `nvme` node.
 ///
-/// On Oxide platforms the label is carried by the enclosing `bay` (a U.2 bay)
-/// or `slot` (an M.2 socket) node rather than by the nvme node itself, so fall
-/// back to the parent. Only those two node types count: a label further up the
-/// tree would describe something unrelated to this disk. This is the same rule
-/// nvmeadm(8) applies for `-L`.
+/// On Oxide platforms, the label is carried by the enclosing `bay` (a U.2 bay)
+/// or `slot` (an M.2 socket) node, rather than by the nvme node itself.
+/// Therefore, this function falls back to the parent node if the provided node
+/// lacks a label. When using the parent node's label, only the `bay` and `slot`
+/// node types are considered, since a label further up the tree would describe
+/// something unrelated to this disk.
+///
+/// This is the same rule nvmeadm(8) applies when its `-L` argument is passed.
 fn location_label_of(node: &Node<'_>) -> Option<String> {
     label_of(node).or_else(|| {
         node.parent()
@@ -129,7 +136,8 @@ fn location_label_of(node: &Node<'_>) -> Option<String> {
     })
 }
 
-/// A node's label, treating "no label" and an empty label alike.
+/// Returns a node's label, or `None` if it has no label or the label is an
+/// empty string.
 fn label_of(node: &Node<'_>) -> Option<String> {
     node.label().ok().filter(|label| !label.is_empty())
 }
