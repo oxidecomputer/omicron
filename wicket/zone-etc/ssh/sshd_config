@@ -35,13 +35,15 @@ AcceptEnv LANG LC_* OXIDE_PREF_*
 
 AllowUsers wicket support
 
-# Allow "wicket" to log in without a password, and constrain it to the captive
-# shell
 Match User wicket
-        PermitEmptyPasswords yes
-        PasswordAuthentication yes
-        AuthenticationMethods none
-        ForceCommand /opt/oxide/wicket/bin/wicket
+    # Always constrain `wicket` to the captive shell.
+    ForceCommand /opt/oxide/wicket/bin/wicket
+    # wicket may be configured for passwordless login or SSH-key based login;
+    # sled-agent decides at runtime when starting the switch zone (and may
+    # reconfigure it while the switch zone is up, if the operator changes it).
+    # This file remains unchanged; include the snippet that sled-agent writes to
+    # specify auth for wicket.
+    Include /opt/oxide/wicket/wicket_sshd_config
 
 Match User support
         PubkeyAuthentication yes

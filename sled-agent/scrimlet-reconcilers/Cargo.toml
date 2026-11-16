@@ -9,7 +9,9 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+atomicwrites.workspace = true
 bootstrap-agent-lockstep-types.workspace = true
+camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
 ddm-admin-client.workspace = true
@@ -26,15 +28,18 @@ macaddr.workspace = true
 mg-admin-client.workspace = true
 mg-api-types.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
 scuffle.workspace = true
+sled-agent-config-reconciler.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 
 omicron-workspace-hack.workspace = true
 

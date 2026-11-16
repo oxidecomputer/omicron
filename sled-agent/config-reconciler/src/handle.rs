@@ -178,6 +178,11 @@ impl WicketSshAuthReceiver {
 
     /// Waits for a change notification in the underlying watch channel, then
     /// marks the current value as seen and returns it.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. The only `.await` point it contains is a
+    /// call to [`watch::Receiver::changed()`], which itself is cancel safe.
     pub async fn changed_value(
         &mut self,
     ) -> Result<WicketSshAuth, WicketSshAuthReceiverError> {

@@ -70,7 +70,7 @@ use sled_agent_config_reconciler::{
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_scrimlet_reconcilers::{
-    ScrimletReconcilersMode, SledAgentNetworkingInfo,
+    ScrimletReconcilersMode, SledAgentNetworkingInfo, WicketSshAuthReconciler,
 };
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
@@ -86,7 +86,6 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     Inventory, OmicronSledConfig, SledRegistrationInfo, SledRole,
-    WicketSshAuthStatus,
 };
 use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
@@ -491,6 +490,9 @@ struct SledAgentInner {
     // This is used for idempotence checks during RSS/Add-Sled internal APIs
     start_request: StartSledAgentRequest,
 
+    // Handle to the reconciler for wicket SSH authentication.
+    wicket_ssh_auth_reconciler: Arc<WicketSshAuthReconciler>,
+
     // Handle to the sled-agent-config-reconciler system.
     config_reconciler: Arc<ConfigReconcilerHandle>,
 
@@ -881,6 +883,9 @@ impl SledAgent {
                 id: request.body.id,
                 subnet: request.body.subnet,
                 start_request: request,
+                wicket_ssh_auth_reconciler: long_running_task_handles
+                    .wicket_ssh_auth_reconciler
+                    .clone(),
                 config_reconciler,
                 instances,
                 probes,
@@ -1426,11 +1431,10 @@ impl SledAgent {
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,
-            // TODO omicron#11821 We don't yet manage the wicket SSH auth status
-            // of the switch zone, so report the trivial status (even though
-            // this is slightly wrong if we actually _do_ have a switch zone;
-            // we'll fix this as the feature work lands).
-            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
+            wicket_ssh_auth_status: self
+                .inner
+                .wicket_ssh_auth_reconciler
+                .status(),
         })
     }
 
