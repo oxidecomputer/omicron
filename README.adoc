@@ -4,7 +4,7 @@
 
 = Oxide Control Plane
 
-This repo houses the work-in-progress Oxide Rack control plane.
+This repo houses the work-in-progress Oxide Rack control plane
 
 image::https://github.com/oxidecomputer/omicron/workflows/Rust/badge.svg[]
 
