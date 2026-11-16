@@ -91,6 +91,24 @@ pub static HARDWARE_SLED_PROVISION_POLICY_URL: LazyLock<String> =
             SLED_AGENT_UUID
         )
     });
+pub static HARDWARE_SLED_EXPUNGE_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/system/hardware/sleds/{}/expunge", SLED_AGENT_UUID)
+});
+pub static DEMO_SLED_EXPUNGE_PARAMS: LazyLock<sled::SledExpungeParams> =
+    LazyLock::new(|| sled::SledExpungeParams {
+        serial: "demo-serial".to_string(),
+    });
+pub const HARDWARE_SLED_EXPUNGE_REQUESTS_URL: &'static str =
+    "/v1/system/hardware/sled-expunge-requests";
+const DEMO_SLED_EXPUNGE_REQUEST_ID: &'static str =
+    "5b4f3c8e-7d1a-4a6b-9f2e-3c8d1e0a7b64";
+pub static HARDWARE_SLED_EXPUNGE_REQUEST_URL: LazyLock<String> = LazyLock::new(
+    || {
+        format!(
+            "{HARDWARE_SLED_EXPUNGE_REQUESTS_URL}/{DEMO_SLED_EXPUNGE_REQUEST_ID}"
+        )
+    },
+);
 pub static HARDWARE_RACK_MEMBERSHIP_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!("/v1/system/hardware/racks/{}/membership", RACK_UUID)
@@ -3040,6 +3058,26 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Put(
                     serde_json::to_value(&*DEMO_SLED_PROVISION_POLICY).unwrap(),
                 )],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_SLED_EXPUNGE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SLED_EXPUNGE_PARAMS).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: HARDWARE_SLED_EXPUNGE_REQUESTS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_SLED_EXPUNGE_REQUEST_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
                 url: "/v1/system/hardware/switches",

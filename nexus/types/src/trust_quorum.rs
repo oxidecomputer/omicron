@@ -16,8 +16,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
-use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
-use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
+use trust_quorum_types::membership::TrustQuorumMembers;
+use trust_quorum_types::membership::TrustQuorumMembersError;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
@@ -145,14 +145,12 @@ impl TrustQuorumConfig {
         proposed: ProposedTrustQuorumConfig,
         coordinator: BaseboardId,
     ) -> Self {
-        let num_members = u8::try_from(proposed.members.len()).unwrap();
+        let num_members = proposed.members.num_members();
         let state = if proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes {
             TrustQuorumConfigState::PreparingLrtqUpgrade
         } else {
             TrustQuorumConfigState::Preparing
         };
-        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
-        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
         TrustQuorumConfig {
             rack_id: proposed.rack_id,
             epoch: proposed.epoch,
@@ -164,6 +162,7 @@ impl TrustQuorumConfig {
             encrypted_rack_secrets: None,
             members: proposed
                 .members
+                .into_set()
                 .into_iter()
                 .map(|id| {
                     (
@@ -187,12 +186,10 @@ impl TrustQuorumConfig {
 
     pub fn new_rss_committed_config(
         rack_id: RackUuid,
-        initial_members: BTreeSet<BaseboardId>,
+        initial_members: TrustQuorumMembers,
         coordinator: BaseboardId,
     ) -> TrustQuorumConfig {
-        let num_members = u8::try_from(initial_members.len()).unwrap();
-        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
-        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
+        let num_members = initial_members.num_members();
         let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,
@@ -204,6 +201,7 @@ impl TrustQuorumConfig {
             coordinator,
             encrypted_rack_secrets: None,
             members: initial_members
+                .into_set()
                 .into_iter()
                 .map(|id| {
                     (
@@ -263,7 +261,7 @@ pub struct ProposedTrustQuorumConfig {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub is_lrtq_upgrade: IsLrtqUpgrade,
-    pub members: BTreeSet<BaseboardId>,
+    pub members: TrustQuorumMembers,
 }
 
 impl ProposedTrustQuorumConfig {
@@ -276,24 +274,27 @@ impl ProposedTrustQuorumConfig {
         }
     }
 
-    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
-    // from the membership. Return an error if the sled is not a member of the
-    // `latest_committed_config`.
     pub fn remove_sled(
         latest_committed_config: &TrustQuorumConfig,
         new_epoch: Epoch,
         sled_to_remove: &BaseboardId,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, RemoveSledError> {
         let rack_id = latest_committed_config.rack_id;
         let mut members: BTreeSet<_> =
             latest_committed_config.members.keys().cloned().collect();
 
         if !members.remove(sled_to_remove) {
-            return Err(Error::invalid_request(format!(
-                "Sled {} is not a member of the trust quorum.",
-                sled_to_remove
-            )));
+            return Err(RemoveSledError::NotMember {
+                sled: sled_to_remove.clone(),
+            });
         }
+        let members = TrustQuorumMembers::new(members).map_err(|error| {
+            RemoveSledError::InvalidMembership {
+                rack_id,
+                sled: sled_to_remove.clone(),
+                error,
+            }
+        })?;
 
         Ok(ProposedTrustQuorumConfig {
             rack_id,
@@ -304,6 +305,93 @@ impl ProposedTrustQuorumConfig {
             members,
         })
     }
+
+    /// Create a new `ProposedTrustQuorumConfig` including `new_sleds` in the
+    /// membership. Return an error if any of the new sleds exist in the
+    /// `latest_committed_config` membership already.
+    pub fn add_sleds(
+        latest_committed_config: &TrustQuorumConfig,
+        new_epoch: Epoch,
+        new_sleds: BTreeSet<BaseboardId>,
+    ) -> Result<Self, AddSledsError> {
+        let rack_id = latest_committed_config.rack_id;
+        let existing: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        let already_members: BTreeSet<_> =
+            existing.intersection(&new_sleds).cloned().collect();
+        if !already_members.is_empty() {
+            return Err(AddSledsError::AlreadyMembers {
+                sleds: already_members,
+            });
+        }
+
+        let members = TrustQuorumMembers::new(
+            new_sleds.union(&existing).cloned().collect(),
+        )
+        .map_err(|error| AddSledsError::InvalidMembership { rack_id, error })?;
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members,
+        })
+    }
+
+    /// Create a new `ProposedTrustQuorumConfig` that upgrades a rack from LRTQ,
+    /// with the rack's commissioned sleds as its members.
+    pub fn upgrade_from_lrtq(
+        rack_id: RackUuid,
+        new_epoch: Epoch,
+        commissioned_sleds: BTreeSet<BaseboardId>,
+    ) -> Result<Self, LrtqUpgradeError> {
+        let members =
+            TrustQuorumMembers::new(commissioned_sleds).map_err(|error| {
+                LrtqUpgradeError::InvalidMembership { rack_id, error }
+            })?;
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+            members,
+        })
+    }
+}
+
+/// Why [`ProposedTrustQuorumConfig::add_sleds`] refused to add sleds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AddSledsError {
+    /// Some of the sleds are already members of the trust quorum.
+    AlreadyMembers { sleds: BTreeSet<BaseboardId> },
+    /// The members after adding the sleds are outside the trust quorum size
+    /// bounds.
+    InvalidMembership { rack_id: RackUuid, error: TrustQuorumMembersError },
+}
+
+/// Why [`ProposedTrustQuorumConfig::upgrade_from_lrtq`] refused to upgrade a
+/// rack.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LrtqUpgradeError {
+    /// The commissioned sleds are outside the trust quorum size bounds.
+    InvalidMembership { rack_id: RackUuid, error: TrustQuorumMembersError },
+}
+
+/// Why [`ProposedTrustQuorumConfig::remove_sled`] refused to remove a sled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoveSledError {
+    /// The sled is not a member of the trust quorum.
+    NotMember { sled: BaseboardId },
+    /// The members left after removing `sled` are outside the trust quorum size
+    /// bounds.
+    InvalidMembership {
+        rack_id: RackUuid,
+        sled: BaseboardId,
+        error: TrustQuorumMembersError,
+    },
 }
 
 /// Given the current trust quorum config returned by
@@ -356,11 +444,210 @@ pub fn check_trust_quorum_allows_expunge(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum SledExpungeTaskGate {
+    SledRemoved,
+    RemovalPreparing,
+    RemovalAborted,
+    ReAddPreparing { epoch: Epoch },
+    ReAdded { epoch: Epoch, state: TrustQuorumConfigState },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct SledExpungeTaskGateError {
+    message: String,
+}
+
+impl SledExpungeTaskGateError {
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+// TODO-RAINCLAUDE: the epoch of the base config check_sled_expunge_task_gate needs (the caller passes the removal config itself when this is the removal epoch): the latest config is Preparing and may abort, after which its base becomes the latest non-aborted config. None when the removal is still Preparing or is Aborted (the gate decides on the removal alone), or when the latest config is past Preparing or Aborted (a config past Preparing can't be aborted, so its base never becomes the latest again). Errors when the Preparing latest has no last committed epoch or builds on an epoch older than the removal.
+pub fn sled_expunge_task_gate_base_epoch(
+    removal_config: &TrustQuorumConfig,
+    latest_non_aborted_config: &TrustQuorumConfig,
+) -> Result<Option<Epoch>, SledExpungeTaskGateError> {
+    match removal_config.state {
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade
+        | TrustQuorumConfigState::Aborted => return Ok(None),
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially => {}
+    }
+    match latest_non_aborted_config.state {
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+            preparing_latest_base_epoch(
+                removal_config.epoch,
+                latest_non_aborted_config,
+            )
+            .map(Some)
+        }
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially
+        | TrustQuorumConfigState::Aborted => Ok(None),
+    }
+}
+
+fn preparing_latest_base_epoch(
+    removal_epoch: Epoch,
+    latest: &TrustQuorumConfig,
+) -> Result<Epoch, SledExpungeTaskGateError> {
+    let Some(base_epoch) = latest.last_committed_epoch else {
+        return Err(SledExpungeTaskGateError::new(format!(
+            "the latest non-aborted configuration (epoch {}, state {:?}) is \
+             preparing but has no last committed epoch",
+            latest.epoch, latest.state,
+        )));
+    };
+    if base_epoch < removal_epoch {
+        return Err(SledExpungeTaskGateError::new(format!(
+            "the latest non-aborted configuration (epoch {}) is preparing on \
+             top of epoch {base_epoch}, which is older than the removal \
+             configuration (epoch {removal_epoch})",
+            latest.epoch,
+        )));
+    }
+    Ok(base_epoch)
+}
+
+// TODO-RAINCLAUDE: the sled_expunge task's gate (RFD 747). latest_non_aborted_config is what tq_load_latest_possible_committed_config returns, which does NOT skip Preparing configs; latest_base_config is the config at sled_expunge_task_gate_base_epoch (the removal config itself when that is the removal epoch), required when the latest is Preparing and ignored otherwise. A removal past Preparing can never be aborted and must exclude the sled; the sled is removed only if it is in neither the latest config nor, when that is Preparing and could abort, its base. So, within the snapshot of configs the gate is given, a re-add is reported, not missed; after that snapshot, acting on SledRemoved relies on check_no_new_member_being_expunged_conn refusing re-adds and on sled_expunge_request_complete re-running the gate in its own transaction. Unrelated Preparing configs that exclude the sled are ignored. Inconsistent inputs are errors; the rack checks run first, then the removal state, then the rest.
+pub fn check_sled_expunge_task_gate(
+    removal_config: &TrustQuorumConfig,
+    latest_non_aborted_config: &TrustQuorumConfig,
+    latest_base_config: Option<&TrustQuorumConfig>,
+    baseboard_id: &BaseboardId,
+) -> Result<SledExpungeTaskGate, SledExpungeTaskGateError> {
+    let rack_id = removal_config.rack_id;
+    let removal_epoch = removal_config.epoch;
+    let latest = latest_non_aborted_config;
+    let gate_error = SledExpungeTaskGateError::new;
+
+    if latest.rack_id != rack_id {
+        return Err(gate_error(format!(
+            "the latest non-aborted configuration (epoch {}) is for rack {}, \
+             not the removal's rack {rack_id}",
+            latest.epoch, latest.rack_id,
+        )));
+    }
+    if let Some(base) = latest_base_config {
+        if base.rack_id != rack_id {
+            return Err(gate_error(format!(
+                "the base configuration (epoch {}) is for rack {}, not the \
+                 removal's rack {rack_id}",
+                base.epoch, base.rack_id,
+            )));
+        }
+    }
+
+    match removal_config.state {
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+            return Ok(SledExpungeTaskGate::RemovalPreparing);
+        }
+        TrustQuorumConfigState::Aborted => {
+            return Ok(SledExpungeTaskGate::RemovalAborted);
+        }
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially => {}
+    }
+
+    if removal_config.members.contains_key(baseboard_id) {
+        return Err(gate_error(format!(
+            "the removal configuration (epoch {removal_epoch}, state {:?}) \
+             still includes the sled",
+            removal_config.state,
+        )));
+    }
+    if latest.epoch < removal_epoch {
+        return Err(gate_error(format!(
+            "the latest non-aborted configuration (epoch {}) is older than \
+             the removal configuration (epoch {removal_epoch}, state {:?}), \
+             which can no longer be aborted",
+            latest.epoch, removal_config.state,
+        )));
+    }
+
+    let latest_has_sled = latest.members.contains_key(baseboard_id);
+    match latest.state {
+        TrustQuorumConfigState::Aborted => Err(gate_error(format!(
+            "the latest non-aborted configuration (epoch {}) is aborted",
+            latest.epoch,
+        ))),
+        TrustQuorumConfigState::Committing
+        | TrustQuorumConfigState::Committed
+        | TrustQuorumConfigState::CommittedPartially => {
+            if latest_has_sled {
+                Ok(SledExpungeTaskGate::ReAdded {
+                    epoch: latest.epoch,
+                    state: latest.state,
+                })
+            } else {
+                Ok(SledExpungeTaskGate::SledRemoved)
+            }
+        }
+        TrustQuorumConfigState::Preparing
+        | TrustQuorumConfigState::PreparingLrtqUpgrade => {
+            let base_epoch =
+                preparing_latest_base_epoch(removal_epoch, latest)?;
+            let base = match latest_base_config {
+                Some(base) if base.epoch == base_epoch => base,
+                supplied => {
+                    let supplied = match supplied {
+                        Some(base) => format!("epoch {}", base.epoch),
+                        None => "none".to_string(),
+                    };
+                    return Err(gate_error(format!(
+                        "the latest non-aborted configuration (epoch {}) is \
+                         preparing on top of epoch {base_epoch}, but the base \
+                         configuration supplied is {supplied}",
+                        latest.epoch,
+                    )));
+                }
+            };
+            match base.state {
+                TrustQuorumConfigState::Preparing
+                | TrustQuorumConfigState::PreparingLrtqUpgrade
+                | TrustQuorumConfigState::Aborted => {
+                    return Err(gate_error(format!(
+                        "the base configuration (epoch {}, state {:?}) is not \
+                         past Preparing",
+                        base.epoch, base.state,
+                    )));
+                }
+                TrustQuorumConfigState::Committing
+                | TrustQuorumConfigState::Committed
+                | TrustQuorumConfigState::CommittedPartially => {}
+            }
+            if base.members.contains_key(baseboard_id) {
+                Ok(SledExpungeTaskGate::ReAdded {
+                    epoch: base.epoch,
+                    state: base.state,
+                })
+            } else if latest_has_sled {
+                Ok(SledExpungeTaskGate::ReAddPreparing { epoch: latest.epoch })
+            } else {
+                Ok(SledExpungeTaskGate::SledRemoved)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+    use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
 
-    #[derive(Debug)]
+    #[derive(Clone, Copy, Debug, test_strategy::Arbitrary)]
     enum Membership {
         Member,
         NonMember,
@@ -421,7 +708,8 @@ mod tests {
             }
             let mut config = TrustQuorumConfig::new_rss_committed_config(
                 rack_id,
-                members,
+                TrustQuorumMembers::new(members)
+                    .expect("test members are within the size bounds"),
                 other_members[0].clone(),
             );
             config.epoch = epoch;
@@ -513,7 +801,8 @@ mod tests {
         let coordinator = members.first().expect("at least one member").clone();
         let mut config = TrustQuorumConfig::new_rss_committed_config(
             RackUuid::new_v4(),
-            members,
+            TrustQuorumMembers::new(members)
+                .expect("test members are within the size bounds"),
             coordinator,
         );
         config.epoch = epoch;
@@ -541,26 +830,532 @@ mod tests {
                 is_lrtq_upgrade: IsLrtqUpgrade::No {
                     last_committed_epoch: Epoch(5),
                 },
-                members: [
-                    test_baseboard("member-0"),
-                    test_baseboard("member-1"),
-                    test_baseboard("member-3"),
-                ]
-                .into_iter()
-                .collect(),
+                members: TrustQuorumMembers::new(
+                    [
+                        test_baseboard("member-0"),
+                        test_baseboard("member-1"),
+                        test_baseboard("member-3"),
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
+                .expect("three members are within the size bounds"),
             }
         );
 
         let non_member = test_baseboard("not-a-member");
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &config,
+            Epoch(6),
+            &non_member,
+        )
+        .expect_err("removing a non-member sled is refused");
+        assert_eq!(error, RemoveSledError::NotMember { sled: non_member });
+
+        let minimum =
+            test_config(3, Epoch(5), TrustQuorumConfigState::Committed);
+        let error = ProposedTrustQuorumConfig::remove_sled(
+            &minimum,
+            Epoch(6),
+            &sled_to_remove,
+        )
+        .expect_err("removing from a minimum-size trust quorum is refused");
         assert_eq!(
-            ProposedTrustQuorumConfig::remove_sled(
-                &config,
-                Epoch(6),
-                &non_member,
+            error,
+            RemoveSledError::InvalidMembership {
+                rack_id: minimum.rack_id,
+                sled: sled_to_remove,
+                error: TrustQuorumMembersError::TooFew { num_members: 2 },
+            },
+        );
+    }
+
+    #[test]
+    fn test_proposed_config_add_sleds() {
+        let config =
+            test_config(3, Epoch(5), TrustQuorumConfigState::Committed);
+        let new_sled = test_baseboard("new");
+
+        let proposed = ProposedTrustQuorumConfig::add_sleds(
+            &config,
+            Epoch(6),
+            BTreeSet::from([new_sled.clone()]),
+        )
+        .expect("a new sled is added");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id: config.rack_id,
+                epoch: Epoch(6),
+                is_lrtq_upgrade: IsLrtqUpgrade::No {
+                    last_committed_epoch: Epoch(5),
+                },
+                members: TrustQuorumMembers::new(
+                    config
+                        .members
+                        .keys()
+                        .cloned()
+                        .chain([new_sled.clone()])
+                        .collect(),
+                )
+                .expect("four members are within the size bounds"),
+            }
+        );
+
+        let member = test_baseboard("member-1");
+        let error = ProposedTrustQuorumConfig::add_sleds(
+            &config,
+            Epoch(6),
+            BTreeSet::from([member.clone(), new_sled]),
+        )
+        .expect_err("adding a member sled is refused");
+        assert_eq!(
+            error,
+            AddSledsError::AlreadyMembers { sleds: BTreeSet::from([member]) }
+        );
+
+        let maximum = test_config(
+            TRUST_QUORUM_MAX_MEMBERS,
+            Epoch(5),
+            TrustQuorumConfigState::Committed,
+        );
+        let error = ProposedTrustQuorumConfig::add_sleds(
+            &maximum,
+            Epoch(6),
+            BTreeSet::from([test_baseboard("new")]),
+        )
+        .expect_err("adding to a maximum-size trust quorum is refused");
+        assert_eq!(
+            error,
+            AddSledsError::InvalidMembership {
+                rack_id: maximum.rack_id,
+                error: TrustQuorumMembersError::TooMany {
+                    num_members: TRUST_QUORUM_MAX_MEMBERS + 1,
+                },
+            },
+        );
+    }
+
+    #[test]
+    fn test_proposed_config_upgrade_from_lrtq() {
+        let rack_id = RackUuid::new_v4();
+        let sleds: BTreeSet<_> =
+            (0..3).map(|i| test_baseboard(&format!("member-{i}"))).collect();
+
+        let proposed = ProposedTrustQuorumConfig::upgrade_from_lrtq(
+            rack_id,
+            Epoch(2),
+            sleds.clone(),
+        )
+        .expect("three commissioned sleds are upgraded");
+        assert_eq!(
+            proposed,
+            ProposedTrustQuorumConfig {
+                rack_id,
+                epoch: Epoch(2),
+                is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+                members: TrustQuorumMembers::new(sleds.clone())
+                    .expect("three members are within the size bounds"),
+            }
+        );
+
+        let too_few: BTreeSet<_> = sleds.into_iter().take(2).collect();
+        let error = ProposedTrustQuorumConfig::upgrade_from_lrtq(
+            rack_id,
+            Epoch(2),
+            too_few,
+        )
+        .expect_err("upgrading with too few sleds is refused");
+        assert_eq!(
+            error,
+            LrtqUpgradeError::InvalidMembership {
+                rack_id,
+                error: TrustQuorumMembersError::TooFew { num_members: 2 },
+            },
+        );
+    }
+
+    const REMOVAL_EPOCH: Epoch = Epoch(5);
+    const BASE_EPOCH: Epoch = Epoch(7);
+    const LATER_EPOCH: Epoch = Epoch(8);
+    const OLDER_EPOCH: Epoch = Epoch(4);
+
+    struct GateFixture {
+        rack_id: RackUuid,
+        sled: BaseboardId,
+    }
+
+    impl GateFixture {
+        fn new() -> Self {
+            Self {
+                rack_id: RackUuid::new_v4(),
+                sled: test_baseboard("expunged"),
+            }
+        }
+
+        // TODO-RAINCLAUDE: every config has a member with the sled's serial but another part number, so membership must compare the full baseboard id.
+        fn config(
+            &self,
+            epoch: Epoch,
+            state: TrustQuorumConfigState,
+            membership: Membership,
+            last_committed_epoch: Option<Epoch>,
+        ) -> TrustQuorumConfig {
+            let mut config = test_config(4, epoch, state);
+            config.rack_id = self.rack_id;
+            config.last_committed_epoch = last_committed_epoch;
+            config.members.insert(
+                BaseboardId {
+                    part_number: "other-part".to_string(),
+                    serial_number: self.sled.serial_number.clone(),
+                },
+                TrustQuorumMemberData::new(),
+            );
+            match membership {
+                Membership::Member => {
+                    config.members.insert(
+                        self.sled.clone(),
+                        TrustQuorumMemberData::new(),
+                    );
+                }
+                Membership::NonMember => {}
+            }
+            config
+        }
+
+        fn removal(
+            &self,
+            state: TrustQuorumConfigState,
+            membership: Membership,
+        ) -> TrustQuorumConfig {
+            self.config(REMOVAL_EPOCH, state, membership, Some(OLDER_EPOCH))
+        }
+
+        fn error<T>(
+            &self,
+            message: &str,
+        ) -> Result<T, SledExpungeTaskGateError> {
+            Err(SledExpungeTaskGateError::new(message.to_string()))
+        }
+
+        fn check(
+            &self,
+            removal: &TrustQuorumConfig,
+            latest: &TrustQuorumConfig,
+            base: Option<&TrustQuorumConfig>,
+        ) -> Result<SledExpungeTaskGate, SledExpungeTaskGateError> {
+            check_sled_expunge_task_gate(removal, latest, base, &self.sled)
+        }
+
+        fn has_sled(&self, config: &TrustQuorumConfig) -> bool {
+            config.members.contains_key(&self.sled)
+        }
+    }
+
+    const ALL_STATES: [TrustQuorumConfigState; 6] = [
+        TrustQuorumConfigState::Preparing,
+        TrustQuorumConfigState::PreparingLrtqUpgrade,
+        TrustQuorumConfigState::Committing,
+        TrustQuorumConfigState::Committed,
+        TrustQuorumConfigState::CommittedPartially,
+        TrustQuorumConfigState::Aborted,
+    ];
+
+    #[derive(Debug, test_strategy::Arbitrary)]
+    enum GateLatest {
+        RemovalItself,
+        Later {
+            #[strategy(proptest::sample::select(ALL_STATES.to_vec()))]
+            state: TrustQuorumConfigState,
+            membership: Membership,
+            built_on: GateBase,
+        },
+    }
+
+    #[derive(Debug, test_strategy::Arbitrary)]
+    enum GateBase {
+        Removal,
+        Later {
+            #[strategy(proptest::sample::select(ALL_STATES.to_vec()))]
+            state: TrustQuorumConfigState,
+            membership: Membership,
+        },
+    }
+
+    // TODO-RAINCLAUDE: base is what the loader supplies: the config at sled_expunge_task_gate_base_epoch, or else whatever base config exists (which the gate must ignore); exactly the consistent inputs give Ok, and the properties below then pin the exact outcome.
+    // TODO-RAINCLAUDE: the default 256 cases reach a Preparing latest re-adding the sled on a committed base only about half the time.
+    #[proptest(cases = 4096)]
+    fn proptest_check_sled_expunge_task_gate(
+        #[strategy(proptest::sample::select(ALL_STATES.to_vec()))]
+        removal_state: TrustQuorumConfigState,
+        removal_membership: Membership,
+        latest_input: GateLatest,
+    ) {
+        use TrustQuorumConfigState as S;
+
+        let fixture = GateFixture::new();
+        let removal = fixture.removal(removal_state, removal_membership);
+        let (latest, base_config) = match latest_input {
+            GateLatest::RemovalItself => (removal.clone(), None),
+            GateLatest::Later { state, membership, built_on } => match built_on
+            {
+                GateBase::Removal => {
+                    let latest = fixture.config(
+                        LATER_EPOCH,
+                        state,
+                        membership,
+                        Some(REMOVAL_EPOCH),
+                    );
+                    (latest, None)
+                }
+                GateBase::Later { state: base_state, membership: base } => {
+                    let latest = fixture.config(
+                        LATER_EPOCH,
+                        state,
+                        membership,
+                        Some(BASE_EPOCH),
+                    );
+                    let base = fixture.config(
+                        BASE_EPOCH,
+                        base_state,
+                        base,
+                        Some(REMOVAL_EPOCH),
+                    );
+                    (latest, Some(base))
+                }
+            },
+        };
+        let base_epoch = sled_expunge_task_gate_base_epoch(&removal, &latest);
+        let base = match base_epoch {
+            Ok(Some(REMOVAL_EPOCH)) => Some(&removal),
+            Ok(_) | Err(_) => base_config.as_ref(),
+        };
+        let gate = fixture.check(&removal, &latest, base);
+
+        match removal_state {
+            S::Preparing | S::PreparingLrtqUpgrade => {
+                prop_assert_eq!(
+                    gate,
+                    Ok(SledExpungeTaskGate::RemovalPreparing)
+                );
+                prop_assert_eq!(base_epoch, Ok(None));
+                return Ok(());
+            }
+            S::Aborted => {
+                prop_assert_eq!(gate, Ok(SledExpungeTaskGate::RemovalAborted));
+                prop_assert_eq!(base_epoch, Ok(None));
+                return Ok(());
+            }
+            S::Committing | S::Committed | S::CommittedPartially => {}
+        }
+
+        let latest_preparing = match latest.state {
+            S::Preparing | S::PreparingLrtqUpgrade => true,
+            S::Committing
+            | S::Committed
+            | S::CommittedPartially
+            | S::Aborted => false,
+        };
+        prop_assert_eq!(
+            base_epoch,
+            Ok(latest.last_committed_epoch.filter(|_| latest_preparing)),
+        );
+        let effective_base = base.filter(|_| latest_preparing);
+        let base_past_preparing = match effective_base.map(|base| base.state) {
+            None
+            | Some(S::Committing | S::Committed | S::CommittedPartially) => {
+                true
+            }
+            Some(S::Preparing | S::PreparingLrtqUpgrade | S::Aborted) => false,
+        };
+        let consistent = !fixture.has_sled(&removal)
+            && latest.state != S::Aborted
+            && base_past_preparing;
+        let base_has_sled = effective_base.is_some_and(|b| fixture.has_sled(b));
+
+        prop_assert_eq!(gate.is_err(), !consistent, "{:?}", gate);
+        match gate {
+            Ok(SledExpungeTaskGate::SledRemoved) => {
+                prop_assert!(!fixture.has_sled(&removal));
+                prop_assert!(!fixture.has_sled(&latest));
+                prop_assert!(!base_has_sled);
+            }
+            Ok(SledExpungeTaskGate::ReAdded { epoch, state }) => {
+                let readded_in = if latest_preparing {
+                    effective_base
+                } else {
+                    Some(&latest)
+                };
+                let readded_in =
+                    readded_in.expect("a Preparing latest has a base");
+                prop_assert_eq!(
+                    (epoch, state),
+                    (readded_in.epoch, readded_in.state)
+                );
+                prop_assert!(fixture.has_sled(readded_in));
+            }
+            Ok(SledExpungeTaskGate::ReAddPreparing { epoch }) => {
+                prop_assert!(latest_preparing);
+                prop_assert_eq!(epoch, latest.epoch);
+                prop_assert!(fixture.has_sled(&latest));
+                prop_assert!(!base_has_sled);
+            }
+            Ok(
+                outcome @ (SledExpungeTaskGate::RemovalPreparing
+                | SledExpungeTaskGate::RemovalAborted),
+            ) => {
+                prop_assert!(false, "{outcome:?} for a removal past Preparing");
+            }
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn test_check_sled_expunge_task_gate_inconsistent_inputs() {
+        use Membership::*;
+        use TrustQuorumConfigState as S;
+
+        let fixture = GateFixture::new();
+        let rack_id = fixture.rack_id;
+        let removal = fixture.removal(S::Committed, NonMember);
+        let other_rack = RackUuid::new_v4();
+        let preparing_on_removal = fixture.config(
+            LATER_EPOCH,
+            S::Preparing,
+            NonMember,
+            Some(REMOVAL_EPOCH),
+        );
+        let preparing_on_base = fixture.config(
+            LATER_EPOCH,
+            S::Preparing,
+            NonMember,
+            Some(BASE_EPOCH),
+        );
+
+        // TODO-RAINCLAUDE: the rack checks run before the removal state, so they win even over a removal that is still Preparing.
+        let preparing_removal = fixture.removal(S::Preparing, NonMember);
+        let mut latest_other_rack = preparing_on_removal.clone();
+        latest_other_rack.rack_id = other_rack;
+        assert_eq!(
+            fixture.check(&preparing_removal, &latest_other_rack, None),
+            fixture.error(&format!(
+                "the latest non-aborted configuration (epoch {LATER_EPOCH}) is \
+                 for rack {other_rack}, not the removal's rack {rack_id}"
+            )),
+        );
+        let mut base_other_rack =
+            fixture.config(BASE_EPOCH, S::Committed, NonMember, None);
+        base_other_rack.rack_id = other_rack;
+        assert_eq!(
+            fixture.check(
+                &preparing_removal,
+                &preparing_on_base,
+                Some(&base_other_rack)
             ),
-            Err(Error::invalid_request(format!(
-                "Sled {non_member} is not a member of the trust quorum."
-            ))),
+            fixture.error(&format!(
+                "the base configuration (epoch {BASE_EPOCH}) is for rack \
+                 {other_rack}, not the removal's rack {rack_id}"
+            )),
+        );
+
+        let removal_with_sled = fixture.removal(S::Committed, Member);
+        assert_eq!(
+            fixture.check(&removal_with_sled, &removal_with_sled, None),
+            fixture.error(&format!(
+                "the removal configuration (epoch {REMOVAL_EPOCH}, state \
+                 Committed) still includes the sled"
+            )),
+        );
+
+        let older = fixture.config(OLDER_EPOCH, S::Committed, NonMember, None);
+        assert_eq!(
+            fixture.check(&removal, &older, None),
+            fixture.error(&format!(
+                "the latest non-aborted configuration (epoch {OLDER_EPOCH}) is \
+                 older than the removal configuration (epoch {REMOVAL_EPOCH}, \
+                 state Committed), which can no longer be aborted"
+            )),
+        );
+
+        let aborted_latest =
+            fixture.config(LATER_EPOCH, S::Aborted, NonMember, None);
+        assert_eq!(
+            fixture.check(&removal, &aborted_latest, None),
+            fixture.error(&format!(
+                "the latest non-aborted configuration (epoch {LATER_EPOCH}) is \
+                 aborted"
+            )),
+        );
+
+        let wrong_base =
+            fixture.config(Epoch(6), S::Committed, NonMember, None);
+        for (latest, base_epoch, supplied, description) in [
+            (&preparing_on_base, BASE_EPOCH, None, "none"),
+            (
+                &preparing_on_removal,
+                REMOVAL_EPOCH,
+                Some(&wrong_base),
+                "epoch 6",
+            ),
+        ] {
+            assert_eq!(
+                fixture.check(&removal, latest, supplied),
+                fixture.error(&format!(
+                    "the latest non-aborted configuration (epoch \
+                     {LATER_EPOCH}) is preparing on top of epoch \
+                     {base_epoch}, but the base configuration supplied is \
+                     {description}"
+                )),
+            );
+        }
+
+        let no_base =
+            fixture.config(LATER_EPOCH, S::Preparing, NonMember, None);
+        let message = format!(
+            "the latest non-aborted configuration (epoch {LATER_EPOCH}, state \
+             Preparing) is preparing but has no last committed epoch"
+        );
+        assert_eq!(
+            sled_expunge_task_gate_base_epoch(&removal, &no_base),
+            fixture.error(&message),
+        );
+        assert_eq!(
+            fixture.check(&removal, &no_base, None),
+            fixture.error(&message)
+        );
+
+        let on_older_base = fixture.config(
+            LATER_EPOCH,
+            S::Preparing,
+            NonMember,
+            Some(OLDER_EPOCH),
+        );
+        let message = format!(
+            "the latest non-aborted configuration (epoch {LATER_EPOCH}) is \
+             preparing on top of epoch {OLDER_EPOCH}, which is older than the \
+             removal configuration (epoch {REMOVAL_EPOCH})"
+        );
+        assert_eq!(
+            sled_expunge_task_gate_base_epoch(&removal, &on_older_base),
+            fixture.error(&message),
+        );
+        assert_eq!(
+            fixture.check(&removal, &on_older_base, Some(&older)),
+            fixture.error(&message),
+        );
+
+        let preparing_base = fixture.config(
+            BASE_EPOCH,
+            S::Preparing,
+            Member,
+            Some(REMOVAL_EPOCH),
+        );
+        assert_eq!(
+            fixture.check(&removal, &preparing_on_base, Some(&preparing_base)),
+            fixture.error(&format!(
+                "the base configuration (epoch {BASE_EPOCH}, state Preparing) \
+                 is not past Preparing"
+            )),
         );
     }
 }

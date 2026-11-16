@@ -426,6 +426,24 @@ resource DnsConfig {
 has_relation(fleet: Fleet, "parent_fleet", dns_config: DnsConfig)
 	if dns_config.fleet = fleet;
 
+resource SledExpungeRequestList {
+	permissions = [ "list_children" ];
+	relations = { parent_fleet: Fleet };
+	"list_children" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", list: SledExpungeRequestList)
+	if list.fleet = fleet;
+
+# TODO-RAINCLAUDE: only fleet admins (not fleet viewers) list, view, or modify sled expunge requests; Custom snippet because FleetChild grants viewers read.
+resource SledExpungeRequest {
+	permissions = [ "read", "modify" ];
+	relations = { parent_fleet: Fleet };
+	"read" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", request: SledExpungeRequest)
+	if request.fleet = fleet;
+
 # Describes the policy for accessing blueprints
 resource BlueprintConfig {
 	permissions = [

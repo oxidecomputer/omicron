@@ -327,6 +327,7 @@ uptime = 1245
 k = "overfull_hbox"
 badness  = 10000
 
+# TODO-RAINCLAUDE: the Nexus test harness copies whichever gimlet SP is last (this one), giving each copy its own serial and a default ereport config, so that every sim sled the harness starts at setup has an SP; a gimlet appended after this one becomes the template; see add_simulated_gimlet_sps. Keep the last gimlet healthy (no failed sensors, unlike SimGimlet00).
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet01"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"

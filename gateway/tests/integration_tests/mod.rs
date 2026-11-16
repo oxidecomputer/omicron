@@ -6,6 +6,7 @@ mod component_list;
 mod component_vpd;
 mod config;
 mod ereports;
+mod ignition;
 mod location_discovery;
 mod serial_console;
 mod task_dump;

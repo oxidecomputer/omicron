@@ -937,6 +937,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -8085,6 +8086,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "steno",
+ "trust-quorum-types",
  "uuid",
 ]
 
@@ -8188,14 +8190,19 @@ dependencies = [
  "anyhow",
  "futures",
  "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
+ "gateway-types",
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnetwork",
  "nexus-db-lookup",
  "nexus-db-queries",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -8207,8 +8214,10 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "sp-sim",
  "static_assertions",
  "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 
@@ -8609,6 +8618,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "sp-sim",
  "tokio",
  "tokio-postgres",
  "tokio-util",
@@ -12826,6 +12836,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "toml 0.8.23",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -14858,7 +14869,7 @@ dependencies = [
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
- "trust-quorum-types",
+ "trust-quorum-types-versions",
  "uuid",
 ]
 
@@ -17386,6 +17397,7 @@ dependencies = [
  "rand 0.9.2",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "serde_with 3.21.0",
  "sled-hardware-types",
  "slog",
@@ -18658,6 +18670,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "slog",
+ "trust-quorum-types-versions",
  "wicketd-commission-types-versions",
 ]
 
@@ -18691,6 +18704,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "toml 0.8.23",
+ "trust-quorum-types-versions",
  "uuid",
  "zeroize",
 ]

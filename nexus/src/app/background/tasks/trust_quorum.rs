@@ -4,6 +4,7 @@
 
 //! Background task for preparing and committing trust quorum configurations
 
+use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use crate::app::rack::rack_subnet;
 use anyhow::{Context, Error, anyhow, bail};
@@ -45,17 +46,18 @@ use std::time::Duration;
 use swrite::{SWrite, swrite, swriteln};
 use tokio::task::JoinSet;
 use trust_quorum_types::messages::{CommitRequest, PrepareAndCommitRequest};
-use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::{CommitStatus, NotCoordinatingStatus};
 use trust_quorum_types::types::Epoch;
 
 const MAX_SLED_AGENT_REQUEST_CONCURRENCY: usize = 5;
 pub struct TrustQuorumManager {
     datastore: Arc<DataStore>,
+    sled_expunge: Activator,
 }
 
 impl TrustQuorumManager {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(datastore: Arc<DataStore>, sled_expunge: Activator) -> Self {
+        Self { datastore, sled_expunge }
     }
 
     async fn activate_impl(
@@ -100,10 +102,16 @@ impl TrustQuorumManager {
                 ("epoch".into(), epoch.to_string()),
             ]));
             let datastore = self.datastore.clone();
+            let sled_expunge = self.sled_expunge.clone();
             if let Some(output) = workers
                 .spawn(async move {
                     let res = drive_reconfiguration(
-                        log, opctx, datastore, rack_id, epoch,
+                        log,
+                        opctx,
+                        datastore,
+                        &sled_expunge,
+                        rack_id,
+                        epoch,
                     )
                     .await;
                     (rack_id, epoch, res)
@@ -218,6 +226,7 @@ async fn drive_reconfiguration(
     log: Logger,
     opctx: OpContext,
     datastore: Arc<DataStore>,
+    sled_expunge: &Activator,
     rack_id: RackUuid,
     epoch: Epoch,
 ) -> Result<Status, Error> {
@@ -241,7 +250,8 @@ async fn drive_reconfiguration(
             "state" => ?config.state
         );
         if config.state.is_preparing() {
-            prepare(&log, &opctx, &datastore, config.clone()).await?
+            prepare(&log, &opctx, &datastore, sled_expunge, config.clone())
+                .await?
         } else {
             commit(&log, &opctx, &datastore, config.clone()).await?
         }
@@ -313,6 +323,7 @@ async fn prepare(
     log: &Logger,
     opctx: &OpContext,
     datastore: &DataStore,
+    sled_expunge: &Activator,
     config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // Get a sled agent for the coordinator
@@ -332,6 +343,14 @@ async fn prepare(
                     log, opctx, datastore, &config,
                 )
                 .await?;
+                // TODO-RAINCLAUDE: an aborted removal config also left preparing, which fails its sled expunge request; as on the Committing path below, the wake only saves sled_expunge a period.
+                info!(
+                    log,
+                    "Trust quorum config aborted; activating sled_expunge.";
+                    "rack_id" => %config.rack_id,
+                    "epoch" => %config.epoch,
+                );
+                sled_expunge.activate();
                 return Ok(Status::CoordinatorNotInService(config.coordinator));
             }
             Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
@@ -351,9 +370,12 @@ async fn prepare(
         .into_inner();
     let status = match response {
         TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
-        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
-            latest_config_epoch,
-        } => {
+        TrustQuorumCoordinatorStatusResponse::NotCoordinating(
+            NotCoordinatingStatus {
+                latest_config_epoch,
+                latest_committed_epoch: _,
+            },
+        ) => {
             let latest_config_epoch = match latest_config_epoch {
                 Some(epoch) => epoch.to_string(),
                 None => "none".to_string(),
@@ -384,6 +406,14 @@ async fn prepare(
     // Otherwise, we haven't finished preparing, so just return.
     match outcome {
         TqPrepareStatusOutcome::Committing { config } => {
+            // TODO-RAINCLAUDE: a sled expunge request waits for its removal config to leave preparing (and a re-add config leaving preparing fails it); waking sled_expunge here only saves it a period, and it happens before commit so a commit error can't lose it.
+            info!(
+                log,
+                "Trust quorum config left preparing; activating sled_expunge.";
+                "rack_id" => %config.rack_id,
+                "epoch" => %config.epoch,
+            );
+            sled_expunge.activate();
             commit(log, opctx, datastore, *config).await
         }
         TqPrepareStatusOutcome::StillPreparing => Ok(Status::Preparing),
@@ -991,6 +1021,7 @@ mod tests {
     use trust_quorum_types::crypto::{
         EncryptedRackSecrets, Salt, Sha3_256Digest,
     };
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use uuid::Uuid;
 
     async fn load_config(
@@ -1046,7 +1077,8 @@ mod tests {
             opctx,
             &conn,
             authz::TrustQuorumConfig::for_rack_id(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             members.first().expect("at least one member").clone(),
         )
         .await
@@ -1060,7 +1092,8 @@ mod tests {
                     is_lrtq_upgrade: IsLrtqUpgrade::No {
                         last_committed_epoch: Epoch(1),
                     },
-                    members: members.clone(),
+                    members: TrustQuorumMembers::new(members.clone())
+                        .expect("test members are within the size bounds"),
                 },
             )
             .await

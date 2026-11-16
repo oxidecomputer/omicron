@@ -89,7 +89,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    //
+    (2026_11_10_01, SLED_EXPUNGE_REQUESTS),
+    (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
@@ -7744,6 +7745,26 @@ pub trait NexusExternalApi {
         .await
     }
 
+    /// Abort rack membership change
+    ///
+    /// This operation is synchronous. Upon returning from the API call, a
+    /// success response indicates that the prior membership change was aborted.
+    /// An error response indicates that there is no active membership change in
+    /// progress (previous changes have completed), that the specified
+    /// membership change could not be aborted, or that (if a version is
+    /// specified) configuration has moved past it.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
+        tags = ["experimental"],
+        versions = VERSION_RACK_MEMBERSHIP_ABORT_BY_VERSION..
+    }]
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+        query_params: Query<latest::rack::RackMembershipVersionParam>,
+    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
     /// Abort the latest rack membership change
     ///
     /// This operation is synchronous. Upon returning from the API call, a
@@ -7752,15 +7773,28 @@ pub trait NexusExternalApi {
     /// in progress (previous changes have completed) or that the current
     /// membership change could not be aborted.
     #[endpoint {
+        operation_id = "rack_membership_abort",
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
         tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..
+        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..VERSION_RACK_MEMBERSHIP_ABORT_BY_VERSION,
     }]
-    async fn rack_membership_abort(
+    async fn rack_membership_abort_v2026_02_02_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::RackPath>,
-    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+        path_params: Path<v2025_11_20_00::path_params::RackPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_21_00::rack::RackMembershipStatus>,
+        HttpError,
+    > {
+        Self::rack_membership_abort(
+            rqctx,
+            path_params,
+            Query::from(latest::rack::RackMembershipVersionParam {
+                version: None,
+            }),
+        )
+        .await
+    }
 
     /// Fetch rack cluster membership status
     ///
@@ -7852,6 +7886,49 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::sled::SledProvisionPolicyResponse>,
         HttpError,
     >;
+
+    // TODO-RAINCLAUDE: API doc (Rain writes it): summary "Expunge sled", then what it does, the request states, the serial acknowledgment, the dispositions, the refusals, power-off semantics (a sled present at creation has its cubby recorded from inventory, or from an ignition scan, and is powered off later by an ignition power-off after re-checking the cubby holds it; a sled gone at creation, with neither its SP nor its sled agent in inventory and no powered cubby that could be it, is accepted with no cubby and confirmed still gone by a collection taken after it leaves the trust quorum; a sled agent without its SP, or a powered cubby that cannot be identified, is refused with 409, and a 503 means no MGS answered while the sled is missing from inventory, so retrying later may help), the cubby and power_off_outcome fields, scrimlets, and RFD 747's risks.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/sleds/{sled_id}/expunge",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_EXPUNGE_REQUESTS..,
+    }]
+    async fn sled_expunge(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+        params: TypedBody<latest::sled::SledExpungeParams>,
+    ) -> Result<
+        HttpResponseAccepted<latest::sled::SledExpungeResponse>,
+        HttpError,
+    >;
+
+    // TODO-RAINCLAUDE: API doc: summary "List sled expunge requests"; lists the requests sled_expunge created, in every state, oldest first.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sled-expunge-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_EXPUNGE_REQUESTS..,
+    }]
+    async fn sled_expunge_request_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::sled::SledExpungeRequest>>,
+        HttpError,
+    >;
+
+    // TODO-RAINCLAUDE: API doc: summary "Fetch sled expunge request".
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sled-expunge-requests/{sled_expunge_request_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_EXPUNGE_REQUESTS..,
+    }]
+    async fn sled_expunge_request_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledExpungeRequestPath>,
+    ) -> Result<HttpResponseOk<latest::sled::SledExpungeRequest>, HttpError>;
 
     /// List instances running on given sled
     #[endpoint {

@@ -296,6 +296,13 @@ impl<'a> LookupPath<'a> {
         SupportBundle::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    pub fn sled_expunge_request(
+        self,
+        id: SledExpungeRequestUuid,
+    ) -> SledExpungeRequest<'a> {
+        SledExpungeRequest::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     pub fn tuf_trust_root(self, id: TufTrustRootUuid) -> TufTrustRoot<'a> {
         TufTrustRoot::PrimaryKey(Root { lookup_root: self }, id)
     }
@@ -844,6 +851,14 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", uuid_kind = SupportBundleKind } ]
+}
+
+lookup_resource! {
+    name = "SledExpungeRequest",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", uuid_kind = SledExpungeRequestKind } ]
 }
 
 lookup_resource! {
