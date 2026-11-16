@@ -42,6 +42,7 @@ use std::net::Ipv6Addr;
 use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 use trust_quorum_types::status::CoordinatorStatus;
 use trust_quorum_types::types::Epoch;
@@ -64,7 +65,7 @@ pub struct RackInitializeRequest {
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
-    pub trust_quorum_peers: Option<Vec<BaseboardId>>,
+    pub trust_quorum_peers: Option<TrustQuorumMembers>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -171,7 +172,7 @@ impl RackInitializeRequest {
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    trust_quorum_peers: Option<Vec<BaseboardId>>,
+    trust_quorum_peers: Option<TrustQuorumMembers>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
@@ -436,6 +437,27 @@ pub struct BaseboardIds {
     pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
 }
 
+/// The status of starting sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum SledAgentStartStatus {
+    NotStarted,
+    WaitingForTrustQuorumConfig {
+        connected_peers: BTreeSet<BaseboardId>,
+    },
+    WaitingForRackUnlock {
+        connected_peers: BTreeSet<BaseboardId>,
+        latest_committed_epoch: Epoch,
+    },
+    Expunged {
+        epoch: Epoch,
+        from: BaseboardId,
+    },
+    Started {
+        sled_id: SledUuid,
+    },
+}
+
 /// The state of the commit phase of the trust quorum protocol
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct CommitState {
@@ -512,56 +534,6 @@ impl From<StartSledAgentsStatus> for MultirackJoinServiceStatus {
             rack_subnet,
             sled_agents,
         }
-    }
-}
-
-impl StartSledAgentsStatus {
-    // Create the allocations necessary to start a sled-agent and return a
-    // preliminary state.
-    //
-    // This should only be called once.
-    pub fn assign_ids_and_subnets(
-        this_nodes_baseboard_id: &BaseboardId,
-        rack_id: RackUuid,
-        req: MultirackJoinRequest,
-    ) -> Self {
-        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
-            req.rack_network_config.rack_subnet.addr(),
-        );
-
-        // This is guaranteed to be filled in, because validating a trust
-        // quorum reconfiguration request ensures that this node is a member of
-        // `trust_quorum_peers`.
-        let mut this_nodes_sled_id = None;
-
-        let sleds = req
-            .trust_quorum_peers
-            .into_iter()
-            .enumerate()
-            .map(|(idx, baseboard_id)| {
-                let sled_id = SledUuid::new_v4();
-                if baseboard_id == *this_nodes_baseboard_id {
-                    this_nodes_sled_id = Some(sled_id);
-                }
-
-                SledAgentInfo {
-                    baseboard_id,
-                    sled_id,
-                    sled_subnet: get_64_subnet(
-                        rack_subnet,
-                        u8::try_from(idx + 1).expect("too many sleds"),
-                    ),
-                    start_state: SledAgentStartState::InProgress {
-                        last_error: None,
-                    },
-                }
-            })
-            .collect();
-
-        // SAFETY: Construction of the trust quorum ensures this node is a member
-        let this_nodes_sled_id = this_nodes_sled_id.unwrap();
-
-        StartSledAgentsStatus { this_nodes_sled_id, rack_id, sleds }
     }
 }
 

@@ -37,6 +37,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::UpstreamNtpConfig;
@@ -680,6 +681,7 @@ impl ExampleSystemBuilder {
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
             &initial_blueprint,
+            ReflectsCollection::Indeterminate,
             "test suite",
             rng.blueprint2_rng,
         )

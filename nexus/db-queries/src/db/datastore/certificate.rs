@@ -126,6 +126,14 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Delete a certificate
+    ///
+    /// This fails if it's the last certificate for its silo and service.
+    /// Without a certificate, the silo's endpoint can't serve TLS, which would
+    /// leave the silo's users unable to reach the API to upload a new one.
+    ///
+    /// If the certificate was concurrently deleted, this also reports it as
+    /// the last certificate rather than not found.
     pub async fn certificate_delete(
         &self,
         opctx: &OpContext,
@@ -135,10 +143,25 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Delete, authz_cert).await?;
 
+        // Only delete if another live certificate exists for the same silo and
+        // service. Doing this in one statement means concurrent deletes can't
+        // remove the last two certificates.
+        let other = diesel::alias!(
+            nexus_db_schema::schema::certificate as other_certificate
+        );
+        let another_cert_exists = diesel::dsl::exists(
+            other
+                .filter(other.field(dsl::silo_id).eq(dsl::silo_id))
+                .filter(other.field(dsl::service).eq(dsl::service))
+                .filter(other.field(dsl::id).ne(dsl::id))
+                .filter(other.field(dsl::time_deleted).is_null()),
+        );
+
         let now = Utc::now();
-        diesel::update(dsl::certificate)
+        let updated_rows = diesel::update(dsl::certificate)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_cert.id()))
+            .filter(another_cert_exists)
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -148,6 +171,13 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_cert),
                 )
             })?;
+
+        if updated_rows == 0 {
+            return Err(Error::invalid_request(
+                "cannot delete the last certificate for a silo; create \
+                another certificate first",
+            ));
+        }
 
         Ok(())
     }

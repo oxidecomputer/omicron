@@ -14,10 +14,10 @@ WITH
         candidate_ip AS multicast_ip,
         $8 AS underlay_group_id,
         $9::STRING || ':' || candidate_ip::STRING AS tag,
-        $10 AS state,
         nextval('omicron.public.multicast_group_version') AS version_added,
-        $11 AS version_removed,
-        $12 AS underlay_salt
+        $10 AS version_removed,
+        $11 AS underlay_salt,
+        $12 AS state
       FROM
         (
           SELECT
@@ -57,10 +57,10 @@ WITH
             multicast_ip,
             underlay_group_id,
             tag,
-            state,
             version_added,
             version_removed,
-            underlay_salt
+            underlay_salt,
+            state
           )
       SELECT
         id,
@@ -75,10 +75,10 @@ WITH
         multicast_ip,
         underlay_group_id,
         tag,
-        state,
         version_added,
         version_removed,
-        underlay_salt
+        underlay_salt,
+        state
       FROM
         next_external_multicast_group
       WHERE
@@ -96,10 +96,10 @@ WITH
         multicast_ip,
         underlay_group_id,
         tag,
-        state,
         version_added,
         version_removed,
-        underlay_salt
+        underlay_salt,
+        state
     ),
   updated_pool_range
     AS (
@@ -125,10 +125,10 @@ SELECT
   multicast_ip,
   underlay_group_id,
   tag,
-  state,
   version_added,
   version_removed,
-  underlay_salt
+  underlay_salt,
+  state
 FROM
   previously_allocated_group
 UNION ALL
@@ -145,9 +145,9 @@ UNION ALL
     multicast_ip,
     underlay_group_id,
     tag,
-    state,
     version_added,
     version_removed,
-    underlay_salt
+    underlay_salt,
+    state
   FROM
     multicast_group

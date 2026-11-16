@@ -55,8 +55,9 @@ use uuid::Uuid;
 pub struct VmmStateUpdateResult {
     /// The VMM record that the update query found and possibly updated.
     ///
-    /// NOTE: This is the record prior to the update!
-    pub found_vmm: Vmm,
+    /// If the VMM record was updated, this is its state *after* the update was
+    /// applied.
+    pub vmm: Vmm,
 
     /// `true` if the VMM record was updated, `false` otherwise.
     pub vmm_updated: bool,
@@ -218,7 +219,7 @@ impl DataStore {
                 model::DbSledBpAvailability::Unavailable,
             )
             .bind::<sql_types::Array<VmmStateEnum>, _>(
-                DbVmmState::SHOULD_MARK_TO_STOP_FOR_EVACUATION.to_vec(),
+                DbVmmState::SHOULD_STOP_FOR_EVACUATION.to_vec(),
             )
             .bind::<sql_types::BigInt, _>(i64::from(batch_size.get()))
             .execute_async(&*conn)
@@ -244,23 +245,29 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
     ) -> LookupResult<Vmm> {
-        let vmm = dsl::vmm
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.vmm_fetch_on_conn(&conn, vmm_id).await.map_err(|e| {
+            public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Vmm,
+                    LookupType::ById(vmm_id.into_untyped_uuid()),
+                ),
+            )
+        })
+    }
+
+    async fn vmm_fetch_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        vmm_id: &PropolisUuid,
+    ) -> Result<Vmm, diesel::result::Error> {
+        dsl::vmm
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vmm,
-                        LookupType::ById(vmm_id.into_untyped_uuid()),
-                    ),
-                )
-            })?;
-
-        Ok(vmm)
     }
 
     pub async fn vmm_update_runtime(
@@ -424,8 +431,21 @@ impl DataStore {
                     },
                     None => false,
                 };
+
+                let vmm = if vmm_updated {
+                    // If the VMM record *was* updated, re-fetch it in order to
+                    // return the post-update state, since `check_if_exists`
+                    // will return the *pre-update* in its `found` value. It's
+                    // fine to do this in a separate query since we are in a
+                    // transaction.
+                    self.vmm_fetch_on_conn(&conn, &vmm_id).await?
+                } else {
+                    // If we *didn't* update the VMM state, we can just return
+                    // the value that `check_if_exists` gave us.
+                    found_vmm
+                };
                 Ok(VmmStateUpdateResult {
-                    found_vmm,
+                    vmm,
                     vmm_updated,
                     migration_in_updated,
                     migration_out_updated,
@@ -906,8 +926,7 @@ mod tests {
         let is_stoppable = |state: DbVmmState| {
             matches!(
                 state,
-                DbVmmState::Creating
-                    | DbVmmState::Starting
+                DbVmmState::Starting
                     | DbVmmState::Running
                     | DbVmmState::Rebooting
             )
@@ -982,7 +1001,7 @@ mod tests {
             .filter(|v| v.time_deleted.is_none() && is_stoppable(v.state))
             .count()
             / 3;
-        assert_eq!(stoppable_per_sled, 4);
+        assert_eq!(stoppable_per_sled, 3);
 
         // Fetches every VMM row, including deleted VMMs (unlike `vmm_fetch`,
         // which skips them).
@@ -1072,8 +1091,8 @@ mod tests {
             .await
             .expect("bulk mark should succeed");
         assert_eq!(
-            marked.vmms_marked, 8,
-            "the 4 stoppable VMMs on each of sleds A and B should be marked"
+            marked.vmms_marked, 6,
+            "the 3 stoppable VMMs on each of sleds A and B should be marked"
         );
         assert_eq!(marked.batches, 1);
         assert_eq!(marked.batch_size, SQL_BATCH_SIZE);
@@ -1092,7 +1111,7 @@ mod tests {
             }
         }
 
-        // There should be 25 unmarked rows. 6 unstoppable VMMs on each of
+        // There should be 27 unmarked rows. 8 unstoppable VMMs on each of
         // sleds A and B, all 10 on sled C, plus the 3 deleted VMMs.
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
@@ -1101,7 +1120,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            25,
+            27,
             "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
@@ -1120,7 +1139,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            25
+            27
         );
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
@@ -1146,7 +1165,7 @@ mod tests {
             .await
             .expect("bulk mark for sled C should succeed");
         assert_eq!(
-            marked_c.vmms_marked, 4,
+            marked_c.vmms_marked, 3,
             "only the 4 stoppable VMMs on sled C should be marked"
         );
         assert_eq!(marked_c.batches, 1);
@@ -1178,13 +1197,13 @@ mod tests {
             .values()
             .filter(|v| v.stop_for_update_disposition_generation.is_none())
             .count();
-        assert_eq!(gen1_count, 4, "sled A's marked VMMs are unchanged");
+        assert_eq!(gen1_count, 3, "sled A's marked VMMs are unchanged");
         assert_eq!(
-            gen2_count, 8,
+            gen2_count, 6,
             "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
         assert_eq!(
-            null_count, 21,
+            null_count, 24,
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
@@ -1263,7 +1282,7 @@ mod tests {
             .collect();
 
         // We have the same marked VMMs, nothing has changed
-        assert_eq!(sled_a_marked.len(), 4);
+        assert_eq!(sled_a_marked.len(), 3);
         for vmm in sled_a_marked {
             assert_eq!(
                 vmm.stop_for_update_disposition_generation,
@@ -1629,7 +1648,7 @@ mod tests {
             )
             .await
             .expect("failed VMM should be updated to Destroyed");
-        assert_eq!(result.found_vmm.state, db::model::VmmState::Failed);
+        assert_eq!(result.vmm.state, db::model::VmmState::Destroyed);
         assert!(
             result.vmm_updated,
             "VMM should have been updated to Destroyed"

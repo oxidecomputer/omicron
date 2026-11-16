@@ -149,7 +149,7 @@ instance_watcher.period_secs = 30
 capacity_metrics.period_secs = 60
 # How frequently to schedule new instance update sagas.
 instance_updater.period_secs = 30
-# How frequently to attempt to restart Failed instances?
+# How frequently to attempt to restart instances that require it.
 instance_reincarnation.period_secs = 60
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30

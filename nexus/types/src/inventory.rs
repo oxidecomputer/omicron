@@ -9,6 +9,8 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::multirack::UnadoptedRack;
+use crate::external_api::multirack::UnadoptedSled;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use chrono::DateTime;
 use chrono::Utc;
@@ -22,6 +24,7 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH};
 use omicron_common::api::external::ByteCount;
@@ -210,6 +213,19 @@ pub struct Collection {
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 }
 
+/// Returns whether `zone_name` names a Propolis zone.
+///
+/// Propolis zones come and go with their VMMs, so SMF services in them are
+/// excluded when judging sled health from
+/// [`SledAgent::smf_services_enabled_not_online`].
+///
+/// This matches on the zone name prefix. If that prefix ever changed without
+/// [`PROPOLIS_ZONE_PREFIX`] following, Propolis services would be reported as
+/// false positives.
+pub fn is_propolis_zone(zone_name: &str) -> bool {
+    zone_name.starts_with(PROPOLIS_ZONE_PREFIX)
+}
+
 impl Collection {
     pub fn host_phase_1_active_slot_for(
         &self,
@@ -255,6 +271,14 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
+    /// Returns the SP on `baseboard_id`
+    pub fn sp_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<&ServiceProcessor, NotInInventory> {
+        self.sps.get(baseboard_id).ok_or(NotInInventory(InventoryItem::Sp))
+    }
+
     /// Returns caboose `which` on `baseboard_id`, along with the version that
     /// it contains
     pub fn caboose_with_version_for(
@@ -290,6 +314,21 @@ impl Collection {
         baseboard_id: &BaseboardId,
     ) -> Result<CabooseWithVersion<'_>, CabooseVersionError> {
         self.caboose_with_version_for(CabooseWhich::Stage0, baseboard_id)
+    }
+
+    /// Returns the hash of the active host phase 1 image on `baseboard_id`
+    pub fn active_host_phase_1_hash_for(
+        &self,
+        baseboard_id: &BaseboardId,
+    ) -> Result<ArtifactHash, NotInInventory> {
+        let Some(active_slot) =
+            self.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
+        else {
+            return Err(NotInInventory(InventoryItem::HostPhase1ActiveSlot));
+        };
+        self.host_phase_1_flash_hash_for(active_slot, baseboard_id)
+            .map(|h| h.hash)
+            .ok_or(NotInInventory(InventoryItem::HostPhase1Hash(active_slot)))
     }
 
     /// Iterate over all the Omicron zones in the sled-agent ledgers of this
@@ -408,6 +447,46 @@ impl Collection {
     /// to display part or all of a collection.
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
+    }
+}
+
+/// An item about a particular baseboard that was not found in an inventory
+/// collection
+///
+/// This does not identify the baseboard.  Callers generally report it in the
+/// context of a particular baseboard already.
+///
+/// This type is not used in the planner's failure reasons (e.g.,
+/// `FailedSpUpdateReason`).  Those are part of the planning report's
+/// serialized format, and they have their own variant for each kind of
+/// missing item (e.g., `SpNotInInventory`).  A missing caboose is reported
+/// with `CabooseVersionError::NotInInventory` instead.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("{0} is not in inventory")]
+pub struct NotInInventory(pub InventoryItem);
+
+/// Describes an item that inventory collects about a baseboard
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InventoryItem {
+    /// the baseboard's SP
+    Sp,
+    /// the active host phase 1 slot of a sled
+    HostPhase1ActiveSlot,
+    /// the hash of the contents of a sled's host phase 1 slot
+    HostPhase1Hash(M2Slot),
+}
+
+impl std::fmt::Display for InventoryItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InventoryItem::Sp => write!(f, "SP"),
+            InventoryItem::HostPhase1ActiveSlot => {
+                write!(f, "active host phase 1 slot")
+            }
+            InventoryItem::HostPhase1Hash(slot) => {
+                write!(f, "host phase 1 hash for slot {slot:?}")
+            }
+        }
     }
 }
 
@@ -1276,6 +1355,20 @@ impl IdOrdItem for DiscoveredRack {
     id_upcast!();
 }
 
+impl From<DiscoveredRack> for UnadoptedRack {
+    fn from(value: DiscoveredRack) -> Self {
+        Self {
+            rack_id: value.rack_id,
+            rack_subnet: value.rack_subnet.net(),
+            unadopted_sleds: value
+                .discovered_sleds
+                .into_iter()
+                .map(UnadoptedSled::from)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DiscoveredSled {
     /// ID of the sled, which will be the same ID used by the sled-agent to
@@ -1296,6 +1389,24 @@ impl IdOrdItem for DiscoveredSled {
         self.sled_id
     }
     id_upcast!();
+}
+
+impl From<DiscoveredSled> for UnadoptedSled {
+    fn from(value: DiscoveredSled) -> Self {
+        let (sled_agent_started, last_start_err) =
+            match value.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error)
+                }
+            };
+        Self {
+            sled_id: value.sled_id,
+            baseboard_id: value.baseboard_id,
+            sled_agent_started,
+            last_start_err,
+        }
+    }
 }
 
 #[cfg(test)]
