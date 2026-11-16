@@ -19,6 +19,8 @@ mod case;
 pub use case::{AllCases, CaseBuilder};
 pub(crate) mod rng;
 pub use rng::SitrepBuilderRng;
+mod problem;
+pub use problem::{ProblemSetBuilder, RevisionBuilder};
 
 #[derive(Debug)]
 pub struct SitrepBuilder<'a> {
@@ -26,6 +28,7 @@ pub struct SitrepBuilder<'a> {
     debug_log: fm::analysis_reports::DebugLog,
     pub inventory: &'a inventory::Collection,
     pub parent_sitrep: Option<&'a fm::Sitrep>,
+    pub active_problems: ProblemSetBuilder<'a>,
     pub sitrep_id: SitrepUuid,
     pub cases: case::AllCases,
     /// The analysis input this builder was constructed from; `cases` is
@@ -79,7 +82,12 @@ impl<'a> SitrepBuilder<'a> {
             "parent_sitrep_id" => format!("{:?}", parent_sitrep.as_ref().map(|s| s.id())),
             "inv_collection_id" => format!("{:?}", inventory.id),
         ));
-
+        
+        let active_problems = ProblemSetBuilder::new(
+            rng.problem_builder_rng(),
+            parent_sitrep,
+            log.clone(),
+        );
         let cases = case::AllCases::new(log.clone(), sitrep_id, inputs, rng);
         let closed_cases_copied_forward = inputs.closed_cases_copied_forward();
 
@@ -101,6 +109,7 @@ impl<'a> SitrepBuilder<'a> {
             closed_cases_copied_forward,
             alerts_changed: inputs.alerts_changed(),
             support_bundles_changed: inputs.support_bundles_changed(),
+            active_problems,
             cases,
         }
     }
