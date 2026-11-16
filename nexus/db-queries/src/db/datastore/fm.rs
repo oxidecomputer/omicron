@@ -587,8 +587,6 @@ impl DataStore {
         let mut case_problems =
             self.case_problems_read_on_conn(id, conn).await?;
 
-        let problems = self.problems_read_on_conn(id, conn).await?;
-
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
         // cases that we loaded in the previous steps.
@@ -654,6 +652,17 @@ impl DataStore {
             cases
         };
 
+        // Load every problem revision, alert link, and support bundle link in
+        // this sitrep, grouped by problem.
+        let mut revisions_by_problem =
+            Self::problem_revs_read_on_conn(id, conn).await?;
+        let mut alerts_by_problem =
+            Self::problem_alerts_read_on_conn(id, conn).await?;
+        let mut support_bundles_by_problem =
+            Self::problem_support_bundles_read_on_conn(id, conn).await?;
+        // Load the problem requests themselves.
+        let problem_requests = Self::problems_read_on_conn(id, conn).await?;
+
         // Finally, fetch the sitrep's metadata from the `fm_sitrep` table. We
         // load this record last, because if a concurrent delete operation has
         // started, we will observe that the top-level metadata record has been
@@ -665,37 +674,117 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
+        // Once we have confirmed the sitrep metadata is valid (and we did not
+        // read a torn sitrep that was in the process of being deleted), attempt
+        // to stitch together the problems and their revisions and alert
+        // requests.
+        //
+        // It's necessary to wait to do this until we have confirmed that the
+        // metadata still exists, because we will return an internalerror if we
+        // encounter invalid foreign key relationships (such as a problem that
+        // has no revisions, revisions that have no problem, or alert/support
+        // bundle links for which the problem does not exist). Because
+        // `fm_sitrep_read_current` will retry any `NotFound` errors that
+        // indicate the sitrep we read is in the process of being deleted, but
+        // will not retry internal errors, the checking for a corrupt sitrep can
+        // only be performed after we are sure we didn't read a sitrep that was
+        // being deleted (which is ensured by the metadata read).
+        let problems = {
+            let mut problems = IdOrdMap::with_capacity(problem_requests.len());
+            for problem in problem_requests {
+                let model::fm::FmProblemRequest {
+                    id: problem_id,
+                    sitrep_id: _,
+                    requested_sitrep_id,
+                    comment,
+                } = problem;
+                let problem_id = ProblemUuid::from(problem_id);
+                let revisions = revisions_by_problem
+                    .remove(&problem_id)
+                    .filter(|revisions| !revisions.is_empty())
+                    .ok_or_else(|| {
+                        let internal_message = format!(
+                            "problem {problem_id} in sitrep {id} has no \
+                             revisions. every problem in a sitrep must have \
+                             at least one revision",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+                // Unlike revisions, a problem need not have any links.
+                let alerts =
+                    alerts_by_problem.remove(&problem_id).unwrap_or_default();
+                let support_bundles = support_bundles_by_problem
+                    .remove(&problem_id)
+                    .unwrap_or_default();
+                problems
+                    .insert_unique(SitrepProblem {
+                        id: problem_id,
+                        requested_sitrep_id: requested_sitrep_id.into(),
+                        comment,
+                        revisions,
+                        alerts,
+                        support_bundles,
+                    })
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered problem {problem_id} multiple times \
+                             in sitrep {id}. this should really not be \
+                             possible, as the ID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+
+            if let Some((orphaned, revs)) = revisions_by_problem.iter().next() {
+                let internal_message = format!(
+                    "sitrep {id} contains {} revisions of problem {orphaned}, \
+                     but no record of that problem",
+                    revs.len(),
+                );
+                return Err(Error::InternalError { internal_message });
+            }
+            if let Some((orphaned, alerts)) = alerts_by_problem.iter().next() {
+                let internal_message = format!(
+                    "sitrep {id} contains {} alert links for problem \
+                    {orphaned},  but no record of that problem",
+                    alerts.len(),
+                );
+                return Err(Error::InternalError { internal_message });
+            }
+            if let Some((orphaned, bundles)) =
+                support_bundles_by_problem.iter().next()
+            {
+                let internal_message = format!(
+                    "sitrep {id} contains {} support bundle links for problem \
+                     {orphaned}, but no record of that problem",
+                    bundles.len(),
+                );
+                return Err(Error::InternalError { internal_message });
+            }
+
+            problems
+        };
+
         Ok(Sitrep { metadata, cases, ereports_by_id: ereports, problems })
     }
 
-    /// Fetch all problems in the given sitrep, along with all of their
-    /// revisions.
-    ///
-    /// Every problem in a sitrep must have at least one revision, which
-    /// is ensured by the `SitrepBuilder` APIs that create problems.
-    /// Therefore, any problem which has no revisions, or any orphaned
-    /// revisions for which there are no corresponding problems, are
-    /// treated as an error.
-    async fn problems_read_on_conn(
-        &self,
+    /// Fetch all revisions of problems requested in the current sitrep.
+    async fn problem_revs_read_on_conn(
         sitrep_id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<IdOrdMap<fm::problem::SitrepProblem>, Error> {
-        use nexus_db_schema::schema::fm_problem_request::dsl;
-        use nexus_db_schema::schema::fm_problem_revision_request::dsl as rev_dsl;
+    ) -> Result<HashMap<ProblemUuid, IdOrdMap<SitrepRevision>>, Error> {
+        use nexus_db_schema::schema::fm_problem_revision_request::dsl;
 
-        // First, load every revision of every problem in this sitrep,
-        // grouped by problem.
         let mut revisions_by_problem = HashMap::<_, iddqd::IdOrdMap<_>>::new();
         let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
         while let Some(p) = paginator.next() {
             let batch = paginated_multicolumn(
-                rev_dsl::fm_problem_revision_request,
-                (rev_dsl::problem_id, rev_dsl::revision),
+                dsl::fm_problem_revision_request,
+                (dsl::problem_id, dsl::revision),
                 &p.current_pagparams(),
             )
-            .filter(rev_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
             .select(model::fm::FmProblemRevisionRequest::as_select())
             .load_async(conn)
             .await
@@ -727,16 +816,16 @@ impl DataStore {
             }
         }
 
-        // Load every alert and support bundle link in this sitrep, grouped by
-        // problem.
-        let mut alerts_by_problem =
-            Self::problem_alerts_read_on_conn(sitrep_id, conn).await?;
-        let mut support_bundles_by_problem =
-            Self::problem_support_bundles_read_on_conn(sitrep_id, conn).await?;
+        Ok(revisions_by_problem)
+    }
 
-        // Then, load the problems themselves, and attach each one's
-        // revisions and links.
-        let mut problems = iddqd::IdOrdMap::new();
+    async fn problems_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Vec<model::fm::FmProblemRequest>, Error> {
+        use nexus_db_schema::schema::fm_problem_request::dsl;
+
+        let mut problems = Vec::new();
         let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
         while let Some(p) = paginator.next() {
@@ -755,69 +844,7 @@ impl DataStore {
             })?;
 
             paginator = p.found_batch(&batch, &|problem| problem.id);
-            for problem in batch {
-                let model::fm::FmProblemRequest {
-                    id,
-                    sitrep_id: _,
-                    requested_sitrep_id: created_sitrep_id,
-                    comment,
-                } = problem;
-                let id = ProblemUuid::from(id);
-                let revisions = revisions_by_problem
-                    .remove(&id)
-                    .filter(|revisions| !revisions.is_empty())
-                    .ok_or_else(|| {
-                        let internal_message = format!(
-                            "problem {id} in sitrep {sitrep_id} has \
-                             no revisions. every problem in a sitrep \
-                             must have at least one revision",
-                        );
-                        Error::InternalError { internal_message }
-                    })?;
-                // Unlike revisions, a problem need not have any links.
-                let alerts = alerts_by_problem.remove(&id).unwrap_or_default();
-                let support_bundles =
-                    support_bundles_by_problem.remove(&id).unwrap_or_default();
-                problems
-                    .insert_unique(SitrepProblem {
-                        id,
-                        requested_sitrep_id: created_sitrep_id.into(),
-                        comment,
-                        revisions,
-                        alerts,
-                        support_bundles,
-                    })
-                    .map_err(|_| {
-                        let internal_message = format!(
-                            "encountered problem {id} multiple times in \
-                             sitrep {sitrep_id}. this should really not be \
-                             possible, as the ID is a primary key!",
-                        );
-                        Error::InternalError { internal_message }
-                    })?;
-            }
-        }
-
-        if let Some(orphaned) = revisions_by_problem.keys().next() {
-            let internal_message = format!(
-                "sitrep {sitrep_id} contains revisions of problem \
-                 {orphaned},  but no record of that problem",
-            );
-            return Err(Error::InternalError { internal_message });
-        }
-        if let Some(orphaned) = alerts_by_problem.keys().next() {
-            let internal_message = format!(
-                "sitrep {sitrep_id} contains alert links for problem \
-                 {orphaned}, but no record of that problem",
-            );
-            return Err(Error::InternalError { internal_message });
-        }
-        if let Some(orphaned) = support_bundles_by_problem.keys().next() {
-            let internal_message = format!(
-                "sitrep {sitrep_id} contains support bundle links for \
-                 problem {orphaned}, but no record of that problem",
-            );
-            return Err(Error::InternalError { internal_message });
+            problems.extend(batch);
         }
 
         Ok(problems)
