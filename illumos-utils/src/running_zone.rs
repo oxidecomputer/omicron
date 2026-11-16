@@ -57,8 +57,8 @@ pub enum BootError {
     #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
-    #[error("Zone booted, but timed out waiting for {service} in {zone}")]
-    Timeout { service: String, zone: String },
+    #[error(transparent)]
+    WaitForService(#[from] crate::svc::WaitForServiceError),
 
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
@@ -296,11 +296,7 @@ impl RunningZone {
             let fmri = "svc:/milestone/single-user:default";
             zone.zones_api
                 .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
-                .await
-                .map_err(|_| BootError::Timeout {
-                    service: fmri.to_string(),
-                    zone: zone.name.to_string(),
-                })?;
+                .await?;
 
             zone.zones_api
                 .id(&zone.name)
