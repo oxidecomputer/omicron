@@ -81,6 +81,8 @@ use sled_agent_config_reconciler::PathInPool;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
+use sled_agent_scrimlet_reconcilers::WicketSshAuthReconciler;
+use sled_agent_scrimlet_reconcilers::WicketSshAuthReconcilerError;
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
@@ -260,6 +262,9 @@ pub enum Error {
 
     #[error("internal error: sled-agent started multiple times")]
     SledAgentStartedMultipleTimes,
+
+    #[error("failed to configure wicket SSH auth when booting switch zone")]
+    ConfigureWicketSshAuthWhenBooting(#[source] WicketSshAuthReconcilerError),
 }
 
 impl Error {
@@ -582,6 +587,7 @@ pub struct ServiceManagerInner {
     sled_info: OnceLock<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     zone_image_resolver: ZoneImageSourceResolver,
+    wicket_ssh_auth_reconciler: Arc<WicketSshAuthReconciler>,
     system_api: Box<dyn SystemApi>,
 }
 
@@ -613,6 +619,8 @@ impl ServiceManager {
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_maghemite_links`: List of physical links on which
     ///    maghemite should listen.
+    /// - `wicket_ssh_auth_reconciler`: Handle to the task responsible for
+    ///    configuring wicket SSH auth settings within the switch zone.
     /// - `zone_image_resolver`: how to find Omicron zone images
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -622,6 +630,7 @@ impl ServiceManager {
         sled_mode: SledMode,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
+        wicket_ssh_auth_reconciler: Arc<WicketSshAuthReconciler>,
         zone_image_resolver: ZoneImageSourceResolver,
     ) -> Self {
         Self::new_inner(
@@ -632,6 +641,7 @@ impl ServiceManager {
             sidecar_revision,
             switch_zone_maghemite_links,
             zone_image_resolver,
+            wicket_ssh_auth_reconciler,
             RealSystemApi::new(),
         )
     }
@@ -645,6 +655,7 @@ impl ServiceManager {
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         zone_image_resolver: ZoneImageSourceResolver,
+        wicket_ssh_auth_reconciler: Arc<WicketSshAuthReconciler>,
         system_api: Box<dyn SystemApi>,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
@@ -679,6 +690,7 @@ impl ServiceManager {
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 zone_image_resolver,
+                wicket_ssh_auth_reconciler,
                 system_api,
             }),
         }
@@ -2350,6 +2362,15 @@ impl ServiceManager {
         bootstrap_name_and_address: Option<(String, Ipv6Addr)>,
         device_names: &[String],
     ) -> Result<RunningZone, Error> {
+        // Configure wicket SSH auth before proceeding with switch zone boot;
+        // this ensures we always apply our latest-known auth settings before
+        // wicket is accessible (even if we're cold booting).
+        self.inner
+            .wicket_ssh_auth_reconciler
+            .configure_switch_zone_before_boot(&installed_zone)
+            .await
+            .map_err(Error::ConfigureWicketSshAuthWhenBooting)?;
+
         let SwitchZoneConfig { id, services, addresses, .. } = config;
 
         let disabled_dns_client_service =
@@ -3687,6 +3708,7 @@ impl ServiceManager {
             (SwitchZoneState::Initializing { worker, .. }, None) => {
                 info!(log, "Disabling {zone_typestr} zone (was initializing)");
                 worker.take().unwrap().stop().await;
+                self.inner.wicket_ssh_auth_reconciler.mark_zone_uninstalled();
                 *sled_zone = SwitchZoneState::Disabled;
             }
             (SwitchZoneState::Running { zone, .. }, None) => {
@@ -3711,6 +3733,7 @@ impl ServiceManager {
                 }
 
                 let _ = zone.stop().await;
+                self.inner.wicket_ssh_auth_reconciler.mark_zone_uninstalled();
                 *sled_zone = SwitchZoneState::Disabled;
             }
         }

@@ -7,6 +7,7 @@
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use omicron_generation_kinds::SledConfigGeneration;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -68,6 +69,13 @@ pub enum LedgerNewConfigError {
         current: SledConfigGeneration,
         requested: SledConfigGeneration,
     },
+    #[error(
+        "wicket auth generation out of date (got {requested}, have {current})"
+    )]
+    WicketSshAuthGenerationOutdated {
+        current: WicketSshAuthGeneration,
+        requested: WicketSshAuthGeneration,
+    },
     #[error("sled config changed with the same generation ({generation})")]
     ConfigurationChanged { generation: SledConfigGeneration },
     #[error("failed to commit sled config to ledger")]
@@ -84,6 +92,9 @@ impl From<LedgerNewConfigError> for HttpError {
                 HttpError::for_unavail(None, message)
             }
             LedgerNewConfigError::GenerationOutdated { .. }
+            | LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                ..
+            }
             | LedgerNewConfigError::ConfigurationChanged { .. }
             | LedgerNewConfigError::ValidationFailed(_) => {
                 HttpError::for_bad_request(None, message)
@@ -422,9 +433,31 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
                         current: omicron_sled_config.generation,
                         requested: new_config.generation,
                     });
-                } else if new_config.generation
-                    == omicron_sled_config.generation
+                }
+
+                if new_config.wicket_ssh_auth.generation
+                    < omicron_sled_config.wicket_ssh_auth.generation
                 {
+                    info!(
+                        self.log,
+                        "rejecting config request due to \
+                         out-of-date wicket SSH auth generation";
+                        "current-gen" =>
+                            %omicron_sled_config.wicket_ssh_auth.generation,
+                        "request-gen" =>
+                            %new_config.wicket_ssh_auth.generation,
+                    );
+                    return Err(
+                        LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                            current: omicron_sled_config
+                                .wicket_ssh_auth
+                                .generation,
+                            requested: new_config.wicket_ssh_auth.generation,
+                        },
+                    );
+                }
+
+                if new_config.generation == omicron_sled_config.generation {
                     if *new_config != *omicron_sled_config {
                         warn!(
                             self.log,

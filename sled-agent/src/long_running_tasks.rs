@@ -34,7 +34,9 @@ use sled_agent_config_reconciler::{
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
-use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilers, WicketSshAuthReconciler,
+};
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_hardware::{ExternalDisks, HardwareManager, SledMode};
 use sled_storage::config::MountConfig;
@@ -53,6 +55,10 @@ pub struct LongRunningTaskHandles {
     /// A handle to the set of tasks managed by the sled-agent-config-reconciler
     /// system.
     pub config_reconciler: Arc<ConfigReconcilerHandle>,
+
+    /// A handle to the reconciler than manages configuration of wicket SSH auth
+    /// in the switch zone.
+    pub wicket_ssh_auth_reconciler: Arc<WicketSshAuthReconciler>,
 
     /// A handle to the set of tasks managed by the
     /// sled-agent-scrimlet-reconcilers system.
@@ -130,6 +136,10 @@ pub async fn spawn_all_longrunning_tasks(
             log,
         );
 
+    let wicket_ssh_auth_reconciler = Arc::new(WicketSshAuthReconciler::new(
+        ledger_task_spawn_token.subscribe_wicket_ssh_auth(),
+        log,
+    ));
     let scrimlet_reconcilers = Arc::new(ScrimletReconcilers::new(log));
 
     let hardware_manager =
@@ -210,6 +220,7 @@ pub async fn spawn_all_longrunning_tasks(
     LongRunningTaskResult {
         long_running_task_handles: LongRunningTaskHandles {
             config_reconciler,
+            wicket_ssh_auth_reconciler,
             scrimlet_reconcilers,
             hardware_manager,
             hardware_monitor,

@@ -140,6 +140,7 @@ impl BootstrapAgentStartup {
             sled_mode,
             config.deployment.sidecar_revision(),
             config.switch_zone_maghemite_links.clone(),
+            long_running_task_handles.wicket_ssh_auth_reconciler.clone(),
             long_running_task_handles.zone_image_resolver.clone(),
         );
 
