@@ -176,16 +176,10 @@ fn add_fact_rows_to_map<R: FmFactRow>(
     Ok(())
 }
 
-/// Generates the code that inserts and reads the `fm_fact_*` tables.
+/// Generates the insert and read code for the `fm_fact_*` tables.
 ///
-/// To add a fact table, add its [`fm::FactPayload`] variant to the
-/// invocation below. Each `Variant` is stored in the table
-/// `fm_fact_<variant>` using the model type `FmFact<Variant>`, which must
-/// implement [`FmFactRow`]. See [`nexus_types::fm::fact`] for the other
-/// steps.
-///
-/// This generates [`FactRows`], which inserts a sitrep's facts, and
-/// [`fm_facts_read`], which reads them back.
+/// Each `Variant` uses the table `fm_fact_<variant>` and the model
+/// `FmFact<Variant>`. See [`nexus_types::fm::fact`] for how to add one.
 macro_rules! fm_fact_tables {
     ($($variant:ident),* $(,)?) => { ::paste::paste! {
         /// A sitrep's facts, split by table for insertion.

@@ -10,29 +10,15 @@
 //!
 //! # Adding a fact table
 //!
-//! Each [`FactPayload`] variant is stored in its own `fm_fact_<variant>`
-//! database table. To add a variant:
+//! Each [`FactPayload`] variant has its own `fm_fact_<variant>` table. To
+//! add one:
 //!
-//! 1. Define the engine's fact type in this module. Add a [`FactPayload`]
-//!    variant for it, and `as_<variant>` accessors on [`FactPayload`] and
-//!    [`Fact`].
-//! 2. Add the `fm_fact_<variant>` table to the database schema, with a
-//!    migration. It has the columns shared by every fact table (`id`,
-//!    `sitrep_id`, `case_id`, `created_sitrep_id`, and `comment`) and typed
-//!    columns for the payload.
-//! 3. Add an `FmFact<Variant>` model for the table to `nexus_db_model::fm`,
-//!    and implement `FmFactRow` for it.
-//! 4. In `nexus_db_queries::db::datastore::fm`, add the variant to
-//!    `fm_fact_tables!`, which generates the queries that insert and read
-//!    its rows, and to `sitrep_child_tables!`, which deletes its rows along
-//!    with their sitrep.
-//! 5. Add a fact of the new variant to the `make_sitrep_with_cases` test
-//!    fixture in that module. `test_representative_sitrep_child_tables`
-//!    checks that every fact table is listed and populated.
-//!
-//! To add a kind of fact to an engine that already has a table, extend the
-//! engine's fact type, then update the table's columns and its `FmFactRow`
-//! implementation to match.
+//! 1. Add the fact type and its [`FactPayload`] variant here.
+//! 2. Add the `fm_fact_<variant>` table to the schema.
+//! 3. Add an `FmFact<Variant>` model in `nexus_db_model::fm` that
+//!    implements `FmFactRow`.
+//! 4. Add the variant to `fm_fact_tables!` and `sitrep_child_tables!` in
+//!    `nexus_db_queries::db::datastore::fm`.
 //!
 //! [`Fact`]: super::case::Fact
 //! [`Case`]: super::case::Case
