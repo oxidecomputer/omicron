@@ -727,10 +727,7 @@ impl DataStore {
                 ),
             )
             .map_err(|e| {
-                let internal_message = format!(
-                    "failed to construct problem index for sitrep {id}: {e:#}"
-                );
-                Error::InternalError { internal_message }
+                Error::internal_error(format!("invalid sitrep {id}: {e:#}"))
             })?;
 
             fn check_for_orphaned_problem_records<T>(
