@@ -200,7 +200,8 @@ pub async fn test_setup_with_config(
     .await
 }
 
-/// Starts MGS against an existing rack over `sp_port`.
+/// Starts MGS for an existing simulated rack, communicating with the SP
+/// simulator over `sp_port`.
 pub async fn test_setup_with_simrack(
     test_name: &str,
     sp_port: SpPort,

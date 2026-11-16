@@ -430,8 +430,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         assert!(
             self.simrack.is_none(),
             "set_sp_sim_config_file({sp_sim_config_file}) called after \
-             start_gateway already started the simulated rack with \
-             {}; set the SP simulator config before starting any gateway",
+             start_gateway already started the simulated rack with config \
+             {}. The simulator would not use the new config file. Set the SP \
+             simulator config before starting any gateway.",
             self.sp_sim_config_file,
         );
         self.sp_sim_config_file = sp_sim_config_file;
@@ -1457,6 +1458,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
+        // Dropping self.simrack here is not critical for correctness, but it is
+        // nice to do so before e.g. self.logctx.cleanup_successful(), so that
+        // if anything fails we get useful logs in CI.
         drop(self.simrack);
         for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
