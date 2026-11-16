@@ -76,6 +76,7 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -735,32 +736,52 @@ impl DataStore {
                     })?;
             }
 
-            if let Some((orphaned, revs)) = revisions_by_problem.iter().next() {
-                let internal_message = format!(
-                    "sitrep {id} contains {} revisions of problem {orphaned}, \
-                     but no record of that problem",
-                    revs.len(),
-                );
-                return Err(Error::InternalError { internal_message });
-            }
-            if let Some((orphaned, alerts)) = alerts_by_problem.iter().next() {
-                let internal_message = format!(
-                    "sitrep {id} contains {} alert links for problem \
-                    {orphaned},  but no record of that problem",
-                    alerts.len(),
-                );
-                return Err(Error::InternalError { internal_message });
-            }
-            if let Some((orphaned, bundles)) =
-                support_bundles_by_problem.iter().next()
+            fn check_for_orphaned_problem_records<T>(
+                sitrep_id: &SitrepUuid,
+                kind: &str,
+                records: HashMap<ProblemUuid, IdOrdMap<T>>,
+            ) -> Result<(), Error>
+            where
+                T: iddqd::IdOrdItem,
             {
-                let internal_message = format!(
-                    "sitrep {id} contains {} support bundle links for problem \
-                     {orphaned}, but no record of that problem",
-                    bundles.len(),
-                );
-                return Err(Error::InternalError { internal_message });
+                let len = records.len();
+                let mut orphans = records.into_iter();
+                if let Some((problem_id, items)) = orphans.next() {
+                    let mut internal_message = format!(
+                        "sitrep {sitrep_id} contains {len} {kind}s for {} \
+                         problem IDs that do not have a corresponding record \
+                         in the `fm_problem` table: {problem_id} ({} {kind}s)",
+                        len,
+                        items.len()
+                    );
+                    for (problem_id, items) in orphans {
+                        write!(
+                            &mut internal_message,
+                            ", {problem_id} ({} {kind}s)",
+                            items.len()
+                        )
+                        .expect("writing to a String always succeeds");
+                    }
+                    return Err(Error::InternalError { internal_message });
+                }
+                Ok(())
             }
+
+            check_for_orphaned_problem_records(
+                &id,
+                "revision",
+                revisions_by_problem,
+            )?;
+            check_for_orphaned_problem_records(
+                &id,
+                "alert link",
+                alerts_by_problem,
+            )?;
+            check_for_orphaned_problem_records(
+                &id,
+                "support bundle link",
+                support_bundles_by_problem,
+            )?;
 
             problems
         };
