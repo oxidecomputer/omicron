@@ -13,8 +13,7 @@ use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_model::Sled as DbSled;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
+use nexus_db_queries::db::pub_test_utils::trust_quorum::TrustQuorumConfigDriver;
 use nexus_lockstep_client::types::LastResult;
 use nexus_lockstep_client::types::SledPolicy;
 use nexus_lockstep_client::types::SledProvisionPolicy;
@@ -36,8 +35,6 @@ use nexus_types::external_api::rack::RackMembershipStatus;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
-use nexus_types::trust_quorum::IsLrtqUpgrade;
-use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types::trust_quorum::TrustQuorumConfigState;
 use omicron_common::api::external::LookupType;
@@ -55,10 +52,6 @@ use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::time::Duration;
-use trust_quorum_types::configuration::Configuration;
-use trust_quorum_types::crypto::Sha3_256Digest;
-use trust_quorum_types::membership::TrustQuorumMembers;
-use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -432,123 +425,6 @@ async fn test_sled_agent_put_checks_fetched_identity(
     expunge_and_decommission(cptestctx, &opctx, sled_id).await;
 }
 
-struct TrustQuorumConfigDriver<'a> {
-    opctx: &'a OpContext,
-    datastore: &'a DataStore,
-    rack_id: RackUuid,
-}
-
-impl TrustQuorumConfigDriver<'_> {
-    fn authz_tq(&self) -> authz::TrustQuorumConfig {
-        authz::TrustQuorumConfig::for_rack_id(self.rack_id)
-    }
-
-    async fn config(&self, epoch: u64) -> TrustQuorumConfig {
-        self.datastore
-            .tq_get_config(self.opctx, self.authz_tq(), Epoch(epoch))
-            .await
-            .expect("loaded trust quorum config")
-            .unwrap_or_else(|| {
-                panic!("trust quorum config at epoch {epoch} exists")
-            })
-    }
-
-    async fn propose(
-        &self,
-        epoch: u64,
-        last_committed_epoch: u64,
-        members: &BTreeSet<BaseboardId>,
-    ) {
-        self.datastore
-            .tq_insert_latest_config(
-                self.opctx,
-                ProposedTrustQuorumConfig {
-                    rack_id: self.rack_id,
-                    epoch: Epoch(epoch),
-                    is_lrtq_upgrade: IsLrtqUpgrade::No {
-                        last_committed_epoch: Epoch(last_committed_epoch),
-                    },
-                    members: TrustQuorumMembers::new(members.clone())
-                        .expect("test members are within the size bounds"),
-                },
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("inserted trust quorum config at epoch {epoch}: {error}")
-            });
-        assert_eq!(
-            self.config(epoch).await.state,
-            TrustQuorumConfigState::Preparing
-        );
-    }
-
-    async fn ack_all_prepares(&self, epoch: u64) {
-        let config = self.config(epoch).await;
-        let members: BTreeSet<_> = config.members.keys().cloned().collect();
-        let coordinator_config = Configuration {
-            rack_id: config.rack_id,
-            epoch: config.epoch,
-            coordinator: config.coordinator.clone(),
-            members: members
-                .iter()
-                .cloned()
-                .map(|id| (id, Sha3_256Digest([0u8; 32])))
-                .collect(),
-            threshold: config.threshold,
-            encrypted_rack_secrets: None,
-        };
-        let outcome = self
-            .datastore
-            .tq_update_prepare_status(self.opctx, coordinator_config, members)
-            .await
-            .unwrap_or_else(|error| {
-                panic!("acked prepares at epoch {epoch}: {error}")
-            });
-        let TqPrepareStatusOutcome::Committing { config: _ } = outcome else {
-            panic!(
-                "acked prepares at epoch {epoch} committing, got {outcome:?}"
-            );
-        };
-    }
-
-    async fn ack_commits(
-        &self,
-        epoch: u64,
-        acked: &BTreeSet<BaseboardId>,
-        expected_state: TrustQuorumConfigState,
-    ) {
-        let state = self
-            .datastore
-            .tq_update_commit_status(
-                self.opctx,
-                self.authz_tq(),
-                Epoch(epoch),
-                acked.clone(),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("acked commits at epoch {epoch}: {error}")
-            });
-        assert_eq!(state, expected_state);
-    }
-
-    async fn abort(&self, epoch: u64) {
-        let aborted = self
-            .datastore
-            .tq_abort_config(
-                self.opctx,
-                self.authz_tq(),
-                Epoch(epoch),
-                "aborted by test".to_string(),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("aborted trust quorum config at epoch {epoch}: {error}")
-            });
-        assert_eq!(aborted.state, TrustQuorumConfigState::Aborted);
-    }
-}
-
 async fn expunge_sled(
     client: &nexus_lockstep_client::Client,
     sled_id: SledUuid,
@@ -647,7 +523,7 @@ async fn test_sled_expunge_trust_quorum_gate(
 
     tq.propose(2, 1, &with_sled).await;
     tq.ack_all_prepares(2).await;
-    tq.ack_commits(2, &with_sled, TrustQuorumConfigState::Committed).await;
+    tq.ack_commits(2, with_sled, TrustQuorumConfigState::Committed).await;
 
     tq.propose(3, 2, &others).await;
     assert_rejected_as_preparing(
