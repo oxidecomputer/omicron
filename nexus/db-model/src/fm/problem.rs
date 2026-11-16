@@ -167,7 +167,7 @@ pub struct FmProblemAlert {
 /// This is a sitrep-internal representation of a *request* that a support
 /// bundle be linked to the problem. The existence of this record does not
 /// create an external-API-visible link between the support bundle and the
-/// problem. Instead, this record will be created by rendezvous when executing
+/// problem. Instead, that link will be created by rendezvous when executing
 /// the sitrep that contains this record.
 ///
 /// The referenced support bundle need not be one requested in the same sitrep,
