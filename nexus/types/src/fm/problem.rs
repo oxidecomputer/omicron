@@ -508,12 +508,6 @@ pub struct SitrepRevision {
     /// A human-readable description (one or more paragraphs) of any operator
     /// actions required to address the problem.
     pub action_required: String,
-    /// A human-readable comment explaining why the diagnosis engine requested
-    /// this revision.
-    ///
-    /// This is used for debugging the sitrep, and is not part of the
-    /// externally visible problem revision.
-    pub comment: String,
 }
 
 impl iddqd::IdOrdItem for SitrepRevision {

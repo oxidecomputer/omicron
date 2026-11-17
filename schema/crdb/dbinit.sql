@@ -10121,12 +10121,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision_request (
     -- actions required to address this problem.
     action_required STRING NOT NULL,
 
-    -- A human-readable comment explaining why the diagnosis engine requested
-    -- this revision to the problem. This is *not* part of the externally
-    -- visible problem revision, and is only used for debugging the sitrep
-    -- itself.
-    comment TEXT NOT NULL,
-
     CONSTRAINT revision_is_non_zero CHECK (revision > 0),
     CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
 
