@@ -117,6 +117,12 @@ impl FmRendezvous {
             "sweeping support bundle creation markers",
             Self::gc_support_bundle_markers,
         );
+        let problem_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "sweeping active problem creation markers",
+            Self::gc_problem_markers,
+        );
 
         const TASKS_SHOULDNT_FAIL: &str = "\
             rendezvous op tasks should never return a `JoinError`. Nexus is \
@@ -133,6 +139,9 @@ impl FmRendezvous {
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
             alert_marker_gc: alert_marker_gc.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundle_marker_gc: support_bundle_marker_gc
+                .await
+                .expect(TASKS_SHOULDNT_FAIL),
+            problem_marker_gc: problem_marker_gc
                 .await
                 .expect(TASKS_SHOULDNT_FAIL),
         };
@@ -591,6 +600,25 @@ impl FmRendezvous {
                 &opctx,
                 sitrep.id(),
                 sitrep.metadata.support_bundle_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx.log, result)
+    }
+
+    /// Sweep the `rendezvous_problem_created` marker table, using this
+    /// activation's sitrep to decide which rows are still needed.
+    async fn gc_problem_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .fm_rendezvous_problem_marker_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.problem_generation,
             )
             .await;
         Self::marker_gc_status(&opctx.log, result)
