@@ -5,7 +5,7 @@
 //! Behavior shared by the per-diagnosis-engine `fm_fact_*` tables.
 
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
+use nexus_types::fm::FactMetadata;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{CaseUuid, FactUuid, SitrepUuid};
 

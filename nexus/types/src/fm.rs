@@ -20,10 +20,10 @@ pub use config::{
 
 pub mod fact;
 pub use fact::{
-    CertificateExpiryFactPayload, CertificateFact, DiskFact, FactPayload,
-    SagaAbandonedFactPayload, SagaFact, SagaNotProgressingFactPayload,
-    SagaOwnerNotCurrentFactPayload, SmfServiceFact, SmfServiceFactPayload,
-    ZpoolUnhealthyFactPayload,
+    CertificateExpiryFactPayload, CertificateFact, DiskFact, FactMetadata,
+    FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    SmfServiceFact, SmfServiceFactPayload, ZpoolUnhealthyFactPayload,
 };
 pub mod display;
 

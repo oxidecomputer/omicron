@@ -15,8 +15,9 @@ use crate::inventory::InvZpoolHealth;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_physical_disk;
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
-use nexus_types::fm::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+use nexus_types::fm::{
+    DiskFact, FactMetadata, FactPayload, ZpoolUnhealthyFactPayload,
+};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
     CaseKind, CaseUuid, CollectionKind, FactKind, FactUuid, PhysicalDiskKind,

@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Typed payloads of diagnosis-engine-derived [`Fact`]s.
+//! The parts of a diagnosis-engine-derived [`Fact`]: its shared
+//! [`FactMetadata`] and its typed [`FactPayload`].
 //!
 //! Each diagnosis engine owns one variant of [`FactPayload`]. A [`Case`]
 //! belongs to exactly one diagnosis engine (see [`Metadata::de`]), so every
@@ -30,10 +31,24 @@ use crate::observed_saga::{OrphanedReason, SagaProgressState};
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
-    CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
+    CollectionUuid, FactUuid, OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid,
+    SledUuid, ZpoolUuid,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// The diagnosis-engine-agnostic part of a [`Fact`](super::case::Fact):
+/// everything that is not the typed [`payload`](super::case::Fact::payload).
+/// Every diagnosis engine's facts share these fields.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FactMetadata {
+    pub id: FactUuid,
+    /// The sitrep in which this fact was first added. Preserved
+    /// unchanged when the fact is carried forward into a child sitrep.
+    /// Debug-only.
+    pub created_sitrep_id: SitrepUuid,
+    pub comment: String,
+}
 
 /// The typed payload of a [`Fact`](super::case::Fact).
 ///
