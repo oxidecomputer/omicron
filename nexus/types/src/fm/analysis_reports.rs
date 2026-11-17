@@ -59,6 +59,10 @@ pub struct ActiveProblemReport {
     pub comment: String,
     pub current_problem_code: u32,
     pub revision: ProblemRevNum,
+    pub total_alerts: usize,
+    pub new_alerts: usize,
+    pub total_support_bundles: usize,
+    pub new_support_bundles: usize,
     pub log: DebugLog,
 }
 
@@ -346,6 +350,10 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
             current_problem_code,
             revision,
             log,
+            total_alerts,
+            new_alerts,
+            total_support_bundles,
+            new_support_bundles,
         } = report;
         let sitrep_id = this_sitrep.as_ref();
         let this_sitrep = move |s| {
@@ -367,12 +375,19 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
         const REVISED_IN: &str = "  revised in sitrep:";
         const REQUESTED_IN: &str = "requested in sitrep:";
         const RESOLVED_IN: &str = "resolved in sitrep:";
+        const TOTAL_ALERTS: &str = "total alerts:";
+        const TOTAL_SUPPORT_BUNDLES: &str = "total support bundles:";
+        const NEW_ALERTS_OR_BUNDLES: &str = "  added in this sitrep:";
         const WIDTH: usize = display::const_max_len(&[
             SUMMARY,
             PROBLEM_CODE,
             REVISION,
             REQUESTED_IN,
             RESOLVED_IN,
+            REVISED_IN,
+            TOTAL_ALERTS,
+            TOTAL_SUPPORT_BUNDLES,
+            NEW_ALERTS_OR_BUNDLES,
         ]);
 
         let indent = indent + 2;
@@ -422,6 +437,30 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
             "{:>indent$}{} {summary}",
             "",
             styles.label(SUMMARY, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {total_alerts}",
+            "",
+            styles.label(TOTAL_ALERTS, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {new_alerts}",
+            "",
+            styles.label(NEW_ALERTS_OR_BUNDLES, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {total_support_bundles}",
+            "",
+            styles.label(TOTAL_SUPPORT_BUNDLES, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {new_support_bundles}",
+            "",
+            styles.label(NEW_ALERTS_OR_BUNDLES, WIDTH),
         )?;
 
         log.display_multiline(indent)
