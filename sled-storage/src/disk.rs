@@ -128,9 +128,10 @@ impl RawSyntheticDisk {
     /// should already exist, and have the desired length.
     ///
     /// The file must be named `m2_<serial>.vdev` or `u2_<serial>.vdev`. When
-    /// `<serial>` is an integer it also picks the disk's chassis location:
-    /// `u2_3.vdev` sits in bay N3, and `m2_0.vdev` and `m2_1.vdev` are M.2
-    /// East and M.2 West. Otherwise `pcie_slot` picks the location.
+    /// `<serial>` is an integer, it also determines the disk's chassis
+    /// location. For example, `u2_3.vdev` sits in bay N3, while `m2_0.vdev`
+    /// and `m2_1.vdev` are M.2 East and M.2 West. Otherwise, the location is
+    /// determined by `pcie_slot`.
     pub fn load<P: AsRef<Utf8Path>>(
         vdev: P,
         pcie_slot: i64,

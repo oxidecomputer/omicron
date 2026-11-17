@@ -9,18 +9,21 @@ use std::fmt;
 /// The instance number the illumos kernel assigned to an NVMe controller
 /// when it bound the `nvme` driver to it.
 ///
-/// Every device node that binds to a driver gets an instance number,
-/// unique among that driver's nodes and recorded in `/etc/path_to_inst`
-/// so it survives reboots. It is the `3` in `nvme3`. libtopo records it as
-/// the `io/instance` property of its `nvme` node, and libnvme opens
-/// controllers by it. That shared key is how sled-hardware asks libnvme
-/// about the controller the topology found in a bay.
+/// Every device node that binds to a driver gets an instance number, which is
+/// unique among that driver's nodes. Instance numbers are recorded in
+/// `/etc/path_to_inst`, so they are persistent across reboots.
 ///
-/// Unrelated to the PCIe physical slot number and to NVMe firmware slots.
+/// Instance numbers are reported by libtopo as the `io/instance` property of
+/// its `nvme` node. In libnvme, controllers are opened by instance number.
+/// Therefore, sled-hardware uses instance numbers as a shared key to ask
+/// libnvme about the controller that libtopo found in a bay.
+///
+/// Instance numbers are unrelated to the PCIe physical slot number and to NVMe
+/// firmware slots.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct NvmeInstance(i32);
 
-/// An instance number outside the range libnvme accepts, which is zero
+/// An instance number outside the range used by libnvme, which is zero
 /// through `i32::MAX`.
 #[derive(Debug, thiserror::Error)]
 #[error("invalid nvme driver instance number: {0}")]
@@ -32,7 +35,7 @@ impl NvmeInstance {
         i32::try_from(value).map(Self).map_err(|_| InvalidNvmeInstance(value))
     }
 
-    /// The instance number as libnvme represents it.
+    /// Returns the instance number as libnvme represents it.
     pub fn as_i32(self) -> i32 {
         self.0
     }
