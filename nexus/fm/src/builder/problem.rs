@@ -45,7 +45,7 @@ pub struct ProblemSetBuilder<'parent> {
 /// Setting a field to the value it already has in the parent sitrep's current
 /// does not record a change for that field (and will undo any previously set
 /// change). If there is no change when the sitrep is built, no new revision
-/// will be created. 
+/// will be created.
 pub struct RevisionBuilder<'rev> {
     revision: id_ord_map::RefMut<'rev, PendingRevision>,
     sitrep_id: SitrepUuid,
@@ -53,7 +53,7 @@ pub struct RevisionBuilder<'rev> {
 }
 
 #[derive(Debug)]
-struct PendingRevision {
+pub struct PendingRevision {
     id: ProblemUuid,
     log: slog::Logger,
     num: ProblemRevNum,
@@ -85,10 +85,112 @@ impl iddqd::IdOrdItem for PendingRevision {
 }
 
 impl PendingRevision {
+    /// Returns the ID of the problem being revised.
+    pub fn id(&self) -> ProblemUuid {
+        self.id
+    }
+
+    /// Returns the number this revision will have, if it is created.
+    pub fn number(&self) -> ProblemRevNum {
+        self.num
+    }
+
+    /// Returns the problem's code as of this revision.
+    pub fn code(&self) -> ProblemCode {
+        self.code
+            .or_else(|| self.previous_revision().map(|p| p.code))
+            .expect(PARENT_OR_ALL_FIELDS_SET)
+    }
+
+    /// Returns the problem's summary as of this revision.
+    pub fn summary(&self) -> &str {
+        self.summary
+            .as_deref()
+            .or_else(|| self.previous_revision().map(|p| p.summary.as_str()))
+            .expect(PARENT_OR_ALL_FIELDS_SET)
+    }
+
+    /// Returns the problem's description as of this revision.
+    pub fn description(&self) -> &str {
+        self.description
+            .as_deref()
+            .or_else(|| {
+                self.previous_revision().map(|p| p.description.as_str())
+            })
+            .expect(PARENT_OR_ALL_FIELDS_SET)
+    }
+
+    /// Returns the problem's required operator action as of this revision.
+    pub fn action_required(&self) -> &str {
+        self.action_required
+            .as_deref()
+            .or_else(|| {
+                self.previous_revision().map(|p| p.action_required.as_str())
+            })
+            .expect(PARENT_OR_ALL_FIELDS_SET)
+    }
+
+    /// Returns `true` if this revision resolves the problem.
+    ///
+    /// [`ProblemSetBuilder::revise`] will never revise a problem that was
+    /// already resolved in the parent sitrep, so this is only `true` if the
+    /// problem was resolved in the sitrep being built.
+    pub fn is_resolved(&self) -> bool {
+        self.resolved
+    }
+
+    /// Returns an iterator over all alerts attached to this problem, including
+    /// both those attached in earlier revisions and alerts newly attached in
+    /// this revision.
+    pub fn alerts(&self) -> impl Iterator<Item = &AlertLink> + '_ {
+        self.parent
+            .iter()
+            .flat_map(|p| p.alerts.iter())
+            .chain(self.new_alerts.iter())
+    }
+
+    /// Returns `true` if the alert with the provided alert UUID has been
+    /// attached to this problem, either in this revision or in an earlier one.
+    pub fn contains_alert(&self, alert: impl AsRef<AlertUuid>) -> bool {
+        let alert_id = alert.as_ref();
+        self.new_alerts.contains_key(alert_id)
+            || self.parent_matches(|p| p.alerts.contains_key(alert_id))
+    }
+
+    /// Returns an iterator over all support bundles attached to this problem,
+    /// including both those attached in earlier revisions and support bundles
+    /// newly attached in this revision.
+    pub fn support_bundles(
+        &self,
+    ) -> impl Iterator<Item = &SupportBundleLink> + '_ {
+        self.parent
+            .iter()
+            .flat_map(|p| p.support_bundles.iter())
+            .chain(self.new_support_bundles.iter())
+    }
+
+    /// Returns `true` if the alert with the provided alert UUID has been
+    /// attached to this problem, either in this revision or in an earlier one.
+    pub fn contains_support_bundle(
+        &self,
+        bundle: impl AsRef<SupportBundleUuid>,
+    ) -> bool {
+        let id = bundle.as_ref();
+        self.new_support_bundles.contains_key(id)
+            || self.parent_matches(|p| p.support_bundles.contains_key(id))
+    }
+
     /// Returns the problem's current revision in the parent sitrep, if the
     /// problem existed there.
     fn previous_revision(&self) -> Option<&SitrepRevision> {
         self.parent.as_deref().map(SitrepProblem::current_revision)
+    }
+
+    fn parent_matches(
+        &self,
+        predicate: impl FnOnce(&SitrepProblem) -> bool,
+    ) -> bool {
+        self.parent.as_deref().map_or(false, predicate)
     }
 }
 
@@ -228,6 +330,17 @@ impl<'parent> ProblemSetBuilder<'parent> {
             }
         }
     }
+
+    /// Immutably borrows the pending revision for the given problem ID, if one
+    /// exists. If this method returns `None`, the problem may exist in the
+    /// parent sitrep and may still be copied forward into this sitrep, but no
+    /// revision for it is currently being prepared in this sitrep.
+    pub fn pending_revision_for(
+        &self,
+        id: &ProblemUuid,
+    ) -> Option<&PendingRevision> {
+        self.pending_revisions.get(id)
+    }
 }
 
 macro_rules! revise_field {
@@ -249,86 +362,6 @@ macro_rules! revise_field {
 }
 
 impl RevisionBuilder<'_> {
-    /// Returns the ID of the problem being revised.
-    pub fn id(&self) -> ProblemUuid {
-        self.revision.id
-    }
-
-    /// Returns the number this revision will have, if it is created.
-    pub fn number(&self) -> ProblemRevNum {
-        self.revision.num
-    }
-
-    /// Returns the problem's code as of this revision.
-    pub fn code(&self) -> ProblemCode {
-        let rev = &*self.revision;
-        rev.code
-            .or_else(|| rev.previous_revision().map(|p| p.code))
-            .expect(PARENT_OR_ALL_FIELDS_SET)
-    }
-
-    /// Returns the problem's summary as of this revision.
-    pub fn summary(&self) -> &str {
-        let rev = &*self.revision;
-        rev.summary
-            .as_deref()
-            .or_else(|| rev.previous_revision().map(|p| p.summary.as_str()))
-            .expect(PARENT_OR_ALL_FIELDS_SET)
-    }
-
-    /// Returns the problem's description as of this revision.
-    pub fn description(&self) -> &str {
-        let rev = &*self.revision;
-        rev.description
-            .as_deref()
-            .or_else(|| rev.previous_revision().map(|p| p.description.as_str()))
-            .expect(PARENT_OR_ALL_FIELDS_SET)
-    }
-
-    /// Returns the problem's required operator action as of this revision.
-    pub fn action_required(&self) -> &str {
-        let rev = &*self.revision;
-        rev.action_required
-            .as_deref()
-            .or_else(|| {
-                rev.previous_revision().map(|p| p.action_required.as_str())
-            })
-            .expect(PARENT_OR_ALL_FIELDS_SET)
-    }
-
-    /// Returns `true` if this revision resolves the problem.
-    ///
-    /// [`ProblemSetBuilder::revise`] will never revise a problem that was
-    /// already resolved in the parent sitrep, so this is only `true` if the
-    /// problem was resolved in the sitrep being built.
-    pub fn is_resolved(&self) -> bool {
-        self.revision.resolved
-    }
-
-    /// Returns all alerts attached to this problem, including both those
-    /// attached in earlier revisions and alerts newly attached in this
-    /// revision.
-    pub fn alerts(&self) -> impl Iterator<Item = &AlertLink> + '_ {
-        let rev = &*self.revision;
-        rev.parent
-            .iter()
-            .flat_map(|p| p.alerts.iter())
-            .chain(rev.new_alerts.iter())
-    }
-
-    /// Returns all alerts attached to this problem, including both those
-    /// attached in earlier revisions and alerts newly attached in this
-    /// revision.
-    pub fn support_bundles(
-        &self,
-    ) -> impl Iterator<Item = &SupportBundleLink> + '_ {
-        let rev = &*self.revision;
-        rev.parent
-            .iter()
-            .flat_map(|p| p.support_bundles.iter())
-            .chain(rev.new_support_bundles.iter())
-    }
-
     /// Sets the problem's code as of this revision.
     pub fn set_code(
         &mut self,
@@ -491,6 +524,13 @@ impl RevisionBuilder<'_> {
         let de = self.de;
         let rev = &mut *self.revision;
         rev.debug_log.warning(&rev.log, event).kv("de", de)
+    }
+}
+
+impl std::ops::Deref for RevisionBuilder<'_> {
+    type Target = PendingRevision;
+    fn deref(&self) -> &Self::Target {
+        &self.revision
     }
 }
 
