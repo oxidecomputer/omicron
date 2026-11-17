@@ -121,7 +121,8 @@ async fn make_nexus_client(
     let url = format!("http://{}", nexus_ip);
     debug!(log, "found Nexus IP"; "nexus_ip" => %nexus_ip, "url" => &url);
 
-    let client = NexusClient::new(&url, log.clone());
+    let client =
+        NexusClient::new(&url, log.clone()).expect("Nexus lockstep client");
 
     // Once this call succeeds, Nexus is ready for us to proceed.
     let blueprint_response = client.blueprint_target_view().await?.into_inner();

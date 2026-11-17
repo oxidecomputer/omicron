@@ -921,7 +921,8 @@ async fn fetch_known_classes_from_nexus(
             format!("http://{addr}")
         }
     };
-    let client = nexus_lockstep_client::Client::new(&nexus_url, log.clone());
+    let client = nexus_lockstep_client::Client::new(&nexus_url, log.clone())
+        .expect("Nexus lockstep client");
     let resp = client
         .fm_known_ereport_classes_list()
         .await

@@ -246,7 +246,8 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     let nexus_lockstep_url =
         format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let nexus_client =
-        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone())
+            .expect("Nexus lockstep client");
     nexus_client
         .blueprint_import(&new_blueprint)
         .await

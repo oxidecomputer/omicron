@@ -780,7 +780,8 @@ async fn init_client_server_with_bind_addresses(
     .with_options(resolver_opts)
     .build();
     let client =
-        Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
+        Client::new(&format!("http://{}", dropshot_server.local_addr()), log)
+            .expect("DNS client");
 
     Ok(TestContext {
         client,

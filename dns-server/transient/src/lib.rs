@@ -76,7 +76,7 @@ impl TransientDnsServer {
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", self.dropshot_server.local_addr()),
             log.clone(),
-        );
+        )?;
         dns_config_client
             .dns_config_put(&dns_config)
             .await

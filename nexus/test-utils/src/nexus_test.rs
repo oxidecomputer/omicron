@@ -564,6 +564,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             &format!("http://{}", self.internal_client.bind_address),
             self.internal_client.client_log.clone(),
         )
+        .expect("Nexus internal client")
     }
 
     pub fn lockstep_client(&self) -> nexus_lockstep_client::Client {
@@ -571,6 +572,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             &format!("http://{}", self.lockstep_client.bind_address),
             self.lockstep_client.client_log.clone(),
         )
+        .expect("Nexus lockstep client")
     }
 
     /// Stop a Dendrite instance for testing failure scenarios.
@@ -651,7 +653,8 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 tag: String::from("test-restart-wait"),
                 log: self.logctx.log.clone(),
             },
-        );
+        )
+        .expect("dpd client");
         wait_for_condition(
             || async {
                 match dpd_client.switch_identifiers().await {

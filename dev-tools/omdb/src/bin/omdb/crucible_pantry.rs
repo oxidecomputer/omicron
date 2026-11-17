@@ -72,7 +72,8 @@ impl CruciblePantryArgs {
                 OMDB_CRUCIBLE_PANTRY_URL"
             );
         };
-        let client = Client::new(crucible_pantry_url);
+        let client =
+            Client::new(crucible_pantry_url).expect("crucible pantry client");
 
         match &self.command {
             CruciblePantryCommands::IsFinished(id) => {

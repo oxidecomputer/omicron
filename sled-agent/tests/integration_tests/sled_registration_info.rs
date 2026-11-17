@@ -40,7 +40,8 @@ async fn sim_sled_registration_info_returns_configured_ids() {
     let client = sled_agent_client::Client::new(
         &format!("http://{}", server.http_server.local_addr()),
         log.clone(),
-    );
+    )
+    .expect("sled agent client");
     let info = client
         .sled_registration_info()
         .await

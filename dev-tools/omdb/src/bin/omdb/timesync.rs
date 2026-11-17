@@ -65,7 +65,8 @@ impl TimesyncArgs {
         let internal = internal.into_iter().zip(std::iter::repeat(false));
         for (sock, is_boundary) in boundaries.chain(internal) {
             let url = format!("http://{sock}");
-            let client = Client::new(&url, log.clone());
+            let client =
+                Client::new(&url, log.clone()).expect("NTP admin client");
             let result = match client.timesync().await.map(|t| t.into_inner()) {
                 Ok(ts) => {
                     let TimeSync {

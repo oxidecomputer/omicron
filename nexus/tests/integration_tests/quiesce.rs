@@ -22,7 +22,8 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
         cptestctx.server.get_http_server_lockstep_address(),
     );
     let nexus_client =
-        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone())
+            .expect("Nexus lockstep client");
 
     // Now, update the target blueprint to reflect that Nexus should quiesce.
     // We don't need it to be enabled to still reflect quiescing.

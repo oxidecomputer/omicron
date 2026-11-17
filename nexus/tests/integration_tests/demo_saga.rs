@@ -26,7 +26,8 @@ async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
         cptestctx.server.get_http_server_lockstep_address(),
     );
     let nexus_client =
-        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone())
+            .expect("Nexus lockstep client");
 
     let sagas_before = list_sagas(&nexus_client).await;
     eprintln!("found sagas (before): {:?}", sagas_before);

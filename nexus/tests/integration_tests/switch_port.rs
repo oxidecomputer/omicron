@@ -1077,7 +1077,8 @@ async fn test_scrimlet_reconcilers_update_on_bootstore_change(
     let mgd_client = mg_admin_client::Client::new(
         &format!("http://{mgd_addr}"),
         ctx.logctx.log.clone(),
-    );
+    )
+    .expect("mgd client");
     wait_for_condition(
         || async {
             let routes = mgd_client

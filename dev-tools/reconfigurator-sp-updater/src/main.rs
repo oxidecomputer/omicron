@@ -129,7 +129,8 @@ impl ReconfiguratorSpUpdater {
         let mgs_client = gateway_client::Client::new(
             &mgs_url,
             log.new(o!("mgs_url" => mgs_url.clone())),
-        );
+        )
+        .expect("MGS client");
         let inventory = Inventory::load(&log, mgs_client)
             .await
             .context("loading inventory")?;

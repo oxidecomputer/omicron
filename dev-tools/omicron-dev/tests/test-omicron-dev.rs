@@ -166,7 +166,8 @@ async fn test_run_all() {
         let client = oxide_client::Client::new(&format!(
             "http://{}",
             runall.external_url
-        ));
+        ))
+        .expect("oxide client");
         let _ =
             client.logout().send().await.context(
                 "Unexpectedly failed to reach Nexus at logout endpoint",

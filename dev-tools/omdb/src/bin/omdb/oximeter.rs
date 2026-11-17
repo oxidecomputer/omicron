@@ -76,7 +76,8 @@ impl OximeterArgs {
         let client = Client::new(
             &oximeter_url,
             log.new(slog::o!("component" => "oximeter-client")),
-        );
+        )
+        .expect("oximeter client");
         Ok(client)
     }
 

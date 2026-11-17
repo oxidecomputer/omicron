@@ -631,7 +631,8 @@ mod test {
         let nexus_client = nexus_lockstep_client::Client::new(
             &nexus_lockstep_url,
             log.clone(),
-        );
+        )
+        .expect("Nexus lockstep client");
 
         // We need to enable blueprint execution in order to complete a saga
         // assignment pass, which is required for quiescing to work.
@@ -663,7 +664,8 @@ mod test {
         let nexus_client = nexus_lockstep_client::Client::new(
             &nexus_lockstep_url,
             log.clone(),
-        );
+        )
+        .expect("Nexus lockstep client");
 
         // We need to enable blueprint execution in order to complete a saga
         // assignment pass, which is required for quiescing to work.
