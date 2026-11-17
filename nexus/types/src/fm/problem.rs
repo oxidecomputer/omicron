@@ -217,7 +217,7 @@ impl AllProblems {
         problems: impl IntoIterator<Item = I>,
     ) -> anyhow::Result<Self>
     where
-        SitrepProblem: From<I>,
+        I: Into<Arc<SitrepProblem>>,
     {
         let mut this = Self::default();
         this.try_extend(problems)?;
@@ -239,10 +239,10 @@ impl AllProblems {
         problems: impl IntoIterator<Item = I>,
     ) -> anyhow::Result<&mut Self>
     where
-        SitrepProblem: From<I>,
+        I: Into<Arc<SitrepProblem>>,
     {
         for problem in problems {
-            self.insert_unique(SitrepProblem::from(problem))?;
+            self.insert_unique(problem)?;
         }
         Ok(self)
     }
@@ -257,7 +257,7 @@ impl AllProblems {
     /// already exists.
     pub fn insert_unique(
         &mut self,
-        problem: SitrepProblem,
+        problem: impl Into<Arc<SitrepProblem>>,
     ) -> anyhow::Result<&mut Self> {
         // Note: because `try_extend` may have been called with potentially
         // invalid sets of problems in the `Deserialize` impl or when
@@ -267,12 +267,12 @@ impl AllProblems {
         // that there is a problem code, so it should really only be used
         // when the problem has already been constructed and is known to be
         // valid.
+        let problem = problem.into();
         let id = problem.id;
         let code =
             problem.revisions.last().map(|rev| rev.code).ok_or_else(|| {
                 anyhow::anyhow!("problem {id} has no revisions!")
             })?;
-        let problem = Arc::new(problem);
         // Inserting the problem into `by_id` first, before inserting it
         // into `by_code` ensures that the problem's UUID is unique. This
         // way, we can panic if the `by_code` insert fails, and enforce
@@ -467,7 +467,7 @@ impl SitrepProblem {
     }
 
     pub fn is_resolved(&self) -> bool {
-        self.current_revision().time_resolved.is_some()
+        self.current_revision().resolved_sitrep_id.is_some()
     }
 
     pub fn display_summary(
@@ -657,7 +657,7 @@ pub struct SitrepRevision {
     ///
     /// If this is `None`, the problem is active as of this revision; if it is
     /// `Some`, the problem is resolved.
-    pub time_resolved: Option<DateTime<Utc>>,
+    pub resolved_sitrep_id: Option<DateTime<Utc>>,
     /// The problem's problem code as of this revision.
     ///
     /// This determines the problem's class, as well as its documentation.
@@ -883,7 +883,7 @@ mod tests {
             revs.insert_unique(SitrepRevision {
                 number: ProblemRevNum::from_u32(number),
                 requested_sitrep_id: sitrep_id,
-                time_resolved: None,
+                resolved_sitrep_id: None,
                 code: ProblemCode::UnhealthyZpool,
                 summary: format!("revision {number}"),
                 description: format!("description of revision {number}"),
