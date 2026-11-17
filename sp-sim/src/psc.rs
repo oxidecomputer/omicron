@@ -17,6 +17,7 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
+use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -68,7 +69,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
 pub const SIM_PSC_BOARD: &str = "SimPscSp";
 
@@ -78,6 +78,7 @@ pub const FAKE_PSC_MODEL: &str = "FAKE_SIM_PSC";
 
 pub struct Psc {
     sp: sp::Handle<Handler>,
+    tasks: SpTasks<()>,
 }
 
 #[async_trait]
@@ -188,7 +189,7 @@ impl Psc {
                 psc.common.old_rot_state,
                 update_state,
             );
-            let sp = sp::Handle::spawn(
+            let (sp, udp_task) = sp::Handle::spawn(
                 servers,
                 ereport_servers,
                 ereport_state,
@@ -196,14 +197,14 @@ impl Psc {
                 &log,
             );
 
-            Ok(Self { sp })
+            Ok(Self { sp, tasks: SpTasks::Running { udp_task, extra: () } })
         } else {
-            Ok(Self { sp: sp::Handle::rot_only() })
+            Ok(Self { sp: sp::Handle::rot_only(), tasks: SpTasks::RotOnly })
         }
     }
 
-    pub(crate) fn take_udp_task(&mut self) -> Option<JoinHandle<()>> {
-        self.sp.take_udp_task()
+    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<()> {
+        &mut self.tasks
     }
 }
 

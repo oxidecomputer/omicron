@@ -28,10 +28,10 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task;
-use tokio::task::JoinHandle;
+use tokio_util::task::AbortOnDropHandle;
 
-/// A handle to a running simulated SP (i.e. the spawned [`UdpTask`] and
-/// its `H`-typed [`SimSpHandler`] implementation).
+/// A handle for controlling a running simulated SP (i.e., its `H`-typed
+/// [`SimSpHandler`] implementation and a command channel).
 ///
 /// This type implements the board-independent parts of the
 /// [`SimulatedSp`](crate::SimulatedSp) trait. Each board-specific simulated SP
@@ -42,14 +42,17 @@ use tokio::task::JoinHandle;
 /// of trust. It has no `SimSpHandler` implementation and doesn't bind any UDP
 /// sockets, so any commands that require these will fail.
 ///
-/// Dropping this handle aborts the UDP task if it hasn't already been aborted
-/// by `SimRack::teardown`.
+/// Dropping this handle closes the command channel, which makes the UDP task
+/// exit.
 pub(crate) struct Handle<H> {
+    // TODO: There are a bunch of invalid but representable states here
+    // (local_addrs, handler, responses_sent_count are all either Some for a
+    // networked SP, or None for RoT-only). We should consider splitting Handle
+    // into RoT-only and regular handle types maybe.
     local_addrs: Option<[SocketAddrV6; 2]>,
     ereport_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<H>>>,
     commands: mpsc::UnboundedSender<Command>,
-    udp_task: UdpTaskState,
     responses_sent_count: Option<watch::Receiver<usize>>,
     power_state_changes: Arc<AtomicUsize>,
 }
@@ -65,7 +68,7 @@ where
         ereport_state: EreportState,
         handler: H,
         log: &Logger,
-    ) -> Self {
+    ) -> (Self, AbortOnDropHandle<()>) {
         let local_addrs = servers.each_ref().map(UdpServer::local_addr);
         let ereport_addrs = ereport_servers
             .as_ref()
@@ -81,7 +84,7 @@ where
             commands_rx,
         );
         let log = log.clone();
-        let udp_task = task::spawn(async move {
+        let udp_task = AbortOnDropHandle::new(task::spawn(async move {
             if let Err(error) = udp_task.run().await {
                 error!(
                     log,
@@ -93,7 +96,7 @@ where
                 // * In the packaged sp-sim, with `panic = "abort"`, this
                 //   aborts the process so SMF restarts it.
                 // * In tests, `SimRack::teardown` joins on the task and
-                //   will reports panics as errors.
+                //   will report panics as errors.
                 panic!(
                     "simulated SP UDP task on {} and {} exited with an error: {}",
                     local_addrs[0],
@@ -101,16 +104,16 @@ where
                     InlineErrorChain::new(error.as_ref()),
                 );
             }
-        });
-        Self {
+        }));
+        let handle = Self {
             local_addrs: Some(local_addrs),
             ereport_addrs,
             handler: Some(handler),
             commands,
-            udp_task: UdpTaskState::Running(udp_task),
             responses_sent_count: Some(responses_sent_count),
             power_state_changes,
-        }
+        };
+        (handle, udp_task)
     }
 }
 
@@ -126,7 +129,6 @@ impl<H> Handle<H> {
             ereport_addrs: None,
             handler: None,
             commands,
-            udp_task: UdpTaskState::RotOnly,
             responses_sent_count: None,
             power_state_changes: Arc::new(AtomicUsize::new(0)),
         }
@@ -139,22 +141,6 @@ impl<H> Handle<H> {
     /// waits for any in-flight request to complete.
     pub(crate) async fn handler(&self) -> Option<MutexGuard<'_, H>> {
         Some(self.handler.as_ref()?.lock().await)
-    }
-
-    pub(crate) fn take_udp_task(&mut self) -> Option<JoinHandle<()>> {
-        match std::mem::replace(
-            &mut self.udp_task,
-            UdpTaskState::TakenForTeardown,
-        ) {
-            UdpTaskState::RotOnly => {
-                self.udp_task = UdpTaskState::RotOnly;
-                None
-            }
-            UdpTaskState::Running(udp_task) => Some(udp_task),
-            UdpTaskState::TakenForTeardown => panic!(
-                "SimRack::teardown takes each simulated SP's UDP task at most once"
-            ),
-        }
     }
 
     pub(crate) fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
@@ -228,26 +214,13 @@ impl<H> Handle<H> {
     }
 }
 
-impl<H> Drop for Handle<H> {
-    fn drop(&mut self) {
-        match &self.udp_task {
-            UdpTaskState::Running(udp_task) => {
-                // default join handle drop behavior is to detach; we want to abort
-                udp_task.abort();
-            }
-            UdpTaskState::RotOnly | UdpTaskState::TakenForTeardown => {}
-        }
-    }
-}
-
-/// The state of the UDP task within [`Handle`].
-enum UdpTaskState {
-    /// This is a RoT-only handle without networking.
+/// The tasks owned by a simulated SP.
+pub(crate) enum SpTasks<T> {
+    /// This is a RoT-only simulated SP which doesn't own any tasks.
     RotOnly,
-    /// The UDP task is running.
-    Running(JoinHandle<()>),
-    /// The UDP task has been taken for teardown.
-    TakenForTeardown,
+    /// This is a simulated SP that is running a UDP task and, through `extra`,
+    /// any board-specific tasks.
+    Running { udp_task: AbortOnDropHandle<()>, extra: T },
 }
 
 fn port_index(port: SpPort) -> usize {

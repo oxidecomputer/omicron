@@ -36,6 +36,7 @@ pub use sidecar::FAKE_SIDECAR_MODEL;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use sidecar::Sidecar;
 pub use slog::Logger;
+use sp::SpTasks;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -204,23 +205,33 @@ impl SimRack {
         let mut udp_tasks = Vec::new();
         let mut serial_console_tasks = Vec::new();
         for (i, sidecar) in self.sidecars.iter_mut().enumerate() {
-            if let Some(task) = sidecar.take_udp_task() {
-                udp_tasks.push((format!("sidecar {i} UDP task"), task));
+            match sidecar.tasks_mut() {
+                SpTasks::RotOnly => {}
+                SpTasks::Running { udp_task, extra: () } => {
+                    udp_tasks.push((format!("sidecar {i} UDP task"), udp_task));
+                }
             }
         }
         for (i, gimlet) in self.gimlets.iter_mut().enumerate() {
-            if let Some(task) = gimlet.take_udp_task() {
-                udp_tasks.push((format!("gimlet {i} UDP task"), task));
-            }
-            for (component, task) in gimlet.take_serial_console_tasks() {
-                let label =
-                    format!("gimlet {i} serial console task ({component})");
-                serial_console_tasks.push((label, task));
+            match gimlet.tasks_mut() {
+                SpTasks::RotOnly => {}
+                SpTasks::Running { udp_task, extra: consoles } => {
+                    udp_tasks.push((format!("gimlet {i} UDP task"), udp_task));
+                    for (component, task) in consoles {
+                        let label = format!(
+                            "gimlet {i} serial console task ({component})"
+                        );
+                        serial_console_tasks.push((label, task));
+                    }
+                }
             }
         }
         for (i, psc) in self.pscs.iter_mut().enumerate() {
-            if let Some(task) = psc.take_udp_task() {
-                udp_tasks.push((format!("PSC {i} UDP task"), task));
+            match psc.tasks_mut() {
+                SpTasks::RotOnly => {}
+                SpTasks::Running { udp_task, extra: () } => {
+                    udp_tasks.push((format!("PSC {i} UDP task"), udp_task));
+                }
             }
         }
 

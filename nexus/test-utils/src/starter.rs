@@ -1469,7 +1469,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for sled_agent in self.sled_agents {
             sled_agent.teardown().await;
         }
-        }
         if let Some(oximeter) = self.oximeter {
             errors.extend(
                 oximeter.close().await.context("closing oximeter").err(),

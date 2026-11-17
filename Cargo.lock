@@ -15646,6 +15646,7 @@ dependencies = [
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "toml 0.8.23",
  "uuid",
  "zerocopy 0.8.55",

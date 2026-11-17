@@ -17,6 +17,7 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
+use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -71,7 +72,8 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
-use tokio::task::{self, JoinHandle};
+use tokio::task;
+use tokio_util::task::AbortOnDropHandle;
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
@@ -103,20 +105,14 @@ impl From<GimletPowerState> for PowerState {
     }
 }
 
+// This is a Vec of (component ID, serial console task).
+type SerialConsoleTasks = Vec<(String, AbortOnDropHandle<Infallible>)>;
+
 pub struct Gimlet {
     sp: sp::Handle<Handler>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    serial_console_tasks: Vec<(String, JoinHandle<Infallible>)>,
+    tasks: SpTasks<SerialConsoleTasks>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
-}
-
-impl Drop for Gimlet {
-    fn drop(&mut self) {
-        // default join handle drop behavior is to detach; we want to abort
-        for (_, task) in &self.serial_console_tasks {
-            task.abort();
-        }
-    }
 }
 
 #[async_trait]
@@ -197,7 +193,6 @@ impl Gimlet {
 
         let mut incoming_console_tx = HashMap::new();
         let mut serial_console_addrs = HashMap::new();
-        let mut serial_console_tasks = Vec::new();
 
         // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
@@ -206,10 +201,12 @@ impl Gimlet {
             return Ok(Self {
                 sp: sp::Handle::rot_only(),
                 serial_console_addrs,
-                serial_console_tasks,
+                tasks: SpTasks::RotOnly,
                 power_state_rx: None,
             });
         };
+
+        let mut serial_console_tasks = Vec::new();
 
         // bind to our two local "KSZ" ports
         let servers = UdpServer::bind_pair(network_config, &log).await?;
@@ -279,7 +276,9 @@ impl Gimlet {
                 );
                 serial_console_tasks.push((
                     id.to_owned(),
-                    task::spawn(async move { serial_console.run().await }),
+                    AbortOnDropHandle::new(task::spawn(async move {
+                        serial_console.run().await
+                    })),
                 ));
             }
         }
@@ -294,7 +293,7 @@ impl Gimlet {
             log.clone(),
             update_state,
         );
-        let sp = sp::Handle::spawn(
+        let (sp, udp_task) = sp::Handle::spawn(
             servers,
             ereport_servers,
             ereport_state,
@@ -305,19 +304,13 @@ impl Gimlet {
         Ok(Self {
             sp,
             serial_console_addrs,
-            serial_console_tasks,
+            tasks: SpTasks::Running { udp_task, extra: serial_console_tasks },
             power_state_rx: Some(power_state_rx),
         })
     }
 
-    pub(crate) fn take_udp_task(&mut self) -> Option<JoinHandle<()>> {
-        self.sp.take_udp_task()
-    }
-
-    pub(crate) fn take_serial_console_tasks(
-        &mut self,
-    ) -> Vec<(String, JoinHandle<Infallible>)> {
-        std::mem::take(&mut self.serial_console_tasks)
+    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<SerialConsoleTasks> {
+        &mut self.tasks
     }
 
     pub fn power_state_rx(&self) -> Option<watch::Receiver<GimletPowerState>> {

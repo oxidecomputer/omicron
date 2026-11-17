@@ -33,6 +33,7 @@ slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tokio-util = { workspace = true, features = ["rt"] }
 toml.workspace = true
 omicron-workspace-hack.workspace = true
 nix.workspace = true
