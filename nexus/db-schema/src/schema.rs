@@ -3598,7 +3598,6 @@ table! {
         summary -> Text,
         description -> Text,
         action_required -> Text,
-        comment -> Text,
     }
 }
 

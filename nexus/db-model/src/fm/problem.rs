@@ -109,13 +109,6 @@ pub struct FmProblemRevisionRequest {
     /// A human-readable description (one or more paragraphs) of any operator
     /// actions required to address the problem.
     pub action_required: String,
-
-    /// An internal human-readable comment explaining why the diagnosis engine
-    /// requested this revision.
-    ///
-    /// This is used for debugging the sitrep, and is not part of the
-    /// externally visible problem revision.
-    pub comment: String,
 }
 
 /// A request in a fault management sitrep that an alert be linked to a problem.
@@ -251,7 +244,6 @@ impl FmProblemRevisionRequest {
             summary,
             description,
             action_required,
-            comment,
         } = revision;
         Self {
             problem_id: problem_id.into(),
@@ -263,7 +255,6 @@ impl FmProblemRevisionRequest {
             summary,
             description,
             action_required,
-            comment,
         }
     }
 }
@@ -286,7 +277,6 @@ impl TryFrom<FmProblemRevisionRequest> for SitrepRevision {
             summary,
             description,
             action_required,
-            comment,
         } = revision;
         Ok(Self {
             number: number.into(),
@@ -296,7 +286,6 @@ impl TryFrom<FmProblemRevisionRequest> for SitrepRevision {
             summary,
             description,
             action_required,
-            comment,
         })
     }
 }

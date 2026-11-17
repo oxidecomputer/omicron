@@ -3346,7 +3346,6 @@ mod tests {
                 summary: summary.to_string(),
                 description: format!("a longer description: {summary}"),
                 action_required: "none, it's not a real problem".to_string(),
-                comment: format!("revision {number}"),
             }
         };
         let resolved_problem = fm::problem::SitrepProblem {

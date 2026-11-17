@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_revision_request (
     description STRING NOT NULL,
     action_required STRING NOT NULL,
 
-    comment TEXT NOT NULL,
 
     CONSTRAINT revision_is_non_zero CHECK (revision > 0),
     CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
