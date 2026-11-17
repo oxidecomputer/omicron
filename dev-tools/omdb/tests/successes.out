@@ -963,6 +963,11 @@ task: "fm_rendezvous"
       rows deleted:    0
       batches:         1
       errors:          0
+    garbage collecting active problem creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
@@ -1741,6 +1746,11 @@ task: "fm_rendezvous"
       batches:         1
       errors:          0
     garbage collecting support bundle creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
+    garbage collecting active problem creation markers:
       started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       rows deleted:    0
       batches:         1
