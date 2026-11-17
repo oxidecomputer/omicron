@@ -1979,6 +1979,9 @@ table! {
         instance_manager_num_registered_vmms -> Int8,
 
         rack_id -> Uuid,
+
+        wicket_ssh_auth_effective_gen -> Nullable<Int8>,
+        wicket_ssh_auth_last_error -> Nullable<Text>,
     }
 }
 

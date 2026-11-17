@@ -39,6 +39,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sled_agent_types::disk::M2Slot;
+use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_agent_types_versions::latest::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
@@ -1252,6 +1253,7 @@ pub struct SledAgent {
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
     pub fmd: Result<FmdInventory, FmdInventoryError>,
+    pub wicket_ssh_auth_status: WicketSshAuthStatus,
 }
 
 impl IdOrdItem for SledAgent {

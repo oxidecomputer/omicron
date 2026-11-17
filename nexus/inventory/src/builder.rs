@@ -658,8 +658,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online,
             reference_measurements,
             fmd,
-            // TODO omicron#11821: finish integrating wicket SSH auth into nexus
-            wicket_ssh_auth_status: _,
+            wicket_ssh_auth_status,
         } = inventory;
 
         let baseboard_id =
@@ -696,6 +695,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online,
             reference_measurements,
             fmd,
+            wicket_ssh_auth_status,
         };
 
         self.sleds

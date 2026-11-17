@@ -1796,7 +1796,9 @@ impl Sled {
                 .reference_measurements
                 .clone(),
             fmd: Ok(FmdInventory::default()),
-            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
+            wicket_ssh_auth_status: inv_sled_agent
+                .wicket_ssh_auth_status
+                .clone(),
         };
 
         Sled {

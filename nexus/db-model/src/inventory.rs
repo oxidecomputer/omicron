@@ -65,6 +65,7 @@ use omicron_common::address::{
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::WicketSshAuthGenerationKind;
 use omicron_generation_kinds::{
     SledConfigGeneration, SledConfigGenerationKind,
 };
@@ -127,6 +128,7 @@ use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SourceNatConfig;
 use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcEnabledNotOnlineState;
+use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_agent_types::inventory::ZoneSnatConfig;
 use sled_agent_types::inventory::ZpoolHealth;
@@ -967,6 +969,42 @@ pub struct InvSledAgent {
     instance_manager_num_registered_vmms: SqlU32,
 
     pub rack_id: DbTypedUuid<RackKind>,
+
+    // database representation of `WicketSshAuthStatus`:
+    //
+    // `WicketSshAuthStatus::NoSwitchZone` <=> (None, None)
+    // `WicketSshAuthStatus::SwitchZone { gen, err }` => (Some(gen), err)
+    //
+    // db constraint rejects (None, Some(_))
+    wicket_ssh_auth_effective_gen:
+        Option<DbTypedGeneration<WicketSshAuthGenerationKind>>,
+    wicket_ssh_auth_last_error: Option<String>,
+}
+
+/// Helper for breaking a [`WicketSshAuthStatus`] up into its DB columns.
+#[derive(Debug, Clone)]
+pub struct InvWicketSshAuthStatusStatusCols {
+    pub wicket_ssh_auth_effective_gen:
+        Option<DbTypedGeneration<WicketSshAuthGenerationKind>>,
+    pub wicket_ssh_auth_last_error: Option<String>,
+}
+
+impl From<WicketSshAuthStatus> for InvWicketSshAuthStatusStatusCols {
+    fn from(status: WicketSshAuthStatus) -> Self {
+        match status {
+            WicketSshAuthStatus::NoSwitchZone => Self {
+                wicket_ssh_auth_effective_gen: None,
+                wicket_ssh_auth_last_error: None,
+            },
+            WicketSshAuthStatus::SwitchZone {
+                effective_auth_gen,
+                last_error,
+            } => Self {
+                wicket_ssh_auth_effective_gen: Some(effective_auth_gen.into()),
+                wicket_ssh_auth_last_error: last_error,
+            },
+        }
+    }
 }
 
 /// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
@@ -1424,6 +1462,11 @@ impl InvSledAgent {
                 num_registered_vmms: instance_manager_num_registered_vmms,
             } = sled_agent.instance_manager_status.try_into()?;
 
+            let InvWicketSshAuthStatusStatusCols {
+                wicket_ssh_auth_effective_gen,
+                wicket_ssh_auth_last_error,
+            } = sled_agent.wicket_ssh_auth_status.clone().into();
+
             Ok(InvSledAgent {
                 inv_collection_id: collection_id.into(),
                 time_collected: sled_agent.time_collected,
@@ -1449,6 +1492,8 @@ impl InvSledAgent {
                 instance_manager_update_disposition,
                 instance_manager_num_registered_vmms,
                 rack_id,
+                wicket_ssh_auth_effective_gen,
+                wicket_ssh_auth_last_error,
             })
         }
     }
@@ -1461,6 +1506,18 @@ impl InvSledAgent {
             num_registered_vmms: self.instance_manager_num_registered_vmms,
         }
         .into()
+    }
+
+    /// Reassemble a [`WicketSshAuthStatus`] from the database representation
+    /// held by `self`.
+    pub fn wicket_ssh_auth_status(&self) -> WicketSshAuthStatus {
+        match self.wicket_ssh_auth_effective_gen {
+            None => WicketSshAuthStatus::NoSwitchZone,
+            Some(effective_auth_gen) => WicketSshAuthStatus::SwitchZone {
+                effective_auth_gen: effective_auth_gen.into(),
+                last_error: self.wicket_ssh_auth_last_error.clone(),
+            },
+        }
     }
 }
 
