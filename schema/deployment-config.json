@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "DeploymentConfig",
+  "description": "Nexus config struct for values known only at deployment time.\n\nNote the [`JsonSchema`] derive is just for `test_deployment_config_schema`, which is there to guard us against accidentally changing this struct without giving the proper care and consideration.\n\nWe skip adding the Dropshot config fields to the schema because [`ConfigDropshot`] doesn't implement [`JsonSchema`]; this isn't ideal, but we can at least lean on the `dropshot` crate's semver adherance to avoid accidental changes to the underlying config formats for those fields.\n\nDeliberate changes to this struct require careful consideration to avoid breaking anything on update, and existing TOML example/test config files in this repo should also be updated accordingly. Once this has been done, the expected output for `test_deployment_config_schema` can be updated by running the test with `EXPECTORATE=overwrite`.",
   "type": "object",
   "required": [
     "database",
@@ -17,6 +18,14 @@
           "$ref": "#/definitions/Database"
         }
       ]
+    },
+    "dropshot_external_additional_addresses": {
+      "description": "Additional addresses to listen on for the external API.\n\nWhen set, Nexus launches additional external API servers bound to each of these addresses, reusing all other settings (TLS, request limits, etc.) from `dropshot_external`. This is mainly used to serve the external API on both IPv4 and IPv6 addresses.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "external_dns_servers": {
       "description": "External DNS servers Nexus can use to resolve external hosts.",
@@ -65,6 +74,13 @@
       "description": "By default, we capture backtraces when claiming a connection from the DB pool, but setting this flag to `false` will disable that behavior.\n\nThis flag is intended as an escape hatch in case we ever encounter an unexpected pathological case where capturing backtraces is slow enough to be an issue.\n\nNote that we probably shouldn't need a default here, but I'm leaving it for now just to be safe in case there are any update-related corner cases where this might matter. We can remove this in a future release.",
       "default": true,
       "type": "boolean"
+    },
+    "techport_external_server_port": {
+      "description": "Port on which the \"techport external\" dropshot server should listen. This dropshot server copies _most_ of its config from `dropshot_external` (so that it matches TLS, etc.), but builds its listening address by combining `dropshot_internal`'s IP address with this port.\n\nWe use `serde(default = ...)` to ensure we don't break any serialized configs that were created before this field was added. In production we always expect this port to be constant, but we need to be able to override it when running tests.",
+      "default": 12228,
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
     }
   },
   "definitions": {
