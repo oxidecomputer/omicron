@@ -14,6 +14,8 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-client.workspace = true

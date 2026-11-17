@@ -32,6 +32,7 @@ pfexec ./target/debug/jbor --count 3 --peer-routers 2
 |---|---|---|
 | `--count N` | `1` | Number of simulated racks to launch (1–100) |
 | `--peer-routers M` | `0` | Number of external peer router mgd instances (0–100) |
+| `--state PATH` | `jbor.json` | Path for the state JSON file written once all services are running |
 | `--nexus-config PATH` | `nexus/examples/config.toml` | Nexus configuration file |
 | `--gateway-config PATH` | (bundled test config) | Gateway server configuration file |
 
@@ -45,9 +46,30 @@ All BGP addresses use `100.64.x.x` (RFC 6598 shared address space)
 | Rack 0 switch0 / switch1 MGD | `100.64.1.0` / `100.64.1.1` | — |
 | Rack N switch0 / switch1 MGD | `100.64.N+1.0` / `100.64.N+1.1` | — |
 
+## State File
+
+Once all services are running, jbor writes a JSON state file (default: `jbor.json`)
+containing Nexus API URLs, bearer tokens, BGP dispatcher addresses, and silo
+credentials for every rack and peer router. Use `--state PATH` to override the
+destination. The file is written atomically (via a `.tmp` rename).
+
+Example fields for rack 0:
+
+```json
+{
+  "racks": [{
+    "nexus_host": "http://127.0.0.1:<port>",
+    "oxide_token": "<bearer-token>",
+    "silo_name": "...",
+    "switch0": { "mgd_api": "http://[::1]:<port>", "bgp_dispatcher": "100.64.1.0:1049" },
+    "switch1": { "mgd_api": "http://[::1]:<port>", "bgp_dispatcher": "100.64.1.1:1049" }
+  }]
+}
+```
+
 ## Output
 
-Peer router information is printer first:
+Peer router information is printed first:
 
 ```
 peer router 0: mgd api:            http://[::1]:<port>

@@ -10,7 +10,10 @@ use gateway_client::ClientInfo as _;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use nexus_test_interface::NexusServer;
-use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::resource_helpers::{
+    DiskTest, create_session_for_user, get_device_token,
+};
 use omicron_common::address::BGP_LISTEN_PORT;
 use omicron_dev_lib::config::{Configurable, read_config, start_stream};
 use sled_agent_types::early_networking::SwitchSlot;
@@ -27,6 +30,94 @@ const DEFAULT_NEXUS_CONFIG: &str =
 /// Autonomous System Number used for BGP configuration.  We will increment this
 /// number for each peer router participating in a unique BGP Autonomous System.
 const BGP_BASE_ASN: u32 = 65100;
+
+/// Per-switch mgd connectivity info.
+#[derive(serde::Serialize)]
+struct SwitchInfo {
+    /// mgd admin API, e.g. `"http://[::1]:PORT"`
+    mgd_api: String,
+    /// BGP dispatcher address, e.g. `"100.64.1.0:1049"`
+    bgp_dispatcher: String,
+    /// Temporary data directory used by this mgd instance, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tmp_dir: Option<String>,
+}
+
+/// One management gateway instance.
+#[derive(serde::Serialize)]
+struct GatewayInfo {
+    location: String,
+    api: String,
+}
+
+/// One dendrite (DPD) instance.
+#[derive(serde::Serialize)]
+struct DendriteInfo {
+    location: String,
+    api: String,
+}
+
+/// Written to the state file once all services are running.
+#[derive(serde::Serialize)]
+struct JborState {
+    peer_routers: Vec<PeerRouterInfo>,
+    racks: Vec<RackInfo>,
+}
+
+#[derive(serde::Serialize)]
+struct PeerRouterInfo {
+    index: u8,
+    /// mgd admin API url, e.g. `"http://[::1]:PORT"`
+    mgd_api: String,
+    /// mgd admin api PORT
+    mgd_port: u16,
+    /// BGP dispatcher address, e.g. `"100.64.0.1:1049"`
+    bgp_dispatcher: String,
+    asn: u32,
+    /// Temporary data directory used by this mgd instance, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tmp_dir: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct RackInfo {
+    index: u8,
+    // Nexus
+    /// Nexus external API URL with 127.0.0.1, e.g. `"http://127.0.0.1:PORT"`
+    nexus_host: String,
+    /// `address:port`
+    nexus_internal_api: String,
+    /// `address:port`
+    nexus_lockstep_api: String,
+    /// Bearer token (OXIDE_TOKEN) for the privileged silo user
+    oxide_token: String,
+    // Auth
+    silo_name: String,
+    user_name: String,
+    password: String,
+    // CockroachDB
+    cockroachdb_pid: u32,
+    cockroachdb_url: String,
+    cockroachdb_dir: String,
+    // Clickhouse
+    clickhouse_native_addr: String,
+    clickhouse_http_addr: String,
+    // Internal DNS
+    internal_dns_http: String,
+    internal_dns: String,
+    // External DNS
+    external_dns_name: String,
+    external_dns_http: String,
+    external_dns: Vec<String>,
+    // Services
+    gateways: Vec<GatewayInfo>,
+    dendrite: Vec<DendriteInfo>,
+    // Switch mgd
+    #[serde(skip_serializing_if = "Option::is_none")]
+    switch0: Option<SwitchInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    switch1: Option<SwitchInfo>,
+}
 
 fn main() -> anyhow::Result<()> {
     oxide_tokio_rt::run(async {
@@ -103,6 +194,9 @@ struct JborArgs {
     /// Launch peer router mgd instances (0–100)
     #[clap(long, default_value_t = PeerRouterCount(0))]
     peer_routers: PeerRouterCount,
+    /// Path for the state JSON file written once all services are running.
+    #[clap(long, default_value = "jbor.json")]
+    state: Utf8PathBuf,
 }
 
 impl Configurable for JborArgs {
@@ -250,7 +344,7 @@ impl JborArgs {
                 .await
                 .context("error setting up services")?;
 
-            println!("jbor: Adding disks to first sled agent");
+            println!("rack {n}: Adding disks to first sled agent");
 
             // This is how our integration tests are identifying that "disks exist"
             // within the database.
@@ -261,45 +355,45 @@ impl JborArgs {
             //   - A debug dataset
             DiskTest::new(&cptestctx).await;
 
-            println!("jbor: services are running.");
+            println!("rack {n}: services are running.");
 
             // Print out basic information about what was started.
             let addr = cptestctx.external_client.bind_address;
-            println!("jbor: nexus external API:     {:?}", addr);
+            println!("rack {n}: nexus external API:     {:?}", addr);
             println!(
-                "jbor: nexus internal API:     {:?}",
+                "rack {n}: nexus internal API:     {:?}",
                 cptestctx.server.get_http_server_internal_address(),
             );
             println!(
-                "jbor: nexus lockstep API:     {:?}",
+                "rack {n}: nexus lockstep API:     {:?}",
                 cptestctx.server.get_http_server_lockstep_address(),
             );
             println!(
-                "jbor: cockroachdb pid:        {}",
+                "rack {n}: cockroachdb pid:        {}",
                 cptestctx.database.pid(),
             );
             println!(
-                "jbor: cockroachdb URL:        {}",
+                "rack {n}: cockroachdb URL:        {}",
                 cptestctx.database.pg_config()
             );
             println!(
-                "jbor: cockroachdb directory:  {}",
+                "rack {n}: cockroachdb directory:  {}",
                 cptestctx.database.temp_dir()
             );
             println!(
-                "jbor: clickhouse native addr: {}",
+                "rack {n}: clickhouse native addr: {}",
                 cptestctx.clickhouse.native_address(),
             );
             println!(
-                "jbor: clickhouse http addr:   {}",
+                "rack {n}: clickhouse http addr:   {}",
                 cptestctx.clickhouse.http_address(),
             );
             println!(
-                "jbor: internal DNS HTTP:      http://{}",
+                "rack {n}: internal DNS HTTP:      http://{}",
                 cptestctx.internal_dns.dropshot_server.local_addr()
             );
             println!(
-                "jbor: internal DNS:           {}",
+                "rack {n}: internal DNS:           {}",
                 cptestctx
                     .internal_dns
                     .dns_server
@@ -307,17 +401,17 @@ impl JborArgs {
                     .context("Expected exactly 1 internal DNS address")?
             );
             println!(
-                "jbor: external DNS name:      {}",
+                "rack {n}: external DNS name:      {}",
                 cptestctx.external_dns_zone_name,
             );
             println!(
-                "jbor: external DNS HTTP:      http://{}",
+                "rack {n}: external DNS HTTP:      http://{}",
                 cptestctx.external_dns.dropshot_server.local_addr()
             );
             for addr in cptestctx.external_dns.dns_server.local_addresses() {
-                println!("jbor: external DNS:           {}", addr,);
+                println!("rack {n}: external DNS:           {}", addr,);
                 println!(
-                    "jbor:   e.g. `dig @{} -p {} {}.sys.{}`",
+                    "rack {n}:   e.g. `dig @{} -p {} {}.sys.{}`",
                     addr.ip(),
                     addr.port(),
                     cptestctx.silo_name,
@@ -326,7 +420,7 @@ impl JborArgs {
             }
             for (location, gateway) in &cptestctx.gateway {
                 println!(
-                    "jbor: management gateway:     {} ({:?})",
+                    "rack {n}: management gateway:     {} ({:?})",
                     gateway.client.baseurl(),
                     location,
                 );
@@ -335,37 +429,172 @@ impl JborArgs {
                 cptestctx.dendrite.read().unwrap().iter()
             {
                 println!(
-                    "jbor: dendrite:               http://[::1]:{} ({:?})",
+                    "rack {n}: dendrite:               http://[::1]:{} ({:?})",
                     dendrite.port(),
                     location,
                 );
             }
             for (location, mgd) in &cptestctx.mgd {
                 println!(
-                    "jbor: mgd api:                http://[::1]:{} ({:?})",
+                    "rack {n}: mgd api:                http://[::1]:{} ({:?})",
                     mgd.port, location,
                 );
 
                 println!(
-                    "jbor: mgd bgp-dispatcher:     tcp {} ({:?})",
+                    "rack {n}: mgd bgp-dispatcher:     tcp {} ({:?})",
                     mgd.bgp_dispatcher_addr, location,
                 );
 
                 if let Some(dir) = &mgd.data_dir {
                     println!(
-                        "jbor: mgd tmp dir:            {} ({:?})",
+                        "rack {n}: mgd tmp dir:            {} ({:?})",
                         dir, location,
                     );
                 }
             }
-            println!("jbor: silo name:              {}", cptestctx.silo_name,);
             println!(
-                "jbor: privileged user name:   {}",
+                "rack {n}: silo name:              {}",
+                cptestctx.silo_name,
+            );
+            println!(
+                "rack {n}: privileged user name:   {}",
                 cptestctx.user_name.as_ref(),
             );
-            println!("jbor: privileged password:    {}", cptestctx.password);
+            println!(
+                "rack {n}: privileged password:    {}",
+                cptestctx.password
+            );
             contexts.push(cptestctx);
         }
+
+        // Build and write the state file.
+        let peer_router_infos: Vec<PeerRouterInfo> = peer_routers
+            .iter()
+            .enumerate()
+            .map(|(n, mgd)| PeerRouterInfo {
+                index: n as u8,
+                mgd_api: format!("http://[::1]:{}", mgd.port),
+                mgd_port: mgd.port,
+                bgp_dispatcher: mgd.bgp_dispatcher_addr.to_string(),
+                asn: BGP_BASE_ASN + n as u32,
+                tmp_dir: mgd.data_dir.as_ref().map(|d| d.to_string()),
+            })
+            .collect();
+
+        let mut rack_infos: Vec<RackInfo> = vec![];
+        for (n, cptestctx) in contexts.iter().enumerate() {
+            let session = create_session_for_user(
+                &cptestctx.external_client,
+                cptestctx.silo_name.as_str(),
+                cptestctx.user_name.as_ref(),
+                &cptestctx.password,
+            )
+            .await;
+            let grant = get_device_token(
+                &cptestctx.external_client,
+                AuthnMode::Session(session),
+            )
+            .await;
+            let port = cptestctx.external_client.bind_address.port();
+            let nexus_host = format!("http://127.0.0.1:{port}");
+
+            let internal_dns_addr = cptestctx
+                .internal_dns
+                .dns_server
+                .sole_local_address()
+                .context("Expected exactly 1 internal DNS address")?;
+
+            let gateways: Vec<GatewayInfo> = cptestctx
+                .gateway
+                .iter()
+                .map(|(loc, gw)| GatewayInfo {
+                    location: format!("{:?}", loc),
+                    api: gw.client.baseurl().to_string(),
+                })
+                .collect();
+
+            let dendrite: Vec<DendriteInfo> = cptestctx
+                .dendrite
+                .read()
+                .unwrap()
+                .iter()
+                .map(|(loc, d)| DendriteInfo {
+                    location: format!("{:?}", loc),
+                    api: format!("http://[::1]:{}", d.port()),
+                })
+                .collect();
+
+            rack_infos.push(RackInfo {
+                index: n as u8,
+                nexus_host,
+                nexus_internal_api: cptestctx
+                    .server
+                    .get_http_server_internal_address()
+                    .to_string(),
+                nexus_lockstep_api: cptestctx
+                    .server
+                    .get_http_server_lockstep_address()
+                    .to_string(),
+                oxide_token: grant.access_token,
+                silo_name: cptestctx.silo_name.to_string(),
+                user_name: cptestctx.user_name.as_ref().to_string(),
+                password: cptestctx.password.clone(),
+                cockroachdb_pid: cptestctx.database.pid(),
+                cockroachdb_url: cptestctx.database.pg_config().to_string(),
+                cockroachdb_dir: cptestctx.database.temp_dir().to_string(),
+                clickhouse_native_addr: cptestctx
+                    .clickhouse
+                    .native_address()
+                    .to_string(),
+                clickhouse_http_addr: cptestctx
+                    .clickhouse
+                    .http_address()
+                    .to_string(),
+                internal_dns_http: format!(
+                    "http://{}",
+                    cptestctx.internal_dns.dropshot_server.local_addr()
+                ),
+                internal_dns: internal_dns_addr.to_string(),
+                external_dns_name: cptestctx.external_dns_zone_name.clone(),
+                external_dns_http: format!(
+                    "http://{}",
+                    cptestctx.external_dns.dropshot_server.local_addr()
+                ),
+                external_dns: cptestctx
+                    .external_dns
+                    .dns_server
+                    .local_addresses()
+                    .map(|a| a.to_string())
+                    .collect(),
+                gateways,
+                dendrite,
+                switch0: cptestctx.mgd.get(&SwitchSlot::Switch0).map(|m| {
+                    SwitchInfo {
+                        mgd_api: format!("http://[::1]:{}", m.port),
+                        bgp_dispatcher: m.bgp_dispatcher_addr.to_string(),
+                        tmp_dir: m.data_dir.as_ref().map(|d| d.to_string()),
+                    }
+                }),
+                switch1: cptestctx.mgd.get(&SwitchSlot::Switch1).map(|m| {
+                    SwitchInfo {
+                        mgd_api: format!("http://[::1]:{}", m.port),
+                        bgp_dispatcher: m.bgp_dispatcher_addr.to_string(),
+                        tmp_dir: m.data_dir.as_ref().map(|d| d.to_string()),
+                    }
+                }),
+            });
+        }
+
+        let jbor_state =
+            JborState { peer_routers: peer_router_infos, racks: rack_infos };
+        let state_json = serde_json::to_string_pretty(&jbor_state)
+            .context("failed to serialize state")?;
+        let tmp_path = Utf8PathBuf::from(format!("{}.tmp", self.state));
+        std::fs::write(&tmp_path, &state_json)
+            .with_context(|| format!("failed to write {}", tmp_path))?;
+        std::fs::rename(&tmp_path, &self.state)
+            .with_context(|| format!("failed to rename to {}", self.state))?;
+        println!("jbor: state written to {}", self.state);
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;
