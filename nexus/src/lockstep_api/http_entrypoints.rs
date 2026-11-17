@@ -181,7 +181,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 view_list,
-                &|_, saga: &Saga| saga.id,
+                &|_, saga: &Saga| saga.id.into_untyped_uuid(),
             )?))
         };
         apictx

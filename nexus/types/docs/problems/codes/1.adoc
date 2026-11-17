@@ -1,0 +1,35 @@
+== Description
+
+A compute sled has reported that the ZFS pool on an in-service physical disk
+(i.e. a U.2 SSD) is in an unhealthy state.
+
+This generally occurs because the physical disk storing the ZFS pool has failed.
+
+== Impact
+
+Reading and writing data stored on the unhealthy physical disk will fail.
+
+Depending on what data is stored on the unhealthy physical disk, distributed
+virtual disks, local virtual disks, and/or control plane services may be
+impacted. Data backing distributed disks is replicated on other physical disks,
+so distributed disk data is not lost. Local disks stored on the impacted
+physical disk may be unrecoverable.
+
+== Action Required
+
+Contact Oxide support.
+
+Future Oxide system software releases will provide operator interfaces for
+_expunging_ the impacted physical disk containing the impacted ZFS pool.
+Expunging the physical disk marks it as non-provisionable and begins the process
+of automatically replicating regions of distributed disks stored on the impacted
+SSD. Currently, this operation may only be performed by Oxide support using the
+technician port.
+
+Once the impacted physical disk has been expunged, it may be replaced.
+
+== Automated Response
+
+Once the impacted physical disk is expunged, any regions of distributed virtual
+disks stored on the impacted physical disk be automatically replicated to other
+physical disks.

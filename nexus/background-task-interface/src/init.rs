@@ -32,10 +32,12 @@ pub struct BackgroundTasks {
     pub task_region_replacement: Activator,
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
+    pub task_capacity_metrics: Activator,
     pub task_instance_updater: Activator,
     pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
+    pub task_vmm_stop_for_update: Activator,
     pub task_audit_log_cleanup: Activator,
     pub task_audit_log_timeout_incomplete: Activator,
     pub task_vpc_route_manager: Activator,
@@ -64,6 +66,7 @@ pub struct BackgroundTasks {
     pub task_attached_subnet_manager: Activator,
     pub task_session_cleanup: Activator,
     pub task_populate_switch_ports: Activator,
+    pub task_vmm_mark_stop_for_update: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

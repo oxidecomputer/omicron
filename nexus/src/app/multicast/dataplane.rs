@@ -72,11 +72,11 @@ use slog::{Logger, debug, error, info, warn};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
-    ExternalForwarding, InternalForwarding, IpSrc, MacAddr,
-    MulticastGroupCreateExternalEntry, MulticastGroupCreateUnderlayEntry,
-    MulticastGroupExternalResponse, MulticastGroupResponse,
-    MulticastGroupUnderlayResponse, MulticastGroupUpdateExternalEntry,
-    MulticastTag, NatTarget, UnderlayMulticastIpv6, Vni,
+    ExternalForwarding, ExternalInternalForwarding, ExternalNatTarget, IpSrc,
+    MacAddr, MulticastGroupCreateExternalEntry,
+    MulticastGroupCreateUnderlayEntry, MulticastGroupExternalResponse,
+    MulticastGroupResponse, MulticastGroupUnderlayResponse,
+    MulticastGroupUpdateExternalEntry,
 };
 use internal_dns_resolver::Resolver;
 
@@ -85,6 +85,7 @@ use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::Error;
+use omicron_ddm_admin_client::{OverlayMulticast, UnderlayMulticastIpv6, Vni};
 use sled_agent_types::early_networking::SwitchSlot;
 
 use crate::app::dpd_switches;
@@ -341,7 +342,7 @@ impl MulticastDataplaneClient {
                     "dpd_operation" => "dpd_ensure_external_created"
                 );
                 let response = client
-                    .multicast_group_get(&create.group_ip)
+                    .multicast_group_get(&create.group_ip.ip())
                     .await
                     .map_err(|e| {
                         error!(
@@ -374,13 +375,16 @@ impl MulticastDataplaneClient {
         &self,
         client: &dpd_client::Client,
         group_ip: IpAddr,
-        tag: &MulticastTag,
+        tag: String,
         update: &MulticastGroupUpdateExternalEntry,
         create: &MulticastGroupCreateExternalEntry,
         switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
+        let tag = tag.try_into().map_err(|e| {
+            Error::internal_error(&format!("invalid multicast tag: {e}"))
+        })?;
         match client
-            .multicast_group_update_external(&group_ip, tag, update)
+            .multicast_group_update_external(&create.group_ip, &tag, update)
             .await
         {
             Ok(r) => Ok(r.into_inner()),
@@ -491,12 +495,16 @@ impl MulticastDataplaneClient {
             }
         };
 
-        let nat_target = NatTarget {
-            internal_ip: underlay_ipv6,
+        let nat_target = ExternalNatTarget {
+            internal_ip: underlay_ip_admin.clone(),
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-            vni: Vni::from(u32::from(external_group.vni.0)),
+            vni: Vni::new(u32::from(external_group.vni.0)).map_err(|e| {
+                Error::internal_error(&format!("invalid multicast VNI: {e}"))
+            })?,
         };
         let external_group_ip = external_group.multicast_ip.ip();
+        let external_group_dpd_ip = OverlayMulticast::new(external_group_ip)
+            .map_err(|e| Error::invalid_request(e.to_string()))?;
         let sources_dpd =
             Self::compute_sources_for_dpd(external_group_ip, source_filter);
 
@@ -525,12 +533,12 @@ impl MulticastDataplaneClient {
                     // the egress design. Once egress is supported, populate
                     // this from group configuration.
                     let external_entry = MulticastGroupCreateExternalEntry {
-                        group_ip: external_group_ip,
+                        group_ip: external_group_dpd_ip,
                         external_forwarding: ExternalForwarding {
                             vlan_id: None,
                         },
-                        internal_forwarding: InternalForwarding {
-                            nat_target: Some(nat_target),
+                        internal_forwarding: ExternalInternalForwarding {
+                            nat_target,
                         },
                         tag: Some(tag.clone()),
                         sources,
@@ -627,10 +635,16 @@ impl MulticastDataplaneClient {
             }
         };
 
-        let nat_target = NatTarget {
-            internal_ip: underlay_ipv6,
+        let nat_target = ExternalNatTarget {
+            internal_ip: underlay_ip_admin.clone(),
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-            vni: Vni::from(u32::from(params.external_group.vni.0)),
+            vni: Vni::new(u32::from(params.external_group.vni.0)).map_err(
+                |e| {
+                    Error::internal_error(&format!(
+                        "invalid multicast VNI: {e}"
+                    ))
+                },
+            )?,
         };
         // The DB tag (`{uuid}:{multicast_ip}`) is immutable for the group's
         // lifetime and shared by the external and underlay entries. Drift
@@ -641,14 +655,13 @@ impl MulticastDataplaneClient {
             Error::internal_error("multicast group missing tag")
         })?;
         let external_group_ip = params.external_group.multicast_ip.ip();
+        let external_group_dpd_ip = OverlayMulticast::new(external_group_ip)
+            .map_err(|e| Error::invalid_request(e.to_string()))?;
         let sources_dpd = Self::compute_sources_for_dpd(
             external_group_ip,
             params.source_filter,
         );
 
-        // Update the external entry on every switch, matching
-        // `create_groups`. The underlay group stays updated on every switch
-        // as before.
         let update_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
                 let db_tag = db_tag.clone();
@@ -656,8 +669,6 @@ impl MulticastDataplaneClient {
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
                 async move {
-                    // Read the underlay group, creating it if absent.
-                    //
                     // The member list is never written back from here.
                     // Underlay membership is owned by mg-lower/DDM, and a tag
                     // or source update does not change it. Writing the
@@ -673,7 +684,6 @@ impl MulticastDataplaneClient {
                             if resp.status()
                                 == reqwest::StatusCode::NOT_FOUND =>
                         {
-                            // Create missing underlay group with DB tag and empty members
                             let db_tag = params
                                 .underlay_group
                                 .tag
@@ -706,15 +716,8 @@ impl MulticastDataplaneClient {
                     };
 
                     // The existing tag authorizes the external update below.
-                    let tag: MulticastTag =
-                        underlay.tag.clone().try_into().map_err(|e| {
-                            Error::internal_error(&format!(
-                                "invalid multicast tag: {e}"
-                            ))
-                        })?;
+                    let tag = underlay.tag.clone();
 
-                    // Prepare external entries with pre-computed data.
-                    //
                     // TODO: `vlan_id` is `None` because egress VLAN tagging is
                     // not yet supported. See RFD 488 (§sect-external-mcast) for
                     // the egress design. Once egress is supported, populate
@@ -722,7 +725,7 @@ impl MulticastDataplaneClient {
                     let external_forwarding =
                         ExternalForwarding { vlan_id: None };
                     let internal_forwarding =
-                        InternalForwarding { nat_target: Some(nat_target) };
+                        ExternalInternalForwarding { nat_target };
 
                     let update_entry = MulticastGroupUpdateExternalEntry {
                         external_forwarding: external_forwarding.clone(),
@@ -730,7 +733,7 @@ impl MulticastDataplaneClient {
                         sources: sources.clone(),
                     };
                     let create_entry = MulticastGroupCreateExternalEntry {
-                        group_ip: external_group_ip,
+                        group_ip: external_group_dpd_ip,
                         external_forwarding,
                         internal_forwarding,
                         tag: Some(db_tag),
@@ -741,7 +744,7 @@ impl MulticastDataplaneClient {
                         .dpd_update_external_or_create(
                             client,
                             external_group_ip,
-                            &tag,
+                            tag,
                             &update_entry,
                             &create_entry,
                             switch_slot,
@@ -924,7 +927,6 @@ impl MulticastDataplaneClient {
             return Ok(ExternalDriftCheck { external_config: None });
         }
 
-        // Missing anywhere forces the update.
         let missing: Vec<SwitchSlot> = results
             .iter()
             .filter(|(_, resp, _)| resp.is_none())
@@ -987,16 +989,16 @@ impl MulticastDataplaneClient {
             ));
         }
 
-        let dpd_tag: MulticastTag = tag
+        let dpd_tag = tag
             .parse()
             .map_err(|_| Error::internal_error("invalid multicast tag"))?;
 
         // Execute cleanup operations on all switches in parallel
         let cleanup_ops = dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
-            let dpd_tag = dpd_tag.clone();
+            let dpd_tag = &dpd_tag;
             async move {
-                match client.multicast_reset_by_tag(&dpd_tag).await {
+                match client.multicast_reset_by_tag(dpd_tag).await {
                     Ok(_) => {
                         debug!(
                             log,

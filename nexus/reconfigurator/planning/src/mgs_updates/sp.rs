@@ -15,10 +15,14 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::planning_report::FailedSpUpdateReason;
+use nexus_types::deployment::planning_report::TargetArtifactError;
+use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::CabooseWithVersion;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
 use slog::debug;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::SpTags;
@@ -72,38 +76,11 @@ pub(super) fn try_make_update(
         return Err(FailedSpUpdateReason::SpNotInInventory);
     };
 
-    let Some(active_caboose) =
-        inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
-    else {
-        return Err(FailedSpUpdateReason::CabooseNotInInventory(
-            CabooseWhich::SpSlot0,
-        ));
-    };
-
-    let expected_active_version = match active_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedSpUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::SpSlot0,
-                err: format!("{}", e),
-            });
-        }
-    };
-
-    let sp_board = active_caboose.caboose.board.clone();
-    let tags = KnownArtifactTags::Sp(SpTags { sp_board });
-    let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedSpUpdateReason::NoMatchingArtifactFound(tags)
-                }
-                GetError::TooMany => {
-                    FailedSpUpdateReason::TooManyMatchingArtifacts(tags)
-                }
-            }
-        })?;
+    let CabooseWithVersion {
+        caboose: active_caboose,
+        version: expected_active_version,
+    } = inventory.active_sp_caboose_for(baseboard_id)?;
+    let artifact = target_artifact(active_caboose, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -123,20 +100,9 @@ pub(super) fn try_make_update(
     }
 
     // Begin configuring an update.
-    let expected_inactive_version = match inventory
-        .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
-        .map(|c| c.caboose.version.parse::<ArtifactVersion>())
-        .transpose()
-    {
-        Ok(None) => ExpectedVersion::NoValidVersion,
-        Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(e) => {
-            return Err(FailedSpUpdateReason::FailedVersionParse {
-                caboose: CabooseWhich::SpSlot1,
-                err: format!("{}", e),
-            });
-        }
-    };
+    let expected_inactive_version = ExpectedVersion::for_inactive_caboose(
+        inventory.caboose_with_version_for(CabooseWhich::SpSlot1, baseboard_id),
+    )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
@@ -149,6 +115,29 @@ pub(super) fn try_make_update(
         artifact_hash: artifact.hash,
         artifact_version: artifact.version.clone(),
     }))
+}
+
+/// Returns the SP artifact in `current_artifacts` that applies to the board
+/// whose active SP caboose (slot 0) is `active_caboose`
+///
+/// The artifact is chosen based on the board name in that caboose.
+pub(super) fn target_artifact<'a>(
+    active_caboose: &Caboose,
+    current_artifacts: &'a TufRepoDescription,
+) -> Result<&'a Artifact, TargetArtifactError> {
+    let sp_board = active_caboose.board.clone();
+    let tags = KnownArtifactTags::Sp(SpTags { sp_board });
+    current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+        let tags = tags.to_string();
+        match err {
+            GetError::NotFound => {
+                TargetArtifactError::NoMatchingArtifactFound(tags)
+            }
+            GetError::TooMany => {
+                TargetArtifactError::TooManyMatchingArtifacts(tags)
+            }
+        }
+    })
 }
 
 #[cfg(test)]

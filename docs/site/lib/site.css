@@ -1,0 +1,201 @@
+/* Styles for a docs site built by lib/build.tsx. Import after Tailwind in the
+   site's own entry stylesheet, which also tells Tailwind to scan the built HTML. */
+
+@import '@oxide/design-system/styles/tailwind.css';
+@import '@oxide/design-system/styles/preflight.css' layer(base);
+@import '@oxide/design-system/styles/main.css';
+@import '@oxide/design-system/styles/dark.css';
+@import '@oxide/design-system/styles/light.css';
+@import '@oxide/design-system/components/asciidoc.css';
+
+/* Search results are rendered by lib/search.ts */
+@source './search.ts';
+
+/* Paths are relative to the built stylesheet. buildSite copies the fonts into
+   dist/fonts when given a fontsDir; without them, these fall back to system fonts. */
+@font-face {
+  font-family: 'GT America Mono';
+  src: url('fonts/GT-America-Mono-Regular-OCC.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'GT America Mono';
+  src: url('fonts/GT-America-Mono-Medium.woff2') format('woff2');
+  font-weight: 500;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-Light-WebS.woff2') format('woff2');
+  font-weight: 300;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-Regular-WebS.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-RegularItalic-WebS.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: 'SuisseIntl';
+  src: url('fonts/SuisseIntl-Medium-WebS.woff2') format('woff2');
+  font-weight: 500;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  scroll-padding-top: 4.5rem;
+}
+
+/* Mobile nav drawer (a popover), below the header so its menu button stays
+   usable for closing it. */
+#mobile-nav {
+  inset: 3.5rem auto 0 0;
+  margin: 0;
+  width: min(80vw, 400px);
+  height: auto;
+  max-height: none;
+}
+/* On mobile, the sidebar's link rows are a little taller, to be easier to
+   tap. The extra 1px under each group heading keeps the space between it and
+   the first link equal to the space between links. Padding, because margins
+   would collapse into the heading's margin. */
+#mobile-nav a {
+  padding-block: 4px;
+}
+#mobile-nav ul {
+  padding-top: 1px;
+}
+#mobile-nav::backdrop {
+  top: 3.5rem;
+  background: var(--surface-scrim);
+}
+@media (min-width: 900px) {
+  #mobile-nav,
+  #mobile-nav::backdrop {
+    display: none;
+  }
+}
+.menu-icon-close,
+body:has(#mobile-nav:popover-open) .menu-icon-open {
+  display: none;
+}
+body:has(#mobile-nav:popover-open) .menu-icon-close {
+  display: block;
+}
+
+/* In docs without numbered sections, headings still get an empty
+   data-sectnum, and the design system's ::before for the number still takes up
+   its margin, indenting the heading. */
+.asciidoc-body [data-sectnum='']::before {
+  display: none;
+}
+
+/* Admonition content is a flex item, which won't shrink below its content's
+   width by default, so a code block in a note widened the whole page on phones
+   instead of scrolling. */
+.admonitionblock .admonition-content {
+  min-width: 0;
+}
+
+/* The search modal (lib/search.ts). The dialog's content fills it, so a click
+   on the backdrop is a click on the dialog itself. */
+oxide-search dialog {
+  margin: 10vh auto auto;
+  width: calc(100% - 2rem);
+  max-width: 640px;
+  max-height: 80vh;
+  padding: 0;
+  overflow: hidden;
+  &[open] {
+    display: flex;
+    flex-direction: column;
+  }
+  /* Once there's a query, hold the modal at its full height, so it doesn't
+     jump around as the number of results changes */
+  &:has([data-search-body]:not([hidden])) {
+    height: min(80vh, 640px);
+  }
+  &::backdrop {
+    background: var(--surface-scrim);
+  }
+}
+[data-search-body]:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+[data-search-list] {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Full screen on a phone, with room for the notch and home indicator */
+@media (max-width: 599px) {
+  oxide-search dialog {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+    &:has([data-search-body]:not([hidden])) {
+      height: 100dvh;
+    }
+  }
+}
+html:has(oxide-search dialog[open]) {
+  overflow: hidden;
+}
+[data-search-list] mark {
+  background: none;
+  color: var(--content-accent-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+@media (min-width: 600px) {
+  [data-search-list] [aria-selected='true'] mark {
+    color: var(--content-accent);
+  }
+}
+
+/* Outline popover for narrow screens (MobileOutline in lib/layout.tsx), below
+   the header and the outline bar so the bar stays usable for closing it, and
+   right of the sidebar when that's showing */
+#mobile-outline {
+  inset: 6rem 0 auto 0;
+  margin: 0;
+  width: auto;
+  max-height: 60vh;
+}
+#mobile-outline::backdrop {
+  top: 6rem;
+  background: var(--surface-scrim);
+}
+@media (min-width: 900px) {
+  #mobile-outline,
+  #mobile-outline::backdrop {
+    left: 16rem;
+  }
+}
+@media (min-width: 1200px) {
+  #mobile-outline,
+  #mobile-outline::backdrop {
+    display: none;
+  }
+}
+body:has(#mobile-outline:popover-open) .outline-chevron {
+  rotate: 180deg;
+}
+/* Clear the outline bar too when jumping to a heading */
+@media (max-width: 1199px) {
+  html:has(#mobile-outline) {
+    scroll-padding-top: 7rem;
+  }
+}

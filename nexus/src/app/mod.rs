@@ -8,7 +8,6 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
-use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
@@ -32,9 +31,12 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::fm::CurrentSitrep;
 use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_debug_dropbox::DebugDropbox;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -89,6 +91,7 @@ pub(crate) mod multicast;
 mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
+mod problem;
 mod project;
 mod quiesce;
 mod quota;
@@ -98,6 +101,7 @@ mod scim;
 mod session;
 mod silo;
 pub(crate) mod sled;
+mod sled_add_checks;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -371,6 +375,7 @@ impl Nexus {
                 all_versions.as_ref(),
                 config.pkg.tunables.load_timeout,
                 IdentityCheckPolicy::CheckAndTakeover { nexus_id },
+                omicron_git_version::current(),
             )
             .await?,
         );
@@ -445,7 +450,7 @@ impl Nexus {
         let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
             mpsc::channel(16);
 
-        let reqwest_client = reqwest::ClientBuilder::new()
+        let reqwest_client = internal_http_client_builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()
@@ -1243,8 +1248,9 @@ impl Nexus {
             self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
         let mut clients = HashMap::new();
         for addr in mgd_addrs {
-            let client = mg_admin_client::Client::new(
+            let client = mg_admin_client::Client::new_with_client(
                 &format!("http://{addr}"),
+                internal_http_client(),
                 self.log.clone(),
             );
             let switch_slot = match client.switch_identifiers().await {
@@ -1367,7 +1373,7 @@ async fn dpd_switches(
     // Per-request bounds so a stalled DPD connection can't hang an RPW
     // iteration or saga action indefinitely. Matches the timeout pair on
     // the shared Nexus `reqwest_client`.
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -1494,8 +1500,9 @@ pub(crate) async fn lldpd_clients(
     let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
         .map(|(location, addr)| {
-            let lldpd_client = lldpd_client::Client::new(
+            let lldpd_client = lldpd_client::Client::new_with_client(
                 &format!("http://[{addr}]:{port}"),
+                internal_http_client(),
                 log.clone(),
             );
             (*location, lldpd_client)
@@ -1586,8 +1593,9 @@ pub(crate) async fn switch_zone_targets(
             }
         };
 
-        let mgs_client = MgsClient::new(
+        let mgs_client = MgsClient::new_with_client(
             &format!("http://[{}]:{}", addr, port),
+            internal_http_client(),
             log.new(o!("component" => "MgsClient")),
         );
 

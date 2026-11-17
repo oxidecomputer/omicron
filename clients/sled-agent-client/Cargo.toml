@@ -12,6 +12,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 byte-wrapper.workspace = true
 chrono.workspace = true
+iddqd.workspace = true
 omicron-generation-kinds.workspace = true
 sled-agent-types-versions.workspace = true
 omicron-common.workspace = true
@@ -19,6 +20,7 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 propolis-client.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = [ "json", "rustls", "stream" ] }

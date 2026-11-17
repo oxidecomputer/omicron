@@ -934,7 +934,7 @@ mod tests {
             },
             payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
                 fm::SagaAbandonedFactPayload {
-                    saga_id: steno::SagaId(uuid::Uuid::from_u128(1)),
+                    saga_id: steno::SagaId::from_u128(1),
                 },
             )),
         };

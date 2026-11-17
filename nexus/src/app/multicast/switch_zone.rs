@@ -23,9 +23,9 @@ use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, debug, warn};
 
 use internal_dns_types::names::ServiceName;
-use mg_admin_client::types::{
-    MribAddStaticRequest, MribDeleteStaticRequest, MulticastRouteKey,
-    MulticastRouteKeyV4, MulticastRouteKeyV6, StaticMulticastRouteInput,
+use mg_api_types::mrib::{
+    MribAddStaticRequest, MribDeleteStaticRequest, MulticastAddr,
+    MulticastRouteKey, StaticMulticastRoute, UnderlayMulticastIpv6, Vni,
 };
 use omicron_common::address::{DDMD_PORT, MGD_PORT};
 use omicron_ddm_admin_client::PeerInfo;
@@ -181,12 +181,16 @@ impl MulticastSwitchZoneClient {
         underlay_ip: Ipv6Addr,
         source: Option<IpAddr>,
     ) -> Result<(), anyhow::Error> {
-        let route_key = make_route_key(group_ip, source);
+        let route_key = make_route_key(group_ip, source)?;
+        let underlay_group = UnderlayMulticastIpv6::new(underlay_ip)
+            .with_context(|| {
+                format!("invalid underlay multicast address {underlay_ip}")
+            })?;
 
         let request = MribAddStaticRequest {
-            routes: vec![StaticMulticastRouteInput {
+            routes: vec![StaticMulticastRoute {
                 key: route_key,
-                underlay_group: underlay_ip,
+                underlay_group,
             }],
         };
 
@@ -229,7 +233,7 @@ impl MulticastSwitchZoneClient {
         group_ip: IpAddr,
         source: Option<IpAddr>,
     ) -> Result<(), anyhow::Error> {
-        let route_key = make_route_key(group_ip, source);
+        let route_key = make_route_key(group_ip, source)?;
 
         let request = MribDeleteStaticRequest { keys: vec![route_key] };
 
@@ -285,7 +289,7 @@ impl MulticastSwitchZoneClient {
                     .or_default()
                     .entry(source)
                     .or_default()
-                    .insert(*slot, route.underlay_group);
+                    .insert(*slot, route.underlay_group.ip());
             }
         }
 
@@ -308,18 +312,28 @@ impl MulticastSwitchZoneClient {
         group_ip: IpAddr,
         source: Option<IpAddr>,
     ) -> bool {
-        let vni = u32::from(
-            omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
-        );
+        let vni = default_multicast_vni();
+        let group = match MulticastAddr::new(group_ip) {
+            Ok(group) => group,
+            Err(e) => {
+                warn!(
+                    self.log,
+                    "invalid multicast group address for MRIB query";
+                    "group_ip" => %group_ip,
+                    "error" => %e,
+                );
+                return false;
+            }
+        };
 
         for (slot, client) in &self.mgd_clients {
             match client
                 .get_mrib_selected(
                     None,
-                    Some(&group_ip),
+                    Some(&group),
                     None,
                     source.as_ref(),
-                    Some(vni),
+                    Some(&vni),
                 )
                 .await
             {
@@ -394,30 +408,25 @@ impl MulticastSwitchZoneClient {
     }
 }
 
+fn default_multicast_vni() -> Vni {
+    Vni::new(u32::from(
+        omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
+    ))
+    .expect("DEFAULT_MULTICAST_VNI is within the 24-bit VNI range")
+}
+
 fn make_route_key(
     group_ip: IpAddr,
     source: Option<IpAddr>,
-) -> MulticastRouteKey {
-    let vni =
-        u32::from(omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI);
-    match group_ip {
-        IpAddr::V4(v4) => MulticastRouteKey::V4(MulticastRouteKeyV4 {
-            group: v4,
-            source: source.and_then(|s| match s {
-                IpAddr::V4(s4) => Some(s4),
-                _ => None,
-            }),
-            vni,
-        }),
-        IpAddr::V6(v6) => MulticastRouteKey::V6(MulticastRouteKeyV6 {
-            group: v6,
-            source: source.and_then(|s| match s {
-                IpAddr::V6(s6) => Some(s6),
-                _ => None,
-            }),
-            vni,
-        }),
-    }
+) -> Result<MulticastRouteKey, anyhow::Error> {
+    let group = MulticastAddr::new(group_ip).with_context(|| {
+        format!("invalid multicast group address {group_ip}")
+    })?;
+    let source = source.filter(|s| s.is_ipv4() == group_ip.is_ipv4());
+    MulticastRouteKey::new(source, group, default_multicast_vni())
+        .with_context(|| {
+            format!("invalid multicast route key for group {group_ip}")
+        })
 }
 
 /// Resolve service sockets from DNS, returning a map of SRV target to socket.
@@ -441,12 +450,5 @@ async fn resolve_service_sockets(
 }
 
 fn route_identifier(key: &MulticastRouteKey) -> (IpAddr, Option<IpAddr>) {
-    match key {
-        MulticastRouteKey::V4(k) => {
-            (IpAddr::V4(k.group), k.source.map(IpAddr::V4))
-        }
-        MulticastRouteKey::V6(k) => {
-            (IpAddr::V6(k.group), k.source.map(IpAddr::V6))
-        }
-    }
+    (IpAddr::from(key.group()), key.source())
 }

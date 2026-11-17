@@ -14,10 +14,10 @@ WITH
         candidate_ip AS multicast_ip,
         $8 AS underlay_group_id,
         $9::STRING || ':' || candidate_ip::STRING AS tag,
-        $10 AS state,
         nextval('omicron.public.multicast_group_version') AS version_added,
-        $11 AS version_removed,
-        $12 AS underlay_salt
+        $10 AS version_removed,
+        $11 AS underlay_salt,
+        $12 AS state
       FROM
         (
           SELECT
@@ -110,7 +110,7 @@ WITH
       UPDATE
         ip_pool_range
       SET
-        time_modified = $18, rcgen = rcgen + 1
+        rcgen = rcgen + 1
       WHERE
         id = (SELECT ip_pool_range_id FROM next_external_multicast_group) AND time_deleted IS NULL
       RETURNING

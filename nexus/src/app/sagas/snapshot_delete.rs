@@ -150,7 +150,7 @@ async fn ssd_account_space(
         .virtual_provisioning_collection_delete_snapshot(
             &opctx,
             params.authz_snapshot.id(),
-            params.snapshot.project_id,
+            params.snapshot.project_id(),
             params.snapshot.size,
         )
         .await

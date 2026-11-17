@@ -258,11 +258,16 @@ pub mod multicast {
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupUpdate;
 
-    pub use crate::v2026_10_02_02::multicast::MulticastGroupMember;
-    pub use crate::v2026_10_02_02::multicast::MulticastGroupMemberParentKind;
+    pub use crate::v2026_11_09_02::multicast::MulticastGroupMember;
+    pub use crate::v2026_11_09_02::multicast::MulticastGroupMemberParentKind;
 
     pub use crate::impls::multicast::validate_multicast_ip;
     pub use crate::impls::multicast::validate_source_ip;
+}
+
+pub mod multirack {
+    pub use crate::v2026_11_04_00::multirack::UnadoptedRack;
+    pub use crate::v2026_11_04_00::multirack::UnadoptedSled;
 }
 
 pub mod networking {
@@ -367,7 +372,19 @@ pub mod probe {
 
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
-    pub use crate::v2026_10_02_02::probe::ProbeCreate;
+    pub use crate::v2026_11_09_02::probe::ProbeCreate;
+}
+
+pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactListParams;
+    pub use crate::v2026_11_05_00::problem::ImpactState;
+    pub use crate::v2026_11_05_00::problem::ImpactedResource;
+    pub use crate::v2026_11_05_00::problem::Problem;
+    pub use crate::v2026_11_05_00::problem::ProblemImpact;
+    pub use crate::v2026_11_05_00::problem::ProblemListParams;
+    pub use crate::v2026_11_05_00::problem::ProblemSelector;
+    pub use crate::v2026_11_05_00::problem::ProblemState;
+    pub use crate::v2026_11_05_00::problem::RelatedProblem;
 }
 
 pub mod project {
@@ -452,8 +469,6 @@ pub mod timeseries {
 pub mod update {
     pub use crate::v2025_11_20_00::update::SetTargetReleaseParams;
     pub use crate::v2025_11_20_00::update::TargetRelease;
-    pub use crate::v2025_11_20_00::update::TufRepo;
-    pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
@@ -461,6 +476,9 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
 
     pub use crate::v2026_05_20_00::update::UpdateStatus;
+
+    pub use crate::v2026_10_13_00::update::TufRepo;
+    pub use crate::v2026_10_13_00::update::TufRepoUpload;
 }
 
 pub mod vpc {
@@ -518,12 +536,14 @@ pub mod physical_disk {
 pub mod rack {
     pub use crate::v2025_11_20_00::rack::Rack;
 
-    pub use crate::v2026_01_21_00::rack::RackMembershipAddSledsRequest;
     pub use crate::v2026_01_21_00::rack::RackMembershipChangeState;
     pub use crate::v2026_01_21_00::rack::RackMembershipConfigPathParams;
     pub use crate::v2026_01_21_00::rack::RackMembershipStatus;
     pub use crate::v2026_01_21_00::rack::RackMembershipVersion;
     pub use crate::v2026_01_21_00::rack::RackMembershipVersionParam;
+
+    pub use crate::v2026_10_29_00::rack::RackMembershipAddSledsRequest;
+    pub use crate::v2026_10_29_00::rack::SledAddPrecheckOverrides;
 }
 
 pub mod subnet_pool {

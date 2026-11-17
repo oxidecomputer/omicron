@@ -16,4 +16,6 @@ pub use connection_manager::platform_id_to_baseboard_id;
 pub(crate) use connection_manager::{
     ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };
-pub use task::{Config, NodeApiError, NodeTask, NodeTaskHandle};
+pub use task::{
+    Config, CoordinatorStatusSnapshot, NodeApiError, NodeTask, NodeTaskHandle,
+};

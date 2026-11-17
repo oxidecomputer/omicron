@@ -15,10 +15,14 @@ use nexus_db_schema::schema::{image, project_image, silo_image};
 use nexus_types::external_api::image as image_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // Shared image definition
 #[derive(
@@ -36,8 +40,8 @@ pub struct Image {
     #[diesel(embed)]
     pub identity: ImageIdentity,
 
-    pub silo_id: Uuid,
-    pub project_id: Option<Uuid>,
+    pub silo_id: DbTypedUuid<SiloKind>,
+    pub project_id: Option<DbTypedUuid<ProjectKind>>,
 
     pub volume_id: DbTypedUuid<VolumeKind>,
     pub url: Option<String>,
@@ -51,6 +55,14 @@ pub struct Image {
 }
 
 impl Image {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
+    pub fn project_id(&self) -> Option<ProjectUuid> {
+        self.project_id.map(ProjectUuid::from)
+    }
+
     pub fn volume_id(&self) -> VolumeUuid {
         self.volume_id.into()
     }
@@ -64,8 +76,8 @@ pub struct ProjectImage {
     #[diesel(embed)]
     pub identity: ProjectImageIdentity,
 
-    pub silo_id: Uuid,
-    pub project_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub volume_id: DbTypedUuid<VolumeKind>,
     pub url: Option<String>,
     pub os: String,
@@ -78,6 +90,14 @@ pub struct ProjectImage {
 }
 
 impl ProjectImage {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
+
     pub fn volume_id(&self) -> VolumeUuid {
         self.volume_id.into()
     }
@@ -91,7 +111,7 @@ pub struct SiloImage {
     #[diesel(embed)]
     pub identity: SiloImageIdentity,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub volume_id: DbTypedUuid<VolumeKind>,
     pub url: Option<String>,
     pub os: String,
@@ -104,6 +124,10 @@ pub struct SiloImage {
 }
 
 impl SiloImage {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn volume_id(&self) -> VolumeUuid {
         self.volume_id.into()
     }
@@ -222,7 +246,7 @@ impl From<Image> for image_types::Image {
     fn from(image: Image) -> Self {
         Self {
             identity: image.identity(),
-            project_id: image.project_id,
+            project_id: image.project_id.map(|id| id.into_untyped_uuid()),
             os: image.os,
             version: image.version,
             digest: image.digest.map(|x| x.into()),

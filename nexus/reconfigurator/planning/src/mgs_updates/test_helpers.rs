@@ -723,7 +723,7 @@ impl ExpectedUpdates {
         println!("found update: {} slot {}", sp_type, sp_slot);
         let ExpectedUpdate { expected_serial, expected_artifact, .. } = self
             .updates
-            .remove(&(sp_type, sp_slot, component))
+            .remove((sp_type, sp_slot, component))
             .expect("unexpected update");
         assert_eq!(update.artifact_hash, expected_artifact);
         assert_eq!(update.artifact_version, ARTIFACT_VERSION_2);
@@ -784,10 +784,8 @@ impl ExpectedUpdates {
 
                 // We should also have a corresponding phase 2 change for this
                 // phase 1 update.
-                let expected_phase2 = self
-                    .phase2
-                    .remove(&sp_slot)
-                    .expect("missing phase2 update");
+                let expected_phase2 =
+                    self.phase2.remove(sp_slot).expect("missing phase2 update");
                 let (actual_phase2_slot, actual_phase2_contents) =
                     pending_host_phase_2_changes
                         .remove(&expected_phase2.sled_id)
@@ -1230,7 +1228,13 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let sled_model = OxideSled::try_from_model(&sp_state.model);
 
             let baseboard_id = builder
-                .found_sp_state("test", sp_id.typ, sp_id.slot, sp_state.clone())
+                .found_sp_state(
+                    "test",
+                    nexus_inventory::examples::RACK_UUID,
+                    sp_id.typ,
+                    sp_id.slot,
+                    sp_state.clone(),
+                )
                 .unwrap();
             let sp_active_version = self
                 .sp_active_version_exceptions
@@ -1468,6 +1472,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 part_number: sp_state.model.clone(),
                                 serial_number: sp_state.serial_number.clone(),
                             },
+                            rack_id: nexus_inventory::examples::RACK_UUID,
                             last_reconciliation: Some(
                                 ConfigReconcilerInventory {
                                     last_reconciled_config: fake_sled_config

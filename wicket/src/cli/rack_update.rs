@@ -8,7 +8,8 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{BufReader, Write},
+    io::{BufReader, Read, Write},
+    net::SocketAddrV6,
     process::ExitCode,
     time::Duration,
 };
@@ -19,32 +20,29 @@ use crate::{
         ComponentId, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
         parse_event_report_map,
     },
-    wicketd::{WicketdAddrs, create_wicketd_client},
+    wicketd::{WicketdAddrs, create_commission_client, create_wicketd_client},
 };
 use anyhow::{Context, Result, anyhow, bail};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Subcommand, ValueEnum};
 use oxide_update_engine_display::{GroupDisplay, LineDisplayStyles};
-use oxide_update_engine_types::buffer::{
-    AbortReason, EventBuffer, ExecutionStatus, FailureReason, StepKey,
-    TerminalKind,
-};
-use oxide_update_engine_types::spec::{EngineSpec, SerializableError};
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::spec::SerializableError;
+use oxide_versioned_envelope::{ReadOutput, WriteEnvelope};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
-use tufaceous_artifact::DisplayTags;
+use wicket_cli_types::rack_update::{
+    RackUpdateStatus, StepPosition, UpdateProgressExt, UpdateStateExt,
+};
 use wicket_common::{
     WICKETD_TIMEOUT,
-    rack_update::{
-        ComponentUpdateStatus, ExitMessage, RackUpdateStatus, UpdateState,
-        UpdateStateCounts, rollup_update_state,
-    },
     update_events::{EventReport, WicketdEngineSpec},
 };
 use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
     StartUpdateParams,
 };
+use wicketd_commission_types::inventory::SpIdentifier;
 use wicketd_commission_types::update::{
     ClearUpdateStateResponse, UpdateTargets,
 };
@@ -341,9 +339,11 @@ pub(crate) struct StatusArgs {
     #[clap(long)]
     json: bool,
 
-    /// Read debug-dump output from a file, or - for stdin.
+    /// Read this command's own `--json` output from a file, or - for stdin.
     /// If omitted, fetch data from wicketd.
-    #[clap(long, value_name = "FILE")]
+    ///
+    /// Cannot be combined with `--sled`, `--switch`, or `--psc`.
+    #[clap(long, value_name = "FILE", conflicts_with = "ComponentIdSelector")]
     file: Option<Utf8PathBuf>,
 }
 
@@ -354,172 +354,130 @@ impl StatusArgs {
         addrs: WicketdAddrs,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
-        // Read the artifact & event reports from wicketd, a file, or stdin.
-        let response = if let Some(path) = self.file {
-            if path == "-" {
-                serde_json::from_reader(BufReader::new(std::io::stdin()))
-                    .context("error parsing stdin")?
-            } else {
-                let file = BufReader::new(
-                    std::fs::File::open(&path)
-                        .with_context(|| format!("error opening {path}"))?,
-                );
-                serde_json::from_reader(file)
-                    .with_context(|| format!("error parsing {path}"))?
+        let status = match &self.file {
+            Some(path) => read_status_file(path)?,
+            None => {
+                // Resolve the selector before performing I/O, so an unusable
+                // --sled/--switch/--psc fails straight away.
+                let selected = self.component_ids.to_selected_sps()?;
+                fetch_status(&log, addrs.commission, selected).await?
             }
-        } else {
-            let client =
-                create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
-            client
-                .get_artifacts_and_event_reports()
-                .await
-                .context("error fetching artifacts and event reports")?
-                .into_inner()
         };
 
-        // Derive the status from events, artifacts, and component selector.
-        let status =
-            build_rack_update_status(&log, response, &self.component_ids)?;
+        let exit_code = ExitCode::from(status.rollup().exit_code());
 
         // Write either JSON or a human-readable table to stdout.
         if self.json {
-            serde_json::to_writer_pretty(&mut *output.stdout, &status)
+            let envelope = WriteEnvelope::new(&status);
+            serde_json::to_writer_pretty(&mut *output.stdout, &envelope)
                 .context("error writing JSON to output")?;
             writeln!(output.stdout).context("error writing to output")?;
         } else {
-            write_status_table(output.stdout, &status)?;
+            write_status_table(output.stdout, &status)
+                .context("error writing status table to output")?;
         }
 
-        Ok(ExitCode::from(status.state.exit_code()))
+        Ok(exit_code)
     }
 }
 
-fn get_exit_message<S: EngineSpec>(
-    buffer: &EventBuffer<S>,
-    key: &StepKey,
-) -> Option<ExitMessage> {
-    let step = buffer.get(key)?;
-    if let Some(FailureReason::StepFailed(fi)) =
-        step.step_status().failure_reason()
-    {
-        return Some(ExitMessage {
-            message: fi.message.clone(),
-            causes: fi.causes.clone(),
-        });
-    }
-    if let Some(AbortReason::StepAborted(ai)) =
-        step.step_status().abort_reason()
-    {
-        return Some(ExitMessage {
-            message: ai.message.clone(),
-            causes: vec![],
-        });
-    }
-    None
-}
-
-fn build_rack_update_status(
+async fn fetch_status(
     log: &Logger,
-    response: GetArtifactsAndEventReportsResponse,
-    selector: &ComponentIdSelector,
+    commission_addr: SocketAddrV6,
+    selected: Option<BTreeSet<SpIdentifier>>,
 ) -> Result<RackUpdateStatus> {
-    let mut artifacts = response.artifacts;
-    artifacts.sort();
+    let client =
+        create_commission_client(log, commission_addr, WICKETD_TIMEOUT);
 
-    let event_reports = parse_event_report_map(log, response.event_reports);
+    let mut update_progress = client
+        .get_update_progress()
+        .await
+        .map_err(commission_error)
+        .with_context(|| {
+            format!(
+                "error fetching the update progress \
+                 from the commission API at {commission_addr}"
+            )
+        })?
+        .into_inner();
 
-    // Filter to the selected components if any are specified.
-    let event_reports = if selector.is_empty() {
-        // Default to all components if no selectors specified.
-        event_reports
-    } else {
-        let ids = selector.to_component_ids()?;
-        event_reports.into_iter().filter(|(id, _)| ids.contains(id)).collect()
-    };
-
-    let components: Vec<ComponentUpdateStatus> =
-        event_reports
+    if let Some(selected) = selected {
+        let missing: Vec<String> = selected
             .iter()
-            .map(|(&id, report)| {
-                let mut buffer = EventBuffer::default();
-                buffer.add_event_report(report.clone());
-
-                // Derive the ComponentUpdateStatus status from the output of
-                // update-engine's ExecutionSummary, a rollup of all events.
-                match buffer.root_execution_summary() {
-                    None => ComponentUpdateStatus {
-                        id: id.into(),
-                        state: UpdateState::NotStarted,
-                        step_index: None,
-                        total_steps: None,
-                        elapsed_secs: None,
-                        exit_message: None,
-                    },
-                    Some(summary) => {
-                        let (
-                            state,
-                            current_step_index,
-                            elapsed_secs,
-                            exit_message,
-                        ) = match &summary.execution_status {
-                            ExecutionStatus::NotStarted => {
-                                (UpdateState::NotStarted, None, None, None)
-                            }
-                            ExecutionStatus::Running {
-                                step_key,
-                                root_total_elapsed,
-                            } => (
-                                UpdateState::InProgress,
-                                Some(step_key.index),
-                                Some(root_total_elapsed.as_secs_f64()),
-                                None,
-                            ),
-                            ExecutionStatus::Terminal(info) => {
-                                let state = match info.kind {
-                                    TerminalKind::Completed => {
-                                        UpdateState::Completed
-                                    }
-                                    TerminalKind::Failed => UpdateState::Failed,
-                                    TerminalKind::Aborted => {
-                                        UpdateState::Aborted
-                                    }
-                                };
-                                let exit_message =
-                                    get_exit_message(&buffer, &info.step_key);
-                                (
-                                    state,
-                                    Some(info.step_key.index),
-                                    info.root_total_elapsed
-                                        .map(|d| d.as_secs_f64()),
-                                    exit_message,
-                                )
-                            }
-                        };
-                        ComponentUpdateStatus {
-                            id: id.into(),
-                            state,
-                            step_index: current_step_index,
-                            total_steps: Some(summary.total_steps),
-                            elapsed_secs,
-                            exit_message,
-                        }
-                    }
-                }
-            })
+            .filter(|sp| !update_progress.sps.contains_key(*sp))
+            .map(|sp| format!("{} {}", sp.typ, sp.slot))
             .collect();
+        if !missing.is_empty() {
+            slog::warn!(
+                log,
+                "no update progress for selected components: {}",
+                missing.join(", ")
+            );
+        }
+        update_progress.sps.retain(|sp| selected.contains(&sp.sp));
+    }
 
-    let component_states: Vec<UpdateState> =
-        components.iter().map(|c| c.state).collect();
-    let state = rollup_update_state(&component_states);
-    let counts = UpdateStateCounts::from_components(&components);
+    Ok(RackUpdateStatus::from_latest(update_progress))
+}
 
-    Ok(RackUpdateStatus {
-        state,
-        system_version: response.system_version,
-        artifacts,
-        components,
-        state_counts: counts,
-    })
+/// Converts a commission client error into an `anyhow::Error`.
+fn commission_error(
+    error: wicketd_commission_client::ClientError,
+) -> anyhow::Error {
+    // XXX This mirrors wicketd's ba_lockstep_error_to_http and has a workaround
+    // for the same reason. We should consider fixing this in progenitor (or
+    // progenitor-extras?).
+    use wicketd_commission_client::Error as CommissionError;
+
+    match &error {
+        CommissionError::ErrorResponse(rv) => anyhow!(
+            "wicketd returned {} (request ID {}): {}",
+            rv.status(),
+            rv.request_id,
+            rv.message
+        ),
+        CommissionError::InvalidRequest(_)
+        | CommissionError::CommunicationError(_)
+        | CommissionError::InvalidUpgrade(_)
+        | CommissionError::ResponseBodyError(_)
+        | CommissionError::InvalidResponsePayload(_, _)
+        | CommissionError::UnexpectedResponse(_)
+        | CommissionError::Custom(_) => {
+            // Progenitor's alternate formatter prints the whole error chain
+            // once -- wrapping the error itself in anyhow would print its first
+            // cause twice.
+            anyhow!("{error:#}")
+        }
+    }
+}
+
+fn read_status_file(path: &Utf8Path) -> Result<RackUpdateStatus> {
+    if path == "-" {
+        read_status(BufReader::new(std::io::stdin()), "stdin")
+    } else {
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("error opening {path}"))?;
+        read_status(BufReader::new(file), path.as_str())
+    }
+}
+
+fn read_status(
+    mut reader: impl Read,
+    source: &str,
+) -> Result<RackUpdateStatus> {
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("error reading {source}"))?;
+
+    oxide_versioned_envelope::read_json::<RackUpdateStatus>(&bytes)
+        .map(ReadOutput::into_value)
+        .with_context(|| {
+            format!(
+                "error reading rack-update status JSON from {source} \
+                 (the output of `rack-update status --json`)"
+            )
+        })
 }
 
 /// Write a human-readable status table to `out`.
@@ -527,13 +485,6 @@ fn write_status_table(
     out: &mut dyn Write,
     status: &RackUpdateStatus,
 ) -> Result<()> {
-    #[derive(PartialEq, Eq, PartialOrd, Ord, tabled::Tabled)]
-    #[tabled(rename_all = "UPPERCASE")]
-    struct ArtifactRow {
-        tags: String,
-        version: String,
-    }
-
     #[derive(tabled::Tabled)]
     #[tabled(rename_all = "UPPERCASE")]
     struct ComponentRow {
@@ -545,64 +496,27 @@ fn write_status_table(
         elapsed: String,
     }
 
-    // System version and artifacts.
-    writeln!(out, "State: {}\n", status.state)?;
+    let counts = status.state_counts();
+    writeln!(out, "State: {}\n", counts.rollup())?;
     writeln!(
         out,
-        "System version: {}",
-        status
-            .system_version
-            .as_ref()
-            .map(|v| v.to_string())
-            .as_deref()
-            .unwrap_or("(none)")
+        "System version: {}\n",
+        format_system_version(
+            status.update_progress.repository.system_version.as_ref()
+        )
     )?;
 
-    let mut artifact_rows: Vec<ArtifactRow> = status
-        .artifacts
-        .iter()
-        .map(|a| ArtifactRow {
-            tags: DisplayTags::from(&a.tags).to_string(),
-            version: a.version.to_string(),
-        })
-        .collect();
-    artifact_rows.sort_unstable();
-    let artifact_table = tabled::Table::new(artifact_rows)
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 2, 0, 0))
-        .to_string();
-    writeln!(out, "{artifact_table}\n")?;
-
-    // Component table.
+    // Component table. The rows are in `SpIdentifier` order.
     let component_rows: Vec<ComponentRow> = status
-        .components
+        .update_progress
+        .sps
         .iter()
-        .map(|c| {
-            let progress = match (c.step_index, c.total_steps) {
-                (Some(i), Some(t)) => format!("{}/{}", i + 1, t),
-                (None, Some(t)) => format!("-/{t}"),
-                _ => "-".to_string(),
-            };
-            let elapsed = match c.elapsed_secs {
-                Some(secs) => {
-                    let total = secs as u64;
-                    format!(
-                        "{:02}:{:02}:{:02}",
-                        total / 3600,
-                        (total % 3600) / 60,
-                        total % 60
-                    )
-                }
-                None => "-".to_string(),
-            };
-
-            ComponentRow {
-                type_: c.id.typ.to_string(),
-                slot: c.id.slot,
-                state: c.state.to_string(),
-                progress,
-                elapsed,
-            }
+        .map(|sp| ComponentRow {
+            type_: sp.sp.typ.to_string(),
+            slot: sp.sp.slot,
+            state: sp.progress.state.label().to_owned(),
+            progress: format_step_position(sp.progress.step_position()),
+            elapsed: format_elapsed(sp.progress.state.elapsed()),
         })
         .collect();
 
@@ -612,30 +526,59 @@ fn write_status_table(
         .to_string();
     writeln!(out, "{component_table}")?;
 
-    let c = &status.state_counts;
     writeln!(
         out,
         "\n{} completed, {} failed, {} aborted, {} in progress, {} not started",
-        c.completed, c.failed, c.aborted, c.in_progress, c.not_started,
+        counts.completed,
+        counts.failed,
+        counts.aborted,
+        counts.in_progress,
+        counts.not_started,
     )?;
 
-    for component in &status.components {
-        if let Some(exit_message) = &component.exit_message {
+    for sp in status.update_progress.sps.iter() {
+        if let Some(message) = sp.progress.state.terminal_message() {
             writeln!(
                 out,
                 "\n{} {} ({}): {}",
-                component.id.typ,
-                component.id.slot,
-                component.state,
-                exit_message.message,
+                sp.sp.typ,
+                sp.sp.slot,
+                sp.progress.state.label(),
+                message,
             )?;
-            for cause in &exit_message.causes {
-                writeln!(out, "  caused by: {cause}")?;
-            }
         }
     }
 
     Ok(())
+}
+
+fn format_system_version(system_version: Option<&semver::Version>) -> String {
+    match system_version {
+        Some(version) => version.to_string(),
+        None => "(none)".to_owned(),
+    }
+}
+
+fn format_step_position(position: Option<StepPosition>) -> String {
+    match position {
+        Some(StepPosition { current, total }) => format!("{current}/{total}"),
+        None => "-".to_owned(),
+    }
+}
+
+fn format_elapsed(elapsed: Option<Duration>) -> String {
+    match elapsed {
+        Some(elapsed) => {
+            let total = elapsed.as_secs();
+            format!(
+                "{:02}:{:02}:{:02}",
+                total / 3600,
+                (total % 3600) / 60,
+                total % 60
+            )
+        }
+        None => "-".to_owned(),
+    }
 }
 
 #[derive(Debug, Args)]
@@ -937,98 +880,224 @@ impl ComponentIdSelector {
     fn is_empty(&self) -> bool {
         self.sled.is_empty() && self.switch.is_empty() && self.psc.is_empty()
     }
+
+    /// Validate that all the sleds, switches, and PSCs are reasonable (though
+    /// they might not exist on the actual hardware), then return the set of
+    /// selected [`SpIdentifier`]s.
+    ///
+    /// Returns `None` if no components are selected.
+    fn to_selected_sps(&self) -> Result<Option<BTreeSet<SpIdentifier>>> {
+        if self.is_empty() {
+            return Ok(None);
+        }
+        let sps = self
+            .to_component_ids()?
+            .into_iter()
+            .map(SpIdentifier::from)
+            .collect();
+        Ok(Some(sps))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maplit::btreemap;
+    use iddqd::{IdOrdMap, id_ord_map};
     use semver::Version;
-    use tufaceous_artifact::ArtifactVersion;
-    use wicket_common::{
-        artifact::ArtifactId,
-        inventory::{SpIdentifier, SpType},
+    use wicketd_commission_types::inventory::SpType;
+    use wicketd_commission_types::update::{
+        GetUpdateProgressResponse, RepositoryDescription, RunningProgress,
+        SpUpdateProgress, StepOutcome, StepProgress, UpdateProgress,
+        UpdateState, UpdateStep, UpdateStepStatus,
     };
 
-    fn non_empty_status() -> RackUpdateStatus {
-        RackUpdateStatus {
-            state: UpdateState::Failed,
-            system_version: Some(Version::new(1, 0, 0)),
-            artifacts: vec![
-                ArtifactId {
-                    tags: btreemap! {
-                        "kind".to_owned() => "zone".to_owned(),
-                        "zone-name".to_owned() => "nexus".to_owned(),
-                    },
-                    version: ArtifactVersion::new_const("1.0.0-nexus"),
-                },
-                ArtifactId {
-                    tags: btreemap! {
-                        "kind".to_owned() => "gimlet_sp".to_owned(),
-                    },
-                    version: ArtifactVersion::new_const("1.0.0"),
-                },
-            ],
-            components: vec![
-                ComponentUpdateStatus {
-                    id: SpIdentifier { typ: SpType::Sled, slot: 0 },
-                    state: UpdateState::Completed,
-                    step_index: Some(11),
-                    total_steps: Some(12),
-                    elapsed_secs: Some(754.5),
-                    exit_message: None,
-                },
-                ComponentUpdateStatus {
-                    id: SpIdentifier { typ: SpType::Sled, slot: 1 },
-                    state: UpdateState::Failed,
-                    step_index: Some(3),
-                    total_steps: Some(12),
-                    elapsed_secs: Some(62.25),
-                    exit_message: Some(ExitMessage {
-                        message: "Get host type: Unknown host type i86pc"
-                            .to_owned(),
-                        causes: vec![
-                            "unknown model string \"i86pc\"".to_owned(),
-                            "expected one of gimlet, cosmo".to_owned(),
-                        ],
-                    }),
-                },
-                ComponentUpdateStatus {
-                    id: SpIdentifier { typ: SpType::Switch, slot: 1 },
-                    state: UpdateState::InProgress,
-                    step_index: Some(2),
-                    total_steps: Some(9),
-                    elapsed_secs: Some(3661.0),
-                    exit_message: None,
-                },
-                ComponentUpdateStatus {
-                    id: SpIdentifier { typ: SpType::Power, slot: 0 },
-                    state: UpdateState::Aborted,
-                    step_index: Some(1),
-                    total_steps: Some(9),
-                    elapsed_secs: None,
-                    exit_message: Some(ExitMessage {
-                        message: "aborted by operator".to_owned(),
-                        causes: Vec::new(),
-                    }),
-                },
-                ComponentUpdateStatus {
-                    id: SpIdentifier { typ: SpType::Power, slot: 1 },
-                    state: UpdateState::NotStarted,
-                    step_index: None,
-                    total_steps: Some(9),
-                    elapsed_secs: None,
-                    exit_message: None,
-                },
-            ],
-            state_counts: UpdateStateCounts {
-                completed: 1,
-                failed: 1,
-                aborted: 1,
-                in_progress: 1,
-                not_started: 1,
+    fn step(description: &str, status: UpdateStepStatus) -> UpdateStep {
+        UpdateStep {
+            description: description.to_owned(),
+            status,
+            children: Vec::new(),
+        }
+    }
+
+    fn completed_step(description: &str) -> UpdateStep {
+        step(
+            description,
+            UpdateStepStatus::Completed {
+                outcome: StepOutcome::Success { message: None },
+            },
+        )
+    }
+
+    fn not_started_step(description: &str) -> UpdateStep {
+        step(description, UpdateStepStatus::NotStarted)
+    }
+
+    fn will_not_be_run_step(description: &str, reason: &str) -> UpdateStep {
+        step(
+            description,
+            UpdateStepStatus::WillNotBeRun { reason: reason.to_owned() },
+        )
+    }
+
+    fn repository() -> RepositoryDescription {
+        RepositoryDescription { system_version: Some(Version::new(1, 0, 0)) }
+    }
+
+    fn update_progress() -> GetUpdateProgressResponse {
+        GetUpdateProgressResponse {
+            repository: repository(),
+            sps: id_ord_map! {
+                sled0_completed(),
+                sled1_failed(),
+                sled2_waiting_with_steps(),
+                switch1_running(),
+                power0_aborted(),
+                power1_waiting(),
             },
         }
+    }
+
+    fn sled0_completed() -> SpUpdateProgress {
+        SpUpdateProgress {
+            sp: SpIdentifier { typ: SpType::Sled, slot: 0 },
+            progress: UpdateProgress {
+                state: UpdateState::Completed {
+                    elapsed: Some(Duration::from_secs(754)),
+                },
+                steps: vec![
+                    completed_step("Update RoT bootloader"),
+                    completed_step("Update RoT"),
+                    completed_step("Update SP"),
+                    completed_step("Update host OS"),
+                ],
+            },
+        }
+    }
+
+    fn sled1_failed() -> SpUpdateProgress {
+        SpUpdateProgress {
+            sp: SpIdentifier { typ: SpType::Sled, slot: 1 },
+            progress: UpdateProgress {
+                state: UpdateState::Failed {
+                    message: "Get host type: Unknown host type i86pc: \
+                              unknown model string \"i86pc\": expected one \
+                              of gimlet, cosmo"
+                        .to_owned(),
+                    elapsed: Some(Duration::from_secs(62)),
+                },
+                steps: vec![
+                    completed_step("Update RoT bootloader"),
+                    completed_step("Update RoT"),
+                    step(
+                        "Get host type",
+                        UpdateStepStatus::Failed {
+                            message: "Unknown host type i86pc".to_owned(),
+                            causes: vec![
+                                "unknown model string \"i86pc\"".to_owned(),
+                                "expected one of gimlet, cosmo".to_owned(),
+                            ],
+                        },
+                    ),
+                    will_not_be_run_step(
+                        "Update host OS",
+                        "Get host type failed",
+                    ),
+                ],
+            },
+        }
+    }
+
+    // The running step carries a nested execution, so this also checks that the
+    // progress column counts top-level steps only.
+    fn switch1_running() -> SpUpdateProgress {
+        SpUpdateProgress {
+            sp: SpIdentifier { typ: SpType::Switch, slot: 1 },
+            progress: UpdateProgress {
+                state: UpdateState::Running {
+                    elapsed: Duration::from_secs(3661),
+                },
+                steps: vec![
+                    completed_step("Update RoT bootloader"),
+                    UpdateStep {
+                        description: "Update RoT".to_owned(),
+                        status: UpdateStepStatus::Running {
+                            progress: RunningProgress::Progress {
+                                progress: Some(StepProgress {
+                                    current: 1024,
+                                    total: Some(4096),
+                                    units: "bytes".to_owned(),
+                                }),
+                            },
+                        },
+                        children: vec![UpdateProgress {
+                            state: UpdateState::Running {
+                                elapsed: Duration::from_secs(12),
+                            },
+                            steps: vec![step(
+                                "Write RoT image",
+                                UpdateStepStatus::Running {
+                                    progress:
+                                        RunningProgress::WaitingForProgress,
+                                },
+                            )],
+                        }],
+                    },
+                    not_started_step("Update SP"),
+                ],
+            },
+        }
+    }
+
+    fn power0_aborted() -> SpUpdateProgress {
+        SpUpdateProgress {
+            sp: SpIdentifier { typ: SpType::Power, slot: 0 },
+            progress: UpdateProgress {
+                state: UpdateState::Aborted {
+                    message: "Update RoT: aborted by operator".to_owned(),
+                    elapsed: None,
+                },
+                steps: vec![
+                    completed_step("Update RoT bootloader"),
+                    step(
+                        "Update RoT",
+                        UpdateStepStatus::Aborted {
+                            message: "aborted by operator".to_owned(),
+                        },
+                    ),
+                    will_not_be_run_step("Update SP", "Update RoT was aborted"),
+                ],
+            },
+        }
+    }
+
+    fn power1_waiting() -> SpUpdateProgress {
+        SpUpdateProgress {
+            sp: SpIdentifier { typ: SpType::Power, slot: 1 },
+            progress: UpdateProgress {
+                state: UpdateState::Waiting,
+                steps: Vec::new(),
+            },
+        }
+    }
+
+    // An update that has been started but whose steps have not run yet -- in
+    // this case, the progress column should read as 1/n rather than -.
+    fn sled2_waiting_with_steps() -> SpUpdateProgress {
+        SpUpdateProgress {
+            sp: SpIdentifier { typ: SpType::Sled, slot: 2 },
+            progress: UpdateProgress {
+                state: UpdateState::Waiting,
+                steps: vec![
+                    not_started_step("Update RoT bootloader"),
+                    not_started_step("Update RoT"),
+                    not_started_step("Update SP"),
+                ],
+            },
+        }
+    }
+
+    fn non_empty_status() -> RackUpdateStatus {
+        RackUpdateStatus::from_latest(update_progress())
     }
 
     // These snapshots test the JSON body and the human-readable table of
@@ -1036,7 +1105,8 @@ mod tests {
 
     #[test]
     fn status_json_non_empty() {
-        let json = serde_json::to_string_pretty(&non_empty_status())
+        let envelope = WriteEnvelope::new(non_empty_status());
+        let json = serde_json::to_string_pretty(&envelope)
             .expect("status serialized to JSON");
         expectorate::assert_contents(
             "tests/output/rack-update-status.json",
@@ -1056,14 +1126,35 @@ mod tests {
     }
 
     #[test]
+    fn status_file_conflicts_with_component_selectors() {
+        use clap::Parser;
+
+        for selector in [["--sled", "0"], ["--switch", "1"], ["--psc", "0"]] {
+            let args =
+                ["wicket", "rack-update", "status", "--file", "saved.json"]
+                    .into_iter()
+                    .chain(selector);
+            let error = crate::cli::ShellApp::try_parse_from(args)
+                .expect_err("--file with a component selector was refused");
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{selector:?}: the selector conflicts with --file: {error}",
+            );
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains("--file") && rendered.contains(selector[0]),
+                "{selector:?}: the error names both arguments: {rendered}",
+            );
+        }
+    }
+
+    #[test]
     fn status_table_empty() {
-        let status = RackUpdateStatus {
-            state: UpdateState::NotStarted,
-            system_version: None,
-            artifacts: Vec::new(),
-            components: Vec::new(),
-            state_counts: UpdateStateCounts::default(),
-        };
+        let status = RackUpdateStatus::from_latest(GetUpdateProgressResponse {
+            repository: RepositoryDescription { system_version: None },
+            sps: IdOrdMap::new(),
+        });
 
         let mut out = Vec::new();
         write_status_table(&mut out, &status)

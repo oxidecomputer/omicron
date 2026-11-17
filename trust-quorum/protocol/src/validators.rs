@@ -12,6 +12,9 @@ use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
 use trust_quorum_types::configuration::{ConfigurationError, NewConfigParams};
+use trust_quorum_types::membership::{
+    TRUST_QUORUM_MAX_MEMBERS, TRUST_QUORUM_MIN_MEMBERS,
+};
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::persistent_state::PersistentStateSummary;
 use trust_quorum_types::types::Threshold;
@@ -85,7 +88,8 @@ pub enum ReconfigurationError {
     ThresholdMismatch { num_members: usize, threshold: Threshold },
 
     #[error(
-        "invalid membership size: {0:?}: must be between 3 and 32 inclusive"
+        "invalid membership size: {0:?}: must be between \
+         {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} inclusive"
     )]
     InvalidMembershipSize(usize),
 
@@ -163,7 +167,8 @@ pub enum LrtqUpgradeError {
     ThresholdMismatch { num_members: usize, threshold: Threshold },
 
     #[error(
-        "invalid membership size: {0:?}: must be between 3 and 32 inclusive"
+        "invalid membership size: {0:?}: must be between \
+         {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} inclusive"
     )]
     InvalidMembershipSize(usize),
 
@@ -365,7 +370,9 @@ impl ValidatedReconfigureMsg {
             });
         }
 
-        if num_members < 3 || num_members > 32 {
+        if num_members < TRUST_QUORUM_MIN_MEMBERS
+            || num_members > TRUST_QUORUM_MAX_MEMBERS
+        {
             return Err(ReconfigurationError::InvalidMembershipSize(
                 num_members,
             ));
@@ -590,7 +597,9 @@ impl ValidatedLrtqUpgradeMsg {
             });
         }
 
-        if num_members < 3 || num_members > 32 {
+        if num_members < TRUST_QUORUM_MIN_MEMBERS
+            || num_members > TRUST_QUORUM_MAX_MEMBERS
+        {
             return Err(LrtqUpgradeError::InvalidMembershipSize(num_members));
         }
 

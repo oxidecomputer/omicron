@@ -106,7 +106,6 @@
 //! | 4 | None | Valid | "Active" | Reactivate member | "Joining" |
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
@@ -409,18 +408,18 @@ impl MulticastGroupReconciler {
 
         // Batch-fetch instance states for all members to avoid N+1 queries
         let instance_states =
-            Arc::new(self.batch_fetch_instance_states(opctx, &members).await?);
+            self.batch_fetch_instance_states(opctx, &members).await?;
 
         // Process members concurrently with configurable parallelism
-        let member_outcomes = stream::iter(members)
+        let mut member_outcomes = stream::iter(members)
             .map(|member| {
-                let instance_states = Arc::clone(&instance_states);
+                let instance_states = &instance_states;
                 async move {
                     let ctx = MemberReconcileCtx {
                         opctx,
                         group,
                         member: &member,
-                        instance_states: &instance_states,
+                        instance_states,
                         sled_client,
                     };
 
@@ -428,12 +427,10 @@ impl MulticastGroupReconciler {
                     (member, res)
                 }
             })
-            .buffer_unordered(self.member_concurrency_limit.get()) // Configurable concurrency
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(self.member_concurrency_limit.get()); // Configurable concurrency
 
         // Process results and update counters
-        for (member, result) in member_outcomes {
+        while let Some((member, result)) = member_outcomes.next().await {
             match result {
                 Ok(transition) => match transition {
                     StateTransition::StateChanged
@@ -480,9 +477,6 @@ impl MulticastGroupReconciler {
         Ok(processed)
     }
 
-    /// Main dispatch function for processing member state changes.
-    ///
-    /// Routes to the appropriate handler based on member state.
     async fn process_member_state(
         &self,
         ctx: &MemberReconcileCtx<'_>,
@@ -924,15 +918,13 @@ impl MulticastGroupReconciler {
 
         // Source-sled OPTE cleanup (M2P, forwarding, port subscription)
         // is handled by VMM teardown: remove_propolis_zone ->
-        // release_opte_ports -> PortTicket::release_inner, which
-        // clears multicast subscriptions along with V2P and firewall
-        // rules.
+        // delete_opte_ports -> PortManager::remove_port, which clears
+        // multicast subscriptions along with V2P and firewall rules.
         //
         // This is consistent with all other OPTE state. Nexus
         // never explicitly calls sled-agent for source-sled cleanup
         // after migration.
 
-        // Update `sled_id` in database using CAS
         let updated = self
             .datastore
             .multicast_group_member_update_sled_id_if_current(
@@ -1516,8 +1508,6 @@ impl MulticastGroupReconciler {
             "group" => ?ctx.group
         );
 
-        // Use the override if provided, then the member's cached sled_id,
-        // then look it up from the instance as a last resort.
         let sled_id: SledUuid = if let Some(id) =
             sled_id_override.or(ctx.member.sled_id.map(Into::into))
         {

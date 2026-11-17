@@ -17,6 +17,7 @@ mod report;
 
 pub use blippy::Blippy;
 pub use blippy::Kind as BlippyKind;
+pub use blippy::KindOrd as BlippyKindOrd;
 pub use blippy::Note as BlippyNote;
 pub use blippy::Severity as BlippySeverity;
 pub use blippy::SledKind as BlippySledKind;

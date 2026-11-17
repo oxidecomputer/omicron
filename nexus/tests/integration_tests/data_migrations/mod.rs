@@ -24,25 +24,30 @@ use semver::Version;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+mod add_rack_id_to_inv_sled_agent;
 mod add_rendezvous_sled_bp_availability;
 mod add_sled_update_disposition;
 mod bgp_unnumbered_peer_cleanup;
 mod blueprint_zone_multiple_external_ips;
 mod delete_nexus_default_allow_firewall_rule;
+mod drop_multicast_deleted_state;
 mod drop_uninitialized_svc_enabled_not_online_state;
 mod ereport_everyone_gets_a_slot;
 mod ereport_trim_serial_trailing_nulls;
 mod ereporter_restart_latest_ereport;
 mod ereporter_restart_order_v2;
 mod ereporter_restart_rack_id;
+mod inv_service_processor_rack_id;
 mod inventory_zone_multiple_external_ips;
 mod normalize_service_external_ips;
 mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod sled_resource_vmm_state;
+mod support_bundle_sp_components;
 mod support_bundle_time_range;
 mod tufaceous_v2;
 mod vmm_failure_reason_if_failed;
+mod widen_lldp_system_description;
 
 pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let versions: HashMap<&str, Version> = KNOWN_VERSIONS
@@ -86,6 +91,11 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(blueprint_zone_multiple_external_ips);
     register!(vmm_failure_reason_if_failed);
     register!(support_bundle_time_range);
+    register!(inv_service_processor_rack_id);
+    register!(add_rack_id_to_inv_sled_agent);
+    register!(support_bundle_sp_components);
+    register!(drop_multicast_deleted_state);
+    register!(widen_lldp_system_description);
 
     map
 }

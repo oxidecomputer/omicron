@@ -1031,6 +1031,7 @@ impl SystemDescription {
                 builder
                     .found_sp_state(
                         "fake MGS 1",
+                        nexus_inventory::examples::RACK_UUID,
                         SpType::Sled,
                         *slot,
                         sp_state.clone(),
@@ -1556,6 +1557,7 @@ impl Sled {
                 sled_role,
                 sled_agent_address,
                 sled_id,
+                rack_id: nexus_inventory::examples::RACK_UUID,
                 usable_hardware_threads: resources.usable_hardware_threads,
                 usable_physical_ram: resources.usable_physical_ram,
                 cpu_family: resources.cpu_family,
@@ -1773,6 +1775,7 @@ impl Sled {
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,
             sled_id,
+            rack_id: inv_sled_agent.rack_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             cpu_family: inv_sled_agent.cpu_family,

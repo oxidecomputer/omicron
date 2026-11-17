@@ -26,6 +26,8 @@ impl_enum_type!(
     PowerShelf => b"power_shelf"
     PhysicalDisk => b"physical_disk"
     Saga => b"saga"
+    Certificate => b"certificate"
+    SmfService => b"smf_service"
 
 );
 
@@ -37,6 +39,10 @@ impl From<DiagnosisEngine> for fm::DiagnosisEngineKind {
                 fm::DiagnosisEngineKind::PhysicalDisk
             }
             DiagnosisEngine::Saga => fm::DiagnosisEngineKind::Saga,
+            DiagnosisEngine::Certificate => {
+                fm::DiagnosisEngineKind::Certificate
+            }
+            DiagnosisEngine::SmfService => fm::DiagnosisEngineKind::SmfService,
         }
     }
 }
@@ -49,6 +55,10 @@ impl From<fm::DiagnosisEngineKind> for DiagnosisEngine {
                 DiagnosisEngine::PhysicalDisk
             }
             fm::DiagnosisEngineKind::Saga => DiagnosisEngine::Saga,
+            fm::DiagnosisEngineKind::Certificate => {
+                DiagnosisEngine::Certificate
+            }
+            fm::DiagnosisEngineKind::SmfService => DiagnosisEngine::SmfService,
         }
     }
 }

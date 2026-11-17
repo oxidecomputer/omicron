@@ -10,6 +10,9 @@ use db_macros::Resource;
 use nexus_db_schema::schema::snapshot;
 use nexus_types::external_api::snapshot as snapshot_types;
 use nexus_types::identity::Resource;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
@@ -42,7 +45,7 @@ pub struct Snapshot {
     #[diesel(embed)]
     pub identity: SnapshotIdentity,
 
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     // which disk is this a snapshot of
     pub disk_id: Uuid,
     pub volume_id: DbTypedUuid<VolumeKind>,
@@ -64,7 +67,7 @@ impl From<Snapshot> for snapshot_types::Snapshot {
     fn from(snapshot: Snapshot) -> Self {
         Self {
             identity: snapshot.identity(),
-            project_id: snapshot.project_id,
+            project_id: snapshot.project_id.into_untyped_uuid(),
             disk_id: snapshot.disk_id,
             state: snapshot.state.into(),
             size: snapshot.size.into(),
@@ -84,6 +87,10 @@ impl From<SnapshotState> for snapshot_types::SnapshotState {
 }
 
 impl Snapshot {
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
+    }
+
     pub fn volume_id(&self) -> VolumeUuid {
         self.volume_id.into()
     }

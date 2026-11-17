@@ -32,10 +32,10 @@ use crate::latest::inventory::{
     OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
-    SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
-    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
-    ZpoolHealth,
+    SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
+    SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
+    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline,
+    ZoneArtifactInventory, ZoneKind, ZoneSnatConfig, ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -1047,6 +1047,23 @@ impl fmt::Display for ZpoolHealth {
     }
 }
 
+impl SledCpuFamily {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SledCpuFamily::Unknown => "unknown",
+            SledCpuFamily::AmdMilan => "amd_milan",
+            SledCpuFamily::AmdTurin => "amd_turin",
+            SledCpuFamily::AmdTurinDense => "amd_turin_dense",
+        }
+    }
+}
+
+impl fmt::Display for SledCpuFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl From<SvcEnabledNotOnlineState> for SvcState {
     fn from(value: SvcEnabledNotOnlineState) -> Self {
         match value {
@@ -1472,5 +1489,44 @@ mod tests {
 
         assert_eq!(dual_stack.as_ipv4().unwrap(), &ipv4);
         assert_eq!(dual_stack.as_ipv6().unwrap(), &ipv6);
+    }
+
+    fn next_hardware_cpu_family(
+        family: sled_hardware_types::SledCpuFamily,
+    ) -> Option<sled_hardware_types::SledCpuFamily> {
+        use sled_hardware_types::SledCpuFamily as HardwareFamily;
+        // Exhaustive match ensures new variants are handled.
+        match family {
+            HardwareFamily::Unknown => Some(HardwareFamily::AmdMilan),
+            HardwareFamily::AmdMilan => Some(HardwareFamily::AmdTurin),
+            HardwareFamily::AmdTurin => Some(HardwareFamily::AmdTurinDense),
+            HardwareFamily::AmdTurinDense => None,
+        }
+    }
+
+    #[test]
+    fn sled_cpu_family_matches_sled_hardware_types() {
+        let hardware_families = std::iter::successors(
+            Some(sled_hardware_types::SledCpuFamily::Unknown),
+            |family| next_hardware_cpu_family(*family),
+        );
+        for hardware_family in hardware_families {
+            let hardware_json = serde_json::to_value(hardware_family)
+                .expect("serialized sled_hardware_types::SledCpuFamily");
+            let family = SledCpuFamily::from(hardware_family);
+            let family_json =
+                serde_json::to_value(family).expect("serialized SledCpuFamily");
+
+            assert_eq!(family_json, hardware_json);
+            assert_eq!(family.to_string(), hardware_family.to_string());
+            assert_eq!(
+                family_json,
+                serde_json::Value::String(family.to_string()),
+            );
+            let round_tripped: SledCpuFamily =
+                serde_json::from_value(family_json)
+                    .expect("deserialized SledCpuFamily");
+            assert_eq!(round_tripped, family);
+        }
     }
 }

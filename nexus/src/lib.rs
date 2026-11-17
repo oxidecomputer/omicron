@@ -21,7 +21,6 @@ use crate::internal_api::params::ServiceIpPoolConfig;
 use crate::internal_api::params::ServiceIpPoolError;
 pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
-use async_bb8_diesel::AsyncRunQueryDsl;
 use context::ApiContext;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
@@ -30,7 +29,6 @@ use iddqd::IdOrdMap;
 use internal_api::http_entrypoints::internal_api;
 use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
-use nexus_db_model::HwBaseboardId;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
 use nexus_db_queries::db;
@@ -64,7 +62,6 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -124,7 +121,8 @@ impl InternalServer {
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
                 nexus_internal_api::latest_version(),
-            ),
+            )
+            .min_version(nexus_internal_api::oldest_version()),
         )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
@@ -243,6 +241,9 @@ impl Server {
                     omicron_common::api::VERSION_HEADER,
                     nexus_external_api::latest_version(),
                 )
+                // Reject requests for versions older than the oldest one that
+                // this server still supports.
+                .min_version(nexus_external_api::oldest_version())
                 // Since we don't have control over all clients to the external
                 // API, we allow the api-version header to not be specified
                 // (picking the latest version in that case). However, all
@@ -409,10 +410,7 @@ impl nexus_test_interface::NexusServer for Server {
         let opctx =
             internal_server.apictx.context.nexus.opctx_for_internal_api();
         let datastore = internal_server.apictx.context.nexus.datastore();
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        // We need to insert hw_baseboard_ids that match the fake hardware we
-        // use for our fake trust quorum configuration.
         let tq_members = BTreeSet::from([
             BaseboardId {
                 part_number: "_test_fake_tq_9adfa".into(),
@@ -427,22 +425,6 @@ impl nexus_test_interface::NexusServer for Server {
                 serial_number: "a3".into(),
             },
         ]);
-
-        let hw_baseboard_ids: Vec<_> = tq_members
-            .iter()
-            .cloned()
-            .map(|id| HwBaseboardId {
-                id: Uuid::new_v4(),
-                part_number: id.part_number,
-                serial_number: id.serial_number,
-            })
-            .collect();
-        use nexus_db_schema::schema::hw_baseboard_id::dsl;
-        diesel::insert_into(dsl::hw_baseboard_id)
-            .values(hw_baseboard_ids.clone())
-            .execute_async(&*conn)
-            .await
-            .unwrap();
 
         // In the real rack init handoff, the `rack_network_config` will contain
         // at least one configured port, and handoff will only complete

@@ -1786,7 +1786,7 @@ mod tests {
             .next()
             .expect("at least one sled");
         let first = sled_config.disks.first().unwrap().id;
-        let removed_disk = sled_config.disks.remove(&first).unwrap();
+        let removed_disk = sled_config.disks.remove(first).unwrap();
         eprintln!("removed disk {removed_disk:?}");
 
         let expected_notes = blueprint
@@ -2125,7 +2125,7 @@ mod tests {
                 .get_mut(&sled1)
                 .unwrap()
                 .zones
-                .get_mut(&zone1_id)
+                .get_mut(zone1_id)
                 .unwrap();
 
             match &mut zone1_config.zone_type {
@@ -2145,7 +2145,7 @@ mod tests {
                 .get_mut(&sled2)
                 .unwrap()
                 .zones
-                .get_mut(&zone2_id)
+                .get_mut(zone2_id)
                 .unwrap();
 
             match &mut zone2_config.zone_type {

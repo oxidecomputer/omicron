@@ -17,7 +17,8 @@ use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use omicron_uuid_kinds::{
-    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, OmicronZoneUuid, PhysicalDiskUuid, RackUuid,
+    ZpoolUuid,
 };
 use sled_agent_types::inventory::{
     InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
@@ -42,13 +43,14 @@ use uuid::Uuid;
 
 use crate::inventory::{
     CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
-    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
+    PhysicalDisk, PowerShelf, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
 pub struct CollectionDisplay<'a> {
     collection: &'a Collection,
     include_sps: CollectionDisplayIncludeSps,
+    include_racks: CollectionDisplayIncludeRacks,
     include_sleds: bool,
     include_orphaned_datasets: bool,
     include_clickhouse_keeper_membership: bool,
@@ -64,6 +66,7 @@ impl<'a> CollectionDisplay<'a> {
             collection,
             // Display all items by default.
             include_sps: CollectionDisplayIncludeSps::All,
+            include_racks: CollectionDisplayIncludeRacks::All,
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
@@ -81,6 +84,16 @@ impl<'a> CollectionDisplay<'a> {
         include_sps: CollectionDisplayIncludeSps,
     ) -> &mut Self {
         self.include_sps = include_sps;
+        self
+    }
+
+    /// Control which racks are displayed (defaults to
+    /// [`CollectionDisplayIncludeRacks::All`]).
+    pub fn include_racks(
+        &mut self,
+        include_racks: CollectionDisplayIncludeRacks,
+    ) -> &mut Self {
+        self.include_racks = include_racks;
         self
     }
 
@@ -150,6 +163,7 @@ impl<'a> CollectionDisplay<'a> {
     ) -> &mut Self {
         self.include_sps(filter.to_include_sps())
             .include_sleds(filter.include_sleds())
+            .include_racks(filter.to_include_racks())
             .include_orphaned_datasets(filter.include_orphaned_datasets())
             .include_clickhouse_keeper_membership(
                 filter.include_keeper_membership(),
@@ -167,11 +181,12 @@ impl fmt::Display for CollectionDisplay<'_> {
         display_devices(
             &self.collection,
             &self.include_sps,
+            &self.include_racks,
             &self.long_string_formatter,
             f,
         )?;
         if self.include_sleds {
-            display_sleds(&self.collection, f)?;
+            display_sleds(&self.collection, &self.include_racks, f)?;
         } else if self.include_orphaned_datasets {
             // display_sleds already includes orphaned datasets, hence "else if
             // self.include_orphaned_datasets" rather than just "if".
@@ -217,6 +232,11 @@ pub enum CollectionDisplayCliFilter {
         /// show only information about one SP
         serial: Option<String>,
     },
+    /// show all information collected from the rack(s) with the given UUID(s)
+    Racks {
+        #[arg(required = true, num_args = 1..)]
+        rack_ids: Vec<Uuid>,
+    },
     /// show orphaned datasets
     OrphanedDatasets,
 }
@@ -224,7 +244,7 @@ pub enum CollectionDisplayCliFilter {
 impl CollectionDisplayCliFilter {
     fn to_include_sps(&self) -> CollectionDisplayIncludeSps {
         match self {
-            Self::All | Self::Sp { serial: None } => {
+            Self::All | Self::Sp { serial: None } | Self::Racks { .. } => {
                 CollectionDisplayIncludeSps::All
             }
             Self::Sp { serial: Some(serial) } => {
@@ -234,10 +254,26 @@ impl CollectionDisplayCliFilter {
         }
     }
 
+    fn to_include_racks(&self) -> CollectionDisplayIncludeRacks {
+        match self {
+            Self::Racks { rack_ids } => CollectionDisplayIncludeRacks::OnlyIds(
+                rack_ids
+                    .iter()
+                    .copied()
+                    .map(RackUuid::from_untyped_uuid)
+                    .collect(),
+            ),
+            Self::All | Self::Sp { .. } | Self::OrphanedDatasets => {
+                CollectionDisplayIncludeRacks::All
+            }
+        }
+    }
+
     fn include_sleds(&self) -> bool {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -246,6 +282,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => true,
         }
     }
@@ -254,6 +291,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -262,6 +300,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -270,6 +309,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -278,6 +318,7 @@ impl CollectionDisplayCliFilter {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
+            Self::Racks { .. } => true,
             Self::OrphanedDatasets => false,
         }
     }
@@ -312,6 +353,26 @@ impl CollectionDisplayIncludeSps {
             CollectionDisplayIncludeSps::All => true,
             CollectionDisplayIncludeSps::Serial(s) => s == serial,
             CollectionDisplayIncludeSps::None => false,
+        }
+    }
+}
+
+/// Which racks within a collection to display.
+pub enum CollectionDisplayIncludeRacks {
+    /// Display baseboards in all racks.
+    All,
+
+    /// Display only baseboards in racks with the given IDs.
+    OnlyIds(BTreeSet<RackUuid>),
+}
+
+impl CollectionDisplayIncludeRacks {
+    fn include_rack(&self, rack_id: RackUuid) -> bool {
+        match self {
+            CollectionDisplayIncludeRacks::All => true,
+            CollectionDisplayIncludeRacks::OnlyIds(ids) => {
+                ids.contains(&rack_id)
+            }
         }
     }
 }
@@ -364,18 +425,22 @@ fn display_errors(
 fn display_devices(
     collection: &Collection,
     include_sps: &CollectionDisplayIncludeSps,
+    include_racks: &CollectionDisplayIncludeRacks,
     long_string_formatter: &LongStringFormatter,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
     // Assemble a list of baseboard ids, sorted first by device type (sled,
-    // switch, power), then by slot number.  This is the order in which we will
-    // print everything out.
+    // switch, power), then by rack ID and slot number.  This is the order in
+    // which we will print everything out.
     let mut sorted_baseboard_ids: Vec<_> =
         collection.sps.keys().cloned().collect();
     sorted_baseboard_ids.sort_by(|s1, s2| {
         let sp1 = collection.sps.get(s1).unwrap();
         let sp2 = collection.sps.get(s2).unwrap();
-        sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
+        sp1.sp_type
+            .cmp(&sp2.sp_type)
+            .then(sp1.rack_id.cmp(&sp2.rack_id))
+            .then(sp1.sp_slot.cmp(&sp2.sp_slot))
     });
 
     // Now print them.
@@ -383,6 +448,10 @@ fn display_devices(
         // This unwrap should not fail because the collection we're iterating
         // over came from the one we're looking into now.
         let sp = collection.sps.get(baseboard_id).unwrap();
+        if !include_racks.include_rack(sp.rack_id) {
+            continue;
+        }
+
         let baseboard = collection.baseboards.get(baseboard_id);
         let rot = collection.rots.get(baseboard_id);
 
@@ -418,6 +487,7 @@ fn display_devices(
 
         writeln!(f, "    power:    {:?}", sp.power_state)?;
         writeln!(f, "    revision: {}", sp.baseboard_revision)?;
+        writeln!(f, "    rack ID:  {}", sp.rack_id)?;
         write!(f, "    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot)?;
         writeln!(f, "")?;
         writeln!(
@@ -427,6 +497,13 @@ fn display_devices(
                 .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
             sp.source
         )?;
+
+        if sp.sp_type == SpType::Power {
+            display_power_shelf(
+                collection.power_shelves.get(&(&sp.rack_id, sp.sp_slot)),
+                f,
+            )?;
+        }
 
         if sp.sp_type == SpType::Sled {
             #[derive(Tabled)]
@@ -601,18 +678,114 @@ fn display_devices(
     Ok(())
 }
 
-fn display_sleds(
-    collection: &Collection,
+fn display_power_shelf(
+    shelf: Option<&PowerShelf>,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    use super::PsuIdentityResult;
+    use super::PsuSlot;
+
+    let Some(shelf) = shelf else {
+        return writeln!(f, "    PSUs: no information found");
+    };
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct PsuRow<'a> {
+        slot: PsuSlot,
+        presence: String,
+        device: &'a str,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_model: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_serial: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        primary_fw_rev: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        secondary_fw_rev: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_id: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_location: Option<&'a str>,
+        #[tabled(display_with = "option_str_or_dash")]
+        mfr_date: Option<&'a str>,
+    }
+
+    writeln!(f, "    PSUs:")?;
+    let mut errors = Vec::new();
+    let rows = shelf
+        .psus
+        .iter()
+        .map(|psu| {
+            let vpd = match psu.identity() {
+                PsuIdentityResult::Present(vpd) => Some(vpd),
+                PsuIdentityResult::Error(error) => {
+                    errors.push((psu.slot, error.to_owned()));
+                    None
+                }
+                PsuIdentityResult::NotPresent => None,
+            };
+            let fw_revs = vpd.and_then(|vpd| match vpd.firmware_revs() {
+                Ok(revs) => Some(revs),
+                Err(error) => {
+                    errors.push((psu.slot, format!("{error:#}")));
+                    None
+                }
+            });
+            PsuRow {
+                slot: psu.slot,
+                presence: format!("{:?}", psu.presence()),
+                device: psu.hubris_device_type.as_str(),
+                mfr_id: vpd.map(|vpd| vpd.mfr_id.as_str()),
+                mfr_model: vpd.map(|vpd| vpd.mfr_model.as_str()),
+                primary_fw_rev: fw_revs.as_ref().map(|revs| revs.primary),
+                secondary_fw_rev: fw_revs.as_ref().map(|revs| revs.secondary),
+                mfr_location: vpd.map(|vpd| vpd.mfr_location.as_str()),
+                mfr_date: vpd.map(|vpd| vpd.mfr_date.as_str()),
+                mfr_serial: vpd.map(|vpd| vpd.mfr_serial.as_str()),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    writeln!(f, "{}", textwrap::indent(&table, "        "))?;
+
+    if !errors.is_empty() {
+        writeln!(f, "    PSU VPD errors:")?;
+        for (slot, error) in errors {
+            writeln!(f, "      - {slot}: {error}")?;
+        }
+    }
+
+    Ok(())
+}
+
+fn display_sleds(
+    collection: &Collection,
+    include_racks: &CollectionDisplayIncludeRacks,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let mut sled_agent_sort_order: Vec<_> = collection
+        .sled_agents
+        .iter()
+        .map(|sa| (&sa.rack_id, &sa.sled_id))
+        .collect();
+    sled_agent_sort_order.sort();
+
     let mut f = f;
     writeln!(f, "SLED AGENTS")?;
-    for sled in &collection.sled_agents {
+    for (_rack_id, sled_id) in sled_agent_sort_order {
+        // Safe to unwrap since `sled_id` came from a map key right above here
+        let sled = &collection.sled_agents.get(sled_id).unwrap();
         let SledAgent {
             time_collected,
             source,
             sled_id,
             baseboard_id,
+            rack_id,
             sled_agent_address,
             sled_role,
             usable_hardware_threads,
@@ -632,6 +805,12 @@ fn display_sleds(
             fmd,
         } = sled;
 
+        // If we were asked to filter by rack ID, display the sled if and only
+        // if its rack ID is included by the filter:
+        if !include_racks.include_rack(*rack_id) {
+            continue;
+        }
+
         writeln!(
             f,
             "\nsled {} (role = {:?}, serial {})",
@@ -644,6 +823,8 @@ fn display_sleds(
         )?;
 
         let mut indented = IndentWriter::new("    ", f);
+
+        writeln!(indented, "rack ID:     {rack_id}",)?;
 
         writeln!(
             indented,
@@ -1494,5 +1675,103 @@ fn option_impl_display<T: fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
+    }
+}
+
+fn option_str_or_dash<T: AsRef<str>>(t: &Option<T>) -> &str {
+    match t {
+        Some(v) => v.as_ref(),
+        None => "-",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_power_shelf;
+    use crate::inventory::PowerShelf;
+    use crate::inventory::Psu;
+
+    use crate::inventory::PsuIdentity;
+    use crate::inventory::PsuSlot;
+    use crate::inventory::PsuState;
+    use crate::inventory::PsuStatus;
+    use chrono::DateTime;
+    use chrono::Utc;
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::RackUuid;
+    use sled_hardware_types::BaseboardId;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_power_shelf_inventory_display() {
+        fn identity(serial: &str, date: &str, fw_rev: &str) -> PsuIdentity {
+            PsuIdentity {
+                mfr_id: String::from("Murata-PS"),
+                mfr_model: String::from("MWOCP68-3600-D-RM"),
+                mfr_revision: fw_rev.to_owned(),
+                mfr_location: String::from("China"),
+                mfr_date: date.to_owned(),
+                mfr_serial: serial.to_owned(),
+            }
+        }
+
+        fn present(identity: Result<PsuIdentity, String>) -> Option<PsuState> {
+            Some(PsuState { status: PsuStatus::Present, identity })
+        }
+
+        let mut psus = IdOrdMap::with_capacity(6);
+        let values = [
+            (
+                PsuSlot::Psu0,
+                present(Ok(identity("LL2111Q9002T", "2111", "0762-0701-0000"))),
+            ),
+            // VPD read successfully, but its MFR_REVISION is not in the
+            // expected format, so firmware revisions could not be parsed.
+            (
+                PsuSlot::Psu1,
+                present(Ok(identity("LL2111Q9003T", "2111", "0762-0701"))),
+            ),
+            (
+                PsuSlot::Psu2,
+                present(Err(String::from(
+                    "test suite injected VPD read failure",
+                ))),
+            ),
+            (PsuSlot::Psu3, None),
+            (
+                PsuSlot::Psu4,
+                present(Ok(identity("LL2115Q1001T", "2115", "0762-0702-0000"))),
+            ),
+            (PsuSlot::Psu5, None),
+        ];
+        for (slot, state) in values {
+            psus.insert_unique(Psu {
+                time_collected: DateTime::<Utc>::MIN_UTC,
+                source: String::from("test MGS"),
+                slot,
+                hubris_device_type: String::from("mwocp68"),
+                state,
+            })
+            .expect("test PSU slots are unique");
+        }
+        let shelf = PowerShelf {
+            psc_baseboard_id: Arc::new(BaseboardId {
+                part_number: String::from("test-psc"),
+                serial_number: String::from("test-psc-serial"),
+            }),
+            rack_id: RackUuid::from_u128(
+                0xc19a698f_c6f9_4a17_ae30_20d711b8f7dc,
+            ),
+            slot: 0,
+            psus,
+        };
+        let mut output = String::new();
+        display_power_shelf(Some(&shelf), &mut output)
+            .expect("formatting test power shelf succeeds");
+
+        expectorate::assert_contents(
+            "output/inventory_power_shelf.txt",
+            &output,
+        );
     }
 }

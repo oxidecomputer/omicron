@@ -199,6 +199,7 @@ pub enum ComponentVpdConfig {
     Barcode(gw_vpd::Barcode),
     SledFanTray(Box<gw_vpd::SledFanTrayVpd>),
     Tmp11x(gw_vpd::Tmp11xVpd),
+    ReadError(gateway_messages::VpdError),
 }
 
 /// One PMBus block-read response for a simulated PMBus device's VPD.
@@ -422,7 +423,7 @@ pub struct Ereport {
     pub task_gen: u32,
     pub uptime: u64,
     #[serde(flatten)]
-    pub data: BTreeMap<String, serde_cbor::Value>,
+    pub data: BTreeMap<String, ciborium::Value>,
 }
 
 #[cfg(test)]

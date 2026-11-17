@@ -54,6 +54,7 @@ use nexus_types::deployment::OperatorNexusConfig;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::UpstreamNtpConfig;
@@ -556,6 +557,7 @@ pub struct BlueprintBuilder<'a> {
     nexus_generation: NexusGeneration,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    reflects_collection: ReflectsCollection,
 
     creator: String,
     operations: Vec<Operation>,
@@ -585,6 +587,7 @@ impl<'a> BlueprintBuilder<'a> {
             sleds: BTreeMap::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
@@ -608,9 +611,13 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Construct a new `BlueprintBuilder` based on a previous blueprint,
     /// starting with no changes from that state
+    ///
+    /// `reflects_collection` describes which inventory collection (if any)
+    /// the new blueprint reflects.  See [`ReflectsCollection`].
     pub fn new_based_on(
         log: &Logger,
         parent_blueprint: &'a Blueprint,
+        reflects_collection: ReflectsCollection,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -671,6 +678,7 @@ impl<'a> BlueprintBuilder<'a> {
             nexus_generation: parent_blueprint.nexus_generation,
             internal_dns_version: parent_blueprint.internal_dns_version,
             external_dns_version: parent_blueprint.external_dns_version,
+            reflects_collection,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -1015,6 +1023,7 @@ impl<'a> BlueprintBuilder<'a> {
             sleds,
             pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
+            reflects_collection: self.reflects_collection,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
@@ -2869,6 +2878,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2923,6 +2933,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
+            ReflectsCollection::Indeterminate,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -3082,6 +3093,7 @@ pub mod test {
         let mut blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -3118,6 +3130,7 @@ pub mod test {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
+            ReflectsCollection::Indeterminate,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -3152,6 +3165,7 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
+                ReflectsCollection::Indeterminate,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3256,6 +3270,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
+            ReflectsCollection::Indeterminate,
             "test",
             rng.next_planner_rng(),
         )
@@ -3309,6 +3324,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
+            ReflectsCollection::Indeterminate,
             "test",
             rng.next_planner_rng(),
         )
@@ -3347,6 +3363,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
+            ReflectsCollection::Indeterminate,
             "test",
             rng.next_planner_rng(),
         )
@@ -3385,6 +3402,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
+            ReflectsCollection::Indeterminate,
             "test",
             rng.next_planner_rng(),
         )
@@ -3507,6 +3525,7 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
+                ReflectsCollection::Indeterminate,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3540,6 +3559,7 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
+                ReflectsCollection::Indeterminate,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3596,6 +3616,7 @@ pub mod test {
             let builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
+                ReflectsCollection::Indeterminate,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3667,6 +3688,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
+            ReflectsCollection::Indeterminate,
             "test",
             rng.next_planner_rng(),
         )
@@ -3699,6 +3721,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
+            ReflectsCollection::Indeterminate,
             "test",
             rng.next_planner_rng(),
         )
@@ -3744,6 +3767,7 @@ pub mod test {
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             TEST_NAME,
             rng.next_planner_rng(),
         )

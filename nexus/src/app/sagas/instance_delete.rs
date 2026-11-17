@@ -282,6 +282,8 @@ mod tests {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams,
     };
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
     use uuid::Uuid;
@@ -293,11 +295,13 @@ mod tests {
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "my-disk";
 
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
+    async fn create_org_project_and_disk(
+        client: &ClientTestContext,
+    ) -> ProjectUuid {
         create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-        project.identity.id
+        ProjectUuid::from_untyped_uuid(project.identity.id)
     }
 
     async fn new_test_params(

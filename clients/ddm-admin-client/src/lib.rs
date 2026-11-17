@@ -20,6 +20,7 @@ use either::Either;
 use omicron_common::address::BOOTSTRAP_PREFIX;
 use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::DDMD_PORT;
+use omicron_common::http_client::internal_http_client_builder;
 use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -60,7 +61,7 @@ impl Client {
         let log =
             log.new(slog::o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr)));
 
-        let inner = reqwest::ClientBuilder::new()
+        let inner = internal_http_client_builder()
             .connect_timeout(dur)
             .timeout(dur)
             .build()?;
@@ -158,7 +159,9 @@ impl Client {
     pub async fn get_multicast_groups(
         &self,
     ) -> Result<Vec<MulticastRoute>, Error<types::Error>> {
-        self.inner.get_multicast_groups().await.map(|resp| resp.into_inner())
+        self.inner.get_multicast_groups().await.map(|resp| {
+            resp.into_inner().into_iter().map(MulticastRoute::from).collect()
+        })
     }
 
     /// Returns multicast origins that this DDM instance is advertising.

@@ -133,14 +133,34 @@ impl HardwareMonitor {
         // its monitor.
         self.check_latest_hardware_snapshot().await;
 
+        // If `sled_agent_started_rx` is dropped without ever sending us the
+        // "sled agent started" message, the bootstrap server has decided it
+        // will never happen. This should only happen if we've been expunged.
+        let mut is_sled_agent_started_rx_alive = true;
+
         loop {
             tokio::select! {
-                Ok(sled_agent) = &mut self.sled_agent_started_rx,
-                    if self.sled_agent.is_none() =>
+                result = &mut self.sled_agent_started_rx,
+                    if is_sled_agent_started_rx_alive =>
                 {
-                    info!(self.log, "Sled Agent Started");
-                    self.sled_agent = Some(sled_agent);
-                    self.check_latest_hardware_snapshot().await;
+                    match result {
+                        Ok(sled_agent) => {
+                            info!(self.log, "Sled Agent Started");
+                            self.sled_agent = Some(sled_agent);
+                            self.check_latest_hardware_snapshot().await;
+                        }
+                        Err(_) => {
+                            error!(
+                                self.log,
+                                "Sled Agent will never start - start channel \
+                                 dropped. This should only happen if the sled \
+                                 has been expunged.",
+                            );
+                        }
+                    }
+                    // This is a oneshot channel: whatever result we got, it's
+                    // done, and we must not poll it again.
+                    is_sled_agent_started_rx_alive = false;
                 }
                 Ok(service_manager) = &mut self.service_manager_ready_rx,
                     if self.service_manager.is_none() =>
@@ -256,11 +276,15 @@ impl HardwareMonitor {
     //
     // We use this on startup and any time the snapshot changes.
     async fn check_latest_hardware_snapshot(&mut self) {
+        // borrow_and_update must happen before notifying Nexus, so that if a
+        // hardware change happens after this point, changed() is fired and
+        // this method is re-run.
+        let snapshot = self.hardware_view_rx.borrow_and_update().clone();
+
         if let Some(sled_agent) = &self.sled_agent {
             sled_agent.notify_nexus_about_self(&self.log).await;
         }
 
-        let snapshot = self.hardware_view_rx.borrow_and_update().clone();
         info!(
             self.log, "Checking current full hardware snapshot";
             "snapshot" => ?snapshot,

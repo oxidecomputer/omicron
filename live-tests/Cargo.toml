@@ -32,6 +32,7 @@ nexus-types.workspace = true
 omicron-generation-kinds.workspace = true
 sled-agent-types.workspace = true
 omicron-common.workspace = true
+omicron-git-version.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
 reqwest.workspace = true

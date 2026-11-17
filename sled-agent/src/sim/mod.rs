@@ -20,10 +20,12 @@ mod upstairs;
 
 pub use config::{
     Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
-    TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
+    SledCpuFamily, TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
 };
 pub use server::{NexusRegistration, RssArgs, Server, run_standalone_server};
-pub use sled_agent::{SimLogEntry, SledAgent};
+pub use sled_agent::{
+    NextVmmRequest, PausedVmmRequest, SimLogEntry, SledAgent,
+};
 pub use storage::PantryServer;
 pub(crate) use storage::Storage;
 pub use upstairs::SimulatedUpstairs;

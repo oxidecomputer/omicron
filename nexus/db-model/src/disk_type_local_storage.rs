@@ -41,16 +41,17 @@ impl DiskTypeLocalStorage {
         disk_id: Uuid,
         size: external::ByteCount,
     ) -> Result<DiskTypeLocalStorage, external::ByteCountRangeError> {
-        // For zvols, there's an overhead that must be accounted for, and it
-        // empirically seems to be about 65M per 1G for volblocksize=4096.
-        // Multiple the disk size by something a little over this value.
-
+        // Account for the storage overhead of the raw zvol: 4 MiB per GiB.
+        // sled-agent sets the parent dataset's reservation and quota to the
+        // disk size plus this overhead. With the default (minimum) 8k
+        // volblocksize, the zvol's indirect blocks have been measured at about
+        // 2 MiB per GiB, so this leaves room for the metadata of the zvol and
+        // its parent dataset, and for variation in how well the indirect blocks
+        // compress.
         let one_gb = external::ByteCount::from_gibibytes_u32(1).to_bytes();
         let gbs = size.to_bytes() / one_gb;
         let overhead: u64 =
-            external::ByteCount::from_mebibytes_u32(70).to_bytes() * gbs;
-
-        // XXX revisit, tracked by oxidecomputer/omicron#9591
+            external::ByteCount::from_mebibytes_u32(4).to_bytes() * gbs;
 
         // Don't unwrap this - the size of this disk is a parameter set by an
         // API call, and we don't want to panic on out of range input.

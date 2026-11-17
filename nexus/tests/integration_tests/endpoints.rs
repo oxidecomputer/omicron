@@ -110,6 +110,7 @@ pub static DEMO_RACK_ADD_SLEDS_REQUEST: LazyLock<
         serial_number: "demo-serial".to_string(),
         part_number: "demo-part".to_string(),
     }]),
+    override_prechecks: rack::SledAddPrecheckOverrides::no_overrides_enabled(),
 });
 
 pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
@@ -153,6 +154,9 @@ pub static HARDWARE_SLED_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
+
+pub const MULTIRACK_RACKS_UNADOPTED_URL: &'static str =
+    "/v1/system/hardware/racks-unadopted";
 
 pub const SUPPORT_BUNDLES_URL: &'static str = "/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
@@ -870,6 +874,10 @@ pub static DEMO_CERTIFICATE_NAME: LazyLock<Name> =
 pub const DEMO_CERTIFICATES_URL: &'static str = "/v1/certificates";
 pub const DEMO_CERTIFICATE_URL: &'static str =
     "/v1/certificates/demo-certificate";
+pub const DEMO_SYSTEM_CERTIFICATES_URL: &'static str =
+    "/v1/system/certificates?silo=demo-silo";
+pub const DEMO_SYSTEM_CERTIFICATE_URL: &'static str =
+    "/v1/system/certificates/demo-certificate?silo=demo-silo";
 pub static DEMO_CERTIFICATE: LazyLock<CertificateChain> = LazyLock::new(|| {
     CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"))
 });
@@ -1523,6 +1531,21 @@ pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
     LazyLock::new(|| update::SetTargetReleaseParams {
         system_version: Version::new(0, 0, 0),
     });
+
+// Problems
+pub static PROBLEMS_URL: &'static str = "/v1/system/problems";
+pub static DEMO_PROBLEM_URL: &'static str =
+    "/v1/system/problems/001de000-7768-4000-8000-000000000001";
+pub static DEMO_PROBLEM_CAUSES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/causes"));
+pub static DEMO_PROBLEM_CONSEQUENCES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/consequences"));
+pub static DEMO_PROBLEM_IMPACTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/impacts"));
+pub static DEMO_PROBLEM_SUPPORT_BUNDLES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/support-bundles"));
+pub static DEMO_PROBLEM_ALERTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/alerts"));
 
 // Alerts
 pub static ALERTS_URL: &'static str = "/v1/alerts";
@@ -2987,6 +3010,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
+                url: &MULTIRACK_RACKS_UNADOPTED_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
                 url: "/v1/system/hardware/sleds",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -3333,6 +3362,29 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                 ],
             },
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_CERTIFICATES_URL,
+                // Like the SAML identity provider endpoints, these refer to a
+                // non-default Silo that unprivileged users can't see.
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_CERTIFICATE_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_CERTIFICATE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
             /* External Networking */
             VerifyEndpoint {
                 url: &DEMO_SWITCH_PORT_URL,
@@ -3575,6 +3627,49 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                             .unwrap(),
                     ),
                 ],
+            },
+            // Problems
+            VerifyEndpoint {
+                url: &PROBLEMS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_CAUSES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_CONSEQUENCES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_IMPACTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_SUPPORT_BUNDLES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_ALERTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             // Alerts
             VerifyEndpoint {

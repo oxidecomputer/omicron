@@ -29,7 +29,6 @@ use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
 use itertools::Either;
-use itertools::Itertools;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintMeasurements;
@@ -45,10 +44,12 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
+use nexus_types::deployment::planning_report::AddUpdateBlockedReason;
 use nexus_types::deployment::{
     NexusGenerationBumpWaitingOn, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
@@ -81,8 +82,6 @@ use std::collections::BTreeSet;
 use std::iter;
 use std::str::FromStr;
 use std::sync::Arc;
-use swrite::SWrite;
-use swrite::swriteln;
 
 pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
 pub(crate) use self::image_source::NoopConvertInfo;
@@ -192,6 +191,7 @@ impl<'a> Planner<'a> {
         let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
             input.parent_blueprint(),
+            ReflectsCollection::from(inventory),
             creator,
             rng,
         )?;
@@ -2101,7 +2101,7 @@ impl<'a> Planner<'a> {
     fn should_plan_add_or_update(
         &self,
         actions_by_sled: &BTreeMap<SledUuid, EnsureMupdateOverrideAction>,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<Vec<AddUpdateBlockedReason>, Error> {
         // We need to determine whether to also perform other actions like
         // updating or adding zones. We have to be careful here:
         //
@@ -2150,12 +2150,12 @@ impl<'a> Planner<'a> {
         if self.blueprint.target_release_minimum_generation()
             > self.input.tuf_repo().target_release_generation
         {
-            reasons.push(format!(
-                "current target release generation ({}) is lower than \
-                 minimum required by blueprint ({})",
-                self.input.tuf_repo().target_release_generation,
-                self.blueprint.target_release_minimum_generation(),
-            ));
+            reasons.push(
+                AddUpdateBlockedReason::TargetReleaseGenerationTooLow {
+                    current: self.input.tuf_repo().target_release_generation,
+                    minimum: self.blueprint.target_release_minimum_generation(),
+                },
+            );
         }
 
         // Condition 2 above.
@@ -2172,10 +2172,11 @@ impl<'a> Planner<'a> {
             }
 
             if !sleds_with_override.is_empty() {
-                reasons.push(format!(
-                    "sleds have remove mupdate override set in blueprint: {}",
-                    sleds_with_override.iter().join(", ")
-                ));
+                reasons.push(
+                    AddUpdateBlockedReason::SledsWithMupdateOverride {
+                        sled_ids: sleds_with_override,
+                    },
+                );
             }
         }
 
@@ -2202,10 +2203,11 @@ impl<'a> Planner<'a> {
                     })
                     .collect();
             if !sleds_with_mupdate_override_errors.is_empty() {
-                reasons.push(format!(
-                    "sleds have mupdate override errors: {}",
-                    sleds_with_mupdate_override_errors.iter().join(", ")
-                ));
+                reasons.push(
+                    AddUpdateBlockedReason::SledsWithMupdateOverrideErrors {
+                        sled_ids: sleds_with_mupdate_override_errors,
+                    },
+                );
             }
         }
 
@@ -2227,8 +2229,7 @@ impl<'a> Planner<'a> {
 
                 match self.blueprint.current_sled_measurements(sled_id)? {
                     BlueprintMeasurements::InstallDataset => {
-                        sleds_with_measurements_non_artifact
-                            .insert((sled_id, "install dataset"));
+                        sleds_with_measurements_non_artifact.insert(sled_id);
                     }
                     BlueprintMeasurements::Unknown => {
                         // We cannot consider this a hard error because
@@ -2264,37 +2265,20 @@ impl<'a> Planner<'a> {
             }
 
             if !sleds_with_zone_non_artifact.is_empty() {
-                let mut reason =
-                    "sleds have deployment units with image sources \
-                     not set to Artifact:\n"
-                        .to_owned();
-                for (sled_id, zones_with_non_artifact) in
-                    &sleds_with_zone_non_artifact
-                {
-                    swriteln!(
-                        reason,
-                        "- sled {sled_id}: {} {}",
-                        zones_with_non_artifact.len(),
-                        if zones_with_non_artifact.len() == 1 {
-                            "zone"
-                        } else {
-                            "zones"
-                        }
-                    );
-                }
-                reasons.push(reason);
+                reasons.push(AddUpdateBlockedReason::ZonesNotFromArtifacts {
+                    zone_counts_by_sled: sleds_with_zone_non_artifact
+                        .iter()
+                        .map(|(sled_id, zones)| (*sled_id, zones.len()))
+                        .collect(),
+                });
             }
 
             if !sleds_with_measurements_non_artifact.is_empty() {
-                let mut reason = "sleds have measurements with image sources \
-                     not set to Artifact:\n"
-                    .to_owned();
-
-                for (sled_id, which) in &sleds_with_measurements_non_artifact {
-                    swriteln!(reason, "- sled {sled_id} set to {which}");
-                }
-
-                reasons.push(reason);
+                reasons.push(
+                    AddUpdateBlockedReason::MeasurementsNotFromArtifacts {
+                        sled_ids: sleds_with_measurements_non_artifact,
+                    },
+                );
             }
         }
 

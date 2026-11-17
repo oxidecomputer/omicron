@@ -309,7 +309,7 @@ impl NoopConvertInfo {
                 ))
             }
             Self::GlobalEligible { sleds } => {
-                let Some(sled_info) = sleds.get_mut(&sled_id) else {
+                let Some(sled_info) = sleds.get_mut(sled_id) else {
                     return Err(Error::Planner(anyhow!(
                         "tried to get noop convert zone info \
                          for unknown sled {sled_id}"

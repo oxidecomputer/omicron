@@ -36,6 +36,7 @@ pub async fn read_and_assemble(
         bgp_configs,
         infra_blocks,
         bfd_sessions,
+        bootstore_generation,
     } = datastore.switch_config_read(opctx).await?;
 
     // Each `(switch, BGP config)` association a peer makes.
@@ -129,6 +130,7 @@ pub async fn read_and_assemble(
         infra_ip_first,
         infra_ip_last,
         bfd,
+        bootstore_generation,
     ))
 }
 
@@ -148,6 +150,7 @@ pub fn assemble(
     infra_ip_first: IpAddr,
     infra_ip_last: IpAddr,
     bfd: Vec<BfdPeerConfig>,
+    bootstore_generation: Option<i64>,
 ) -> RackNetworkConfigInput {
     // Collapse the per-switch BGP associations into one `SwitchBgpConfig` per
     // switch, flagging conflicting entries.
@@ -165,6 +168,7 @@ pub fn assemble(
         infra_ip_first,
         infra_ip_last,
         bfd,
+        bootstore_generation,
     }
 }
 

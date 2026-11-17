@@ -41,6 +41,7 @@ use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
     MulticastGroupMember,
 };
+use nexus_types::internal_api::params::InstanceMigrateDestination;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use nexus_types_versions::latest::instance::Instance;
@@ -844,7 +845,11 @@ async fn test_multicast_migration_scenarios(
     let migrate_url = format!("/instances/{instance1_id}/migrate");
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id: target_sled }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById {
+                    dst_sled_id: target_sled,
+                },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -917,7 +922,7 @@ async fn test_multicast_migration_scenarios(
         .await
         .expect("switch should have the external group")
         .into_inner();
-    let delete_tag: dpd_types::MulticastTag = match removed_response {
+    let delete_tag = match removed_response {
         dpd_types::MulticastGroupResponse::External { tag, .. } => {
             tag.parse().expect("DB multicast tag should be valid for DPD")
         }
@@ -1050,7 +1055,7 @@ async fn test_multicast_migration_scenarios(
 
         // TODO: assert the source sled no longer holds a multicast
         // subscription for the old propolis_id. On real hardware,
-        // VMM teardown (release_opte_ports -> PortTicket::release_inner)
+        // VMM teardown (delete_opte_ports -> PortManager::remove_port)
         // clears it. The sim does not model per-propolis cleanup on
         // unregister for any of the networking maps (external_ips,
         // attached_subnets, multicast_groups).
@@ -1122,7 +1127,11 @@ async fn test_multicast_migration_scenarios(
             let url = format!("/instances/{id}/migrate");
             NexusRequest::new(
                 RequestBuilder::new(lockstep_client, Method::POST, &url)
-                    .body(Some(&InstanceMigrateRequest { dst_sled_id: target }))
+                    .body(Some(&InstanceMigrateRequest {
+                        destination: InstanceMigrateDestination::ById {
+                            dst_sled_id: target,
+                        },
+                    }))
                     .expect_status(Some(StatusCode::OK)),
             )
             .authn_as(AuthnMode::PrivilegedUser)

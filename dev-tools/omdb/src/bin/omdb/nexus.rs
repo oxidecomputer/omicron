@@ -61,9 +61,11 @@ use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintPrunerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::CapacityMetricsStatus;
 use nexus_types::internal_api::background::DatasetRendezvousOutcome;
 use nexus_types::internal_api::background::DatasetRendezvousStats;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
+use nexus_types::internal_api::background::DendriteSubnetDetails;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::FmConfigLoadStatus;
@@ -89,6 +91,7 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousOutcome;
 use nexus_types::internal_api::background::SledBlueprintAvailabilityRendezvousStats;
+use nexus_types::internal_api::background::SledSubnetDetails;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
@@ -100,6 +103,8 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateDetails;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -1326,6 +1331,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "vmm_stop_for_update" => {
+            print_task_vmm_stop_for_update(details);
+        }
         "attached_subnet_manager" => {
             print_task_attached_subnet_manager_status(details);
         }
@@ -1370,6 +1378,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "instance_watcher" => {
             print_task_instance_watcher(details);
+        }
+        "capacity_metrics" => {
+            print_task_capacity_metrics(details);
         }
         "inventory_collection" => {
             print_task_inventory_collection(details);
@@ -1470,6 +1481,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "switch_port_config_manager" => {
             print_task_switch_port_settings_manager(details);
         }
+        "vmm_mark_stop_for_update" => {
+            print_task_vmm_mark_stop_for_update(details);
+        }
         _ => {
             println!(
                 "warning: unknown background task: {:?} \
@@ -1540,6 +1554,62 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
     };
 }
 
+fn print_task_vmm_stop_for_update(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::VmmStopForUpdateDetails;
+    use nexus_types::internal_api::background::VmmStopForUpdateStatus;
+
+    match serde_json::from_value::<VmmStopForUpdateStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(VmmStopForUpdateStatus::Disabled) => {
+            println!("    task explicitly disabled by config!");
+        }
+        Ok(VmmStopForUpdateStatus::Enabled(VmmStopForUpdateDetails {
+            vmms_stopped_by_sled,
+            vmms_failed_to_stop_by_sled,
+            error_messages,
+        })) => {
+            let total: usize =
+                vmms_stopped_by_sled.iter().map(|s| s.vmm_ids.len()).sum();
+            println!("    VMMs stopped for sled evacuation: {total} total");
+            for sled in vmms_stopped_by_sled {
+                println!(
+                    "      sled_id={} n_stopped={}",
+                    sled.sled_id,
+                    sled.vmm_ids.len()
+                );
+            }
+            if !vmms_failed_to_stop_by_sled.is_empty() {
+                let total_failed: usize = vmms_failed_to_stop_by_sled
+                    .iter()
+                    .map(|s| s.vmm_ids.len())
+                    .sum();
+                println!("    VMMs that failed to stop: {total_failed} total");
+                for sled in vmms_failed_to_stop_by_sled {
+                    println!(
+                        "      sled_id={} n_failed_to_stop={}",
+                        sled.sled_id,
+                        sled.vmm_ids.len()
+                    );
+                    for vmm in sled.vmm_ids {
+                        println!("        vmm_id={}", vmm);
+                    }
+                }
+            }
+
+            if !error_messages.is_empty() {
+                let total_err = error_messages.len();
+                println!("    Error messages: {total_err} total");
+                for error in error_messages {
+                    println!("      {error}");
+                }
+            }
+        }
+    };
+}
+
 fn print_task_blueprint_planner(details: &serde_json::Value) {
     let status =
         match serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
@@ -1556,6 +1626,12 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
     match status {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
+        }
+        BlueprintPlannerStatus::ConfigNotYetLoaded => {
+            println!(
+                "    blueprint planning skipped because the reconfigurator \
+                 config has not been loaded yet"
+            );
         }
         BlueprintPlannerStatus::LimitReached { limit, report } => {
             println!(
@@ -2262,6 +2338,18 @@ fn print_task_instance_updater(details: &serde_json::Value) {
     println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
 }
 
+fn print_task_capacity_metrics(details: &serde_json::Value) {
+    match serde_json::from_value::<CapacityMetricsStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {error:?}: {details:?}",
+        ),
+        Ok(status) => {
+            println!("    silo samples: {}", status.silo_samples);
+            println!("    project samples: {}", status.project_samples);
+        }
+    }
+}
+
 fn print_task_instance_watcher(details: &serde_json::Value) {
     #[derive(Deserialize)]
     struct TaskSuccess {
@@ -2566,42 +2654,79 @@ fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(AttachedSubnetManagerStatus { db_error, dendrite, sled }) => {
-            if let Some(err) = db_error {
-                println!(
+        Ok(status) => {
+            print!("{}", AttachedSubnetManagerStatusDisplay(&status));
+        }
+    };
+}
+
+struct AttachedSubnetManagerStatusDisplay<'a>(&'a AttachedSubnetManagerStatus);
+
+impl std::fmt::Display for AttachedSubnetManagerStatusDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (dendrite, sled) = match self.0 {
+            AttachedSubnetManagerStatus::DatabaseError { error } => {
+                writeln!(
+                    f,
                     "  error accessing database to list attached subnets:"
-                );
-                println!("    {err}");
+                )?;
+                writeln!(f, "    {error}")?;
+                return Ok(());
             }
-            if dendrite.is_empty() {
-                println!("   no dendrite instances found");
-            } else {
-                for (switch_slot, details) in dendrite.iter() {
-                    println!("   dendrite instance on switch {switch_slot:?}");
-                    println!(
-                        "     n_subnets_removed={}",
-                        details.n_subnets_removed
-                    );
-                    println!(
-                        "     n_subnets_added={}",
-                        details.n_subnets_added
-                    );
-                    println!(
-                        "     n_subnets_total={}",
-                        details.n_total_subnets
-                    );
-                }
+            AttachedSubnetManagerStatus::Listed { dendrite, sled } => {
+                (dendrite, sled)
             }
-            if sled.is_empty() {
-                println!("   no sleds found");
-            } else {
-                for (sled_id, details) in sled.iter() {
-                    println!("   sled {sled_id}");
-                    println!("     n_subnets={}", details.n_subnets);
+        };
+        match dendrite {
+            Err(err) => {
+                writeln!(f, "  error looking up dendrite instances:")?;
+                writeln!(f, "    {err}")?;
+            }
+            Ok(dendrite) if dendrite.is_empty() => {
+                writeln!(f, "   no dendrite instances found")?;
+            }
+            Ok(dendrite) => {
+                // Sort the data by switch slot to ensure stable output.
+                let mut dendrite: Vec<_> = dendrite.iter().collect();
+                dendrite.sort_unstable_by_key(|(switch_slot, _)| **switch_slot);
+                for (switch_slot, details) in dendrite {
+                    let DendriteSubnetDetails {
+                        n_subnets_added,
+                        n_subnets_removed,
+                        n_total_subnets,
+                        errors,
+                    } = details;
+                    writeln!(
+                        f,
+                        "   dendrite instance on switch {switch_slot:?}"
+                    )?;
+                    writeln!(f, "     n_subnets_removed={n_subnets_removed}")?;
+                    writeln!(f, "     n_subnets_added={n_subnets_added}")?;
+                    writeln!(f, "     n_subnets_total={n_total_subnets}")?;
+                    writeln!(f, "     n_errors={}", errors.len())?;
+                    for error in errors {
+                        writeln!(f, "       {error}")?;
+                    }
                 }
             }
         }
-    };
+        if sled.is_empty() {
+            writeln!(f, "   no sleds found")?;
+        } else {
+            let mut sled: Vec<_> = sled.iter().collect();
+            sled.sort_unstable_by_key(|(sled_id, _)| **sled_id);
+            for (sled_id, details) in sled {
+                let SledSubnetDetails { n_subnets, errors } = details;
+                writeln!(f, "   sled {sled_id}")?;
+                writeln!(f, "     n_subnets={n_subnets}")?;
+                writeln!(f, "     n_errors={}", errors.len())?;
+                for error in errors {
+                    writeln!(f, "       {error}")?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
@@ -3019,6 +3144,43 @@ fn print_task_audit_log_cleanup(details: &serde_json::Value) {
     };
 }
 
+fn print_task_vmm_mark_stop_for_update(details: &serde_json::Value) {
+    match serde_json::from_value::<VmmMarkStopForUpdateStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(VmmMarkStopForUpdateStatus::Disabled) => {
+            println!("    task explicitly disabled by config!");
+        }
+        Ok(VmmMarkStopForUpdateStatus::Enabled(details)) => {
+            let VmmMarkStopForUpdateDetails {
+                vmms_marked,
+                batches,
+                batch_size,
+                error,
+            } = details;
+
+            const MARKED: &str = "VMMs marked to be stopped for an update:";
+            const BATCHES: &str = "  batches:";
+            const BATCH_SIZE: &str = "batch size:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[MARKED, BATCHES, BATCH_SIZE, ERROR]) + 1;
+
+            println!("    {BATCH_SIZE:<WIDTH$}{batch_size}");
+            println!("    {MARKED:<WIDTH$}{}", vmms_marked);
+            if batches > 0 {
+                println!("    {BATCHES:<WIDTH$}{batches}");
+            }
+            if let Some(error) = &error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
 fn print_task_audit_log_timeout_incomplete(details: &serde_json::Value) {
     match serde_json::from_value::<AuditLogTimeoutIncompleteStatus>(
         details.clone(),
@@ -3203,6 +3365,43 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                         println!("{}", textwrap::indent(&pretty, "        "));
                     }
                 }
+                if let Some(exceeded) = &collection.size_limit_exceeded {
+                    println!(
+                        "      Bundle reached its size limit, and collection \
+                         stopped early:"
+                    );
+                    println!(
+                        "        limit:            {}",
+                        exceeded.limit_bytes
+                    );
+                    println!(
+                        "        collected:        {} bytes",
+                        exceeded.used_bytes
+                    );
+                    println!(
+                        "        reached at:       {}",
+                        exceeded.exceeded_at
+                    );
+                    for (title, items) in [
+                        (
+                            "files left out (would exceed the limit)",
+                            exceeded.refused_paths.iter().collect::<Vec<_>>(),
+                        ),
+                        (
+                            "steps stopped before finishing",
+                            exceeded.incomplete_steps.iter().collect(),
+                        ),
+                        (
+                            "steps never started",
+                            exceeded.skipped_steps.iter().collect(),
+                        ),
+                    ] {
+                        println!("        {title}: {}", items.len());
+                        for item in items {
+                            println!("          {item}");
+                        }
+                    }
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
@@ -3328,7 +3527,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
         "globs already reprocessed by another Nexus:";
-    const GLOB_ERRORS: &str = "globs that failed to be reprocessed";
+    const GLOB_ERRORS: &str = "globs that failed to be reprocessed:";
     const WIDTH: usize = const_max_len(&[
         DISPATCHED,
         NO_RECEIVERS,
@@ -3647,7 +3846,10 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                 "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
             );
         }
-        print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+        print!(
+            "{}",
+            EreporterStatusTotalsDisplay::new(sps.iter().map(|sp| &sp.status))
+        );
     }
 
     if !sps.is_empty() {
@@ -3661,8 +3863,9 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status, ignition_type } in &sps {
             println!(
-                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
-                status.ereports_received
+                "    - rack {}, {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} \
+                 ereports",
+                status.rack_id, status.ereports_received
             );
             println!("      ignition type: {ignition_type:?}",);
             println!(
@@ -3687,70 +3890,129 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     }
 }
 
-fn print_ereporter_status_totals<'status>(
-    statuses: impl Iterator<Item = &'status EreporterStatus>,
-) {
-    let mut total_received = 0;
-    let mut total_new = 0;
-    let mut total_reqs = 0;
-    let mut total_errors = 0;
-    let mut reporters_with_ereports = 0;
-    let mut reporters_without_ereports = 0;
-    let mut reporters_with_errors = 0;
-    let mut reporters_without_errors = 0;
+struct EreporterStatusTotalsDisplay {
+    total_received: usize,
+    total_new: usize,
+    total_reqs: usize,
+    total_errors: usize,
+    total_racks: usize,
+    total_reporters: usize,
+    reporters_with_ereports: usize,
+    reporters_without_ereports: usize,
+    reporters_with_errors: usize,
+    reporters_without_errors: usize,
+}
 
-    for &EreporterStatus {
-        ereports_received,
-        new_ereports,
-        requests,
-        ref errors,
-    } in statuses
-    {
-        total_received += ereports_received;
-        total_new += new_ereports;
-        total_reqs += requests;
-        total_errors += errors.len();
-        if ereports_received > 0 {
-            reporters_with_ereports += 1;
-        } else {
-            reporters_without_ereports += 1;
+impl EreporterStatusTotalsDisplay {
+    fn new<'a>(
+        statuses: impl IntoIterator<Item = &'a EreporterStatus>,
+    ) -> Self {
+        let mut racks = std::collections::HashSet::new();
+        let mut total_received = 0;
+        let mut total_new = 0;
+        let mut total_reqs = 0;
+        let mut total_errors = 0;
+        let mut reporters_with_ereports = 0;
+        let mut reporters_without_ereports = 0;
+        let mut reporters_with_errors = 0;
+        let mut reporters_without_errors = 0;
+
+        for &EreporterStatus {
+            rack_id,
+            ereports_received,
+            new_ereports,
+            requests,
+            ref errors,
+        } in statuses
+        {
+            racks.insert(rack_id);
+            total_received += ereports_received;
+            total_new += new_ereports;
+            total_reqs += requests;
+            total_errors += errors.len();
+            if ereports_received > 0 {
+                reporters_with_ereports += 1;
+            } else {
+                reporters_without_ereports += 1;
+            }
+            if !errors.is_empty() {
+                reporters_with_errors += 1;
+            } else {
+                reporters_without_errors += 1;
+            }
         }
-        if !errors.is_empty() {
-            reporters_with_errors += 1;
-        } else {
-            reporters_without_errors += 1;
+        let total_reporters =
+            reporters_with_ereports + reporters_without_ereports;
+        let total_racks = racks.len();
+        Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
         }
     }
-    let total_reporters = reporters_with_ereports + reporters_without_ereports;
+}
 
-    use ereporter_status_fields::*;
-    println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
-    println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
-    println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
-    println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
-    println!(
-        "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
-        {reporters_without_errors:>NUM_WIDTH$}",
-    );
-    println!(
-        "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
-         {reporters_with_ereports:>NUM_WIDTH$}"
-    );
-    println!(
-        "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
-         {reporters_without_ereports:>NUM_WIDTH$}"
-    );
-    println!(
-        "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
-         {reporters_with_errors:>NUM_WIDTH$}"
-    );
+impl fmt::Display for EreporterStatusTotalsDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            total_received,
+            total_new,
+            total_reqs,
+            total_errors,
+            total_racks,
+            total_reporters,
+            reporters_with_ereports,
+            reporters_without_ereports,
+            reporters_with_errors,
+            reporters_without_errors,
+        } = self;
+        use ereporter_status_fields::*;
+
+        writeln!(f, "    {TOTAL_RACKS:<WIDTH$}{total_racks:>NUM_WIDTH$}")?;
+        writeln!(
+            f,
+            "    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}"
+        )?;
+        writeln!(f, "    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}")?;
+        writeln!(f, "    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}")?;
+        writeln!(f, "    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}")?;
+        writeln!(
+            f,
+            "    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
+            {reporters_without_errors:>NUM_WIDTH$}",
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
+             {reporters_with_ereports:>NUM_WIDTH$}"
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITHOUT_EREPORTS:<WIDTH$}\
+             {reporters_without_ereports:>NUM_WIDTH$}"
+        )?;
+        writeln!(
+            f,
+            "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
+             {reporters_with_errors:>NUM_WIDTH$}"
+        )?;
+        Ok(())
+    }
 }
 
 mod ereporter_status_fields {
-    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
-    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
-
+    pub const TOTAL_RACKS: &str = "total racks:";
     pub const EREPORTS_RECEIVED: &str = "total ereports received:";
     pub const NEW_EREPORTS: &str = "  new ereports ingested:";
     pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
@@ -3764,12 +4026,12 @@ mod ereporter_status_fields {
     pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
-        TOTAL_NEW_EREPORTS,
-        TOTAL_HTTP_REQUESTS,
+        TOTAL_RACKS,
         EREPORTS_RECEIVED,
         NEW_EREPORTS,
         HTTP_REQUESTS,
         ERRORS,
+        TOTAL_REPORTERS,
         REPORTERS_CONTACTED_SUCCESSFULLY,
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
@@ -3781,8 +4043,9 @@ mod ereporter_status_fields {
 }
 
 fn print_task_fm_analysis(details: &serde_json::Value) {
+    use nexus_types::fm::InventoryStale;
     use nexus_types::internal_api::background::fm_analysis::{
-        AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
+        AnalysisOutcome, AnalysisStatus, Outcome, PreparationFailure,
     };
 
     let FmAnalysisStatus {
@@ -3842,11 +4105,11 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             return;
         }
-        Outcome::WaitingForNewerInventory {
+        Outcome::WaitingForNewerInventory(InventoryStale {
             parent_inv_id,
             next_inv_min_time_started,
             input_inv_time_started,
-        } => {
+        }) => {
             const PARENT_INV: &str = "parent sitrep's inventory ID:";
             const MIN_STARTED: &str = "earliest start time for next inventory:";
             const LOADED_STARTED: &str = "loaded inventory started at:";
@@ -3866,10 +4129,26 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             println!("      {LOADED_STARTED:<WIDTH$}{loaded_started}");
             return;
         }
-        Outcome::PreparationError(error) => {
-            println!(
-                "{ERRICON} failed to prepare analysis inputs:\n    {error}"
-            );
+        Outcome::PreparationError { prep_status, failure } => {
+            match failure {
+                PreparationFailure::StepsFailed(errors) => {
+                    println!(
+                        "{ERRICON} failed to load analysis inputs \
+                         ({} steps failed):",
+                        errors.len()
+                    );
+                    for (step, error) in errors {
+                        println!("      > {step}: {error}");
+                    }
+                }
+                PreparationFailure::InvalidInputs(error) => {
+                    println!(
+                        "{ERRICON} failed to assemble analysis inputs:\n    \
+                         {error}"
+                    );
+                }
+            }
+            print!("{prep_status}");
             return;
         }
         Outcome::RanAnalysis { prep_status, analysis_status } => {
@@ -3948,13 +4227,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         println!("      count: {:>6}", capacity.count);
     }
 
-    let PreparationStatus { warnings } = prep_status;
-    if !warnings.is_empty() {
-        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
-        for error in warnings {
-            println!("      > {error}")
-        }
-    }
+    print!("{prep_status}");
     print_start_end_time(start_time, end_time, 4);
 }
 
@@ -5059,11 +5332,11 @@ async fn cmd_nexus_clickhouse_policy_get(
                     Defaulting to single-node deployment"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving clickhouse policy");
             }
         }
         Ok(policy) => {
-            println!("Clickhouse Policy: ");
+            println!("Clickhouse Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -5231,7 +5504,6 @@ async fn cmd_nexus_clickhouse_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving clickhouse policy");
             }
         }
@@ -5267,11 +5539,11 @@ async fn cmd_nexus_oximeter_read_policy_get(
                     Defaulting to reading from a single-node"
                 );
             } else {
-                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving oximeter read policy");
             }
         }
         Ok(policy) => {
-            println!("Oximeter Read Policy: ");
+            println!("Oximeter Read Policy:");
             println!("    version: {}", policy.version);
             println!("    creation time: {}", policy.time_created);
             match policy.mode {
@@ -5308,7 +5580,6 @@ async fn cmd_nexus_oximeter_read_policy_set(
                     time_created: now_db_precision(),
                 }
             } else {
-                eprintln!("error: {:#}", err);
                 return Err(err).context("retrieving oximeter read policy");
             }
         }
@@ -5356,7 +5627,7 @@ async fn cmd_nexus_sagas_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct SagaRow {
-        saga_id: Uuid,
+        saga_id: steno::SagaId,
         state: &'static str,
     }
     let rows = sagas.into_iter().map(|saga| SagaRow {
@@ -6138,8 +6409,68 @@ mod tests {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
     use omicron_uuid_kinds::AlertUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::WebhookDeliveryUuid;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_ereporter_status_totals_display() {
+        // Include reporters with and without ereports, and errors both with
+        // and without received ereports.
+        //
+        // Also have one of the reporters contain multiple errors to distinguish
+        // the error count from the count of affected reporters. And throw in
+        // two rack IDs to see how that part looks.
+        let rack1 = RackUuid::from_u128(0x6174c6ce_9bb1_4ce8_afc3_97fc1e6aa450);
+        let rack2 = RackUuid::from_u128(0xaaf68b01_1fa2_4665_ad2d_cf43f7c3f378);
+        let statuses = [
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 12,
+                new_ereports: 7,
+                requests: 4,
+                errors: vec![],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 3,
+                new_ereports: 2,
+                requests: 5,
+                errors: vec!["error one".into(), "error two".into()],
+            },
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 2,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: Vec::new(),
+            },
+            EreporterStatus {
+                rack_id: rack2,
+                requests: 1,
+                ereports_received: 0,
+                new_ereports: 0,
+                errors: vec!["error three".into()],
+            },
+            EreporterStatus {
+                rack_id: rack1,
+                ereports_received: 0,
+                new_ereports: 0,
+                requests: 0,
+                errors: Vec::new(),
+            },
+        ];
+        expectorate::assert_contents(
+            "tests/output/ereporter-status-totals.txt",
+            &EreporterStatusTotalsDisplay::new(&statuses).to_string(),
+        );
+        expectorate::assert_contents(
+            "tests/output/ereporter-status-totals-empty.txt",
+            &EreporterStatusTotalsDisplay::new([]).to_string(),
+        );
+    }
 
     #[test]
     fn test_webhook_delivery_totals_distinct_counts() {
@@ -6181,6 +6512,78 @@ mod tests {
                 failed: 3,
                 errors: 2,
             },
+        );
+    }
+
+    #[test]
+    fn test_attached_subnet_manager_status_display() {
+        // In this test:
+        //
+        // * There are two entries in `dendrite` to exercise
+        //   the sorting in AttachedSubnetManagerStatusDisplay.
+        // * Some entries have errors. These errors are displayed
+        //   in the snapshot.
+        let sled1 = SledUuid::from_u128(0x1b2b4c4f_42a5_4e3c_8b28_a1c1f2f3a0b1);
+        let sled2 = SledUuid::from_u128(0x9d8e2f61_7c0d_4b6a_9e5f_3a4b5c6d7e8f);
+        let status = AttachedSubnetManagerStatus::Listed {
+            dendrite: Ok(HashMap::from([
+                (
+                    SwitchSlot::Switch1,
+                    DendriteSubnetDetails {
+                        n_subnets_added: 0,
+                        n_subnets_removed: 1,
+                        n_total_subnets: 2,
+                        errors: vec!["failed to create subnet".to_string()],
+                    },
+                ),
+                (
+                    SwitchSlot::Switch0,
+                    DendriteSubnetDetails {
+                        n_subnets_added: 3,
+                        n_subnets_removed: 0,
+                        n_total_subnets: 3,
+                        errors: Vec::new(),
+                    },
+                ),
+            ])),
+            sled: HashMap::from([
+                (
+                    sled2,
+                    SledSubnetDetails {
+                        n_subnets: 1,
+                        errors: vec![
+                            "duplicate subnet".to_string(),
+                            "failed to send attached subnets".to_string(),
+                        ],
+                    },
+                ),
+                (sled1, SledSubnetDetails { n_subnets: 2, errors: Vec::new() }),
+            ]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status.txt",
+            &AttachedSubnetManagerStatusDisplay(&status).to_string(),
+        );
+
+        let db_error = AttachedSubnetManagerStatus::DatabaseError {
+            error: "database unavailable".to_string(),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-db-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&db_error).to_string(),
+        );
+
+        let dendrite_lookup_error = AttachedSubnetManagerStatus::Listed {
+            dendrite: Err("no dendrite instances in DNS".to_string()),
+            sled: HashMap::from([(
+                sled1,
+                SledSubnetDetails { n_subnets: 2, errors: Vec::new() },
+            )]),
+        };
+        expectorate::assert_contents(
+            "tests/output/attached-subnet-manager-status-dendrite-lookup-error.txt",
+            &AttachedSubnetManagerStatusDisplay(&dendrite_lookup_error)
+                .to_string(),
         );
     }
 

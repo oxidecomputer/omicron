@@ -13,13 +13,11 @@ use chrono::Utc;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_model::saga_types::Saga;
-use nexus_db_model::saga_types::SagaId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
@@ -32,6 +30,7 @@ use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::Zpool;
+use nexus_types::inventory::is_propolis_zone;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
@@ -50,6 +49,7 @@ use std::collections::BTreeSet;
 use std::error::Error as _;
 use std::iter;
 use std::sync::Arc;
+use steno::SagaId;
 use tokio::sync::watch;
 use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
@@ -217,20 +217,6 @@ impl UpdateContactSupportChecksInput {
             missing_sleds,
         }
     }
-}
-
-// String matching here because it is the most straightforward way to check
-// if a zone is a propolis zone or not. This way of identifying a zone is not
-// ideal but in this case it makes sense. This `contact_support` field will only
-// be in use until a proper FM implementation is in place. The only consequence
-// of this pattern matching failing (e.g. the propolis zone prefix changes and
-// is also no longer set by this constant) would be that the contact_support
-// field reports a false positive, but would have no further impact than that.
-//
-// This function should not be used for anything other than filtering propolis
-// zones out of the `enabled_smf_services_not_online_by_sled` field
-fn is_propolis_zone(zone: &str) -> bool {
-    zone.starts_with(PROPOLIS_ZONE_PREFIX)
 }
 
 /// Identifies a saga that has been running or unwinding for too long.
@@ -902,10 +888,12 @@ async fn component_version_counts(
 mod test {
     use super::*;
     use chrono::Utc;
+    use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
     use nexus_db_model::saga_types::Saga;
     use nexus_db_model::saga_types::SecId;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_test_utils::RACK_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -953,6 +941,7 @@ mod test {
             sled_role: SledRole::Gimlet,
             sled_agent_address: "[::1]:56792".parse().unwrap(),
             sled_id: SledUuid::new_v4(),
+            rack_id: RACK_UUID,
             usable_hardware_threads: 10,
             usable_physical_ram: ByteCount::from(1024 * 1024),
             cpu_family: SledCpuFamily::AmdMilan,
@@ -1077,7 +1066,7 @@ mod test {
     async fn insert_stuck_running_saga(cptestctx: &ControlPlaneTestContext) {
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let params = steno::SagaCreateParams {
-            id: steno::SagaId(Uuid::new_v4()),
+            id: steno::SagaId::new_v4(),
             name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
@@ -1092,7 +1081,7 @@ mod test {
     // that exercise `problems()` directly.
     fn fake_saga() -> Saga {
         let params = steno::SagaCreateParams {
-            id: steno::SagaId(saga_uuid()),
+            id: saga_id(),
             name: steno::SagaName::new("test stuck saga"),
             dag: serde_json::Value::Null,
             state: steno::SagaCachedState::Running,
@@ -1180,8 +1169,8 @@ mod test {
         ZpoolUuid::from_untyped_uuid(Uuid::from_u128(0xBBBB))
     }
 
-    fn saga_uuid() -> Uuid {
-        Uuid::from_u128(0xCCCC)
+    fn saga_id() -> SagaId {
+        SagaId::from_u128(0xCCCC)
     }
 
     // `Zpool.time_collected` is stamped by `CollectionBuilder::build` with the

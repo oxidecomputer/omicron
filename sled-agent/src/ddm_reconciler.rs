@@ -560,15 +560,34 @@ fn desired_multicast_origins(
             }
         };
 
-        desired.insert(MulticastOrigin {
+        let origin = match MulticastOrigin::new(
             overlay_group,
             underlay_group,
-            vni: Vni::DEFAULT_MULTICAST,
-            metric: 0,
-            source: None,
-        });
+            default_multicast_vni(),
+            None,
+        ) {
+            Ok(origin) => origin,
+            Err(err) => {
+                warn!(
+                    log, "skipping invalid multicast origin";
+                    "group" => %group,
+                    "underlay" => %underlay,
+                    InlineErrorChain::new(&err),
+                );
+                continue;
+            }
+        };
+
+        desired.insert(origin);
     }
     desired
+}
+
+fn default_multicast_vni() -> Vni {
+    Vni::new(u32::from(
+        omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
+    ))
+    .expect("DEFAULT_MULTICAST_VNI is within the 24-bit VNI range")
 }
 
 /// The set difference between desired and currently-originated multicast
@@ -598,7 +617,7 @@ fn multicast_origin_delta(
     underlay_by_overlay: &HashMap<IpAddr, Ipv6Addr>,
 ) -> MulticastOriginDelta {
     let m2p_pending = |origin: &MulticastOrigin| {
-        let overlay = origin.overlay_group.ip();
+        let overlay = origin.overlay_group().ip();
         subscribed.contains(&overlay)
             && !underlay_by_overlay.contains_key(&overlay)
     };
@@ -641,10 +660,10 @@ mod tests {
 
         assert_eq!(origins.len(), 1);
         let origin = origins.iter().next().unwrap();
-        assert_eq!(origin.overlay_group.ip(), group);
-        assert_eq!(origin.underlay_group.ip(), under);
-        assert_eq!(origin.source, None);
-        assert_eq!(origin.vni, Vni::DEFAULT_MULTICAST);
+        assert_eq!(origin.overlay_group().ip(), group);
+        assert_eq!(origin.underlay_group().ip(), under);
+        assert_eq!(origin.source(), None);
+        assert_eq!(origin.vni(), default_multicast_vni());
 
         logctx.cleanup_successful();
     }
@@ -664,7 +683,10 @@ mod tests {
         let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
 
         assert_eq!(origins.len(), 1);
-        assert_eq!(origins.iter().next().unwrap().overlay_group.ip(), mapped,);
+        assert_eq!(
+            origins.iter().next().unwrap().overlay_group().ip(),
+            mapped,
+        );
 
         logctx.cleanup_successful();
     }
@@ -704,14 +726,13 @@ mod tests {
     }
 
     fn origin(group: &str, under: &str) -> MulticastOrigin {
-        MulticastOrigin {
-            overlay_group: OverlayMulticast::new(overlay(group)).unwrap(),
-            underlay_group: UnderlayMulticastIpv6::new(underlay(under))
-                .unwrap(),
-            vni: Vni::DEFAULT_MULTICAST,
-            metric: 0,
-            source: None,
-        }
+        MulticastOrigin::new(
+            OverlayMulticast::new(overlay(group)).unwrap(),
+            UnderlayMulticastIpv6::new(underlay(under)).unwrap(),
+            default_multicast_vni(),
+            None,
+        )
+        .unwrap()
     }
 
     // A desired group that is not yet originated is advertised.

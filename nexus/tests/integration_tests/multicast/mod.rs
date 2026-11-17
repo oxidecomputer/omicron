@@ -54,7 +54,9 @@ use nexus_types::external_api::multicast::{
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types::identity::Resource;
-use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::internal_api::params::{
+    InstanceMigrateDestination, InstanceMigrateRequest,
+};
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
     ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
@@ -191,7 +193,13 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     object_create::<_, IpPoolRange>(client, &range_url, &asm_range).await;
 
     // Link the pool to the silo so it can be found by multicast group creation
-    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
 
     pool
 }
@@ -230,7 +238,13 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     object_create::<_, IpPoolRange>(client, &range_url, &ipv6_range).await;
 
     // Link the pool to the silo so it can be found by multicast group creation
-    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
 
     pool
 }
@@ -1459,7 +1473,11 @@ pub(crate) async fn migrate_instance_to(
     let migrate_url = format!("/instances/{instance_id}/migrate");
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id: target_sled }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById {
+                    dst_sled_id: target_sled,
+                },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1506,7 +1524,7 @@ pub(crate) async fn migrate_instance_to(
 pub(crate) async fn fetch_underlay_admin_ip(
     cptestctx: &ControlPlaneTestContext,
     external_multicast_ip: IpAddr,
-) -> dpd_client::types::UnderlayMulticastIpv6 {
+) -> mg_api_types::mrib::UnderlayMulticastIpv6 {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -1526,7 +1544,7 @@ pub(crate) async fn fetch_underlay_admin_ip(
 
     match underlay_group.multicast_ip.ip() {
         IpAddr::V6(v6) => {
-            dpd_client::types::UnderlayMulticastIpv6::try_from(v6)
+            mg_api_types::mrib::UnderlayMulticastIpv6::try_from(v6)
                 .expect("underlay IP should be admin-local IPv6")
         }
         IpAddr::V4(other) => {
@@ -1878,7 +1896,7 @@ pub(crate) async fn assert_mrib_route_sources(
                     });
                 }
                 for route in &group_routes {
-                    if route.underlay_group.segments()[0] != 0xff04 {
+                    if route.underlay_group.ip().segments()[0] != 0xff04 {
                         return Err(CondCheckError::NotYet {
                             status: Some(
                                 "underlay group not admin-scoped".to_string(),
@@ -1886,7 +1904,7 @@ pub(crate) async fn assert_mrib_route_sources(
                         });
                     }
                     if expected_underlay
-                        .is_some_and(|exp| exp != route.underlay_group)
+                        .is_some_and(|exp| exp != route.underlay_group.ip())
                     {
                         return Err(CondCheckError::NotYet {
                             status: Some(
@@ -1904,7 +1922,7 @@ pub(crate) async fn assert_mrib_route_sources(
                         });
                     }
                 }
-                Ok(group_routes.first().map(|r| r.underlay_group))
+                Ok(group_routes.first().map(|r| r.underlay_group.ip()))
             },
             &POLL_INTERVAL,
             &MULTICAST_OPERATION_TIMEOUT,
@@ -1954,16 +1972,9 @@ async fn assert_ddm_peers_view_reachable(cptestctx: &ControlPlaneTestContext) {
 }
 
 fn mrib_route_source(
-    key: &mg_admin_client::types::MulticastRouteKey,
+    key: &mg_api_types::mrib::MulticastRouteKey,
 ) -> Option<IpAddr> {
-    match key {
-        mg_admin_client::types::MulticastRouteKey::V4(k) => {
-            k.source.map(IpAddr::V4)
-        }
-        mg_admin_client::types::MulticastRouteKey::V6(k) => {
-            k.source.map(IpAddr::V6)
-        }
-    }
+    key.source()
 }
 
 /// Run a function `f` against every MGD client in the fixture, in `SwitchSlot`
@@ -1997,16 +2008,8 @@ async fn for_each_mgd<F, Fut>(
 }
 
 fn mrib_route_matches_group(
-    key: &mg_admin_client::types::MulticastRouteKey,
+    key: &mg_api_types::mrib::MulticastRouteKey,
     group_ip: IpAddr,
 ) -> bool {
-    match (key, group_ip) {
-        (mg_admin_client::types::MulticastRouteKey::V4(k), IpAddr::V4(ip)) => {
-            k.group == ip
-        }
-        (mg_admin_client::types::MulticastRouteKey::V6(k), IpAddr::V6(ip)) => {
-            k.group == ip
-        }
-        _ => false,
-    }
+    IpAddr::from(key.group()) == group_ip
 }

@@ -253,11 +253,11 @@ async fn test_multicast_group_member_operations(
                 dpd_types::MulticastGroupResponse::External {
                     group_ip,
                     ..
-                } => *group_ip,
+                } => group_ip.ip(),
                 dpd_types::MulticastGroupResponse::Underlay {
                     group_ip,
                     ..
-                } => IpAddr::V6(group_ip.0),
+                } => IpAddr::V6(group_ip.ip()),
             };
             ip == external_multicast_ip
                 && matches!(
@@ -279,7 +279,7 @@ async fn test_multicast_group_member_operations(
                     ..
                 } => {
                     // Check if it starts with ff04 (admin-local multicast)
-                    if group_ip.0.segments()[0] == 0xff04 {
+                    if group_ip.ip().segments()[0] == 0xff04 {
                         Some(group_ip.clone())
                     } else {
                         None
@@ -306,7 +306,7 @@ async fn test_multicast_group_member_operations(
         cptestctx,
         external_multicast_ip,
         &[None],
-        Some(underlay_ip.0),
+        Some(underlay_ip.ip()),
         "wildcard MRIB route once the member is joined",
     )
     .await;
@@ -1652,7 +1652,13 @@ async fn test_default_pool_on_implicit_creation(
         .await;
 
     // Link as default so it can be auto-discovered when joining by name
-    link_ip_pool(&client, "default-mcast-pool", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default-mcast-pool",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
 
     // Case: Joining when multicast pool exists - should succeed (pool auto-discovered)
     multicast_group_attach(cptestctx, project_name, instance_name, group_name2)

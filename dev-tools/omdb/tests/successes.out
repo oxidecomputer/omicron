@@ -315,13 +315,13 @@ SP DETAILS: type "Power" slot 0
 
     COMPONENTS
 
-        NAME DESCRIPTION DEVICE  PRESENCE SERIAL 
-        PSU0 PSU 0 MCU   mwocp68 Present  None   
-        PSU1 PSU 1 MCU   mwocp68 Present  None   
-        PSU2 PSU 2 MCU   mwocp68 Present  None   
-        PSU3 PSU 3 MCU   mwocp68 Present  None   
-        PSU4 PSU 4 MCU   mwocp68 Present  None   
-        PSU5 PSU 5 MCU   mwocp68 Present  None   
+        NAME DESCRIPTION DEVICE  PRESENCE   SERIAL 
+        PSU0 PSU 0 MCU   mwocp68 Present    None   
+        PSU1 PSU 1 MCU   mwocp68 Present    None   
+        PSU2 PSU 2 MCU   mwocp68 NotPresent None   
+        PSU3 PSU 3 MCU   mwocp68 Present    None   
+        PSU4 PSU 4 MCU   mwocp68 Timeout    None   
+        PSU5 PSU 5 MCU   mwocp68 Present    None   
 
     CABOOSES: none found
 
@@ -426,6 +426,10 @@ task: "blueprint_pruner"
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
+
+
+task: "capacity_metrics"
+    periodically emits quota capacity metrics
 
 
 task: "crdb_node_id_collector"
@@ -627,6 +631,14 @@ task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
 
+task: "vmm_mark_stop_for_update"
+    marks VMMs on evacuating sleds as needing to be stopped for an update
+
+
+task: "vmm_stop_for_update"
+    stops VMMs that are marked to be stopped for a sled update
+
+
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
@@ -737,7 +749,8 @@ task: "attached_subnet_manager"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-   no dendrite instances found
+  error looking up dendrite instances:
+    proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
    no sleds found
 
 task: "audit_log_cleanup"
@@ -806,6 +819,13 @@ task: "blueprint_rendezvous"
         num_not_in_blueprint:                0
         num_decommissioned_not_in_blueprint: 0
 
+task: "capacity_metrics"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    silo samples: 0
+    project samples: 0
+
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -847,6 +867,15 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -856,10 +885,11 @@ task: "fm_config_loader"
     config last loaded at:       <REDACTED_TIMESTAMP>
       loaded by this activation: false
     current config:
-      source:                    default
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      source:                          default
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -913,9 +943,13 @@ task: "fm_sitrep_gc"
       batches:                                                                    1
     orphaned fm_ereport_in_case rows deleted:                                     0
       batches:                                                                    1
+    orphaned fm_fact_certificate rows deleted:                                    0
+      batches:                                                                    1
     orphaned fm_fact_physical_disk rows deleted:                                  0
       batches:                                                                    1
     orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_fact_smf_service rows deleted:                                    0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1
@@ -935,9 +969,10 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -957,6 +992,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -1154,6 +1190,7 @@ task: "sp_ereport_ingester"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     SPs found via ignition:       0
+    total racks:                  0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -1232,6 +1269,19 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
+    VMMs marked to be stopped for an update: 0
+
+task: "vmm_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs stopped for sled evacuation: 0 total
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1472,7 +1522,8 @@ task: "attached_subnet_manager"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-   no dendrite instances found
+  error looking up dendrite instances:
+    proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
    no sleds found
 
 task: "audit_log_cleanup"
@@ -1541,6 +1592,13 @@ task: "blueprint_rendezvous"
         num_not_in_blueprint:                0
         num_decommissioned_not_in_blueprint: 0
 
+task: "capacity_metrics"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    silo samples: 0
+    project samples: 0
+
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1582,6 +1640,15 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1591,10 +1658,11 @@ task: "fm_config_loader"
     config last loaded at:       <REDACTED_TIMESTAMP>
       loaded by this activation: false
     current config:
-      source:                    default
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      source:                          default
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1648,9 +1716,13 @@ task: "fm_sitrep_gc"
       batches:                                                                    1
     orphaned fm_ereport_in_case rows deleted:                                     0
       batches:                                                                    1
+    orphaned fm_fact_certificate rows deleted:                                    0
+      batches:                                                                    1
     orphaned fm_fact_physical_disk rows deleted:                                  0
       batches:                                                                    1
     orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_fact_smf_service rows deleted:                                    0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1
@@ -1670,9 +1742,10 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -1692,6 +1765,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -1889,6 +1963,7 @@ task: "sp_ereport_ingester"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     SPs found via ignition:       0
+    total racks:                  0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -1967,6 +2042,19 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
+    VMMs marked to be stopped for an update: 0
+
+task: "vmm_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs stopped for sled evacuation: 0 total
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -2177,6 +2265,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
@@ -2326,6 +2415,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
@@ -2394,6 +2484,15 @@ Reconfigurator config:
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "4294967295"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: no reconfigurator config with version 4294967295
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "update-status"]
 termination: Exited(0)
@@ -2590,10 +2689,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    default
-  analysis enabled:          true (default)
-  sitrep limit:              2500 (default)
-  history pruning threshold: 2000 (default)
+  source:                          default
+  analysis enabled:                true (default)
+  sitrep limit:                    2500 (default)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2604,9 +2704,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 1:
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2617,13 +2718,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    version 1
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 1
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       I am altering the config. Pray I do not alter it further.
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2634,9 +2736,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 2:
-  analysis enabled:          false (overriden)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                false (overriden)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2647,13 +2750,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    version 2
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 2
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       oops i altered it further
-  analysis enabled:          false (overriden)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                false (overriden)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2664,13 +2768,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration v1:
-  source:                    version 1
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 1
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       I am altering the config. Pray I do not alter it further.
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:

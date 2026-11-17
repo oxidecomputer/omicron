@@ -1,3 +1,16 @@
+# The base system version used to generate a TUF repository.
+#
+# This is parsed as a SemVer string and should only include a major, minor,
+# and patch number. Build information is appended to the string via the releng
+# tooling.
+#
+# Under current policy, each new release is a major version bump, and is
+# generally referred to only by the major version (e.g. 8.0.0 is referred
+# to as "v8", "version 8", or "release 8" to customers). The use of semantic
+# versioning is mostly to hedge for perhaps wanting something more granular in
+# the future.
+system_version = "24.0.0"
+
 # Helios should *not* be pinned except on release branches.
 #[helios]
 #commit = ""

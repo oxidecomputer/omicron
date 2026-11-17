@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::ErrorStatusCode;
+use dropshot::HttpError;
 use dropshot::HttpResponseError;
 use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
@@ -44,6 +45,17 @@ impl HttpResponseError for SpComponentResetError {
                 ErrorStatusCode::BAD_REQUEST
             }
             SpComponentResetError::Other { status, .. } => *status,
+        }
+    }
+}
+
+impl From<HttpError> for SpComponentResetError {
+    fn from(err: HttpError) -> Self {
+        Self::Other {
+            message: err.external_message,
+            error_code: err.error_code,
+            internal_message: err.internal_message,
+            status: err.status_code,
         }
     }
 }

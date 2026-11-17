@@ -6,7 +6,6 @@
 
 pub mod artifact;
 pub mod bootstore;
-pub mod debug;
 pub mod diagnostics;
 pub mod disk;
 pub mod early_networking;
@@ -14,5 +13,4 @@ pub mod instance;
 pub mod inventory;
 pub mod sled;
 pub mod support_bundle;
-pub mod uplink;
 pub mod zone_bundle;

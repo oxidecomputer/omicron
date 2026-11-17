@@ -244,7 +244,8 @@ pub struct ExternalMulticastGroup {
     /// - `None` or `0`: Default, no salt applied
     /// - `1..255`: Salt value used for collision avoidance
     pub underlay_salt: Option<SqlU8>,
-    /// Current state of the multicast group (RPW pattern).
+    /// Current state of the multicast group (tracked as part of the RPW).
+    ///
     /// See [MulticastGroupState] for possible values.
     pub state: MulticastGroupState,
 }

@@ -46,6 +46,7 @@ use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition::PathSpIgnitionCommand;
 use gateway_types::ignition::SpIgnitionInfo;
+use gateway_types::local::RackId;
 use gateway_types::rot::GetCfpaParams;
 use gateway_types::rot::GetRotBootInfoParams;
 use gateway_types::rot::RotCfpa;
@@ -523,13 +524,8 @@ impl GatewayApi for GatewayImpl {
             // in the SP (erroneously) rolling back the update. (In production
             // we always disallow this; it's a config option to support dev/test
             // environments that don't need this.)
-            if component == SpComponent::SP_ITSELF
-                && !apictx
-                    .mgmt_switch
-                    .allowed_to_reset_sp(sp_id)
-                    .map_err(HttpError::from)?
-            {
-                return Err(SpComponentResetError::ResetSpOfLocalSled);
+            if component == SpComponent::SP_ITSELF {
+                apictx.mgmt_switch.validate_sp_reset_is_allowed(sp_id)?;
             }
 
             sp.reset_component_prepare(component)
@@ -1247,6 +1243,25 @@ impl GatewayApi for GatewayImpl {
             )?;
             Ok(HttpResponseOk(ereport_types::Ereports { restart_id, reports }))
         };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn rack_id_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RackId>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            match apictx.rack_id.get() {
+                Some(&rack_id) => Ok(HttpResponseOk(RackId { rack_id })),
+                None => Err(HttpError::for_unavail(
+                    Some("RackIdNotSet".to_string()),
+                    "the rack UUID has not yet been set; perhaps RSS has not \
+                        run yet?"
+                        .to_string(),
+                )),
+            }
+        };
+
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 }

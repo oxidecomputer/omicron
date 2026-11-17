@@ -289,7 +289,8 @@ async fn create_nat_entry(
     let nat_target = dpd_client::types::NatTarget {
         inner_mac: dpd_client::types::MacAddr { a: entry.nic_mac.into_array() },
         internal_ip: entry.sled_underlay_ip,
-        vni: entry.vni.as_u32().into(),
+        vni: ddm_api_types::net::Vni::new(entry.vni.as_u32())
+            .expect("omicron VNIs are within the 24-bit range"),
     };
     match entry.target_ip {
         IpAddr::V4(ip) => client
@@ -360,8 +361,8 @@ impl TryFrom<dpd_client::types::Ipv4Nat> for NatEntry {
     fn try_from(
         value: dpd_client::types::Ipv4Nat,
     ) -> Result<Self, Self::Error> {
-        let vni = Vni::try_from(value.target.vni.0)
-            .map_err(|_| BadVni(value.target.vni.0))?;
+        let raw_vni = u32::from(value.target.vni);
+        let vni = Vni::try_from(raw_vni).map_err(|_| BadVni(raw_vni))?;
         Ok(Self {
             sled_underlay_ip: value.target.internal_ip,
             target_ip: value.external.into(),
@@ -379,8 +380,8 @@ impl TryFrom<dpd_client::types::Ipv6Nat> for NatEntry {
     fn try_from(
         value: dpd_client::types::Ipv6Nat,
     ) -> Result<Self, Self::Error> {
-        let vni = Vni::try_from(value.target.vni.0)
-            .map_err(|_| BadVni(value.target.vni.0))?;
+        let raw_vni = u32::from(value.target.vni);
+        let vni = Vni::try_from(raw_vni).map_err(|_| BadVni(raw_vni))?;
         Ok(Self {
             sled_underlay_ip: value.target.internal_ip,
             target_ip: value.external.into(),

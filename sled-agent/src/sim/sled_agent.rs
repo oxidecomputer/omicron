@@ -19,6 +19,7 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use anyhow::Context;
 use anyhow::bail;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
@@ -26,7 +27,6 @@ use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::{ByteCount, Error, ResourceType};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
@@ -51,7 +51,6 @@ use sled_agent_scrimlet_reconcilers::{
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskIdentity;
-use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::PortConfig;
@@ -67,7 +66,8 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
     InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
     InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronSledUpdateDisposition, SingleMeasurementInventory, ZpoolHealth,
+    OmicronSledUpdateDisposition, SingleMeasurementInventory,
+    SledRegistrationInfo, ZpoolHealth,
 };
 use sled_agent_types::multicast::{
     ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
@@ -78,12 +78,13 @@ use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -113,6 +114,28 @@ pub struct SledAgent {
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
     /// subnets attached to instances.
+    // TODO: entries in this map can currently be stale because:
+    //
+    // * We don't always clean up attached subnets at VMM unregister
+    //   time. instance_unregister cleans attached subnets up, but
+    //   sim_poke -> ready_to_destroy does not.
+    // * instance_register can fail after the VMM is registered,
+    //   which leaves it registered (with its entry) despite returning
+    //   an error.
+    //
+    // There are multiple data modeling and code defects here:
+    //
+    // * Invalid states are representable at all (attached_subnets
+    //   should not be a separate map).
+    // * Even if they're representable, these kinds of torn states
+    //   should not be externally visible (there should be a single
+    //   shared lock, or we should use the actor model).
+    // * instance_register (and other functions?) should be written
+    //   in a prepare-and-commit style, where all prerequisites are
+    //   checked first and then a second infallible section updates
+    //   all state.
+    //
+    // We should fix all of this at some point.
     pub attached_subnets:
         Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
     /// multicast group memberships, keyed by VMM (propolis).
@@ -120,7 +143,18 @@ pub struct SledAgent {
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
-    instance_ensure_state_error: Mutex<Option<Error>>,
+    /// Pending pauses for `vmm_register` requests, queued by
+    /// [`Self::pause_next_vmm_registration`].
+    vmm_register_pauses: VmmRequestPauseQueue,
+    /// Pending pauses for `vmm_put_state` requests, queued by
+    /// [`Self::pause_next_vmm_put_state`].
+    vmm_put_state_pauses: VmmRequestPauseQueue,
+    /// Pending pauses for `vmm_get_state` requests, queued by
+    /// [`Self::pause_next_vmm_get_state`].
+    vmm_get_state_pauses: VmmRequestPauseQueue,
+    /// Pending pauses for `vmm_unregister` requests, queued by
+    /// [`Self::pause_next_vmm_unregister`].
+    vmm_unregister_pauses: VmmRequestPauseQueue,
     /// Number of remaining local storage operation failures to inject.
     /// When > 0, local storage ensure/delete operations decrement this
     /// counter and return 503 Service Unavailable.
@@ -138,6 +172,216 @@ pub struct SledAgent {
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+}
+
+/// A queue of pending pauses for one of the simulated sled-agent's VMM
+/// endpoints.
+///
+/// Each time the endpoint receives a request, it pops the from the front of
+/// this queue until it encounters a requested pause for which the corresponding
+/// [`NextVmmRequest`] handle has not been dropped. It then signals to the test
+/// that a request has been received, and waits for the test to resume or fail
+/// the request before continuing. If there are no pauses in the queue, the
+/// request is allowed to complete normally.
+struct VmmRequestPauseQueue {
+    /// The name of the endpoint this queue corresponds to. This is used for
+    /// logging and panic messages.
+    endpoint: &'static str,
+    queue: Mutex<VecDeque<oneshot::Sender<PausedVmmRequest>>>,
+}
+
+impl VmmRequestPauseQueue {
+    fn new(endpoint: &'static str) -> Self {
+        Self { endpoint, queue: Mutex::new(VecDeque::new()) }
+    }
+
+    fn pause_next(&self) -> NextVmmRequest {
+        let (tx, rx) = oneshot::channel();
+        self.queue.lock().unwrap().push_back(tx);
+        NextVmmRequest { rx, endpoint: self.endpoint }
+    }
+
+    /// Called when a request for `propolis_id` is received. If there is a pause
+    /// in the queue for this endpoint, this method signals to the corresponding
+    /// [`NextVmmRequest`] handle that a request has been received, and waits
+    /// for the test to resume the request or inject an error before continuing.
+    /// If there are no pause requests in the queue, or the handles
+    /// corresponding to all queued pauses have been dropped, this method
+    /// returns immediately without waiting.
+    ///
+    /// # Returns
+    ///
+    /// This function returns `Ok(())` if the request has been unpaused and is
+    /// allowed to proceed normally, or `Err` if the test injected an error. If
+    /// this returns `Err`, the endpoint should return that error to the caller.
+    async fn hold_request(
+        &self,
+        log: &Logger,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), HttpError> {
+        let tx = {
+            let mut queue = self.queue.lock().unwrap();
+            loop {
+                let Some(tx) = queue.pop_front() else {
+                    // No pauses remain in the queue, continue handling the
+                    // request normally.
+                    return Ok(());
+                };
+                if !tx.is_closed() {
+                    // If the test is still holding the handle for this pause,
+                    // return it, otherwise, it has been dropped, so move on to
+                    // the next one.
+                    break tx;
+                }
+            }
+        };
+
+        info!(
+            log,
+            "pausing VMM request until resumed";
+            "endpoint" => self.endpoint,
+            "propolis_id" => %propolis_id,
+        );
+        let (resume_tx, resume_rx) = oneshot::channel();
+        if tx.send(PausedVmmRequest { propolis_id, resume_tx }).is_err() {
+            // The test dropped its handle between our checking it and sending
+            // the paused request, so there's nobody to resume it.
+            warn!(
+                log,
+                "paused VMM request handle dropped unexpectedly, resuming the \
+                 request";
+                "endpoint" => self.endpoint,
+                "propolis_id" => %propolis_id,
+            );
+            return Ok(());
+        }
+
+        match resume_rx.await {
+            Ok(Ok(())) => {
+                info!(
+                    log,
+                    "resuming paused VMM request";
+                    "endpoint" => self.endpoint,
+                    "propolis_id" => %propolis_id,
+                );
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                info!(
+                    log,
+                    "injecting error into paused VMM request";
+                    "endpoint" => self.endpoint,
+                    "propolis_id" => %propolis_id,
+                    "error" => %error,
+                );
+                Err(error)
+            }
+            // The test dropped the `PausedVmmRequest` without resuming or
+            // failing it. This probably means the test has already failed and
+            // is unwinding.
+            Err(_) => {
+                warn!(
+                    log,
+                    "paused VMM request handle dropped unexpectedly, resuming \
+                     the request";
+                    "endpoint" => self.endpoint,
+                    "propolis_id" => %propolis_id,
+                );
+                Ok(())
+            }
+        }
+    }
+}
+
+/// A handle to await the next request to one of the simulated sled-agent's VMM
+/// endpoints, returned by [`SledAgent::pause_next_vmm_registration`],
+/// [`SledAgent::pause_next_vmm_put_state`],
+/// [`SledAgent::pause_next_vmm_get_state`], or
+/// [`SledAgent::pause_next_vmm_unregister`].
+///
+/// Use [`Self::wait_for_request`] to wait for the request to arrive and take
+/// control of it. Dropping this handle before a request arrives cancels the
+/// pause.
+///
+/// Pauses may be queued before any request has been sent, and several may be
+/// queued for the same endpoint. Requests to an endpoint are matched to that
+/// endpoint's pauses in the order both were made, so the handle returned by
+/// the first call pauses the first request received, and so on. Each endpoint
+/// has its own queue.
+#[must_use = "this type does nothing unless `wait_for_request()` is called"]
+pub struct NextVmmRequest {
+    rx: oneshot::Receiver<PausedVmmRequest>,
+    endpoint: &'static str,
+}
+
+/// A request to one of the simulated sled-agent's VMM endpoints that has been
+/// paused. This handle is returned by awaiting
+/// [`NextVmmRequest::wait_for_request`], and the simulated sled-agent pauses
+/// the request for as long as the handle exists.
+///
+/// This lets a test act at a precise point in the middle of a control plane
+/// operation: after a request has been sent to the sled-agent, but before the
+/// sled-agent has acted on it or responded. The request remains paused until
+/// the test calls [`Self::resume`] or [`Self::fail`].
+///
+/// Dropping this without calling `resume` or `fail` unpauses the request as
+/// though `resume` had been called. However, this results in a warning, since a
+/// test which pauses a request _presumably_ wants to actually control when it
+/// is allowed to continue.
+#[must_use = "why would you pause the next VMM request if you don't want to \
+    control when it is unpaused explicitly?"]
+pub struct PausedVmmRequest {
+    propolis_id: PropolisUuid,
+    resume_tx: oneshot::Sender<Result<(), HttpError>>,
+}
+
+impl PausedVmmRequest {
+    /// Allows the paused request to resume and be handled normally.
+    pub fn resume(self) {
+        let _ = self.resume_tx.send(Ok(()));
+    }
+
+    /// Causes the paused request to fail with the provided error, without the
+    /// sled-agent acting on it.
+    pub fn fail(self, error: impl Into<HttpError>) {
+        let _ = self.resume_tx.send(Err(error.into()));
+    }
+
+    /// Returns the ID of the VMM that the paused request is for.
+    pub fn propolis_id(&self) -> PropolisUuid {
+        self.propolis_id
+    }
+}
+
+impl NextVmmRequest {
+    /// Waits for up to `timeout` for a request to be received by the simulated
+    /// sled-agent and be paused, returning a handle that controls when and how
+    /// the request completes.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if:
+    ///
+    /// - `timeout` elapses before a request is received, so that the test may
+    ///   fail in a timely manner if one is never sent.
+    /// - The simulated sled-agent task exits before a request is received.
+    pub async fn wait_for_request(self, timeout: Duration) -> PausedVmmRequest {
+        let endpoint = self.endpoint;
+        match tokio::time::timeout(timeout, self.rx).await {
+            Ok(Ok(paused)) => paused,
+            // If the oneshot receive fails, then that means the sender side of
+            // the channel was dropped, indicating the simulated sled-agent has
+            // terminated.
+            Ok(Err(_)) => panic!(
+                "simulated sled-agent exited before a `{endpoint}` request \
+                 was received"
+            ),
+            Err(_) => panic!(
+                "simulated sled-agent did not receive a `{endpoint}` request \
+                 within {timeout:?}",
+            ),
+        }
+    }
 }
 
 /// A synthetic log file injected into the simulated sled-agent by tests,
@@ -241,7 +485,10 @@ impl SledAgent {
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
-            instance_ensure_state_error: Mutex::new(None),
+            vmm_register_pauses: VmmRequestPauseQueue::new("vmm_register"),
+            vmm_put_state_pauses: VmmRequestPauseQueue::new("vmm_put_state"),
+            vmm_get_state_pauses: VmmRequestPauseQueue::new("vmm_get_state"),
+            vmm_unregister_pauses: VmmRequestPauseQueue::new("vmm_unregister"),
             local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
@@ -295,10 +542,7 @@ impl SledAgent {
     }
 
     /// Returns the current status of the scrimlet reconcilers.
-    pub fn scrimlet_reconcilers_status(
-        &self,
-    ) -> bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus
-    {
+    pub fn scrimlet_reconcilers_status(&self) -> ScrimletReconcilersStatus {
         self.scrimlet_reconcilers.status()
     }
 
@@ -307,14 +551,16 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, HttpError> {
+        self.vmm_register_pauses.hold_request(&self.log, propolis_id).await?;
+
         let InstanceEnsureBody {
             vmm_spec,
             local_config,
-            instance_id,
             migration_id,
             vmm_runtime,
+            instance_id: _,
+            propolis_addr: _,
             metadata,
-            ..
         } = instance;
         let spec = vmm_spec.0.clone();
         // respond with a fake 500 level failure if asked to ensure an instance
@@ -331,7 +577,7 @@ impl SledAgent {
         // sled-agent will also return a 503 if it has no config. We don't do
         // that here because sim-sled-agent never gets a config if it isn't
         // explicitly given one.
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             if let Some(config) = self.omicron_sled_config() {
                 match config.update_disposition {
                     OmicronSledUpdateDisposition::Available => (),
@@ -383,7 +629,7 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
+            if !self.vmms.contains_key(&propolis_id).await {
                 let metadata =
                     propolis_client::instance_spec::InstanceMetadata {
                         project_id: metadata.project_id,
@@ -441,10 +687,28 @@ impl SledAgent {
                 time_updated: chrono::Utc::now(),
             });
 
+        let newly_registered = !self.vmms.contains_key(&propolis_id).await;
+        // If this is a newly-registered VMM, track the attached subnets.
+        //
+        // Add to attached_subnets before calling sim_ensure so that a
+        // concurrent attached-subnet PUT/POST/DELETE (which only checks
+        // vmms.contains_key) can't be overwritten by this, and so a later `?`
+        // in this function can't cause a registered VMM with no
+        // attached-subnets entry.
+        //
+        // TODO: This should all become atomic. See the comment on
+        // `Self::attached_subnets`.
+        if newly_registered {
+            self.attached_subnets
+                .lock()
+                .unwrap()
+                .insert(propolis_id, local_config.attached_subnets);
+        }
+
         let instance_run_time_state = self
             .vmms
             .sim_ensure(
-                &propolis_id.into_untyped_uuid(),
+                &propolis_id,
                 SledVmmState {
                     vmm_state: vmm_runtime,
                     migration_in,
@@ -502,6 +766,20 @@ impl SledAgent {
         Ok(instance_run_time_state)
     }
 
+    /// Handles a `vmm_unregister` request.
+    ///
+    /// This is [`Self::instance_unregister`], except that the request may be
+    /// held by [`Self::pause_next_vmm_unregister`]. Tests that call
+    /// `instance_unregister` directly do not need to wait for pauses, so this
+    /// is a separate function.
+    pub(super) async fn handle_vmm_unregister_request(
+        self: &Arc<Self>,
+        propolis_id: PropolisUuid,
+    ) -> Result<VmmUnregisterResponse, HttpError> {
+        self.vmm_unregister_pauses.hold_request(&self.log, propolis_id).await?;
+        Ok(self.instance_unregister(propolis_id).await?)
+    }
+
     /// Forcibly unregisters an instance. To simulate the rude termination that
     /// this produces in the real sled agent, the instance's mock Propolis is
     /// not notified.
@@ -509,10 +787,7 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
     ) -> Result<VmmUnregisterResponse, Error> {
-        let instance = match self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
+        let instance = match self.vmms.sim_get_cloned_object(&propolis_id).await
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
@@ -525,7 +800,8 @@ impl SledAgent {
             updated_runtime: Some(instance.terminate()),
         };
 
-        self.vmms.sim_force_remove(propolis_id.into_untyped_uuid()).await;
+        self.vmms.sim_force_remove(propolis_id).await;
+        self.attached_subnets.lock().unwrap().remove(&propolis_id);
         Ok(response)
     }
 
@@ -535,11 +811,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
     ) -> Result<VmmPutStateResponse, HttpError> {
-        if let Some(e) =
-            self.instance_ensure_state_error.lock().unwrap().as_ref()
-        {
-            return Err(e.clone().into());
-        }
+        self.vmm_put_state_pauses.hold_request(&self.log, propolis_id).await?;
 
         let current =
             self.get_sim_instance(propolis_id).await?.current().clone();
@@ -561,11 +833,7 @@ impl SledAgent {
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         match vmms
-                            .sim_ensure(
-                                &propolis_id.into_untyped_uuid(),
-                                current,
-                                Some(state),
-                            )
+                            .sim_ensure(&propolis_id, current, Some(state))
                             .await
                         {
                             Ok(state) => {
@@ -597,10 +865,8 @@ impl SledAgent {
             )?;
         }
 
-        let new_state = self
-            .vmms
-            .sim_ensure(&propolis_id.into_untyped_uuid(), current, Some(state))
-            .await?;
+        let new_state =
+            self.vmms.sim_ensure(&propolis_id, current, Some(state)).await?;
 
         Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
@@ -611,20 +877,18 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<SimInstance, crate::sled_agent::Error> {
-        self.vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-            .map_err(|_| {
-                crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
-                )
-            })
+        self.vmms.sim_get_cloned_object(&propolis_id).await.map_err(|_| {
+            crate::sled_agent::Error::Instance(
+                crate::instance_manager::Error::NoSuchVmm(propolis_id),
+            )
+        })
     }
 
     pub async fn instance_get_state(
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<SledVmmState, HttpError> {
+        self.vmm_get_state_pauses.hold_request(&self.log, propolis_id).await?;
         Ok(self.get_sim_instance(propolis_id).await?.current())
     }
 
@@ -638,8 +902,42 @@ impl SledAgent {
         Ok(())
     }
 
-    pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
-        *self.instance_ensure_state_error.lock().unwrap() = error;
+    /// Pauses the next `vmm_register` request received by the sled-agent until
+    /// the test explicitly resumes or fails it.
+    ///
+    /// Call [`NextVmmRequest::wait_for_request`] on the returned handle to
+    /// wait for the request to arrive. See [`NextVmmRequest`] for more details.
+    pub fn pause_next_vmm_registration(&self) -> NextVmmRequest {
+        self.vmm_register_pauses.pause_next()
+    }
+
+    /// Pauses the next `vmm_put_state` request received by the sled-agent
+    /// until the test explicitly resumes or fails it.
+    ///
+    /// Call [`NextVmmRequest::wait_for_request`] on the returned handle to
+    /// wait for the request to arrive. See [`NextVmmRequest`] for more details.
+    pub fn pause_next_vmm_put_state(&self) -> NextVmmRequest {
+        self.vmm_put_state_pauses.pause_next()
+    }
+
+    /// Pauses the next `vmm_get_state` request received by the sled-agent
+    /// until the test explicitly resumes or fails it.
+    ///
+    /// Call [`NextVmmRequest::wait_for_request`] on the returned handle to
+    /// wait for the request to arrive. See [`NextVmmRequest`] for more details.
+    pub fn pause_next_vmm_get_state(&self) -> NextVmmRequest {
+        self.vmm_get_state_pauses.pause_next()
+    }
+
+    /// Pauses the next `vmm_unregister` request received by the sled-agent
+    /// until the test explicitly resumes or fails it.
+    ///
+    /// Direct calls to [`Self::instance_unregister`] are not paused.
+    ///
+    /// Call [`NextVmmRequest::wait_for_request`] on the returned handle to
+    /// wait for the request to arrive. See [`NextVmmRequest`] for more details.
+    pub fn pause_next_vmm_unregister(&self) -> NextVmmRequest {
+        self.vmm_unregister_pauses.pause_next()
     }
 
     /// Set the number of times local storage operations should fail with 503
@@ -654,7 +952,7 @@ impl SledAgent {
     }
 
     pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
-        let prev = self.local_storage_error_count.fetch_update(
+        let prev = self.local_storage_error_count.try_update(
             Ordering::Relaxed,
             Ordering::Relaxed,
             |n| {
@@ -678,15 +976,6 @@ impl SledAgent {
         Ok(())
     }
 
-    pub async fn disk_ensure(
-        self: &Arc<Self>,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        unimplemented!("Disk attachment not yet implemented");
-    }
-
     pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
         self.repo_depot.app_private()
     }
@@ -696,7 +985,7 @@ impl SledAgent {
     }
 
     pub async fn vmm_poke(&self, id: PropolisUuid, mode: PokeMode) {
-        self.vmms.sim_poke(id.into_untyped_uuid(), mode).await;
+        self.vmms.sim_poke(id, mode).await;
     }
 
     /// Adds a Physical Disk to the simulated sled agent.
@@ -874,7 +1163,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter IP state for VMM that's not registered",
             ));
@@ -909,7 +1198,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter IP state for VMM that's not registered",
             ));
@@ -928,7 +1217,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnets: AttachedSubnets,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -944,7 +1233,7 @@ impl SledAgent {
         &self,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -963,7 +1252,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnet: AttachedSubnet,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -980,7 +1269,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         subnet: IpNet,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter subnet state for VMM that's not registered",
             ));
@@ -997,7 +1286,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter multicast membership for VMM that's not registered",
             ));
@@ -1012,7 +1301,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+        if !self.vmms.contains_key(&propolis_id).await {
             return Err(Error::internal_error(
                 "can't alter multicast membership for VMM that's not registered",
             ));
@@ -1058,6 +1347,11 @@ impl SledAgent {
         let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
         Ok(addr)
+    }
+
+    /// Return the sled's registration identity.
+    pub fn sled_registration_info(&self) -> SledRegistrationInfo {
+        SledRegistrationInfo { sled_id: self.id, rack_id: self.config.rack_id }
     }
 
     pub async fn inventory(
@@ -1118,12 +1412,13 @@ impl SledAgent {
             sled_agent_address,
             sled_role: self.config.sled_role,
             baseboard_id: self.config.hardware.baseboard.clone().into(),
+            rack_id: self.config.rack_id,
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
                 self.config.hardware.physical_ram,
             )
             .context("usable_physical_ram")?,
-            cpu_family: self.config.hardware.cpu_family,
+            cpu_family: self.config.hardware.cpu_family.into(),
             reservoir_size: ByteCount::try_from(
                 self.config.hardware.reservoir_ram,
             )

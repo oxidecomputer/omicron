@@ -5,6 +5,7 @@
 //! Functions used for automated testing of command-line programs
 
 use std::env::temp_dir;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -16,6 +17,8 @@ use subprocess::Exec;
 use subprocess::ExitStatus;
 use subprocess::NullFile;
 use subprocess::Redirection;
+use swrite::SWrite as _;
+use swrite::swrite;
 
 // Standard exit codes
 pub const EXIT_SUCCESS: u32 = libc::EXIT_SUCCESS as u32;
@@ -119,6 +122,43 @@ pub fn temp_file_path(label: &str) -> PathBuf {
 /// found.
 pub fn error_for_enoent() -> String {
     io::Error::from_raw_os_error(libc::ENOENT).to_string()
+}
+
+const SNAPSHOT_SEPARATOR: &str =
+    "---------------------------------------------\n";
+const SNAPSHOT_TERMINATOR: &str =
+    "=============================================\n";
+
+#[derive(Clone, Debug, Default)]
+pub struct OutputSnapshot {
+    text: String,
+}
+
+impl OutputSnapshot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(
+        &mut self,
+        header: impl fmt::Display,
+        stdout: impl fmt::Display,
+        stderr: impl fmt::Display,
+    ) {
+        swrite!(
+            self.text,
+            "{header}\n{SNAPSHOT_SEPARATOR}stdout:\n{stdout}{SNAPSHOT_SEPARATOR}stderr:\n{stderr}{SNAPSHOT_TERMINATOR}"
+        );
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    #[track_caller]
+    pub fn assert_contents(&self, path: &str) {
+        expectorate::assert_contents(path, &self.text);
+    }
 }
 
 /// Redacts text from a string (usually stdout/stderr) that may change from
@@ -367,6 +407,16 @@ fn redact_basic(input: &str) -> String {
         .unwrap()
         .replace_all(&s, "<REDACTED_TIMESTAMP>")
         .to_string();
+    // HTTP Date headers contain timestamps in the following format:
+    // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Date
+    //
+    // Examples:
+    //   Fri, 02 Oct 2026 20:33:20 GMT
+    let s =
+        regex::Regex::new(r"(Mon|Tue|Wed|Thu|Fri|Sun|Sat), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT")
+            .unwrap()
+            .replace_all(&s, "<REDACTED_TIMESTAMP>")
+            .to_string();
 
     // Replace formatted durations.  These are pretty specific to the background
     // task output.

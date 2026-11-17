@@ -1123,7 +1123,12 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
             is_default: false,
@@ -1268,7 +1273,12 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
             is_default: true, // For default allocation
@@ -1422,7 +1432,7 @@ mod tests {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -1521,7 +1531,7 @@ mod tests {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -1629,7 +1639,7 @@ mod tests {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -1751,7 +1761,12 @@ mod tests {
             .expect("Should add range to pool");
 
         let link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
             is_default: false,
@@ -1857,7 +1872,12 @@ mod tests {
             .expect("Should add range to pool");
 
         let link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
             is_default: false,
@@ -1986,7 +2006,12 @@ mod tests {
             .expect("Should add range to pool");
 
         let link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
             is_default: false,
@@ -2630,7 +2655,12 @@ mod tests {
 
         // Link pool to silo as default
         let link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
             is_default: true,
@@ -2721,7 +2751,12 @@ mod tests {
             .expect("Should add ASM range to pool");
 
         let asm_link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: asm_ip_pool.id(),
             is_default: false,
@@ -2793,7 +2828,12 @@ mod tests {
             .expect("Should add SSM range to pool");
 
         let ssm_link = IncompleteIpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
+            resource_id: opctx
+                .authn
+                .silo_required()
+                .unwrap()
+                .id()
+                .into_untyped_uuid(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ssm_ip_pool.id(),
             is_default: false,
@@ -2897,7 +2937,7 @@ mod tests {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -3035,7 +3075,7 @@ mod tests {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore

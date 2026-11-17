@@ -17,7 +17,7 @@ use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zone::IPADM;
-use illumos_utils::zpool::ZpoolOrRamdisk;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -144,6 +144,7 @@ pub(crate) struct ProbeManagerInner {
 /// config and whether that config has been realized yet.
 struct RunningProbe {
     zone: RunningZone,
+    zpool: ZpoolName,
     /// The probe's network interface, fixed at provisioning. Retained so the
     /// reconciler can report a non-lossy `current` state. A `Zone` carries no
     /// information about its network devices, so reconstructing this from a
@@ -503,19 +504,7 @@ impl ProbeManagerInner {
             .running_probes
             .iter()
             .filter_map(|(id, probe)| {
-                let probe_pool = match probe.zone.root_zpool() {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
-                    ZpoolOrRamdisk::Ramdisk => {
-                        info!(
-                            self.log,
-                            "use_only_these_disks: removing probe on ramdisk";
-                            "id" => ?id,
-                        );
-                        return None;
-                    }
-                };
-
-                if !disks.contains(probe_pool) { Some(*id) } else { None }
+                if !disks.contains(&probe.zpool) { Some(*id) } else { None }
             })
             .collect::<Vec<_>>();
 
@@ -595,13 +584,14 @@ impl ProbeManagerInner {
         // joiner config carries it so `apply_joiner` can pin the probe's
         // multicast joins (IP_MULTICAST_IF / SSM membership) to its overlay
         // port.
-        let multicast_iface = port.0.ipv4_addr().copied();
+        let multicast_iface = port.ipv4_addr().copied();
 
+        let zpool = zone_root_path.pool();
         let installed_zone = ZoneBuilderFactory::new()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(zone_root_path)
+            .with_zone_root_path(zone_root_path.into_path())
             .with_file_source(&ramdisk_file_source("probe"))
             .with_zone_type("probe")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
@@ -639,6 +629,7 @@ impl ProbeManagerInner {
                         probe.id,
                         RunningProbe {
                             zone,
+                            zpool,
                             interface: nic.clone(),
                             external_ips: probe.external_ips.clone(),
                             joiner: JoinerConfig {
@@ -665,7 +656,7 @@ impl ProbeManagerInner {
         //
         // Teardown order matters: `stop` halts and removes the zone, tearing
         // down the VNIC layered over the `xde` device, and only then can
-        // `release_opte_ports` delete the `xde` cleanly. In the other order,
+        // `delete_opte_ports` delete the `xde` cleanly. In the other order,
         // the delete fails as busy while the VNIC is live and the port leaks,
         // holding the probe's MAC so every later reconcile fails `create_xde`
         // with `MacExists`, wedging the probe permanently.
@@ -706,6 +697,7 @@ impl ProbeManagerInner {
                         probe.id,
                         RunningProbe {
                             zone: running_zone,
+                            zpool,
                             interface: nic.clone(),
                             external_ips: probe.external_ips.clone(),
                             joiner: JoinerConfig {
@@ -723,7 +715,7 @@ impl ProbeManagerInner {
                     return Err(e.into());
                 }
             }
-            running_zone.release_opte_ports();
+            running_zone.delete_opte_ports();
             return Err(e.into());
         }
         info!(self.log, "started probe {}", probe.id);
@@ -773,6 +765,7 @@ impl ProbeManagerInner {
             probe.id,
             RunningProbe {
                 zone: running_zone,
+                zpool,
                 interface: nic.clone(),
                 external_ips: probe.external_ips.clone(),
                 joiner,
@@ -1212,9 +1205,6 @@ impl ProbeManagerInner {
                         error!(self.log, "delete probe link {}: {e}", l.name());
                     }
                 }
-
-                // Ask the sled-agent to stop tracking our datalinks, and then
-                // delete the OPTE ports.
                 match self.metrics_queue.untrack_zone_links(&running_probe.zone)
                 {
                     Ok(_) => debug!(
@@ -1267,7 +1257,7 @@ impl ProbeManagerInner {
                 // Consume the zone ID so the drop path does not spawn a
                 // redundant halt of the already-removed zone.
                 let _ = running_probe.zone.stop().await;
-                running_probe.zone.release_opte_ports();
+                running_probe.zone.delete_opte_ports();
                 true
             }
             None => {

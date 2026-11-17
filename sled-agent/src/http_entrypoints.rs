@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::sled_agent::SledAgent;
+use crate::bootstrap::RssAccessError;
 use crate::sled_agent::Error as SledAgentError;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
@@ -17,7 +18,6 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
@@ -40,7 +40,6 @@ use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
-use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::SledVmmState;
@@ -50,10 +49,15 @@ use sled_agent_types::instance::{
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo,
+};
 use sled_agent_types::multicast::{
     ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
     McastForwardingEntry,
+};
+use sled_agent_types::multirack::{
+    MultirackJoinCompleteResponse, MultirackJoinServiceStatus,
 };
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::rot::{
@@ -67,7 +71,9 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    TrustQuorumCoordinatorStatusResponse, TrustQuorumNetworkConfig,
+    TrustQuorumNetworkConfigResponse,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -76,10 +82,11 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use trust_quorum::CoordinatorStatusSnapshot;
 use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
-use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::status::{CommitStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::{
@@ -608,17 +615,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn sled_role_get_v1(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
-        let sa = rqctx.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                Ok(HttpResponseOk(sa.get_role()))
-            })
-            .await
-    }
-
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
@@ -788,29 +784,6 @@ impl SledAgentApi for SledAgentImpl {
             .instrument_dropshot_handler(&rqctx, async {
                 sa.vmm_leave_multicast_group(propolis_id, &membership).await?;
                 Ok(HttpResponseUpdatedNoContent())
-            })
-            .await
-    }
-
-    async fn disk_put(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        body: TypedBody<DiskEnsureBody>,
-    ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
-        let sa = rqctx.context();
-        let disk_id = path_params.into_inner().disk_id;
-        let body_args = body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                Ok(HttpResponseOk(
-                    sa.disk_ensure(
-                        disk_id,
-                        body_args.initial_runtime.clone(),
-                        body_args.target.clone(),
-                    )
-                    .await
-                    .map_err(|e| Error::from(e))?,
-                ))
             })
             .await
     }
@@ -1065,83 +1038,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
-        HttpError,
-    > {
-        // This endpoint has been removed, so we're forever pinned to returning
-        // a `v20::early_networking::EarlyNetworkConfigBody`. If a new version
-        // of that type is added, we'll need to update this code to convert from
-        // the version we get back from `deserialize_from_bootstore()` into the
-        // v20 version we need.
-        //
-        // Use shorter names so rustfmt doesn't give up on this function.
-        use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
-        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
-        use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
-        use v33::system_networking::SystemNetworkingConfig as BodyV33;
-        use v39::system_networking::SystemNetworkingConfig as BodyV39;
-        use v42::system_networking::SystemNetworkingConfig as BodyV42;
-        use v47::system_networking::SystemNetworkingConfig as BodyV47;
-        type LatestEnvelope = EarlyNetworkConfigEnvelope;
-
-        let sa = rqctx.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                let bs = sa.bootstore();
-
-                // It's a little awkward to create a new subscription
-                // (i.e., a new `watch::Receiver`) any time we receive this
-                // dropshot request, but this request is deprecated anyway so we
-                // don't expect it to be called in practice.
-                let config = bs.network_config_subscribe().borrow().clone();
-                let config = match config {
-                    Some(config) => {
-                        let latest_version_body =
-                            LatestEnvelope::deserialize_from_bootstore(&config)
-                                .and_then(|envelope| {
-                                    envelope.deserialize_body()
-                                })
-                                .map_err(|err| {
-                                    HttpError::for_internal_error(format!(
-                                        "failed to deserialize \
-                                         early network config: {}",
-                                        InlineErrorChain::new(&err),
-                                    ))
-                                })?;
-                        let body_v42 = BodyV42::try_from(BodyV47::from(
-                            latest_version_body,
-                        ))
-                        .map_err(|err| {
-                            HttpError::for_internal_error(format!(
-                                "failed to downconvert early network \
-                                         config: {err:#}"
-                            ))
-                        })?;
-                        let body = BodyV20::from(BodyV26::from(BodyV30::from(
-                            BodyV33::from(BodyV39::from(body_v42)),
-                        )));
-                        v20::early_networking::EarlyNetworkConfig {
-                            generation: config.generation,
-                            schema_version: BodyV20::SCHEMA_VERSION,
-                            body,
-                        }
-                    }
-                    None => {
-                        return Err(HttpError::for_unavail(
-                            None,
-                            "early network config does not exist yet".into(),
-                        ));
-                    }
-                };
-
-                Ok(HttpResponseOk(config))
-            })
-            .await
-    }
-
     async fn write_network_bootstore_config_v48(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
@@ -1322,31 +1218,6 @@ impl SledAgentApi for SledAgentImpl {
         )?;
 
         Ok(HttpResponseUpdatedNoContent())
-    }
-
-    // As explained in `sled-agent-api`, we must faithfully implement old
-    // versions of `write_network_bootstore_config()` _without_ upconverting the
-    // request into the latest bootstore `NetworkConfig` we understand.
-    async fn write_network_bootstore_config_v1(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        let config = body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                let bs = sa.bootstore();
-                bs.update_network_config(NetworkConfig::from(config))
-                    .await
-                    .map_err(|e| {
-                        HttpError::for_internal_error(format!(
-                            "failed to write updated config to boot store: {}",
-                            InlineErrorChain::new(&e)
-                        ))
-                    })?;
-                Ok(HttpResponseUpdatedNoContent())
-            })
-            .await
     }
 
     async fn sled_add(
@@ -1664,59 +1535,6 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        request_context: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-        HttpError,
-    > {
-        let sa = request_context.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&request_context, async {
-                // This API has been removed, but we still provide an endpoint for
-                // backwards compatibility. Only `omdb` ever called this endpoint, so we
-                // could probably just always return an error, but we can at least
-                // attempt to do something reasonable. We've removed this chicken switch
-                // and always attempt to destroy orphans, so we can just claim the
-                // chicken switch is always in that state.
-                let destroy_orphans = true;
-                Ok(HttpResponseOk(
-                    v1::debug::ChickenSwitchDestroyOrphanedDatasets {
-                        destroy_orphans,
-                    },
-                ))
-            })
-            .await
-    }
-
-    async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
-            body.into_inner();
-        sa.latencies()
-            .instrument_dropshot_handler(&request_context, async {
-                // This API has been removed, but we still provide an endpoint for
-                // backwards compatibility. Only `omdb` ever called this endpoint, so we
-                // could probably just always return an error, but we can at least
-                // attempt to do something reasonable. We've removed this chicken switch
-                // and always attempt to destroy orphans, so we can treat requests to
-                // destroy orphans as successful and attempts to disable it as an error.
-                if destroy_orphans {
-                    Ok(HttpResponseUpdatedNoContent())
-                } else {
-                    Err(HttpError::for_bad_request(
-                    None,
-                    "orphaned dataset destruction can no longer be disabled"
-                        .to_string(),
-                ))
-                }
-            })
-            .await
-    }
-
     async fn debug_operator_switch_zone_policy_get(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
@@ -1873,19 +1691,35 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<TrustQuorumCoordinatorStatusResponse>, HttpError>
+    {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                let status =
-                    sa.trust_quorum().coordinator_status().await.map_err(
-                        |e| {
-                            HttpError::for_internal_error(
-                                InlineErrorChain::new(&e).to_string(),
-                            )
-                        },
-                    )?;
-                Ok(HttpResponseOk(status))
+                let snapshot = sa
+                    .trust_quorum()
+                    .coordinator_status_snapshot()
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                let response = match snapshot {
+                    CoordinatorStatusSnapshot::Coordinating { status } => {
+                        TrustQuorumCoordinatorStatusResponse::Coordinating {
+                            status,
+                        }
+                    }
+                    CoordinatorStatusSnapshot::NotCoordinating {
+                        latest_config_epoch,
+                    } => {
+                        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
+                            latest_config_epoch,
+                        }
+                    }
+                };
+                Ok(HttpResponseOk(response))
             })
             .await
     }
@@ -2012,7 +1846,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn trust_quorum_network_config_get(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    ) -> Result<HttpResponseOk<TrustQuorumNetworkConfigResponse>, HttpError>
     {
         let sa = request_context.context();
         sa.latencies()
@@ -2023,7 +1857,9 @@ impl SledAgentApi for SledAgentImpl {
                             InlineErrorChain::new(&e).to_string(),
                         )
                     })?;
-                Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+                Ok(HttpResponseOk(TrustQuorumNetworkConfigResponse {
+                    config: config.map(TrustQuorumNetworkConfig::from),
+                }))
             })
             .await
     }
@@ -2163,6 +1999,91 @@ impl SledAgentApi for SledAgentImpl {
                     sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let attestation = rot.attest(nonce.into()).await?;
                 Ok(HttpResponseOk(attestation.into()))
+            })
+            .await
+    }
+
+    async fn multirack_join_complete(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinCompleteResponse>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let bootstore_generation = sa.complete_multirack_join().await?;
+                Ok(HttpResponseOk(MultirackJoinCompleteResponse {
+                    bootstore_generation,
+                }))
+            })
+            .await
+    }
+
+    async fn multirack_join_service_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceStatus>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.multirack_join_service_status();
+                let status = res.map_err(|err| match err {
+                    // Errors returned from multirack join should be a 500.
+                    RssAccessError::MultirackJoinTaskExitedUnexpectedly
+                    | RssAccessError::MultirackJoinFailed { .. }
+                    | RssAccessError::MultirackJoinPanicked => {
+                        HttpError::for_internal_error(err.to_string())
+                    }
+
+                    // RSS running/having run or Multirack join not started
+                    // should return a 404.
+                    //
+                    // We also return a 404 if the multirack join service has
+                    // completed. In this case Nexus will have already recorded
+                    // the results to CRDB, and so there is no real error here.
+                    // We no longer have the status to report anyway, and it
+                    // seems overly complicated to keep track of it and map it
+                    // to an option which the consumer would have to match on.
+                    // This is especially true since we expect the consumer to
+                    // be a background task that next time through will see the
+                    // value in the DB and not make another request.
+                    RssAccessError::MultirackJoinNotYetStarted
+                    | RssAccessError::StillInitializing
+                    | RssAccessError::InitializationFailed { .. }
+                    | RssAccessError::InitializationPanicked
+                    | RssAccessError::AlreadyInitialized
+                    | RssAccessError::MultirackJoinCompleted => {
+                        HttpError::for_not_found(
+                            None,
+                            "No multirack join service running".to_string(),
+                        )
+                    }
+
+                    // If we don't yet have the status available, but we will
+                    // soon we should return a 409.
+                    RssAccessError::MultirackJoinInProgress
+                    | RssAccessError::MembershipChangeNoLongerAllowed
+                    | RssAccessError::RackSubnetChangeNotAllowed
+                    | RssAccessError::MultirackJoinStatusNotYetAvailable
+                    | RssAccessError::MultirackJoinGenerationUnavailable
+                    | RssAccessError::MultirackJoinPendingConfigUpdate => {
+                        HttpError::for_client_error(
+                            Some(err.error_code().to_string()),
+                            dropshot::ClientErrorStatusCode::CONFLICT,
+                            err.to_string(),
+                        )
+                    }
+                })?;
+
+                Ok(HttpResponseOk(status))
+            })
+            .await
+    }
+
+    async fn sled_registration_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledRegistrationInfo>, HttpError> {
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.sled_registration_info()))
             })
             .await
     }

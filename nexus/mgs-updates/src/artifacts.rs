@@ -5,6 +5,7 @@
 //! Makes artifact contents available for use in updates
 
 use futures::TryStreamExt;
+use omicron_common::http_client::internal_http_client;
 use sha2::{Digest, Sha256};
 use slog::o;
 use std::sync::atomic::AtomicUsize;
@@ -91,7 +92,11 @@ impl ArtifactCache {
             let addr = addresses[idx % addresses.len()];
             let url = format!("http://{}", addr.address);
             let log = self.log.new(o!("repo_depot_url" => url.clone()));
-            Ok(repo_depot_client::Client::new(&url, log))
+            Ok(repo_depot_client::Client::new_with_client(
+                &url,
+                internal_http_client(),
+                log,
+            ))
         }
     }
 }

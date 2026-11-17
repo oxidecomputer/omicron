@@ -653,13 +653,14 @@ async fn test_ip_pool_silo_list_includes_non_discoverable(
     link_ip_pool(client, "p0", &silo_disc.id(), false).await;
 
     // The default silo is not discoverable
-    link_ip_pool(client, "p0", &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(client, "p0", &DEFAULT_SILO.id().into_untyped_uuid(), false)
+        .await;
 
     let silos_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(silos_p0.items.len(), 2);
     assert_eq!(
         silos_p0.items.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
-        BTreeSet::from([silo_disc.id(), DEFAULT_SILO.id()]),
+        BTreeSet::from([silo_disc.id(), DEFAULT_SILO.id().into_untyped_uuid()]),
     );
 }
 
@@ -1450,7 +1451,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 
     // associate pool with default silo, which is the privileged user's silo
     let params = IpPoolLinkSilo {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
+        silo: NameOrId::Id(DEFAULT_SILO.id().into_untyped_uuid()),
         is_default: true,
     };
     NexusRequest::objects_post(client, &ip_pool_silos_url, &params)

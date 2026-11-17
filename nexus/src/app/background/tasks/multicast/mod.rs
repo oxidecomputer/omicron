@@ -363,8 +363,6 @@ impl MulticastGroupReconciler {
             }
         };
 
-        // Create sled-agent client for OPTE subscriptions and
-        // M2P/forwarding propagation.
         let sled_client = MulticastSledClient::new(
             self.datastore.clone(),
             self.resolver.clone(),
@@ -437,7 +435,6 @@ impl MulticastGroupReconciler {
             }
         }
 
-        // Reconcile active groups
         if let Some(switch_zone_client) = &switch_zone_client {
             match self
                 .reconcile_active_groups(
@@ -459,7 +456,6 @@ impl MulticastGroupReconciler {
             status.skipped.push("reconcile_active_groups".to_string());
         }
 
-        // Process deleting groups
         if let Some(switch_zone_client) = &switch_zone_client {
             match self
                 .reconcile_deleting_groups(

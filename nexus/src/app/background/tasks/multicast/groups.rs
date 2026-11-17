@@ -59,19 +59,20 @@
 //! ### DELETING State Transitions
 //! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
 //! |-----------|-------------------------------|-------------------|--------|------------|
-//! | 1 | Success | Success | Delete DB row | (row removed) |
+//! | 1 | Success | Success | Delete DB row | N/A (row removed) |
 //! | 2 | Failed | N/A | Log error, retry next pass | "Deleting" (NoChange) |
 //! | 3 | Success | Failed | Log error, retry next pass | "Deleting" (NoChange) |
 //!
-//! Note: deletion is terminal by row removal. All DPD cleanup happens while
-//! in "Deleting", and once the row is gone, the reconciler has nothing to
-//! process.
+//! Note: "Deleting" is the terminally stored state. DPD cleanup is attempted
+//! on every reconciler pass while a group is in the "Deleting" state, and
+//! once both the DPD and DB cleanup operations succeed, the row is deleted
+//! for good.
 //!
 //! ## Triggering Events
 //! - **"Creating"**: Instance joins group (implicitly creates if needed) → DB inserts with "Creating" state
 //! - **"Active"**: DPD ensure saga completes successfully → state = "Active"
 //! - **"Deleting"**: Last member leaves group → state = "Deleting" (implicit lifecycle)
-//! - **Row removal**: RPW reconciler completes DPD cleanup → removes from DB
+//! - **Row removal**: RPW reconciler completes DPD cleanup → deletes the row
 //!
 //! ## Error Handling
 //! - **Saga failures**: Group stays in "Creating", reconciler retries
@@ -88,7 +89,7 @@ use futures::stream::{self, StreamExt};
 use oxnet::MulticastMac;
 use slog::{debug, error, info, trace, warn};
 
-use dpd_client::types::{IpSrc, MacAddr, NatTarget, Vni};
+use dpd_client::types::{ExternalNatTarget, IpSrc, MacAddr};
 use nexus_db_model::{
     MulticastGroup, MulticastGroupState, SqlU8, UnderlayMulticastGroup,
 };
@@ -98,6 +99,7 @@ use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{self, DataPageParams};
+use omicron_ddm_admin_client::{UnderlayMulticastIpv6, Vni};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::{MulticastGroupReconciler, StateTransition};
@@ -207,13 +209,20 @@ fn dpd_state_matches_forwarding(
         return false;
     };
 
-    let expected = NatTarget {
-        internal_ip: underlay_ipv6,
-        inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-        vni: Vni::from(u32::from(db_group.vni.0)),
+    let Ok(internal_ip) = UnderlayMulticastIpv6::new(underlay_ipv6) else {
+        return false;
+    };
+    let Ok(vni) = Vni::new(u32::from(db_group.vni.0)) else {
+        return false;
     };
 
-    dpd_group.internal_forwarding.nat_target.as_ref() == Some(&expected)
+    let expected = ExternalNatTarget {
+        internal_ip,
+        inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
+        vni,
+    };
+
+    dpd_group.internal_forwarding.nat_target == expected
         && dpd_group.external_forwarding.vlan_id.is_none()
 }
 
@@ -342,8 +351,6 @@ impl MulticastGroupReconciler {
                     | EnsureUnderlayResult::Existing(underlay),
                 ) => {
                     if salt != initial_salt {
-                        // Persist the new salt. If the group was deleted during
-                        // processing, return None; caller handles appropriately.
                         match self
                             .datastore
                             .multicast_group_set_underlay_salt(
@@ -391,7 +398,6 @@ impl MulticastGroupReconciler {
             }
         }
 
-        // Exhausted all 256 possible salt values (0-255)
         anyhow::bail!(
             "failed to find non-colliding underlay IP after {} attempts \
              (salt range {initial_salt}..={})",
@@ -400,12 +406,6 @@ impl MulticastGroupReconciler {
         )
     }
 
-    /// Generic group reconciliation logic for any state.
-    ///
-    /// This consolidates the common pattern of:
-    /// 1. List groups by state
-    /// 2. Process concurrently
-    /// 3. Collect and log results
     async fn reconcile_groups_by_state(
         &self,
         opctx: &OpContext,
@@ -453,7 +453,8 @@ impl MulticastGroupReconciler {
         let mrib_route_index = mrib_route_index.as_ref();
 
         // Process groups concurrently with configurable parallelism
-        let group_outcomes = stream::iter(groups)
+        let total = groups.len();
+        let mut group_outcomes = stream::iter(groups)
             .map(|group| async move {
                 let result = self
                     .process_group_state(
@@ -467,14 +468,11 @@ impl MulticastGroupReconciler {
                     .await;
                 (group, result)
             })
-            .buffer_unordered(self.group_concurrency_limit.get())
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(self.group_concurrency_limit.get());
 
         // Handle results with state-appropriate logging and counting
         let mut processed = 0;
-        let total = group_outcomes.len();
-        for (group, result) in group_outcomes {
+        while let Some((group, result)) = group_outcomes.next().await {
             match result {
                 Ok(transition) => {
                     // Count successful transitions based on state expectations
@@ -845,7 +843,6 @@ impl MulticastGroupReconciler {
                 needs_update
             }
             None => {
-                // Absent somewhere in DPD, so re-issue the update.
                 debug!(
                     opctx.log,
                     "active group missing on a switch in DPD, will update";
@@ -914,12 +911,10 @@ impl MulticastGroupReconciler {
                         "group_id" => %group.id(),
                         "error" => %e
                     );
-                    // Return NoChange so RPW retries on next activation.
                     Ok(StateTransition::NoChange)
                 }
             }
         } else {
-            // DPD was already in sync (no update needed).
             dpd_synced = true;
 
             // Even when DPD is in sync, propagate M2P/forwarding to
@@ -1175,8 +1170,23 @@ mod tests {
             external_forwarding: dpd_client::types::ExternalForwarding {
                 vlan_id: None,
             },
-            internal_forwarding: dpd_client::types::InternalForwarding {
-                nat_target: None,
+            internal_forwarding: dpd_client::types::ExternalInternalForwarding {
+                nat_target: ExternalNatTarget {
+                    internal_ip: UnderlayMulticastIpv6::new(
+                        "ff04::1".parse().unwrap(),
+                    )
+                    .unwrap(),
+                    inner_mac: MacAddr {
+                        a: "ff04::1"
+                            .parse::<std::net::Ipv6Addr>()
+                            .unwrap()
+                            .derive_multicast_mac(),
+                    },
+                    vni: super::Vni::new(u32::from(
+                        omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
+                    ))
+                    .unwrap(),
+                },
             },
         }
     }
@@ -1282,17 +1292,14 @@ mod tests {
 
         let group = create_group("224.1.1.1");
 
-        // DPD has matching specific sources
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
             "10.0.0.1".parse().unwrap(),
         )]));
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
-        // DPD has None (mismatch: should have specific sources)
         let dpd_group = create_dpd_group(None);
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
-        // DPD has IpSrc::Any (mismatch: should have specific sources)
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Any]));
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
@@ -1308,11 +1315,9 @@ mod tests {
 
         let group = create_group("224.1.1.1");
 
-        // DPD has None (correct: any-source canonicalizes to None)
         let dpd_group = create_dpd_group(None);
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
-        // DPD has specific sources (mismatch)
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
             "10.0.0.1".parse().unwrap(),
         )]));
@@ -1329,11 +1334,9 @@ mod tests {
 
         let group = create_group("224.1.1.1");
 
-        // DPD has None (correct: no sources configured)
         let dpd_group = create_dpd_group(None);
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
-        // DPD has sources (mismatch)
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
             "10.0.0.1".parse().unwrap(),
         )]));

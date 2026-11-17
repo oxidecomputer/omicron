@@ -664,7 +664,7 @@ pub struct InstancePathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct SagaPathParam {
     #[serde(rename = "saga_id")]
-    pub saga_id: Uuid,
+    pub saga_id: steno::SagaId,
 }
 
 /// Path parameters for DemoSaga requests

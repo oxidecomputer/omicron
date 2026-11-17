@@ -31,6 +31,7 @@ use nexus_types::external_api::multicast::{
 use nexus_types::identity::Resource;
 use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
+use omicron_uuid_kinds::GenericUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -72,7 +73,13 @@ async fn create_multicast_pool_linked(
     ip_range: Option<IpRange>,
 ) {
     create_multicast_ip_pool(client, pool_name, ip_range).await;
-    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
 }
 
 /// Convenience function to wait for a group to become "Active".

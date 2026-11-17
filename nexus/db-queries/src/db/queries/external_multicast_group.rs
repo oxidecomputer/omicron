@@ -115,16 +115,16 @@ impl NextExternalMulticastGroup {
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.group.id)?;
         out.push_sql("::text || ':' || candidate_ip::text) AS tag, ");
 
-        // New multicast groups start in "Creating" state (RPW pattern)
-        out.push_bind_param::<nexus_db_schema::enums::MulticastGroupStateEnum, MulticastGroupState>(&MulticastGroupState::Creating)?;
-        out.push_sql(" AS state, ");
-
         out.push_sql("nextval('omicron.public.multicast_group_version') AS version_added, ");
         out.push_bind_param::<sql_types::Nullable<sql_types::Int8>, Option<Generation>>(&None)?;
         out.push_sql(" AS version_removed, ");
 
         out.push_bind_param::<sql_types::Nullable<sql_types::Int2>, Option<i16>>(&None)?;
-        out.push_sql(" AS underlay_salt");
+        out.push_sql(" AS underlay_salt, ");
+
+        // New multicast groups start in "Creating" state (RPW pattern)
+        out.push_bind_param::<nexus_db_schema::enums::MulticastGroupStateEnum, MulticastGroupState>(&MulticastGroupState::Creating)?;
+        out.push_sql(" AS state");
 
         // FROM the candidates subquery with LEFT JOIN (like external IP)
         out.push_sql(" FROM (");
@@ -223,12 +223,6 @@ impl NextExternalMulticastGroup {
         out.push_sql("UPDATE ");
         schema::ip_pool_range::table.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.now,
-        )?;
-        out.push_sql(", ");
         out.push_identifier(dsl::rcgen::NAME)?;
         out.push_sql(" = ");
         out.push_identifier(dsl::rcgen::NAME)?;

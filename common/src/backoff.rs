@@ -66,10 +66,7 @@ where
 /// This policy makes attempts to retry under one second, but backs off
 /// significantly to avoid overloading critical services.
 pub fn retry_policy_internal_service() -> ::backoff::ExponentialBackoff {
-    backoff_builder()
-        .with_initial_interval(Duration::from_millis(250))
-        .with_max_interval(Duration::from_secs(60 * 3))
-        .build()
+    configure_internal_service_intervals(&mut backoff_builder()).build()
 }
 
 /// Return a backoff policy for querying internal services aggressively.
@@ -89,6 +86,21 @@ pub fn retry_policy_internal_service_aggressive()
         .build()
 }
 
+/// Return a backoff policy for querying internal services with a maximum
+/// elapsed time limit after which no further retries will be permitted.
+///
+/// This policy is similar to [`retry_policy_internal_service`], with one key
+/// exception: unlike other policies in this module, this retry policy will
+/// **give up** after `timeout` has elapsed, rather than continuing to retry
+/// indefinitely.
+pub fn retry_policy_internal_service_timeout(
+    timeout: Duration,
+) -> ::backoff::ExponentialBackoff {
+    configure_internal_service_intervals(&mut backoff_builder())
+        .with_max_elapsed_time(Some(timeout))
+        .build()
+}
+
 /// Return a backoff policy for querying local-to-sled conditions.
 ///
 /// This policy has a very small max interval, and should be used only in cases
@@ -96,9 +108,20 @@ pub fn retry_policy_internal_service_aggressive()
 /// be used when repeating the request does not risk overloading whatever
 /// service is being queried.
 pub fn retry_policy_local() -> ::backoff::ExponentialBackoff {
-    backoff_builder()
-        .with_initial_interval(Duration::from_millis(50))
-        .with_max_interval(Duration::from_secs(1))
+    configure_local_intervals(&mut backoff_builder()).build()
+}
+
+/// Return a backoff policy for local-to-sled conditions, with a maximum
+/// elapsed time limit after which no further retries will be permitted.
+///
+/// This policy is similar to [`retry_policy_local`], with one key exception:
+/// unlike other policies in this module, this retry policy will **give up**
+/// after `timeout` has elapsed, rather than continuing to retry indefinitely.
+pub fn retry_policy_local_timeout(
+    timeout: Duration,
+) -> ::backoff::ExponentialBackoff {
+    configure_local_intervals(&mut backoff_builder())
+        .with_max_elapsed_time(Some(timeout))
         .build()
 }
 
@@ -125,4 +148,25 @@ fn backoff_builder() -> ::backoff::ExponentialBackoffBuilder {
     let mut builder = ::backoff::ExponentialBackoffBuilder::new();
     builder.with_multiplier(2.0).with_max_elapsed_time(None);
     builder
+}
+
+/// Configure `builder` with the initial and maximum intervals for an internal
+/// service.
+fn configure_internal_service_intervals(
+    builder: &mut ::backoff::ExponentialBackoffBuilder,
+) -> &mut ::backoff::ExponentialBackoffBuilder {
+    builder
+        .with_initial_interval(Duration::from_millis(250))
+        .with_max_interval(Duration::from_secs(60 * 3))
+}
+
+/// Configure `builder` with the initial and maximum intervals for a sled-local
+/// retry policy. This is used by [`retry_policy_local`] and
+/// [`retry_policy_local_timeout`].
+fn configure_local_intervals(
+    builder: &mut ::backoff::ExponentialBackoffBuilder,
+) -> &mut ::backoff::ExponentialBackoffBuilder {
+    builder
+        .with_initial_interval(Duration::from_millis(50))
+        .with_max_interval(Duration::from_secs(1))
 }

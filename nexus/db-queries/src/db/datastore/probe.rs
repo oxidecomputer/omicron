@@ -10,6 +10,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::datastore::multicast::ops::member_attach::AttachMemberError;
 use crate::db::datastore::multicast::ops::member_attach::AttachMemberToGroupStatement;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -19,6 +20,7 @@ use diesel::JoinOnDsl as _;
 use diesel::NullableExpressionMethods as _;
 use diesel::OptionalExtension as _;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use iddqd::IdHashMap;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -37,6 +39,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -49,9 +52,10 @@ use omicron_uuid_kinds::MulticastGroupUuid;
 use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
-use sled_agent_client::types::ProbeCreate;
 use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::probes::ProbeCreate;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -81,7 +85,7 @@ impl super::DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .filter(dsl::time_deleted.is_null())
         .select(Probe::as_select())
         .load_async(&*conn)
@@ -229,7 +233,9 @@ impl super::DataStore {
             NameOrId::Name(name) => dsl::probe
                 .filter(probe::name.eq(name.to_string()))
                 .filter(probe::time_deleted.is_null())
-                .filter(probe::project_id.eq(authz_project.id()))
+                .filter(
+                    probe::project_id.eq(to_db_typed_uuid(authz_project.id())),
+                )
                 .select(Probe::as_select())
                 .limit(1)
                 .first_async::<Probe>(&*conn)
@@ -245,7 +251,9 @@ impl super::DataStore {
                 }),
             NameOrId::Id(id) => dsl::probe
                 .filter(probe::id.eq(id))
-                .filter(probe::project_id.eq(authz_project.id()))
+                .filter(
+                    probe::project_id.eq(to_db_typed_uuid(authz_project.id())),
+                )
                 .select(Probe::as_select())
                 .limit(1)
                 .first_async::<Probe>(&*conn)
@@ -340,11 +348,9 @@ impl super::DataStore {
             self.probe_create_network_interface(opctx, incomplete)
                 .await
                 .map_err(|e| {
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message: format!(
-                            "create network interface: {e:?}"
-                        ),
-                    }
+                    Error::internal_error(format!(
+                        "create network interface: {e:?}"
+                    ))
                 })?;
 
             // Pre-convert the source IPs so the transaction closure (which may
@@ -522,16 +528,16 @@ impl super::DataStore {
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-    ) -> ListResultVec<ProbeCreate> {
+    ) -> Result<IdHashMap<ProbeCreate>, Error> {
         opctx.check_complex_operations_allowed()?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
         );
-        let mut all_probes_for_sled = Vec::new();
+        let mut all_probes_for_sled = IdHashMap::new();
         while let Some(p) = paginator.next() {
-            let mut batch = self
+            let batch = self
                 .list_probe_create_params_for_sled(
                     opctx,
                     sled_id,
@@ -540,7 +546,17 @@ impl super::DataStore {
                 .await?;
             paginator =
                 p.found_batch(&batch, &|probe| probe.id.into_untyped_uuid());
-            all_probes_for_sled.append(&mut batch);
+            for probe in batch {
+                all_probes_for_sled.insert_unique(probe).map_err(|err| {
+                    Error::internal_error(format!(
+                        "encountered multiple probe create parameters for \
+                         sled {sled_id} with the same probe ID {} (does a \
+                         probe have more than one external IP or NIC?): {}",
+                        err.new_item().id,
+                        InlineErrorChain::new(&err),
+                    ))
+                })?;
+            }
         }
         Ok(all_probes_for_sled)
     }
@@ -633,7 +649,7 @@ impl super::DataStore {
                 )| {
                     let kind = db_ip_kind_to_sled(kind);
                     let external_ips =
-                        vec![sled_agent_client::types::ExternalIp {
+                        vec![sled_agent_types::probes::ExternalIp {
                             first_port: first_port.into(),
                             ip: ip.ip(),
                             kind,
@@ -686,11 +702,11 @@ impl super::DataStore {
 
         let mut by_probe: HashMap<
             Uuid,
-            Vec<sled_agent_client::types::InstanceMulticastMembership>,
+            Vec<sled_agent_types::instance::InstanceMulticastMembership>,
         > = HashMap::new();
         for (parent_id, group_ip, source_ips) in memberships {
             by_probe.entry(parent_id).or_default().push(
-                sled_agent_client::types::InstanceMulticastMembership {
+                sled_agent_types::instance::InstanceMulticastMembership {
                     group_ip: group_ip.ip(),
                     sources: source_ips.into_iter().map(|s| s.ip()).collect(),
                 },
@@ -724,7 +740,9 @@ impl super::DataStore {
             NameOrId::Name(name) => dsl::probe
                 .filter(probe::name.eq(name.to_string()))
                 .filter(probe::time_deleted.is_null())
-                .filter(probe::project_id.eq(authz_project.id()))
+                .filter(
+                    probe::project_id.eq(to_db_typed_uuid(authz_project.id())),
+                )
                 .select(probe::id)
                 .limit(1)
                 .first_async::<Uuid>(&*conn)
@@ -741,7 +759,7 @@ impl super::DataStore {
 
         use nexus_db_schema::schema::multicast_group_member;
 
-        let project_id = authz_project.id();
+        let project_id = to_db_typed_uuid(authz_project.id());
         self.transaction_retry_wrapper("probe_delete")
             .transaction(&conn, |conn| async move {
                 // Delete the probe and mark its multicast memberships in the
@@ -788,14 +806,14 @@ impl super::DataStore {
 
 const fn db_ip_kind_to_sled(
     kind: nexus_db_model::IpKind,
-) -> sled_agent_client::types::IpKind {
+) -> sled_agent_types::probes::IpKind {
     match kind {
-        nexus_db_model::IpKind::SNat => sled_agent_client::types::IpKind::Snat,
+        nexus_db_model::IpKind::SNat => sled_agent_types::probes::IpKind::Snat,
         nexus_db_model::IpKind::Ephemeral => {
-            sled_agent_client::types::IpKind::Ephemeral
+            sled_agent_types::probes::IpKind::Ephemeral
         }
         nexus_db_model::IpKind::Floating => {
-            sled_agent_client::types::IpKind::Floating
+            sled_agent_types::probes::IpKind::Floating
         }
     }
 }

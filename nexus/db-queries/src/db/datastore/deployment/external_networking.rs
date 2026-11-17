@@ -678,6 +678,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalFloatingIps;
     use nexus_types::deployment::OmicronZoneExternalSnat;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::identity::Resource;
     use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
@@ -1645,6 +1646,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             &bp1,
+            ReflectsCollection::Indeterminate,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )
@@ -1689,6 +1691,7 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             &bp2,
+            ReflectsCollection::Indeterminate,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )
@@ -1797,6 +1800,7 @@ mod tests {
         let bp2 = BlueprintBuilder::new_based_on(
             &opctx.log,
             &bp1,
+            ReflectsCollection::Indeterminate,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )

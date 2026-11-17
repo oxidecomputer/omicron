@@ -132,7 +132,6 @@ function install_packages {
       'pkg-config'
       'xmlsec1'
       'libxmlsec1-dev'
-      'libxmlsec1-openssl'
       'libclang-dev'
       'libsqlite3-dev'
     )

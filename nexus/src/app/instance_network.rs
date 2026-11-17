@@ -496,7 +496,10 @@ pub(crate) async fn instance_ensure_dpd_config(
                     a: network_interface.mac.into_array(),
                 },
                 internal_ip: *sled_ip_address.ip(),
-                vni: dpd_client::types::Vni(network_interface.vni.into()),
+                vni: omicron_ddm_admin_client::Vni::new(u32::from(
+                    network_interface.vni,
+                ))
+                .expect("omicron VNIs are within the 24-bit VNI range"),
             };
             let _ = instance_send_attached_subnets_to_dendrite(
                 datastore,

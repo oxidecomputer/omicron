@@ -11,6 +11,7 @@ use nexus_db_queries::{context::OpContext, db::fixed_data::FLEET_ID};
 use nexus_external_api::TimeseriesSchemaPaginationParams;
 use nexus_types::external_api::metrics::{ResourceMetrics, SystemMetricName};
 use omicron_common::api::external::{Error, InternalContext};
+use omicron_uuid_kinds::GenericUuid;
 use oximeter_db::{
     Measurement, OxqlResult, TimeseriesSchema, oxql::query::QueryAuthzScope,
 };
@@ -33,7 +34,7 @@ impl super::Nexus {
                 // Make sure silo exists and current user can read it
                 let (.., authz_silo) =
                     silo_lookup.lookup_for(authz::Action::Read).await?;
-                authz_silo.id()
+                authz_silo.id().into_untyped_uuid()
             }
             // if no project specified, scope to entire fleet, i.e., all silos
             _ => *FLEET_ID,
@@ -74,10 +75,10 @@ impl super::Nexus {
                 // make sure project exists and current user can read it
                 let (.., authz_project) =
                     project_lookup.lookup_for(authz::Action::Read).await?;
-                authz_project.id()
+                authz_project.id().into_untyped_uuid()
             }
             // if no project specified, scope to current silo
-            _ => authz_silo.id(),
+            _ => authz_silo.id().into_untyped_uuid(),
         };
 
         let timeseries = match metric_name {
@@ -148,8 +149,8 @@ impl super::Nexus {
             .oxql_query(
                 query,
                 QueryAuthzScope::Project {
-                    silo_id: authz_silo.id(),
-                    project_id: authz_project.id(),
+                    silo_id: authz_silo.id().into_untyped_uuid(),
+                    project_id: authz_project.id().into_untyped_uuid(),
                 },
             )
             .await

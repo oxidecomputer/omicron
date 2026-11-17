@@ -40,6 +40,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use uuid::Uuid;
 
 /// The datastore crate's SiloUser is intended to provide type safety above the
@@ -67,7 +68,7 @@ impl SiloUser {
         }
     }
 
-    pub fn silo_id(&self) -> Uuid {
+    pub fn silo_id(&self) -> SiloUuid {
         match &self {
             SiloUser::ApiOnly(u) => u.silo_id,
             SiloUser::Jit(u) => u.silo_id,
@@ -120,7 +121,7 @@ impl From<model::SiloUser> for SiloUser {
                 time_created: record.time_created(),
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
-                silo_id: record.silo_id,
+                silo_id: record.silo_id.into(),
                 external_id: record.external_id.expect(
                     "the constraint `external_id_consistency` prevents a user \
                     with provision type 'api_only' from having a null \
@@ -133,7 +134,7 @@ impl From<model::SiloUser> for SiloUser {
                 time_created: record.time_created(),
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
-                silo_id: record.silo_id,
+                silo_id: record.silo_id.into(),
                 external_id: record.external_id.expect(
                     "the constraint `external_id_consistency` prevents a user \
                     with provision type 'jit' from having a null external_id",
@@ -145,7 +146,7 @@ impl From<model::SiloUser> for SiloUser {
                 time_created: record.time_created(),
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
-                silo_id: record.silo_id,
+                silo_id: record.silo_id.into(),
                 user_name: record.user_name.expect(
                     "the constraint `user_name_consistency` prevents a user \
                     with provision type 'scim' from having null user_name",
@@ -183,14 +184,18 @@ pub struct SiloUserApiOnly {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 
     /// The identity provider's ID for this user.
     pub external_id: String,
 }
 
 impl SiloUserApiOnly {
-    pub fn new(silo_id: Uuid, id: SiloUserUuid, external_id: String) -> Self {
+    pub fn new(
+        silo_id: SiloUuid,
+        id: SiloUserUuid,
+        external_id: String,
+    ) -> Self {
         Self {
             id,
             time_created: Utc::now(),
@@ -211,7 +216,7 @@ impl From<SiloUserApiOnly> for model::SiloUser {
                 time_modified: u.time_modified,
             },
             time_deleted: u.time_deleted,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into(),
             external_id: Some(u.external_id),
             user_provision_type: UserProvisionType::ApiOnly,
             user_name: None,
@@ -232,7 +237,7 @@ impl From<SiloUserApiOnly> for user::User {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into_untyped_uuid(),
             time_created: u.time_created,
             time_modified: u.time_modified,
         }
@@ -245,14 +250,18 @@ pub struct SiloUserJit {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 
     /// The identity provider's ID for this user.
     pub external_id: String,
 }
 
 impl SiloUserJit {
-    pub fn new(silo_id: Uuid, id: SiloUserUuid, external_id: String) -> Self {
+    pub fn new(
+        silo_id: SiloUuid,
+        id: SiloUserUuid,
+        external_id: String,
+    ) -> Self {
         Self {
             id,
             time_created: Utc::now(),
@@ -273,7 +282,7 @@ impl From<SiloUserJit> for model::SiloUser {
                 time_modified: u.time_modified,
             },
             time_deleted: u.time_deleted,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into(),
             external_id: Some(u.external_id),
             user_provision_type: UserProvisionType::Jit,
             user_name: None,
@@ -294,7 +303,7 @@ impl From<SiloUserJit> for user::User {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into_untyped_uuid(),
             time_created: u.time_created,
             time_modified: u.time_modified,
         }
@@ -307,7 +316,7 @@ pub struct SiloUserScim {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 
     /// The identity provider's ID for this user.
     pub user_name: String,
@@ -318,7 +327,7 @@ pub struct SiloUserScim {
 
 impl SiloUserScim {
     pub fn new(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         id: SiloUserUuid,
         user_name: String,
         active: Option<bool>,
@@ -346,7 +355,7 @@ impl From<SiloUserScim> for model::SiloUser {
                 time_modified: u.time_modified,
             },
             time_deleted: u.time_deleted,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into(),
             external_id: u.external_id,
             user_provision_type: UserProvisionType::Scim,
             user_name: Some(u.user_name),
@@ -367,7 +376,7 @@ impl From<SiloUserScim> for user::User {
             id: u.id,
             // TODO the use of user_name as display_name is temporary
             display_name: u.user_name,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into_untyped_uuid(),
             time_created: u.time_created,
             time_modified: u.time_modified,
         }
@@ -416,7 +425,7 @@ impl DataStore {
         let silo = {
             use nexus_db_schema::schema::silo::dsl;
             dsl::silo
-                .filter(dsl::id.eq(authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(authz_silo.id())))
                 .select(Silo::as_select())
                 .get_result_async::<Silo>(&*conn)
                 .await
@@ -589,7 +598,7 @@ impl DataStore {
         let silo = {
             use nexus_db_schema::schema::silo::dsl;
             dsl::silo
-                .filter(dsl::id.eq(authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(authz_silo.id())))
                 .select(Silo::as_select())
                 .get_result_async::<Silo>(&*conn)
                 .await
@@ -623,7 +632,7 @@ impl DataStore {
             SiloUserLookup::ApiOnly { external_id }
             | SiloUserLookup::Jit { external_id } => {
                 let maybe_db_silo_user = dsl::silo_user
-                    .filter(dsl::silo_id.eq(authz_silo.id()))
+                    .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
                     .filter(
                         dsl::user_provision_type.eq(lookup_user_provision_type),
                     )
@@ -652,7 +661,7 @@ impl DataStore {
 
             SiloUserLookup::Scim { user_name } => {
                 let maybe_db_silo_user = dsl::silo_user
-                    .filter(dsl::silo_id.eq(authz_silo.id()))
+                    .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
                     .filter(
                         dsl::user_provision_type.eq(lookup_user_provision_type),
                     )
@@ -698,7 +707,10 @@ impl DataStore {
         let db_silo = {
             use nexus_db_schema::schema::silo::dsl;
             dsl::silo
-                .filter(dsl::id.eq(authz_silo_user_list.silo().id()))
+                .filter(
+                    dsl::id
+                        .eq(to_db_typed_uuid(authz_silo_user_list.silo().id())),
+                )
                 .select(Silo::as_select())
                 .get_result_async::<Silo>(&*conn)
                 .await
@@ -713,7 +725,9 @@ impl DataStore {
         };
 
         paginated(silo_user, id, pagparams)
-            .filter(silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(
+                silo_id.eq(to_db_typed_uuid(authz_silo_user_list.silo().id())),
+            )
             .filter(user_provision_type.eq(db_silo.user_provision_type))
             .filter(time_deleted.is_null())
             .select(model::SiloUser::as_select())
@@ -739,7 +753,10 @@ impl DataStore {
             .await?;
 
         paginated(user::table, user::id, pagparams)
-            .filter(user::silo_id.eq(authz_silo_user_list.silo().id()))
+            .filter(
+                user::silo_id
+                    .eq(to_db_typed_uuid(authz_silo_user_list.silo().id())),
+            )
             .filter(user::time_deleted.is_null())
             .inner_join(
                 user_to_group::table.on(user_to_group::silo_user_id

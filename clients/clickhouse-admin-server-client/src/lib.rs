@@ -9,21 +9,20 @@ progenitor::generate_api!(
     spec = "../../openapi/clickhouse-admin-server/clickhouse-admin-server-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     crates = {
+        "iddqd" = "*",
         "omicron-uuid-kinds" = "*",
     },
     derives = [schemars::JsonSchema],
     replace = {
-        ServerConfigurableSettings = clickhouse_admin_types::server::ServerConfigurableSettings,
+        DatabaseRetentionPolicy = clickhouse_admin_types_versions::latest::retention::DatabaseRetentionPolicy,
+        DatabaseUsage = clickhouse_admin_types_versions::latest::usage::DatabaseUsage,
+        Days = clickhouse_admin_types_versions::latest::retention::Days,
+        RetentionPolicy = clickhouse_admin_types_versions::latest::retention::RetentionPolicy,
+        ServerConfigurableSettings = clickhouse_admin_types_versions::latest::server::ServerConfigurableSettings,
+        TableUsage = clickhouse_admin_types_versions::latest::usage::TableUsage,
     }
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);

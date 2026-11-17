@@ -25,6 +25,9 @@
 //! 4. Update `latest.rs` with new and updated types from the new version.
 //!
 //! For more information, see RFD 619.
+//!
+//! Note: `wicket-cli-types` uses fixed identifiers from this crate. See the
+//! comment in its `lib.rs` for more information.
 
 mod impls;
 pub mod latest;
@@ -36,3 +39,7 @@ pub mod v2;
 pub mod v3;
 #[path = "update_elapsed/mod.rs"]
 pub mod v4;
+#[path = "multirack_join/mod.rs"]
+pub mod v5;
+#[path = "update_progress_repository/mod.rs"]
+pub mod v6;

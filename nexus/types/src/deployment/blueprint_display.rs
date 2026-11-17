@@ -40,6 +40,9 @@ pub mod constants {
     pub const OXIMETER_READ_FROM: &str = "read from";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
+    pub const REFLECTS_COLLECTION: &str = "reflects collection";
+    pub const COLLECTION_STARTED: &str = "collection started";
+    pub const COLLECTION_DONE: &str = "collection done";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";
     pub const EXTERNAL_DNS_VERSION: &str = "external DNS version";
     // Keep this a bit short to not make the key column too wide.
@@ -50,6 +53,7 @@ pub mod constants {
 
     pub const UNCHANGED_PARENS: &str = "(unchanged)";
     pub const NONE_PARENS: &str = "(none)";
+    pub const INDETERMINATE_PARENS: &str = "(indeterminate)";
     pub const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";

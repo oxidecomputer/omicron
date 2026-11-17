@@ -6,4 +6,4 @@ UPDATE omicron.public.multicast_group
         WHEN 'active' THEN 'active'::omicron.public.multicast_group_state
         WHEN 'deleting' THEN 'deleting'::omicron.public.multicast_group_state
     END
-    WHERE state IS NULL AND state_temp IS NOT NULL;
+    WHERE state IS NULL;

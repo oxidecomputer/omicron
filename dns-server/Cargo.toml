@@ -43,6 +43,7 @@ hickory-client.workspace = true
 internal-dns-types-versions.workspace = true
 omicron-test-utils.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 reqwest.workspace = true
 schemars.workspace = true
 serde_json.workspace = true

@@ -5,7 +5,7 @@
 //! Utilities for managing Zpools.
 
 use crate::{ExecutionError, PFEXEC, execute_async};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::ZpoolHealthParseError;
 use slog_error_chain::SlogInlineError;
@@ -154,25 +154,6 @@ impl FromStr for ZpoolInfo {
 
         Ok(ZpoolInfo { name, size, allocated, free, health })
     }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ZpoolOrRamdisk {
-    Zpool(ZpoolName),
-    Ramdisk,
-}
-
-/// A path which exists within a pool.
-///
-/// By storing these types together, it's possible to answer
-/// whether or not a path exists on a particular device.
-// Technically we could re-derive the pool name from the path,
-// but that involves some string parsing, and honestly I'd just
-// Rather Not.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct PathInPool {
-    pub pool: ZpoolOrRamdisk,
-    pub path: Utf8PathBuf,
 }
 
 /// Wraps commands for interacting with ZFS pools.
