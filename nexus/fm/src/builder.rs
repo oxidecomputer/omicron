@@ -20,7 +20,7 @@ pub use case::{AllCases, CaseBuilder};
 pub(crate) mod rng;
 pub use rng::SitrepBuilderRng;
 mod problem;
-pub use problem::{ProblemSetBuilder, RevisionBuilder};
+pub use problem::{ActiveProblemRequest, ProblemSetBuilder, RevisionBuilder};
 
 #[derive(Debug)]
 pub struct SitrepBuilder<'a> {
@@ -82,9 +82,10 @@ impl<'a> SitrepBuilder<'a> {
             "parent_sitrep_id" => format!("{:?}", parent_sitrep.as_ref().map(|s| s.id())),
             "inv_collection_id" => format!("{:?}", inventory.id),
         ));
-        
+
         let active_problems = ProblemSetBuilder::new(
             rng.problem_builder_rng(),
+            sitrep_id,
             parent_sitrep,
             log.clone(),
         );
