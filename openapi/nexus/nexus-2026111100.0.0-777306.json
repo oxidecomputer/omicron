@@ -24816,7 +24816,7 @@
           },
           "shutdown_policy": {
             "nullable": true,
-            "description": "The method by which the instance should be stopped. If omitted from the update request, the instance's existing shutdown policy is left as-is. Changes to soft-shutdown timeout do not affect instances that are already in the process of shutting down until their next start.",
+            "description": "The method by which the instance should be stopped. If `null`, the instance's shutdown policy is reset to the default value. Changes to soft-shutdown timeout do not affect instances that are already in the process of shutting down until their next start.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceShutdownPolicy"
@@ -24830,7 +24830,8 @@
           "cpu_platform",
           "enable_jumbo_frames",
           "memory",
-          "ncpus"
+          "ncpus",
+          "shutdown_policy"
         ]
       },
       "InterfaceNum": {
