@@ -501,6 +501,11 @@ impl<'a> LookupPath<'a> {
         Alert::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type [`Problem`], identified by its UUID.
+    pub fn problem_id(self, id: ProblemUuid) -> Problem<'a> {
+        Problem::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type [`ScimClientBearerToken`], identified by its
     /// UUID.
     pub fn scim_client_bearer_token_id(
@@ -950,6 +955,16 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "id", uuid_kind = AlertKind }
+    ]
+}
+
+lookup_resource! {
+    name = "Problem",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = ProblemKind }
     ]
 }
 

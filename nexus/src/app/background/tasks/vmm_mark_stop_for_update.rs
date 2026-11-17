@@ -17,6 +17,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VmmBulkMarkStopForUpdateResult;
+use nexus_types::internal_api::background::VmmMarkStopForUpdateDetails;
 use nexus_types::internal_api::background::VmmMarkStopForUpdateStatus;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -25,13 +26,14 @@ use tokio::sync::watch;
 
 pub struct VmmMarkStopForUpdate {
     datastore: Arc<DataStore>,
+    disabled: bool,
     tx: watch::Sender<usize>,
 }
 
 impl VmmMarkStopForUpdate {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
+    pub fn new(datastore: Arc<DataStore>, disabled: bool) -> Self {
         let (tx, _rx) = watch::channel(0);
-        Self { datastore, tx }
+        Self { datastore, disabled, tx }
     }
 
     pub fn watcher(&self) -> watch::Receiver<usize> {
@@ -42,6 +44,16 @@ impl VmmMarkStopForUpdate {
         &mut self,
         opctx: &OpContext,
     ) -> VmmMarkStopForUpdateStatus {
+        if self.disabled {
+            // Return early before notifying watchers, so a disabled task does
+            // not trigger the other tasks that are watching for it.
+            slog::debug!(
+                &opctx.log,
+                "vmm_mark_stop_for_update disabled by config, doing nothing";
+            );
+            return VmmMarkStopForUpdateStatus::Disabled;
+        }
+
         let VmmBulkMarkStopForUpdateResult { vmms_marked, batches, batch_size } =
             match self.datastore.vmm_bulk_mark_stop_for_update(opctx).await {
                 Ok(result) => result,
@@ -52,12 +64,14 @@ impl VmmMarkStopForUpdate {
                         "failed to mark VMMs to stop for a sled update";
                         &err,
                     );
-                    return VmmMarkStopForUpdateStatus {
-                        vmms_marked: 0,
-                        batches: 0,
-                        batch_size: SQL_BATCH_SIZE.get(),
-                        error: Some(err.to_string()),
-                    };
+                    return VmmMarkStopForUpdateStatus::Enabled(
+                        VmmMarkStopForUpdateDetails {
+                            vmms_marked: 0,
+                            batches: 0,
+                            batch_size: SQL_BATCH_SIZE.get(),
+                            error: Some(err.to_string()),
+                        },
+                    );
                 }
             };
 
@@ -78,12 +92,12 @@ impl VmmMarkStopForUpdate {
         // Trigger anything waiting on this task to run.
         self.tx.send_modify(|count| *count = *count + 1);
 
-        VmmMarkStopForUpdateStatus {
+        VmmMarkStopForUpdateStatus::Enabled(VmmMarkStopForUpdateDetails {
             vmms_marked,
             batches,
             batch_size: batch_size.get(),
             error: None,
-        }
+        })
     }
 }
 
@@ -219,11 +233,15 @@ mod tests {
             .expect("sled availability should be written");
 
         // Create a new task
-        let mut task = VmmMarkStopForUpdate::new(datastore.clone());
+        let mut task = VmmMarkStopForUpdate::new(datastore.clone(), false);
 
         // The first activation marks the single eligible VMM at its sled's
         // update disposition generation.
-        let status = task.actually_activate(opctx).await;
+        let VmmMarkStopForUpdateStatus::Enabled(status) =
+            task.actually_activate(opctx).await
+        else {
+            panic!("vmm_mark_stop_for_update task should be enabled");
+        };
         assert_eq!(status.vmms_marked, 1);
         assert!(status.error.is_none());
         assert_eq!(
@@ -240,7 +258,11 @@ mod tests {
         );
 
         // Running again is a no-op: the eligible VMM is already marked.
-        let status = task.actually_activate(opctx).await;
+        let VmmMarkStopForUpdateStatus::Enabled(status) =
+            task.actually_activate(opctx).await
+        else {
+            panic!("vmm_mark_stop_for_update task should be enabled");
+        };
         assert_eq!(status.vmms_marked, 0);
         assert!(status.error.is_none());
         assert_eq!(

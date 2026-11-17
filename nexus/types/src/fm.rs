@@ -9,6 +9,7 @@
 
 pub mod analysis_reports;
 pub mod ereport;
+pub mod problem;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
@@ -19,9 +20,10 @@ pub use config::{
 
 pub mod fact;
 pub use fact::{
-    CertificateExpiryFactPayload, CertificateFact, DiskFact, FactPayload,
-    SagaAbandonedFactPayload, SagaFact, SagaNotProgressingFactPayload,
-    SagaOwnerNotCurrentFactPayload, ZpoolUnhealthyFactPayload,
+    CertificateExpiryFactPayload, CertificateFact, DiskFact, FactMetadata,
+    FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    SmfServiceFact, SmfServiceFactPayload, ZpoolUnhealthyFactPayload,
 };
 pub mod display;
 
@@ -279,4 +281,5 @@ pub enum DiagnosisEngineKind {
     PhysicalDisk,
     Saga,
     Certificate,
+    SmfService,
 }
