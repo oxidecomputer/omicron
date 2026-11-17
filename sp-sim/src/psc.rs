@@ -68,6 +68,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 pub const SIM_PSC_BOARD: &str = "SimPscSp";
 
@@ -183,7 +184,7 @@ impl Psc {
             let handler = Handler::new(
                 baseboard_vpd,
                 psc.common.components.clone(),
-                log,
+                log.clone(),
                 psc.common.old_rot_state,
                 update_state,
             );
@@ -192,12 +193,17 @@ impl Psc {
                 ereport_servers,
                 ereport_state,
                 handler,
+                &log,
             );
 
             Ok(Self { sp })
         } else {
             Ok(Self { sp: sp::Handle::rot_only() })
         }
+    }
+
+    pub(crate) fn take_udp_task(&mut self) -> Option<JoinHandle<()>> {
+        self.sp.take_udp_task()
     }
 }
 

@@ -60,6 +60,7 @@ use slog::{Logger, debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::atomic::AtomicUsize;
@@ -105,14 +106,14 @@ impl From<GimletPowerState> for PowerState {
 pub struct Gimlet {
     sp: sp::Handle<Handler>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    serial_console_tasks: Vec<JoinHandle<()>>,
+    serial_console_tasks: Vec<(String, JoinHandle<Infallible>)>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
 
 impl Drop for Gimlet {
     fn drop(&mut self) {
         // default join handle drop behavior is to detach; we want to abort
-        for task in &self.serial_console_tasks {
+        for (_, task) in &self.serial_console_tasks {
             task.abort();
         }
     }
@@ -276,9 +277,10 @@ impl Gimlet {
                     Arc::clone(&attached_mgs),
                     log.new(slog::o!("serial-console" => id.to_string())),
                 );
-                serial_console_tasks.push(task::spawn(async move {
-                    serial_console.run().await
-                }));
+                serial_console_tasks.push((
+                    id.to_owned(),
+                    task::spawn(async move { serial_console.run().await }),
+                ));
             }
         }
         let (power_state, power_state_rx) =
@@ -289,11 +291,16 @@ impl Gimlet {
             attached_mgs,
             incoming_console_tx,
             power_state,
-            log,
+            log.clone(),
             update_state,
         );
-        let sp =
-            sp::Handle::spawn(servers, ereport_servers, ereport_state, handler);
+        let sp = sp::Handle::spawn(
+            servers,
+            ereport_servers,
+            ereport_state,
+            handler,
+            &log,
+        );
 
         Ok(Self {
             sp,
@@ -301,6 +308,16 @@ impl Gimlet {
             serial_console_tasks,
             power_state_rx: Some(power_state_rx),
         })
+    }
+
+    pub(crate) fn take_udp_task(&mut self) -> Option<JoinHandle<()>> {
+        self.sp.take_udp_task()
+    }
+
+    pub(crate) fn take_serial_console_tasks(
+        &mut self,
+    ) -> Vec<(String, JoinHandle<Infallible>)> {
+        std::mem::take(&mut self.serial_console_tasks)
     }
 
     pub fn power_state_rx(&self) -> Option<watch::Receiver<GimletPowerState>> {
@@ -417,7 +434,7 @@ impl SerialConsoleTcpTask {
         Ok(())
     }
 
-    async fn run(mut self) {
+    async fn run(mut self) -> Infallible {
         loop {
             // wait for incoming connections, discarding any serial console
             // packets received while we don't have one

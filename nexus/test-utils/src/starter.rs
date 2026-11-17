@@ -10,6 +10,9 @@ use crate::SLED_AGENT_UUID;
 use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
 use crate::TEST_SUITE_PASSWORD_HASH;
+use crate::nexus_test::expect_clean_teardown;
+use crate::nexus_test::teardown_shared_simrack;
+use anyhow::Context;
 use anyhow::Result;
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 use camino::Utf8Path;
@@ -1419,6 +1422,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             producer: self.producer.unwrap(),
             logctx: self.logctx,
             gateway: self.gateway,
+            simrack: self.simrack,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
             mgd: self.mgd,
             ddm: self.ddm,
@@ -1440,37 +1444,87 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         if let Some(nexus_internal) = self.nexus_internal {
             N::stop_internal(nexus_internal).await;
         }
+        let mut errors = Vec::new();
         if let Some(mut database) = self.database {
-            database.cleanup().await.unwrap();
+            errors.extend(
+                database
+                    .cleanup()
+                    .await
+                    .context("cleaning up CockroachDB")
+                    .err(),
+            );
         }
         if let Some(mut clickhouse) = self.clickhouse {
-            clickhouse.cleanup().await.unwrap();
+            errors.extend(
+                clickhouse
+                    .cleanup()
+                    .await
+                    .context("cleaning up ClickHouse")
+                    .err(),
+            );
         }
+        // TODO: The sled agent and gateway teardowns panic internally. They
+        // should bubble up errors instead, like all the other teardown steps,
+        // and be added to the list of errors.
         for sled_agent in self.sled_agents {
             sled_agent.teardown().await;
         }
+        }
         if let Some(oximeter) = self.oximeter {
-            oximeter.close().await.unwrap();
+            errors.extend(
+                oximeter.close().await.context("closing oximeter").err(),
+            );
         }
         if let Some(producer) = self.producer {
-            producer.close().await.unwrap();
+            errors.extend(
+                producer
+                    .close()
+                    .await
+                    .context("closing the test metric producer")
+                    .err(),
+            );
         }
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        // Dropping self.simrack here is not critical for correctness, but it is
-        // nice to do so before e.g. self.logctx.cleanup_successful(), so that
-        // if anything fails we get useful logs in CI.
-        drop(self.simrack);
-        for (_, dendrite) in self.dendrite.into_inner().unwrap() {
-            dendrite.cleanup().await.unwrap();
+        errors.extend(
+            teardown_shared_simrack(self.simrack)
+                .await
+                .context("tearing down the simulated SP rack")
+                .err(),
+        );
+        for (switch_slot, dendrite) in self.dendrite.into_inner().unwrap() {
+            errors.extend(
+                dendrite
+                    .cleanup()
+                    .await
+                    .with_context(|| {
+                        format!("cleaning up dendrite for {switch_slot:?}")
+                    })
+                    .err(),
+            );
         }
-        for (_, mut mgd) in self.mgd {
-            mgd.cleanup().await.unwrap();
+        for (switch_slot, mut mgd) in self.mgd {
+            errors.extend(
+                mgd.cleanup()
+                    .await
+                    .with_context(|| {
+                        format!("cleaning up mgd for {switch_slot:?}")
+                    })
+                    .err(),
+            );
         }
-        for (_, mut ddm) in self.ddm {
-            ddm.cleanup().await.unwrap();
+        for (switch_slot, mut ddm) in self.ddm {
+            errors.extend(
+                ddm.cleanup()
+                    .await
+                    .with_context(|| {
+                        format!("cleaning up ddm for {switch_slot:?}")
+                    })
+                    .err(),
+            );
         }
+        expect_clean_teardown(errors);
         self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }

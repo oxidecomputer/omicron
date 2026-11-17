@@ -22,6 +22,7 @@ iddqd.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
+oxide-update-engine-types.workspace = true  # for merge_anyhow_list
 serde.workspace = true
 ciborium.workspace = true
 ciborium-ll.workspace = true

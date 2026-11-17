@@ -18,6 +18,7 @@ mod update;
 mod vpd;
 
 pub use anyhow::Result;
+use anyhow::anyhow;
 use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
@@ -26,6 +27,7 @@ pub use gimlet::FAKE_GIMLET_MODEL;
 pub use gimlet::Gimlet;
 pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;
+use oxide_update_engine_types::spec::merge_anyhow_list;
 pub use psc::FAKE_PSC_MODEL;
 pub use psc::Psc;
 pub use psc::SIM_PSC_BOARD;
@@ -37,6 +39,7 @@ pub use slog::Logger;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::task::JoinError;
 pub use update::HostFlashHashCompletionSender;
 pub use update::HostFlashHashPolicy;
 
@@ -191,5 +194,80 @@ impl SimRack {
     /// Returns the total number of SPs in the simulated rack.
     pub fn num_sps(&self) -> usize {
         self.gimlets.len() + self.pscs.len() + self.sidecars.len()
+    }
+
+    /// Tears down the simulated rack.
+    ///
+    /// Returns `Ok(())` if teardown succeeded, or `Err(_)` if there were any
+    /// panics or other errors.
+    pub async fn teardown(mut self) -> Result<()> {
+        let mut udp_tasks = Vec::new();
+        let mut serial_console_tasks = Vec::new();
+        for (i, sidecar) in self.sidecars.iter_mut().enumerate() {
+            if let Some(task) = sidecar.take_udp_task() {
+                udp_tasks.push((format!("sidecar {i} UDP task"), task));
+            }
+        }
+        for (i, gimlet) in self.gimlets.iter_mut().enumerate() {
+            if let Some(task) = gimlet.take_udp_task() {
+                udp_tasks.push((format!("gimlet {i} UDP task"), task));
+            }
+            for (component, task) in gimlet.take_serial_console_tasks() {
+                let label =
+                    format!("gimlet {i} serial console task ({component})");
+                serial_console_tasks.push((label, task));
+            }
+        }
+        for (i, psc) in self.pscs.iter_mut().enumerate() {
+            if let Some(task) = psc.take_udp_task() {
+                udp_tasks.push((format!("PSC {i} UDP task"), task));
+            }
+        }
+
+        // Abort all the tasks before awaiting any tasks so that all
+        // cancellations happen at the same time for symmetry reasons.
+        for (_, task) in &udp_tasks {
+            task.abort();
+        }
+        for (_, task) in &serial_console_tasks {
+            task.abort();
+        }
+
+        let mut errors = Vec::new();
+        for (label, task) in udp_tasks {
+            match task.await {
+                // We still hold a reference to the command sender, so the task
+                // should not have exited by itself.
+                Ok(()) => errors.push(anyhow!(
+                    "simulated SP {label} exited before teardown"
+                )),
+                Err(error) => record_join_error(&mut errors, &label, error),
+            }
+        }
+        for (label, task) in serial_console_tasks {
+            match task.await {
+                Ok(never) => match never {},
+                Err(error) => record_join_error(&mut errors, &label, error),
+            }
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(merge_anyhow_list(errors)) }
+    }
+}
+
+fn record_join_error(
+    errors: &mut Vec<anyhow::Error>,
+    label: &str,
+    error: JoinError,
+) {
+    // A JoinError is either a panic or a cancellation. Ignore cancellations
+    // because currently the only reason they can happen is due to our teardown.
+    //
+    // JoinError's Display impl includes the task id and panic message.
+    if error.is_panic() {
+        errors.push(
+            anyhow::Error::new(error)
+                .context(format!("simulated SP {label} panicked")),
+        );
     }
 }

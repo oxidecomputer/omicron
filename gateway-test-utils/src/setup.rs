@@ -24,6 +24,7 @@ use std::convert::Infallible;
 use std::future;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -39,7 +40,7 @@ pub struct GatewayTestContext {
     pub client: gateway_client::Client,
     pub server: omicron_gateway::Server,
     port: u16,
-    pub simrack: Arc<SimRack>,
+    pub simrack: GatewaySimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
     resolver: FixedResolver,
@@ -58,7 +59,37 @@ impl GatewayTestContext {
     pub async fn teardown(mut self) {
         self.resolver.terminate().await;
         self.server.close().await.unwrap();
+        match self.simrack {
+            GatewaySimRack::Owned(simrack) => simrack
+                .teardown()
+                .await
+                .expect("simulated SP tasks ran until teardown"),
+            GatewaySimRack::Shared(_) => {}
+        }
         self.logctx.cleanup_successful();
+    }
+}
+
+/// Whether the simulated rack is owned or shared with other MGS instances.
+///
+/// This determines responsibility for tearing down the rack.
+pub enum GatewaySimRack {
+    /// The rack was started by this MGS, and it is responsible for tearing
+    /// it down.
+    Owned(SimRack),
+    /// The rack is shared with other MGS instances. The caller is responsible
+    /// for tearing it down.
+    Shared(Arc<SimRack>),
+}
+
+impl Deref for GatewaySimRack {
+    type Target = SimRack;
+
+    fn deref(&self) -> &SimRack {
+        match self {
+            GatewaySimRack::Owned(simrack) => simrack,
+            GatewaySimRack::Shared(simrack) => simrack,
+        }
     }
 }
 
@@ -187,8 +218,9 @@ pub async fn test_setup_with_config(
     let logctx = LogContext::new(test_name, &server_config.log);
 
     // Start fake rack of simulated SPs
-    let simrack =
-        Arc::new(SimRack::start(sp_sim_config, &logctx.log).await.unwrap());
+    let simrack = GatewaySimRack::Owned(
+        SimRack::start(sp_sim_config, &logctx.log).await.unwrap(),
+    );
 
     test_setup_with_simrack_impl(
         logctx,
@@ -214,7 +246,7 @@ pub async fn test_setup_with_simrack(
         logctx,
         sp_port,
         server_config,
-        simrack,
+        GatewaySimRack::Shared(simrack),
         listen_addr,
     )
     .await
@@ -224,7 +256,7 @@ async fn test_setup_with_simrack_impl(
     logctx: LogContext,
     sp_port: SpPort,
     mut server_config: omicron_gateway::Config,
-    simrack: Arc<SimRack>,
+    simrack: GatewaySimRack,
     listen_addr: Option<SocketAddrV6>,
 ) -> GatewayTestContext {
     // Can't be `const` because `SocketAddrV6::new()` isn't const yet

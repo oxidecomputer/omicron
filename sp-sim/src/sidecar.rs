@@ -72,6 +72,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
@@ -192,7 +193,7 @@ impl Sidecar {
                 baseboard_vpd,
                 sidecar.common.components.clone(),
                 FakeIgnition::new(&config.simulated_sps),
-                log,
+                log.clone(),
                 sidecar.common.old_rot_state,
                 update_state,
             );
@@ -201,12 +202,17 @@ impl Sidecar {
                 ereport_servers,
                 ereport_state,
                 handler,
+                &log,
             );
 
             Ok(Self { sp })
         } else {
             Ok(Self { sp: sp::Handle::rot_only() })
         }
+    }
+
+    pub(crate) fn take_udp_task(&mut self) -> Option<JoinHandle<()>> {
+        self.sp.take_udp_task()
     }
 
     pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
