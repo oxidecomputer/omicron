@@ -10017,7 +10017,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
 --
 -- 1. The problem's latest revision has transitioned it to the `resolved` state
 --    (i.e. the revision's `time_resolved` is non-null), and,
--- 2. All requested revisions of the problem have been created by rendezvous.
+-- 2. All requested revisions of the problem have been created by rendezvous,
+--    including any alert link records, support bundle records, or impact list
+--    records in those revisions.
 --
 -- Once a problem has been resolved, diagnosis engines should no longer request
 -- further revisions of that problem. However, resolved problems must still be
