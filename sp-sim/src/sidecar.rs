@@ -80,6 +80,12 @@ pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 /// part number.
 pub const FAKE_SIDECAR_MODEL: &str = "FAKE_SIM_SIDECAR";
 
+/// The number of ignition targets sp-sim simulates (32 sleds, 2 PSCs, and the
+/// other sidecar).
+///
+/// The total number of simulated SPs can't exceed this value.
+pub const NUM_IGNITION_TARGETS: usize = 35;
+
 pub struct Sidecar {
     sp: sp::Handle<Handler>,
     tasks: SpTasks<()>,
@@ -1111,9 +1117,6 @@ fn initial_ignition_state(system_type: ignition::SystemType) -> IgnitionState {
 }
 
 impl FakeIgnition {
-    // Ignition always has 35 ports: 32 sleds, 2 psc, 1 sidecar (the other one)
-    const NUM_IGNITION_TARGETS: usize = 35;
-
     fn new(config: &SimulatedSpsConfig) -> Self {
         let mut state = Vec::new();
 
@@ -1127,11 +1130,8 @@ impl FakeIgnition {
             state.push(initial_ignition_state(ignition::SystemType::Psc));
         }
 
-        assert!(
-            state.len() <= Self::NUM_IGNITION_TARGETS,
-            "too many simulated SPs"
-        );
-        while state.len() < Self::NUM_IGNITION_TARGETS {
+        assert!(state.len() <= NUM_IGNITION_TARGETS, "too many simulated SPs");
+        while state.len() < NUM_IGNITION_TARGETS {
             state.push(IgnitionState {
                 receiver: ignition::ReceiverStatus {
                     aligned: false,
@@ -1144,7 +1144,7 @@ impl FakeIgnition {
 
         Self {
             state,
-            link_events: vec![empty_link_events(); Self::NUM_IGNITION_TARGETS],
+            link_events: vec![empty_link_events(); NUM_IGNITION_TARGETS],
         }
     }
 
