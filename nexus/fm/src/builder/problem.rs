@@ -4,6 +4,7 @@
 
 use super::rng::ProblemBuilderRng;
 use crate::problem::ProblemCode;
+use chrono::{DateTime, Utc};
 use iddqd::{IdOrdMap, id_ord_map};
 use nexus_types::fm::AllProblems;
 use nexus_types::fm::DiagnosisEngineKind;
@@ -41,13 +42,13 @@ pub struct ProblemSetBuilder<'parent> {
 ///
 /// The accessors on this type return the problem's state *as of this revision*.
 /// If that field has not changed in this revision, they return the value in the
-/// previous revision; if it has changed, they return the value being set in the
-/// in-progress revision.
+/// previous revision. If the current revision *does* change that field, they
+/// return the value that will be set by this revision.
 ///
-/// Setting a field to the value it already has in the parent sitrep's current
-/// does not record a change for that field (and will undo any previously set
-/// change). If there is no change when the sitrep is built, no new revision
-/// will be created.
+/// Setting a field to the value it already has in the most recent revision of
+/// the problem does not record a change for that field (and will undo any
+/// previously set change). If there is no change when the sitrep is built, no
+/// new revision will be created.
 pub struct RevisionBuilder<'rev> {
     revision: id_ord_map::RefMut<'rev, PendingRevision>,
     sitrep_id: SitrepUuid,
@@ -72,6 +73,7 @@ pub struct PendingRevision {
     /// `action_required` are always `Some`, because there is no previous
     /// revision for them to overlay on top of.
     parent: Option<Arc<SitrepProblem>>,
+    problem_comment: Option<String>,
 
     //
     // Fields that may be modified in this revision
@@ -81,7 +83,15 @@ pub struct PendingRevision {
     summary: Option<String>,
     description: Option<String>,
     action_required: Option<String>,
-    resolved: bool,
+    /// The time at which the problem was resolved, if this revision will mark
+    /// it as resolved.
+    ///
+    /// Unlike the other fields, this does not overlay a value from the previous
+    /// revision. This is because [`ProblemSetBuilder::revise`] will never allow
+    /// a diagnosis engine to revise a problem that was already resolved in the
+    /// parent sitrep, so the previous revision's `time_resolved` is always
+    /// `None`.
+    time_resolved: Option<DateTime<Utc>>,
     // Alert links added in this revision.
     new_alerts: IdOrdMap<AlertLink>,
     // Support bundle links added in this revision.
@@ -142,13 +152,19 @@ impl PendingRevision {
             .expect(PARENT_OR_ALL_FIELDS_SET)
     }
 
-    /// Returns `true` if this revision resolves the problem.
+    /// Returns the time at which this revision resolves the problem, or
+    /// `None` if the problem remains active as of this revision.
     ///
     /// [`ProblemSetBuilder::revise`] will never revise a problem that was
-    /// already resolved in the parent sitrep, so this is only `true` if the
+    /// already resolved in the parent sitrep, so this is only `Some` if the
     /// problem was resolved in the sitrep being built.
+    pub fn time_resolved(&self) -> Option<DateTime<Utc>> {
+        self.time_resolved
+    }
+
+    /// Returns `true` if this revision resolves the problem.
     pub fn is_resolved(&self) -> bool {
-        self.resolved
+        self.time_resolved.is_some()
     }
 
     /// Returns an iterator over all alerts attached to this problem, including
@@ -197,7 +213,7 @@ impl PendingRevision {
     ///
     /// If this is `false` when the sitrep is built, no revision will be
     /// created.
-    pub fn has_changed(&self) -> bool {
+    pub fn has_been_revised(&self) -> bool {
         // IMPORTANT NOTE: this function uses an exhaustive destructuring
         // specifically to ensure any newly-added fields are considered. If this
         // destructuring produces a compiler error, it means you have added a
@@ -214,6 +230,7 @@ impl PendingRevision {
             log: _,
             debug_log: _,
             parent: _,
+            problem_comment: _,
             // Every other field is part of the new revision being constructed,
             // and we must test whether any of them have changed.
             code,
@@ -222,13 +239,13 @@ impl PendingRevision {
             action_required,
             new_alerts,
             new_support_bundles,
-            resolved,
+            time_resolved,
         } = self;
         code.is_some()
             || summary.is_some()
             || description.is_some()
             || action_required.is_some()
-            || *resolved
+            || time_resolved.is_some()
             || !new_alerts.is_empty()
             || !new_support_bundles.is_empty()
     }
@@ -248,27 +265,130 @@ impl PendingRevision {
 
     fn build(
         self,
-        now: DateTime<Utc>,
+        sitrep_id: SitrepUuid,
     ) -> (Arc<SitrepProblem>, ActiveProblemReport) {
-        if !self.has_changed() {
-            let problem = self.parent.expect(
+        if !self.has_been_revised() {
+            let parent_problem = self.parent.expect(
                 "if an active problem has not changed in this sitrep, it must \
                  have existed in a previous sitrep",
             );
-            let rev = problem.current_revision();
-            let resolved_sitrep_id = if rev.resolved_sitrep_id.is_some() {
-                Some(rev.requested_sitrep_id)
-            } else {
-                None
+            // A diagnosis engine may have edited the problem's comment even if
+            // it did not create a revision. Editing the comment of the problem
+            // record in the next sitrep does not change the revisions.
+            let (comment, problem) = match self.problem_comment {
+                Some(comment) => {
+                    let SitrepProblem {
+                        id,
+                        comment: _,
+                        revisions,
+                        alerts,
+                        support_bundles,
+                        requested_sitrep_id,
+                    } = Arc::unwrap_or_clone(parent_problem);
+                    let problem = Arc::new(SitrepProblem {
+                        id,
+                        revisions,
+                        alerts,
+                        support_bundles,
+                        requested_sitrep_id,
+                        comment: comment.clone(),
+                    });
+                    (comment, problem)
+                }
+                None => (parent_problem.comment.clone(), parent_problem),
             };
+            let rev = problem.current_revision();
             let report = ActiveProblemReport {
                 id: problem.id,
                 requested_sitrep_id: problem.requested_sitrep_id,
                 revised_sitrep_id: rev.requested_sitrep_id,
-                resolved_sitrep_id,
+                state: rev.report_state(),
+                log: self.debug_log,
+                comment,
+                current_problem_code: rev.code.into(),
+                revision: rev.number,
+                summary: rev.summary.clone(),
+                total_support_bundles: problem.support_bundles.len(),
+                total_alerts: problem.alerts.len(),
+                new_support_bundles: 0,
+                new_alerts: 0,
             };
-            (problem, report)
+            return (problem, report);
         }
+
+        let parent = self.parent.as_deref();
+        let previous_rev = parent.map(|p| p.current_revision());
+        let new_rev = SitrepRevision {
+            number: self.num,
+            requested_sitrep_id: sitrep_id,
+            time_resolved: self.time_resolved,
+            code: self.code(),
+            summary: self
+                .summary
+                .or_else(|| previous_rev.map(|p| p.summary.clone()))
+                .expect(PARENT_OR_ALL_FIELDS_SET),
+            description: self
+                .description
+                .or_else(|| previous_rev.map(|p| p.description.clone()))
+                .expect(PARENT_OR_ALL_FIELDS_SET),
+            action_required: self
+                .action_required
+                .or_else(|| previous_rev.map(|p| p.action_required.clone()))
+                .expect(PARENT_OR_ALL_FIELDS_SET),
+        };
+        // If the problem already existed in a prior sitrep, use the parent
+        // record's requested sitrep ID. Otherwise, it is being requested in
+        // this sitrep, so use this sitrep's ID.
+        let requested_sitrep_id =
+            parent.map(|p| p.requested_sitrep_id).unwrap_or(sitrep_id);
+        let new_alerts = self.new_alerts.len();
+        let new_support_bundles = self.new_support_bundles.len();
+        let support_bundles = {
+            let mut p =
+                parent.map(|p| p.support_bundles.clone()).unwrap_or_default();
+            p.extend(self.new_support_bundles);
+            p
+        };
+        let alerts = {
+            let mut p = parent.map(|p| p.alerts.clone()).unwrap_or_default();
+            p.extend(self.new_alerts);
+            p
+        };
+        let comment = self
+            .problem_comment
+            .or_else(|| parent.map(|p| p.comment.clone()))
+            .expect(PARENT_OR_ALL_FIELDS_SET);
+        let report = ActiveProblemReport {
+            id: self.id,
+            requested_sitrep_id,
+            revised_sitrep_id: sitrep_id,
+            log: self.debug_log,
+            revision: new_rev.number,
+            current_problem_code: new_rev.code.into(),
+            summary: new_rev.summary.clone(),
+            new_alerts,
+            new_support_bundles,
+            total_support_bundles: support_bundles.len(),
+            total_alerts: alerts.len(),
+            state: new_rev.report_state(),
+            comment: comment.clone(),
+        };
+
+        let revisions = {
+            let mut p = parent.map(|p| p.revisions.clone()).unwrap_or_default();
+            p.insert_unique(new_rev)
+                .expect("revision number should be the next one");
+            p
+        };
+        let problem = Arc::new(SitrepProblem {
+            id: self.id,
+            comment,
+            requested_sitrep_id,
+            revisions,
+            alerts,
+            support_bundles,
+        });
+        (problem, report)
     }
 }
 
@@ -323,13 +443,14 @@ impl<'parent> ProblemSetBuilder<'parent> {
             "problem_id" => id.to_string(),
             "revision" => num.as_u64(),
         ));
+        let problem_comment = comment.to_string();
 
         let mut debug_log = DebugLog::default();
         debug_log
             .entry(&log, "requested a new active problem")
             .kv("code", code)
             .kv("requested_by", de)
-            .comment(comment)
+            .comment(&problem_comment)
             .finish();
 
         let builder = PendingRevision {
@@ -337,8 +458,9 @@ impl<'parent> ProblemSetBuilder<'parent> {
             log,
             num,
             debug_log,
+            problem_comment: Some(problem_comment),
             code: Some(code),
-            resolved: false,
+            time_resolved: None,
             summary: Some(summary),
             description: Some(description),
             action_required: Some(action_required),
@@ -395,7 +517,8 @@ impl<'parent> ProblemSetBuilder<'parent> {
                     log,
                     num,
                     debug_log: DebugLog::default(),
-                    resolved: false,
+                    problem_comment: None,
+                    time_resolved: None,
                     code: None,
                     summary: None,
                     description: None,
@@ -420,7 +543,13 @@ impl<'parent> ProblemSetBuilder<'parent> {
         self.pending_revisions.get(id)
     }
 
-    pub fn build(self) -> (AllProblems, IdOrdMap<ActiveProblemReport>) {
+    pub fn build(self) -> anyhow::Result<(AllProblems, IdOrdMap<ActiveProblemReport>)> {
+        let n_problems = self.pending_revisions.len()
+            + self.parent_problems.map_or(0, |p| p.len());
+        let mut reports = IdOrdMap::with_capacity(n_problems);
+        let problems = self.
+        let problems = AllProblems::try_from_iter()?;
+
         todo!()
     }
 }
@@ -490,19 +619,42 @@ impl RevisionBuilder<'_> {
         self
     }
 
-    /// Marks the problem as resolved as of this revision.
+    /// Marks the problem as resolved at `time_resolved`.
     ///
-    /// Resolution cannot be undone. Once the problem has been resolved,
-    /// subsequent sitreps will no longer be able to resolve it.
-    pub fn resolve(&mut self, comment: impl ToString) {
-        if self.revision.resolved {
+    /// The timestamp should reflect the diagnosis engine's closest estimate of
+    /// when the failure condition this active problem represents has cleared
+    /// (e.g. the time of the ereport or inventory collection that indicated the
+    /// condition was resolved). This will set the `time_resolved` timestamp of
+    /// the generated revision. Once the revision is created by rendezvous, its
+    /// `time_created` timestamp, and the problem record's `time_modified`
+    /// timestamp, will reflect the time at which the externally-visible
+    /// revision was actually created.
+    ///
+    /// Once an active problem has been resolved, it cannot be un-resolved. If
+    /// this sitrep is committed, [`ProblemSetBuilder::revise`] will no longer
+    /// permit revising the problem when building sitreps with this one as its
+    /// parent. If the problem has already been resolved in the current sitrep,
+    /// the existing resolution time is kept and a warning is recorded in the
+    /// debug log.
+    pub fn resolve(
+        &mut self,
+        time_resolved: DateTime<Utc>,
+        comment: impl ToString,
+    ) -> &mut Self {
+        if let Some(existing) = self.revision.time_resolved {
             self.log_warning("attempted to resolve a problem twice")
+                .kv("time_resolved", existing)
+                .kv("attempted_time_resolved", time_resolved)
                 .comment(comment)
                 .finish();
-            return;
+            return self;
         }
-        self.revision.resolved = true;
-        self.log_event("resolved problem").comment(comment).finish();
+        self.revision.time_resolved = Some(time_resolved);
+        self.log_event("resolved problem")
+            .kv("time_resolved", time_resolved)
+            .comment(comment)
+            .finish();
+        self
     }
 
     /// Attaches an alert to this problem, associating it with this revision.
@@ -647,7 +799,7 @@ mod tests {
             .insert_unique(SitrepRevision {
                 number: num,
                 requested_sitrep_id: sitrep_id,
-                resolved_sitrep_id: None,
+                time_resolved: None,
                 code: ProblemCode::UnhealthyZpool,
                 summary: "parent summary".to_string(),
                 description: "parent description".to_string(),
