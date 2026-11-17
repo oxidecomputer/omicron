@@ -111,13 +111,11 @@ impl DataStore {
     pub(super) async fn role_assignment_delete_by_identity_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        identity_type: IdentityType,
         identity_id: Uuid,
     ) -> Result<(), DieselError> {
         use nexus_db_schema::schema::role_assignment::dsl;
 
         diesel::delete(dsl::role_assignment)
-            .filter(dsl::identity_type.eq(identity_type))
             .filter(dsl::identity_id.eq(identity_id))
             .execute_async(conn)
             .await?;

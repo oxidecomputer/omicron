@@ -553,7 +553,6 @@ impl DataStore {
                 // Delete role assignments.
                 self.role_assignment_delete_by_identity_on_connection(
                     &conn,
-                    model::IdentityType::SiloUser,
                     authz_silo_user_id.into_untyped_uuid(),
                 )
                 .await?;

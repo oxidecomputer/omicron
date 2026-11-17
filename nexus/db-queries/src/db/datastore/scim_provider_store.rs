@@ -27,7 +27,6 @@ use nexus_auth::authz::SiloUserList;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatabaseString;
-use nexus_db_model::IdentityType;
 use nexus_types::external_api::policy::SiloRole;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
@@ -510,7 +509,6 @@ impl<'a> CrdbScimProviderStore<'a> {
         self.datastore
             .role_assignment_delete_by_identity_on_connection(
                 conn,
-                IdentityType::SiloUser,
                 user_id.into_untyped_uuid(),
             )
             .await?;
@@ -1218,7 +1216,6 @@ impl<'a> CrdbScimProviderStore<'a> {
         self.datastore
             .role_assignment_delete_by_identity_on_connection(
                 conn,
-                IdentityType::SiloGroup,
                 group_id.into_untyped_uuid(),
             )
             .await?;
