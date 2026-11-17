@@ -1475,7 +1475,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
 }
 
 /// Fetch a resource's policy and return the identity ids it names
-async fn policy_identity_ids<T: serde::de::DeserializeOwned>(
+pub(crate) async fn policy_identity_ids<T: serde::de::DeserializeOwned>(
     client: &dropshot::test_util::ClientTestContext,
     policy_url: &str,
     authn_as: AuthnMode,
@@ -1758,6 +1758,8 @@ async fn test_silo_delete_clean_up_role_assignments(
     .await;
     assert!(!fleet_ids.contains(&user_id));
     assert!(!fleet_ids.contains(&group_id));
+    // An identity from another silo keeps its fleet role.
+    assert!(fleet_ids.contains(&USER_TEST_PRIVILEGED.id().into_untyped_uuid()));
 
     // The silo's policy can no longer be fetched through the API, so check
     // the database directly. Every assignment on the silo should be gone,
