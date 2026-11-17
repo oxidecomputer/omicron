@@ -8,6 +8,18 @@
 //! belongs to exactly one diagnosis engine (see [`Metadata::de`]), so every
 //! fact on a case carries that engine's variant.
 //!
+//! # Adding a fact table
+//!
+//! Each [`FactPayload`] variant has its own `fm_fact_<variant>` table. To
+//! add one:
+//!
+//! 1. Add the fact type and its [`FactPayload`] variant here.
+//! 2. Add the `fm_fact_<variant>` table to the schema.
+//! 3. Add an `FmFact<Variant>` model in `nexus_db_model::fm` that
+//!    implements `FmFactRow`.
+//! 4. Add the variant to `fm_fact_tables!` and `sitrep_child_tables!` in
+//!    `nexus_db_queries::db::datastore::fm`.
+//!
 //! [`Fact`]: super::case::Fact
 //! [`Case`]: super::case::Case
 //! [`Metadata::de`]: super::case::Metadata::de
