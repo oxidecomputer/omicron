@@ -1711,12 +1711,10 @@ impl SledAgentApi for SledAgentImpl {
                             status,
                         }
                     }
-                    CoordinatorStatusSnapshot::NotCoordinating {
-                        latest_config_epoch,
-                    } => {
-                        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
-                            latest_config_epoch,
-                        }
+                    CoordinatorStatusSnapshot::NotCoordinating(status) => {
+                        TrustQuorumCoordinatorStatusResponse::NotCoordinating(
+                            status,
+                        )
                     }
                 };
                 Ok(HttpResponseOk(response))

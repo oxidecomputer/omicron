@@ -4,9 +4,10 @@
 
 //! Validates the `multicast-member-parent-kind` migration.
 
-use crate::integration_tests::schema::{DataMigrationFns, MigrationContext};
+use super::super::schema::{DataMigrationFns, MigrationContext};
 use futures::future::BoxFuture;
 use pretty_assertions::assert_eq;
+use tokio_postgres::error::SqlState;
 use uuid::Uuid;
 
 // randomly-generated IDs
@@ -45,6 +46,23 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         .await
         .expect("queried post-migration data");
     assert_eq!(row.get::<_, String>("parent_kind"), "instance");
+
+    let err = ctx
+        .client
+        .batch_execute(&format!(
+            "
+            INSERT INTO omicron.public.multicast_group_member (
+                id, time_created, time_modified, external_group_id,
+                parent_id, state, multicast_ip
+            )
+            VALUES
+            (gen_random_uuid(), now(), now(), '{GROUP_ID}',
+             gen_random_uuid(), 'joined', '224.2.0.1');
+            "
+        ))
+        .await
+        .expect_err("insert without parent_kind should fail");
+    assert_eq!(err.code(), Some(&SqlState::NOT_NULL_VIOLATION));
 
     ctx.client
         .batch_execute(&format!(

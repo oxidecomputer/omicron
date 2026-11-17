@@ -23,7 +23,7 @@ use sled_agent_types_versions::latest::multicast::{
 use sled_agent_types_versions::{
     latest, v1, v7, v10, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29,
     v30, v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48,
-    v49, v50, v51, v52, v53, v55, v64,
+    v49, v50, v51, v52, v53, v55, v61, v65,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -40,9 +40,10 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (66, MCAST_UPSTREAM_TYPES),
-    (65, PROBE_MULTICAST_GROUPS),
-    (64, MCAST_M2P_FORWARDING),
+    (67, MCAST_UPSTREAM_TYPES),
+    (66, PROBE_MULTICAST_GROUPS),
+    (65, MCAST_M2P_FORWARDING),
+    (64, TRUST_QUORUM_MEMBERS),
     (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
     (62, ADD_SLED_REGISTRATION_INFO),
     (61, TRUST_QUORUM_NULLABLE_RESPONSES),
@@ -976,7 +977,7 @@ pub trait SledAgentApi {
     }]
     async fn set_mcast_m2p_v64(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v64::multicast::Mcast2PhysMapping>,
+        body: TypedBody<v65::multicast::Mcast2PhysMapping>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(|b| {
             Mcast2PhysMapping::try_from(b).map_err(HttpError::from)
@@ -1004,7 +1005,7 @@ pub trait SledAgentApi {
     }]
     async fn clear_mcast_m2p_v64(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v64::multicast::ClearMcast2Phys>,
+        body: TypedBody<v65::multicast::ClearMcast2Phys>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(|b| {
             ClearMcast2Phys::try_from(b).map_err(HttpError::from)
@@ -1032,7 +1033,7 @@ pub trait SledAgentApi {
     }]
     async fn set_mcast_fwd_v64(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v64::multicast::McastForwardingEntry>,
+        body: TypedBody<v65::multicast::McastForwardingEntry>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(|b| {
             McastForwardingEntry::try_from(b).map_err(HttpError::from)
@@ -1060,7 +1061,7 @@ pub trait SledAgentApi {
     }]
     async fn clear_mcast_fwd_v64(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v64::multicast::ClearMcastForwarding>,
+        body: TypedBody<v65::multicast::ClearMcastForwarding>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(|b| {
             ClearMcastForwarding::try_from(b).map_err(HttpError::from)
@@ -1087,7 +1088,7 @@ pub trait SledAgentApi {
     }]
     async fn list_mcast_m2p_v64(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<v64::multicast::Mcast2PhysMapping>>, HttpError>
+    ) -> Result<HttpResponseOk<Vec<v65::multicast::Mcast2PhysMapping>>, HttpError>
     {
         Ok(Self::list_mcast_m2p(rqctx)
             .await?
@@ -1114,7 +1115,7 @@ pub trait SledAgentApi {
     async fn list_mcast_fwd_v64(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Vec<v64::multicast::McastForwardingEntry>>,
+        HttpResponseOk<Vec<v65::multicast::McastForwardingEntry>>,
         HttpError,
     > {
         Ok(Self::list_mcast_fwd(rqctx)
@@ -1827,21 +1828,77 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/trust-quorum/configuration",
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn trust_quorum_reconfigure(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<trust_quorum_types::messages::ReconfigureMsg>,
+        body: TypedBody<
+            trust_quorum_types_versions::latest::messages::ReconfigureMsg,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate a trust quorum reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_reconfigure",
+        method = POST,
+        path = "/trust-quorum/configuration",
+        versions = ..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_reconfigure_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::v1::messages::ReconfigureMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::trust_quorum_reconfigure(
+            request_context,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
 
     /// Initiate an upgrade from LRTQ
     #[endpoint {
         method = POST,
         path = "/trust-quorum/upgrade",
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn trust_quorum_upgrade_from_lrtq(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<trust_quorum_types::messages::LrtqUpgradeMsg>,
+        body: TypedBody<
+            trust_quorum_types_versions::latest::messages::LrtqUpgradeMsg,
+        >,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Initiate an upgrade from LRTQ
+    #[endpoint {
+        operation_id = "trust_quorum_upgrade_from_lrtq",
+        method = POST,
+        path = "/trust-quorum/upgrade",
+        versions = ..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_upgrade_from_lrtq_v1(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<
+            trust_quorum_types_versions::v1::messages::LrtqUpgradeMsg,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::trust_quorum_upgrade_from_lrtq(
+            request_context,
+            body.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+    }
 
     /// Commit a trust quorum configuration
     #[endpoint {
@@ -1857,7 +1914,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/trust-quorum/coordinator-status",
-        versions = VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..,
+        versions = VERSION_TRUST_QUORUM_MEMBERS..,
     }]
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
@@ -1867,6 +1924,29 @@ pub trait SledAgentApi {
         >,
         HttpError,
     >;
+
+    /// Get the coordinator status if this node is coordinating a reconfiguration
+    #[endpoint {
+        operation_id = "trust_quorum_coordinator_status",
+        method = GET,
+        path = "/trust-quorum/coordinator-status",
+        versions =
+            VERSION_TRUST_QUORUM_NULLABLE_RESPONSES..VERSION_TRUST_QUORUM_MEMBERS,
+    }]
+    async fn trust_quorum_coordinator_status_v61(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v61::trust_quorum::TrustQuorumCoordinatorStatusResponse>,
+        HttpError,
+    > {
+        Self::trust_quorum_coordinator_status(request_context)
+            .await
+            .map(|response| {
+                response.map(
+                    v61::trust_quorum::TrustQuorumCoordinatorStatusResponse::from,
+                )
+            })
+    }
 
     /// Get the coordinator status if this node is coordinating a reconfiguration
     #[endpoint {
@@ -1891,10 +1971,11 @@ pub trait SledAgentApi {
         // immutable blessed documents. But that leaves open the question of how
         // None can be represented on the wire. We return a 404 -- old clients
         // will receive it as an error and will handle it reasonably well.
-        use latest::trust_quorum::TrustQuorumCoordinatorStatusResponse;
+        use v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 
-        Self::trust_quorum_coordinator_status(request_context).await?.try_map(
-            |response| match response {
+        Self::trust_quorum_coordinator_status_v61(request_context)
+            .await?
+            .try_map(|response| match response {
                 TrustQuorumCoordinatorStatusResponse::Coordinating {
                     status,
                 } => Ok(status),
@@ -1907,8 +1988,7 @@ pub trait SledAgentApi {
                      quorum reconfiguration"
                         .to_string(),
                 )),
-            },
-        )
+            })
     }
 
     /// Attempt to prepare and commit a trust quorum configuration

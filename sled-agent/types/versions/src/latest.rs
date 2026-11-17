@@ -100,16 +100,16 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v64::multicast::McastFilterMode;
-    pub use crate::v64::multicast::McastForwardingNextHop;
-    pub use crate::v64::multicast::McastReplication;
-    pub use crate::v64::multicast::McastSourceFilter;
-    pub use crate::v64::multicast::MulticastGroupCfg;
+    pub use crate::v65::multicast::McastFilterMode;
+    pub use crate::v65::multicast::McastForwardingNextHop;
+    pub use crate::v65::multicast::McastReplication;
+    pub use crate::v65::multicast::McastSourceFilter;
+    pub use crate::v65::multicast::MulticastGroupCfg;
 
-    pub use crate::v66::multicast::ClearMcast2Phys;
-    pub use crate::v66::multicast::ClearMcastForwarding;
-    pub use crate::v66::multicast::Mcast2PhysMapping;
-    pub use crate::v66::multicast::McastForwardingEntry;
+    pub use crate::v67::multicast::ClearMcast2Phys;
+    pub use crate::v67::multicast::ClearMcastForwarding;
+    pub use crate::v67::multicast::Mcast2PhysMapping;
+    pub use crate::v67::multicast::McastForwardingEntry;
 }
 
 pub mod instance {
@@ -258,8 +258,8 @@ pub mod multirack {
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
-    pub use crate::v65::probes::ProbeCreate;
-    pub use crate::v65::probes::ProbeSet;
+    pub use crate::v66::probes::ProbeCreate;
+    pub use crate::v66::probes::ProbeSet;
 }
 
 pub mod rot {
@@ -312,8 +312,9 @@ pub mod trust_quorum {
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 
-    pub use crate::v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
     pub use crate::v61::trust_quorum::TrustQuorumNetworkConfigResponse;
+
+    pub use crate::v64::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 }
 
 pub mod uplink {

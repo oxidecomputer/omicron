@@ -11,8 +11,8 @@ use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v64;
-use crate::v64::multicast::McastForwardingNextHop;
+use crate::v65;
+use crate::v65::multicast::McastForwardingNextHop;
 
 /// Mapping from an overlay multicast group to an underlay multicast address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -50,75 +50,75 @@ pub struct ClearMcastForwarding {
     pub underlay: UnderlayMulticastIpv6,
 }
 
-fn group_from_v64(group: IpAddr) -> Result<MulticastAddr, external::Error> {
+fn group_from_v65(group: IpAddr) -> Result<MulticastAddr, external::Error> {
     MulticastAddr::new(group)
         .map_err(|e| external::Error::invalid_request(e.to_string()))
 }
 
-fn underlay_from_v64(
+fn underlay_from_v65(
     underlay: Ipv6Addr,
 ) -> Result<UnderlayMulticastIpv6, external::Error> {
     UnderlayMulticastIpv6::new(underlay)
         .map_err(|e| external::Error::invalid_request(e.to_string()))
 }
 
-impl TryFrom<v64::multicast::Mcast2PhysMapping> for Mcast2PhysMapping {
+impl TryFrom<v65::multicast::Mcast2PhysMapping> for Mcast2PhysMapping {
     type Error = external::Error;
 
     fn try_from(
-        old: v64::multicast::Mcast2PhysMapping,
+        old: v65::multicast::Mcast2PhysMapping,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            group: group_from_v64(old.group)?,
-            underlay: underlay_from_v64(old.underlay)?,
+            group: group_from_v65(old.group)?,
+            underlay: underlay_from_v65(old.underlay)?,
         })
     }
 }
 
-impl From<Mcast2PhysMapping> for v64::multicast::Mcast2PhysMapping {
+impl From<Mcast2PhysMapping> for v65::multicast::Mcast2PhysMapping {
     fn from(new: Mcast2PhysMapping) -> Self {
         Self { group: new.group.ip(), underlay: new.underlay.ip() }
     }
 }
 
-impl TryFrom<v64::multicast::ClearMcast2Phys> for ClearMcast2Phys {
+impl TryFrom<v65::multicast::ClearMcast2Phys> for ClearMcast2Phys {
     type Error = external::Error;
 
     fn try_from(
-        old: v64::multicast::ClearMcast2Phys,
+        old: v65::multicast::ClearMcast2Phys,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            group: group_from_v64(old.group)?,
-            underlay: underlay_from_v64(old.underlay)?,
+            group: group_from_v65(old.group)?,
+            underlay: underlay_from_v65(old.underlay)?,
         })
     }
 }
 
-impl TryFrom<v64::multicast::McastForwardingEntry> for McastForwardingEntry {
+impl TryFrom<v65::multicast::McastForwardingEntry> for McastForwardingEntry {
     type Error = external::Error;
 
     fn try_from(
-        old: v64::multicast::McastForwardingEntry,
+        old: v65::multicast::McastForwardingEntry,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            underlay: underlay_from_v64(old.underlay)?,
+            underlay: underlay_from_v65(old.underlay)?,
             next_hops: old.next_hops,
         })
     }
 }
 
-impl From<McastForwardingEntry> for v64::multicast::McastForwardingEntry {
+impl From<McastForwardingEntry> for v65::multicast::McastForwardingEntry {
     fn from(new: McastForwardingEntry) -> Self {
         Self { underlay: new.underlay.ip(), next_hops: new.next_hops }
     }
 }
 
-impl TryFrom<v64::multicast::ClearMcastForwarding> for ClearMcastForwarding {
+impl TryFrom<v65::multicast::ClearMcastForwarding> for ClearMcastForwarding {
     type Error = external::Error;
 
     fn try_from(
-        old: v64::multicast::ClearMcastForwarding,
+        old: v65::multicast::ClearMcastForwarding,
     ) -> Result<Self, Self::Error> {
-        Ok(Self { underlay: underlay_from_v64(old.underlay)? })
+        Ok(Self { underlay: underlay_from_v65(old.underlay)? })
     }
 }

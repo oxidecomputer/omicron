@@ -17,7 +17,7 @@
 //!
 //! ## Common Utils
 //!
-//! Helper functions convert state enums to SQL literals with compile-time
+//! Helper functions convert enums to SQL literals with compile-time
 //! safety (ensures SQL strings match enum definitions).
 
 use nexus_db_model::{
@@ -58,8 +58,9 @@ pub(super) const fn member_state_as_sql_literal(
 
 /// Returns SQL literal for a member parent kind (e.g., "'instance'").
 ///
-/// Compile-time safety: kind names in SQL must match enum definition.
-/// Returned string includes single quotes for direct SQL interpolation.
+/// Compile-time safety: kind names in SQL must match the enum definition.
+/// The returned static string includes single quotes for direct SQL
+/// interpolation.
 pub(super) const fn member_parent_kind_as_sql_literal(
     kind: MulticastGroupMemberParentKind,
 ) -> &'static str {

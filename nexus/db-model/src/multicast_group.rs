@@ -314,6 +314,8 @@ pub struct MulticastGroupMember {
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    /// Discriminator for `parent_id`.
+    pub parent_kind: MulticastGroupMemberParentKind,
     /// Origin of this membership.
     ///
     /// [`Static`](MulticastGroupMemberOrigin::Static) for administratively
@@ -322,8 +324,6 @@ pub struct MulticastGroupMember {
     /// soft-state learned from snooped IGMP/MLD reports (RFD 488). Only snooped
     /// rows are subject to soft-state expiry.
     pub membership_origin: MulticastGroupMemberOrigin,
-    /// Discriminator for `parent_id`.
-    pub parent_kind: MulticastGroupMemberParentKind,
 }
 
 // Conversions to external API views

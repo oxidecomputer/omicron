@@ -76,7 +76,7 @@ use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::v2025_11_20_00;
 use nexus_types_versions::v2026_01_01_00;
 use nexus_types_versions::v2026_01_08_00;
-use nexus_types_versions::v2026_11_09_02;
+use nexus_types_versions::v2026_11_17_02;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
@@ -5536,7 +5536,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     // Pre-PROBE_MULTICAST version: body and path types are unchanged, so
     // delegate to the latest and downgrade the response via the version-
     // chain `TryFrom`, which fails 406 if the row is probe-parented.
-    async fn instance_multicast_group_join_v2026_11_09_01(
+    async fn instance_multicast_group_join_v2026_11_17_01(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<
             v2026_01_08_00::multicast::InstanceMulticastGroupPath,
@@ -5574,7 +5574,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
         HttpError,
     > {
-        Self::instance_multicast_group_join_v2026_11_09_01(
+        Self::instance_multicast_group_join_v2026_11_17_01(
             rqctx,
             path_params,
             query_params,
@@ -5626,7 +5626,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             let latest =
-                v2026_11_09_02::multicast::MulticastGroupMember::try_from(
+                v2026_11_17_02::multicast::MulticastGroupMember::try_from(
                     result,
                 )?;
             let member: v2026_01_08_00::multicast::MulticastGroupMember =
@@ -6692,11 +6692,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_abort(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<path_params::RackPath>,
+        query_params: Query<rack::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let rack_id =
                 RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
-            let status = nexus.tq_abort_latest_config(&opctx, rack_id).await?;
+            let epoch = query_params.into_inner().version.map(|v| Epoch(v.0));
+            let status = nexus.tq_abort_config(&opctx, rack_id, epoch).await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026110901.0.0"
+    "version": "2026111700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4475,7 +4475,7 @@
           "experimental"
         ],
         "summary": "Join multicast group by name, IP address, or UUID",
-        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a single request are rejected. Per-member source list is capped at 32, and the union of source IPs across all members of a single group is capped at 256.",
+        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request are automatically deduplicated, with a maximum of 64 source IPs allowed.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -8130,8 +8130,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Abort the latest rack membership change",
-        "description": "This operation is synchronous. Upon returning from the API call, a success response indicates that the prior membership change was aborted. An error response indicates that there is no active membership change in progress (previous changes have completed) or that the current membership change could not be aborted.",
+        "summary": "Abort rack membership change",
+        "description": "This operation is synchronous. Upon returning from the API call, a success response indicates that the prior membership change was aborted. An error response indicates that there is no active membership change in progress (previous changes have completed), that the specified membership change could not be aborted, or that (if a version is specified) configuration has moved past it.",
         "operationId": "rack_membership_abort",
         "parameters": [
           {
@@ -8142,6 +8142,13 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "$ref": "#/components/schemas/RackMembershipVersion"
             }
           }
         ],

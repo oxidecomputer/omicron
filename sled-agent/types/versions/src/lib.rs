@@ -129,12 +129,14 @@ pub mod v61;
 pub mod v62;
 #[path = "multirack_join_complete_generation/mod.rs"]
 pub mod v63;
-#[path = "mcast_m2p_forwarding/mod.rs"]
+#[path = "trust_quorum_members/mod.rs"]
 pub mod v64;
-#[path = "probe_multicast_groups/mod.rs"]
+#[path = "mcast_m2p_forwarding/mod.rs"]
 pub mod v65;
-#[path = "mcast_upstream_types/mod.rs"]
+#[path = "probe_multicast_groups/mod.rs"]
 pub mod v66;
+#[path = "mcast_upstream_types/mod.rs"]
+pub mod v67;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

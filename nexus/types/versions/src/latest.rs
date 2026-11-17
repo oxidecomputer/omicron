@@ -258,8 +258,8 @@ pub mod multicast {
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupUpdate;
 
-    pub use crate::v2026_11_09_02::multicast::MulticastGroupMember;
-    pub use crate::v2026_11_09_02::multicast::MulticastGroupMemberParentKind;
+    pub use crate::v2026_11_17_02::multicast::MulticastGroupMember;
+    pub use crate::v2026_11_17_02::multicast::MulticastGroupMemberParentKind;
 }
 
 pub mod multirack {
@@ -369,7 +369,7 @@ pub mod probe {
 
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
-    pub use crate::v2026_11_09_02::probe::ProbeCreate;
+    pub use crate::v2026_11_17_02::probe::ProbeCreate;
 }
 
 pub mod problem {

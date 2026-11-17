@@ -571,8 +571,8 @@ impl AttachMemberToGroupStatement {
         out.push_sql(
             " RETURNING id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips, membership_origin, \
-             parent_kind",
+             version_removed, multicast_ip, source_ips, parent_kind, \
+             membership_origin",
         );
         Ok(())
     }
@@ -592,8 +592,8 @@ impl AttachMemberToGroupStatement {
         out.push_sql(
             "SELECT id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips, membership_origin, \
-             parent_kind \
+             version_removed, multicast_ip, source_ips, parent_kind, \
+             membership_origin \
              FROM upserted_member CROSS JOIN validation",
         );
         Ok(())
