@@ -75,6 +75,7 @@ use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvSvcEnabledNotOnline;
 use nexus_db_model::InvSvcEnabledNotOnlineParseError;
 use nexus_db_model::InvSvcEnabledNotOnlineService;
+use nexus_db_model::InvWicketSshAuthStatusCols;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -2045,6 +2046,10 @@ impl DataStore {
                         update_disposition: instance_manager_update_disposition,
                         num_registered_vmms: instance_manager_num_registered_vmms,
                     } = instance_manager_status_cols;
+                    let InvWicketSshAuthStatusCols {
+                        wicket_ssh_auth_effective_gen,
+                        wicket_ssh_auth_last_error,
+                    } = sled_agent.wicket_ssh_auth_status.clone().into();
                     let file_source_resolver = InvOmicronFileSourceResolver::new(&sled_agent.file_source_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
@@ -2118,6 +2123,10 @@ impl DataStore {
                                 .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
                             instance_manager_num_registered_vmms
                                 .into_sql::<diesel::sql_types::Int8>(),
+                            wicket_ssh_auth_effective_gen
+                                .into_sql::<Nullable<diesel::sql_types::Int8>>(),
+                            wicket_ssh_auth_last_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
                             sled_agent.rack_id.into_untyped_uuid()
                                 .into_sql::<diesel::sql_types::Uuid>(),
                         ))
@@ -2164,6 +2173,8 @@ impl DataStore {
                                 sa_dsl::mupdate_override_boot_disk_error,
                                 sa_dsl::instance_manager_update_disposition,
                                 sa_dsl::instance_manager_num_registered_vmms,
+                                sa_dsl::wicket_ssh_auth_effective_gen,
+                                sa_dsl::wicket_ssh_auth_last_error,
                                 sa_dsl::rack_id,
                             ))
                             .execute_async(&conn)
@@ -2204,6 +2215,8 @@ impl DataStore {
                         _instance_manager_update_disposition,
                         _instance_manager_num_registered_vmms,
                         _rack_id,
+                        _wicket_ssh_auth_effective_gen,
+                        _wicket_ssh_auth_last_error,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -5267,6 +5280,7 @@ impl DataStore {
                 .transpose()?;
 
             let instance_manager_status = s.instance_manager_status();
+            let wicket_ssh_auth_status = s.wicket_ssh_auth_status();
 
             let file_source_resolver = s
                 .file_source_resolver
@@ -5402,6 +5416,7 @@ impl DataStore {
                         _ => Ok(FmdInventory { cases, resources }),
                     }
                 },
+                wicket_ssh_auth_status,
             };
             sled_agents
                 .insert_unique(sled_agent)

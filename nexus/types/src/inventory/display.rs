@@ -22,7 +22,7 @@ use omicron_uuid_kinds::{
 };
 use sled_agent_types::inventory::{
     InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
-    SvcsEnabledNotOnlineResult, SvcsError,
+    SvcsEnabledNotOnlineResult, SvcsError, WicketSshAuthStatus,
 };
 use sled_agent_types::{
     disk::M2Slot,
@@ -803,6 +803,7 @@ fn display_sleds(
             smf_services_enabled_not_online,
             reference_measurements,
             fmd,
+            wicket_ssh_auth_status,
         } = sled;
 
         // If we were asked to filter by rack ID, display the sled if and only
@@ -846,6 +847,31 @@ fn display_sleds(
             "reservoir (GiB):     {}",
             reservoir_size.to_whole_gibibytes()
         )?;
+
+        {
+            write!(indented, "wicket SSH auth status:")?;
+            match wicket_ssh_auth_status {
+                WicketSshAuthStatus::NoSwitchZone => {
+                    writeln!(indented, " n/a (no switch zone)")?;
+                }
+                WicketSshAuthStatus::SwitchZone {
+                    effective_auth_gen,
+                    last_error,
+                } => {
+                    writeln!(indented)?;
+                    let mut indent2 = IndentWriter::new("    ", &mut indented);
+                    writeln!(
+                        indent2,
+                        "applied generation : {effective_auth_gen}"
+                    )?;
+                    writeln!(
+                        indent2,
+                        "last reconfig error: {}",
+                        last_error.as_deref().unwrap_or("none")
+                    )?;
+                }
+            }
+        }
 
         if !zpools.is_empty() {
             writeln!(indented, "physical disks:")?;

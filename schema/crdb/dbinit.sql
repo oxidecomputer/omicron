@@ -4681,6 +4681,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- ID of the row in the `rack` table that corresponds to this sled's rack
     rack_id UUID NOT NULL,
 
+    -- Columns making up the wicket SSH auth status on this sled
+    --
+    -- NULL in this column maps to `WicketSshAuthStatus::NoSwitchZone`.
+    -- Non-NULL values map to `WicketSshAuthStatus::SwitchZone { .. }`.
+    -- `wicket_ssh_auth_last_error` must be NULL if
+    -- `wicket_ssh_auth_effective_gen` is NULL. It may or may not be NULL
+    -- otherwise (there isn't always a last error).
+    wicket_ssh_auth_effective_gen u64,
+    wicket_ssh_auth_last_error TEXT,
+
+    CONSTRAINT wicket_ssh_auth_last_error_only_if_have_effective_gen CHECK (
+        wicket_ssh_auth_last_error IS NULL
+        OR wicket_ssh_auth_effective_gen IS NOT NULL
+    ),
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
