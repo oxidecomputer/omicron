@@ -163,6 +163,38 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+                                     ID: ..........<REDACTED_UUID>........... (sitrep)
+                       parent sitrep ID: None
+                             created by: ..........<REDACTED_UUID>...........
+                             created at: <REDACTED_TIMESTAMP>
+                                comment: N/A
+
+                                 status: this is the current sitrep!
+                                version: v1
+                        made current at: <REDACTED_TIMESTAMP>
+
+== DIAGNOSIS INPUTS ============================================================
+                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
+                             started at: <REDACTED_TIMESTAMP>
+                            finished at: <REDACTED_TIMESTAMP>
+      next inventory minimum start time: <REDACTED_TIMESTAMP>
+    
+    rendezvous resource generation numbers:
+                       alert generation: 1
+              support bundle generation: 1
+    
+    ereports in this sitrep: 0
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["mgs", "inventory"]
 termination: Exited(0)
 ---------------------------------------------
@@ -901,7 +933,7 @@ task: "fm_rendezvous"
       errors:          0
 
 task: "fm_sitrep_gc"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every 1day
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                                1000
@@ -1669,7 +1701,7 @@ task: "fm_rendezvous"
       errors:          0
 
 task: "fm_sitrep_gc"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every 1day
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                                1000
@@ -2740,4 +2772,109 @@ fault management configuration v1:
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "..........<REDACTED_UUID>..........."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+                                     ID: ..........<REDACTED_UUID>........... (sitrep)
+                       parent sitrep ID: None
+                             created by: ..........<REDACTED_UUID>...........
+                             created at: <REDACTED_TIMESTAMP>
+                                comment:
+      an example sitrep with cases
+
+                                 status: not committed to the sitrep history
+
+== DIAGNOSIS INPUTS ============================================================
+                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
+      note: this collection no longer exists (perhaps it has been pruned?)
+      next inventory minimum start time: <REDACTED_TIMESTAMP>
+    
+    rendezvous resource generation numbers:
+                       alert generation: 1
+              support bundle generation: 1
+    
+    ereports in this sitrep: 2
+
+== CASES =======================================================================
+
+  * case ..........<REDACTED_UUID>...........
+    =========================================
+    // zpool is degraded
+    diagnosis engine: physical_disk
+    opened in sitrep: ..........<REDACTED_UUID>........... <-- this sitrep
+
+    ereports:
+    ---------
+    * ereport ..........<REDACTED_UUID>...........:1
+      // ereport ..........<REDACTED_UUID>...........:1 looks relevant
+      class:         ereport.example.disk
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      ..........<REDACTED_UUID>........... <-- this sitrep
+      assignment ID: ..........<REDACTED_UUID>...........
+
+
+    facts:
+    ------
+    * fact ..........<REDACTED_UUID>...........
+      // zpool health was observed in inventory
+      added in: ..........<REDACTED_UUID>........... <-- this sitrep
+      * payload:
+        * engine: physical_disk
+        * kind: zpool_unhealthy
+        * last_seen_health: degraded
+        * observed_in_inv: ..........<REDACTED_UUID>...........
+        * physical_disk_id: ..........<REDACTED_UUID>...........
+        * time_observed: <REDACTED_TIMESTAMP>
+        * zpool_id: ..........<REDACTED_UUID>...........
+
+
+    alerts requested:
+    -----------------
+    * alert ..........<REDACTED_UUID>...........
+      // tell someone about the zpool
+      class:        test.foo, v0
+      requested in: ..........<REDACTED_UUID>........... <-- this sitrep
+
+
+    support bundles requested:
+    -------------------------
+    * bundle ..........<REDACTED_UUID>...........
+      // collect everything
+      requested in: ..........<REDACTED_UUID>........... <-- this sitrep
+      data:
+        - reconfigurator
+        - host_info(all)
+        - sled_cubby_info
+        - sp_dumps
+        - sp_components
+        - ereports(none)
+
+
+
+  * case ..........<REDACTED_UUID>...........
+    =========================================
+    // PSU was reseated
+    diagnosis engine: power_shelf
+    opened in sitrep: ..........<REDACTED_UUID>...........
+    closed in sitrep: ..........<REDACTED_UUID>........... <-- this sitrep
+
+    ereports:
+    ---------
+    * ereport ..........<REDACTED_UUID>...........:2
+      // ereport ..........<REDACTED_UUID>...........:2 looks relevant
+      class:         ereport.example.psu
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      ..........<REDACTED_UUID>........... <-- this sitrep
+      assignment ID: ..........<REDACTED_UUID>...........
+
+
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
 =============================================

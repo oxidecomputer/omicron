@@ -12,7 +12,9 @@ use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_db_queries::db::datastore::fm::InsertSitrepError;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
@@ -21,16 +23,24 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use nexus_types::fm;
+use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
 use omicron_test_utils::dev::test_cmds::OutputSnapshot;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::TypedUuidKind;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use subprocess::Exec;
 use uuid::Uuid;
@@ -167,6 +177,10 @@ async fn test_omdb_success_cases() {
             .with_extra_sled_agents(1)
             .customize_nexus_config(&|config| {
                 config.pkg.background_tasks.sp_ereport_ingester.disable = false;
+                // `fm_sitrep_gc` would delete the example sitrep inserted
+                // below, so don't activate it periodically.
+                config.pkg.background_tasks.fm.sitrep_gc_period_secs =
+                    Duration::from_secs(86_400);
             })
             .start::<omicron_nexus::Server>()
             .await;
@@ -315,6 +329,7 @@ async fn test_omdb_success_cases() {
         &["db", "instances"],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
+        &["db", "sitrep", "show", "current"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         // Hide "currently executing" to avoid a test flake in case a task is
@@ -576,6 +591,21 @@ async fn test_omdb_success_cases() {
         )
         .await;
     }
+
+    // The sitrep that Nexus produced has no cases, so also show one that
+    // does. `fm_sitrep_gc` still runs when the current sitrep changes, which
+    // happens during the setup above, so this is done last.
+    let example_sitrep_id =
+        insert_example_sitrep(&opctx, datastore).await.to_string();
+    let p = postgres_url.clone();
+    do_run_extra(
+        &mut output,
+        move |exec| exec.env("OMDB_DB_URL", &p),
+        &cmd_path,
+        &["db", "sitrep", "show", &example_sitrep_id],
+        &redactor,
+    )
+    .await;
 
     output.assert_contents("tests/successes.out");
 
@@ -939,6 +969,160 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         &ox_url,
         ox_test_producer,
     );
+}
+
+/// Inserts a sitrep with example cases, returning its ID.
+///
+/// The sitrep has no parent, so it loses to the sitrep that Nexus already
+/// committed and is left out of the sitrep history.
+async fn insert_example_sitrep(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> SitrepUuid {
+    use nexus_types::fm::ereport::{Ena, EreportData, EreportId, Reporter};
+
+    // Cases and their contents are displayed in ID order, so the IDs are
+    // fixed to keep the output stable.
+    fn id<T: TypedUuidKind>(n: u128) -> TypedUuid<T> {
+        TypedUuid::from_untyped_uuid(Uuid::from_u128(n))
+    }
+
+    let sitrep_id: SitrepUuid = id(1);
+    let earlier_sitrep_id: SitrepUuid = id(2);
+    let now = chrono::Utc::now();
+
+    // Reading back a case's ereports requires that they exist in the
+    // `ereport` table.
+    let restart_id = id(3);
+    let collector_id = id(4);
+    let reporter =
+        Reporter::Sp { sp_type: nexus_types::inventory::SpType::Sled, slot: 7 };
+    let ereport_data = |class: &str| EreportData {
+        part_number: Some("913-0000019".to_string()),
+        serial_number: Some("BRM42220007".to_string()),
+        class: Some(class.to_string()),
+        report: serde_json::json!({}),
+    };
+    let disk_ereport = (Ena(1), ereport_data("ereport.example.disk"));
+    let psu_ereport = (Ena(2), ereport_data("ereport.example.psu"));
+    datastore
+        .ereports_insert(
+            opctx,
+            restart_id,
+            now,
+            collector_id,
+            id(5),
+            reporter,
+            [disk_ereport.clone(), psu_ereport.clone()],
+        )
+        .await
+        .expect("inserted ereports");
+    let case_ereport = |n: u128, (ena, data): (Ena, EreportData)| {
+        let ereport_id = EreportId { restart_id, ena };
+        fm::case::CaseEreport {
+            id: id(n),
+            ereport: Arc::new(fm::Ereport::new(
+                ereport_id,
+                now,
+                collector_id,
+                data,
+                reporter,
+            )),
+            assigned_sitrep_id: sitrep_id,
+            comment: format!("ereport {ereport_id} looks relevant"),
+        }
+    };
+
+    // An open case with one of everything a case can hold.
+    let disk_case = fm::Case {
+        id: id(10),
+        metadata: fm::case::Metadata {
+            created_sitrep_id: sitrep_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::PhysicalDisk,
+            comment: "zpool is degraded".to_string(),
+        },
+        ereports: [case_ereport(11, disk_ereport)].into_iter().collect(),
+        facts: [fm::case::Fact {
+            metadata: fm::FactMetadata {
+                id: id(12),
+                created_sitrep_id: sitrep_id,
+                comment: "zpool health was observed in inventory".to_string(),
+            },
+            payload: fm::DiskFact::ZpoolUnhealthy(
+                fm::ZpoolUnhealthyFactPayload {
+                    physical_disk_id: id(13),
+                    zpool_id: id(14),
+                    last_seen_health:
+                        nexus_types::inventory::ZpoolHealth::Degraded,
+                    observed_in_inv: id(15),
+                    time_observed: now,
+                },
+            )
+            .into(),
+        }]
+        .into_iter()
+        .collect(),
+        alerts_requested: [fm::case::AlertRequest {
+            id: id(16),
+            class: nexus_types::alert::AlertClass::TestFoo,
+            version: 0,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: sitrep_id,
+            comment: "tell someone about the zpool".to_string(),
+        }]
+        .into_iter()
+        .collect(),
+        support_bundles_requested: [fm::case::SupportBundleRequest {
+            id: id(17),
+            requested_sitrep_id: sitrep_id,
+            data_selection:
+                nexus_types::support_bundle::BundleDataSelection::all(),
+            comment: "collect everything".to_string(),
+        }]
+        .into_iter()
+        .collect(),
+    };
+
+    // A case from an earlier sitrep which this sitrep closed.
+    let psu_case = fm::Case {
+        id: id(20),
+        metadata: fm::case::Metadata {
+            created_sitrep_id: earlier_sitrep_id,
+            closed_sitrep_id: Some(sitrep_id),
+            de: fm::DiagnosisEngineKind::PowerShelf,
+            comment: "PSU was reseated".to_string(),
+        },
+        ereports: [case_ereport(21, psu_ereport)].into_iter().collect(),
+        facts: Default::default(),
+        alerts_requested: Default::default(),
+        support_bundles_requested: Default::default(),
+    };
+
+    let sitrep = fm::Sitrep {
+        metadata: fm::SitrepMetadata {
+            id: sitrep_id,
+            parent_sitrep_id: None,
+            // No such collection exists.
+            inv_collection_id: id(30),
+            next_inv_min_time_started: now,
+            creator_id: collector_id,
+            comment: "an example sitrep with cases".to_string(),
+            time_created: now,
+            alert_generation: SitrepAlertGeneration::new(),
+            support_bundle_generation: SitrepSupportBundleGeneration::new(),
+        },
+        cases: [disk_case, psu_case].into_iter().collect(),
+        ereports_by_id: Default::default(),
+    };
+    match datastore.fm_sitrep_insert(opctx, sitrep, None).await {
+        Err(InsertSitrepError::ParentNotCurrent(_)) => {}
+        result => panic!(
+            "expected the example sitrep not to be made current: {result:?}"
+        ),
+    }
+
+    sitrep_id
 }
 
 async fn do_run<F>(
