@@ -666,7 +666,7 @@ dependencies = [
 [[package]]
 name = "before"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=8a635ddf45e9c116669ad6e99d83fe25dd0c1c1c#8a635ddf45e9c116669ad6e99d83fe25dd0c1c1c"
+source = "git+https://github.com/oxidecomputer/rumors?rev=1cc9bc6c97ac774ed6e33b3a924e03b1251f445d#1cc9bc6c97ac774ed6e33b3a924e03b1251f445d"
 dependencies = [
  "bytes",
  "dsi-bitstream",
@@ -13734,7 +13734,7 @@ dependencies = [
 [[package]]
 name = "rumors"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=8a635ddf45e9c116669ad6e99d83fe25dd0c1c1c#8a635ddf45e9c116669ad6e99d83fe25dd0c1c1c"
+source = "git+https://github.com/oxidecomputer/rumors?rev=1cc9bc6c97ac774ed6e33b3a924e03b1251f445d#1cc9bc6c97ac774ed6e33b3a924e03b1251f445d"
 dependencies = [
  "aes-gcm",
  "async-stream",
@@ -13755,6 +13755,7 @@ dependencies = [
  "sha2 0.11.0",
  "sha3 0.12.0",
  "smallvec 1.16.5",
+ "strum_macros 0.28.0",
  "thiserror 2.0.18",
  "tinyvec",
  "tokio",
@@ -16251,9 +16252,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum_macros"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "suanpan"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=8a635ddf45e9c116669ad6e99d83fe25dd0c1c1c#8a635ddf45e9c116669ad6e99d83fe25dd0c1c1c"
+source = "git+https://github.com/oxidecomputer/rumors?rev=1cc9bc6c97ac774ed6e33b3a924e03b1251f445d#1cc9bc6c97ac774ed6e33b3a924e03b1251f445d"
 dependencies = [
  "num-bigint",
 ]
@@ -16385,7 +16398,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
+source = "git+https://github.com/oxidecomputer/sush?rev=567f562765150baa12ba20b881123e9d6459e09a#567f562765150baa12ba20b881123e9d6459e09a"
 dependencies = [
  "chrono",
  "dropshot 0.18.0",
@@ -16402,7 +16415,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
+source = "git+https://github.com/oxidecomputer/sush?rev=567f562765150baa12ba20b881123e9d6459e09a#567f562765150baa12ba20b881123e9d6459e09a"
 dependencies = [
  "bytes",
  "bytesize",
@@ -16437,7 +16450,7 @@ dependencies = [
 [[package]]
 name = "sush-proxy"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
+source = "git+https://github.com/oxidecomputer/sush?rev=567f562765150baa12ba20b881123e9d6459e09a#567f562765150baa12ba20b881123e9d6459e09a"
 dependencies = [
  "camino",
  "chrono",
@@ -16462,7 +16475,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=f864b1e90c3347f5eba0a3f19918aadec75980f8#f864b1e90c3347f5eba0a3f19918aadec75980f8"
+source = "git+https://github.com/oxidecomputer/sush?rev=567f562765150baa12ba20b881123e9d6459e09a#567f562765150baa12ba20b881123e9d6459e09a"
 dependencies = [
  "async-trait",
  "atomicwrites",
