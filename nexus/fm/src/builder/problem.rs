@@ -8,7 +8,9 @@ use iddqd::{IdOrdMap, id_ord_map};
 use nexus_types::fm::AllProblems;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::SitrepProblem;
-use nexus_types::fm::analysis_reports::{DebugLog, LogEntryBuilder};
+use nexus_types::fm::analysis_reports::{
+    ActiveProblemReport, DebugLog, LogEntryBuilder,
+};
 use nexus_types::fm::problem::{AlertLink, SitrepRevision, SupportBundleLink};
 use omicron_generation_kinds::ProblemRevNum;
 use omicron_uuid_kinds::AlertUuid;
@@ -54,15 +56,15 @@ pub struct RevisionBuilder<'rev> {
 
 #[derive(Debug)]
 pub struct PendingRevision {
+    /// The ID of the problem this revision is for.
     id: ProblemUuid,
+
+    //
+    // Internal bookkeeping for building the revision's debug log.
+    //
     log: slog::Logger,
-    num: ProblemRevNum,
-    code: Option<ProblemCode>,
-    summary: Option<String>,
-    description: Option<String>,
-    action_required: Option<String>,
     debug_log: DebugLog,
-    resolved: bool,
+
     /// The problem as of the parent sitrep, or `None` if this problem is newly
     /// requested.
     ///
@@ -70,6 +72,16 @@ pub struct PendingRevision {
     /// `action_required` are always `Some`, because there is no previous
     /// revision for them to overlay on top of.
     parent: Option<Arc<SitrepProblem>>,
+
+    //
+    // Fields that may be modified in this revision
+    //
+    num: ProblemRevNum,
+    code: Option<ProblemCode>,
+    summary: Option<String>,
+    description: Option<String>,
+    action_required: Option<String>,
+    resolved: bool,
     // Alert links added in this revision.
     new_alerts: IdOrdMap<AlertLink>,
     // Support bundle links added in this revision.
@@ -180,6 +192,47 @@ impl PendingRevision {
             || self.parent_matches(|p| p.support_bundles.contains_key(id))
     }
 
+    /// Returns `true` if this revision has changed the problem's state from its
+    /// previous revision.
+    ///
+    /// If this is `false` when the sitrep is built, no revision will be
+    /// created.
+    pub fn has_changed(&self) -> bool {
+        // IMPORTANT NOTE: this function uses an exhaustive destructuring
+        // specifically to ensure any newly-added fields are considered. If this
+        // destructuring produces a compiler error, it means you have added a
+        // new field to the `PendingRevision` struct. If the newly-added field
+        // represents data that makes it into the actual revision of the problem
+        // (which it probably does), you must include it in the check for
+        // changes here. If it does not, ignore the new field explicitly, rather
+        // than adding `..`!
+        let Self {
+            // Ignore fields that are not part of the revision being
+            // constructed.
+            id: _,
+            num: _,
+            log: _,
+            debug_log: _,
+            parent: _,
+            // Every other field is part of the new revision being constructed,
+            // and we must test whether any of them have changed.
+            code,
+            summary,
+            description,
+            action_required,
+            new_alerts,
+            new_support_bundles,
+            resolved,
+        } = self;
+        code.is_some()
+            || summary.is_some()
+            || description.is_some()
+            || action_required.is_some()
+            || *resolved
+            || !new_alerts.is_empty()
+            || !new_support_bundles.is_empty()
+    }
+
     /// Returns the problem's current revision in the parent sitrep, if the
     /// problem existed there.
     fn previous_revision(&self) -> Option<&SitrepRevision> {
@@ -191,6 +244,31 @@ impl PendingRevision {
         predicate: impl FnOnce(&SitrepProblem) -> bool,
     ) -> bool {
         self.parent.as_deref().map_or(false, predicate)
+    }
+
+    fn build(
+        self,
+        now: DateTime<Utc>,
+    ) -> (Arc<SitrepProblem>, ActiveProblemReport) {
+        if !self.has_changed() {
+            let problem = self.parent.expect(
+                "if an active problem has not changed in this sitrep, it must \
+                 have existed in a previous sitrep",
+            );
+            let rev = problem.current_revision();
+            let resolved_sitrep_id = if rev.resolved_sitrep_id.is_some() {
+                Some(rev.requested_sitrep_id)
+            } else {
+                None
+            };
+            let report = ActiveProblemReport {
+                id: problem.id,
+                requested_sitrep_id: problem.requested_sitrep_id,
+                revised_sitrep_id: rev.requested_sitrep_id,
+                resolved_sitrep_id,
+            };
+            (problem, report)
+        }
     }
 }
 
@@ -340,6 +418,10 @@ impl<'parent> ProblemSetBuilder<'parent> {
         id: &ProblemUuid,
     ) -> Option<&PendingRevision> {
         self.pending_revisions.get(id)
+    }
+
+    pub fn build(self) -> (AllProblems, IdOrdMap<ActiveProblemReport>) {
+        todo!()
     }
 }
 
@@ -565,7 +647,7 @@ mod tests {
             .insert_unique(SitrepRevision {
                 number: num,
                 requested_sitrep_id: sitrep_id,
-                time_resolved: None,
+                resolved_sitrep_id: None,
                 code: ProblemCode::UnhealthyZpool,
                 summary: "parent summary".to_string(),
                 description: "parent description".to_string(),

@@ -3335,7 +3335,7 @@ mod tests {
             fm::problem::SitrepRevision {
                 number: ProblemRevNum::from_u32(number),
                 requested_sitrep_id: sitrep_id,
-                time_resolved,
+                resolved_sitrep_id: time_resolved,
                 code: fm::problem::ProblemCode::UnhealthyZpool,
                 summary: summary.to_string(),
                 description: format!("a longer description: {summary}"),

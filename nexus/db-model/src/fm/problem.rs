@@ -239,7 +239,7 @@ impl FmProblemRevisionRequest {
         let SitrepRevision {
             number,
             requested_sitrep_id,
-            time_resolved,
+            resolved_sitrep_id: time_resolved,
             code,
             summary,
             description,
@@ -281,7 +281,7 @@ impl TryFrom<FmProblemRevisionRequest> for SitrepRevision {
         Ok(Self {
             number: number.into(),
             requested_sitrep_id: requested_sitrep_id.into(),
-            time_resolved,
+            resolved_sitrep_id: time_resolved,
             code: ProblemCode::try_from(u32::from(code))?,
             summary,
             description,
