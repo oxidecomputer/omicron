@@ -133,6 +133,8 @@ pub mod v63;
 pub mod v64;
 #[path = "probe_multicast_groups/mod.rs"]
 pub mod v65;
+#[path = "mcast_upstream_types/mod.rs"]
+pub mod v66;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

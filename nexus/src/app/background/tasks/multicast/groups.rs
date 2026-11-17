@@ -4,17 +4,12 @@
 
 //! Group-specific multicast reconciler functions.
 //!
-//! This module handles multicast group lifecycle operations within an RPW
-//! (Reliable Persistent Workflow). Groups represent the fundamental
-//! multicast forwarding entities represented by dataplane configuration (via
-//! DPD) applied on switches.
-//!
 //! # RPW Group Processing Model
 //!
 //! Unlike sagas that orchestrate targeted, synchronous changes, the RPW
 //! reconciler ensures the dataplane (via DPD) reflects the intended state from
 //! the database.
-//! Group processing is idempotent and resilient to failures.
+//! Group processing is idempotent.
 //!
 //! ## Operations Handled
 //! - **"Creating" state**: Initiate DPD "ensure" to apply configuration
@@ -26,7 +21,6 @@
 //! - **M2P/forwarding propagation**: Convergent per-sled propagation of
 //!   M2P mappings and forwarding entries via sled-agent after member
 //!   state changes
-//! - **Extensible processing**: Support for different group types
 //!
 //! # Group State Transition Matrix
 //!
@@ -86,21 +80,28 @@ use std::net::IpAddr;
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
+use mg_api_types::mrib::{MulticastAddr, MulticastRouteKey};
 use oxnet::MulticastMac;
 use slog::{debug, error, info, trace, warn};
+use slog_error_chain::InlineErrorChain;
 
-use dpd_client::types::{ExternalNatTarget, IpSrc, MacAddr};
+use dpd_client::types::{ExternalNatTarget, MacAddr, MulticastGroupResponse};
+use dpd_types::mcast::{
+    ExactSource, SourceEntry, SourceFilter, is_ssm_address,
+};
+use dpd_types::network::Vni;
 use nexus_db_model::{
     MulticastGroup, MulticastGroupState, SqlU8, UnderlayMulticastGroup,
 };
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
-use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{self, DataPageParams};
-use omicron_ddm_admin_client::{UnderlayMulticastIpv6, Vni};
+use omicron_ddm_admin_client::DEFAULT_MULTICAST_VNI;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
+use sled_agent_types::early_networking::SwitchSlot;
 
 use super::{MulticastGroupReconciler, StateTransition};
 use crate::app::multicast::dataplane::{
@@ -113,6 +114,16 @@ use crate::app::multicast::switch_zone::{
 };
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
+
+fn multicast_tag_group_id(tag: &str) -> Option<MulticastGroupUuid> {
+    let (id, ip) = tag.split_once(':')?;
+    let id = uuid::Uuid::parse_str(id).ok()?;
+    let ip: IpAddr = ip.parse().ok()?;
+    if !ip.is_multicast() || tag != format!("{id}:{ip}") {
+        return None;
+    }
+    Some(MulticastGroupUuid::from_untyped_uuid(id))
+}
 
 /// Check if DPD tag matches the database group's tag.
 ///
@@ -136,62 +147,40 @@ fn dpd_state_matches_tag(
 /// Check if DPD sources match the expected state based on source filter.
 ///
 /// Source filtering logic per RFC 4607 (mirrors dataplane code):
-/// - SSM (232/8, ff3x::/32): always expect specific sources. API validation
-///   prevents SSM joins without sources.
+/// - SSM ([`dpd_types::mcast::is_ssm_address`]): always expect specific
+///   sources. API validation prevents SSM joins without sources.
 /// - ASM: expect specific sources when all members specify sources,
 ///   otherwise `None` to allow any source at the switch level.
 fn dpd_state_matches_sources(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
     source_filter: &SourceFilterState,
     group: &MulticastGroup,
-) -> bool {
-    let dpd_sources = dpd_group.sources.clone();
-    let group_ip = group.multicast_ip.ip();
-
-    if is_ssm_address(group_ip) {
-        // SSM: always expect specific sources
-        match dpd_sources {
-            None => false,
-            Some(dpd_srcs) => {
-                let mut dpd_ips: Vec<_> = dpd_srcs
-                    .into_iter()
-                    .filter_map(|src| match src {
-                        IpSrc::Exact(ip) => Some(ip),
-                        _ => None,
-                    })
-                    .collect();
-                dpd_ips.sort();
-
-                let mut expected: Vec<_> =
-                    source_filter.specific_sources.iter().copied().collect();
-                expected.sort();
-
-                dpd_ips == expected
-            }
-        }
-    } else if source_filter.has_any_source_member {
-        dpd_sources.is_none()
-    } else {
-        match dpd_sources {
-            None => source_filter.specific_sources.is_empty(),
-            Some(dpd_srcs) => {
-                let mut dpd_ips: Vec<_> = dpd_srcs
-                    .into_iter()
-                    .filter_map(|src| match src {
-                        IpSrc::Exact(ip) => Some(ip),
-                        _ => None,
-                    })
-                    .collect();
-                dpd_ips.sort();
-
-                let mut expected: Vec<_> =
-                    source_filter.specific_sources.iter().copied().collect();
-                expected.sort();
-
-                dpd_ips == expected
-            }
-        }
-    }
+) -> anyhow::Result<bool> {
+    let group_ip = group
+        .dpd_multicast_ip()
+        .context("invalid stored external multicast address")?;
+    let expected = source_filter.for_group(group_ip).map_err(|e| {
+        anyhow!(
+            "invalid stored multicast source filter for group {}: {e}",
+            group.id(),
+        )
+    })?;
+    let entries = dpd_group.sources.as_ref().map(|sources| {
+        sources
+            .iter()
+            .map(|source| match source {
+                dpd_client::types::IpSrc::Exact(ip) => {
+                    ExactSource::new(*ip).map(SourceEntry::Exact)
+                }
+                dpd_client::types::IpSrc::Any => Ok(SourceEntry::Any),
+            })
+            .collect::<Result<Vec<_>, _>>()
+    });
+    let Ok(entries) = entries.transpose() else {
+        return Ok(false);
+    };
+    Ok(SourceFilter::from_entries(group_ip, entries.as_deref())
+        .is_ok_and(|actual| actual == expected))
 }
 
 /// Check if DPD forwarding configuration matches what Nexus programs.
@@ -205,13 +194,10 @@ fn dpd_state_matches_forwarding(
     db_group: &MulticastGroup,
     underlay_group: &UnderlayMulticastGroup,
 ) -> bool {
-    let IpAddr::V6(underlay_ipv6) = underlay_group.multicast_ip.ip() else {
+    let Ok(internal_ip) = underlay_group.dpd_multicast_ip() else {
         return false;
     };
-
-    let Ok(internal_ip) = UnderlayMulticastIpv6::new(underlay_ipv6) else {
-        return false;
-    };
+    let underlay_ipv6 = internal_ip.ip();
     let Ok(vni) = Vni::new(u32::from(db_group.vni.0)) else {
         return false;
     };
@@ -318,6 +304,124 @@ impl GroupStateProcessor for ExternalGroupProcessor {
 }
 
 impl MulticastGroupReconciler {
+    pub(super) async fn sweep_stale_groups(
+        &self,
+        opctx: &OpContext,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<(), String> {
+        async fn sweep_switch(
+            datastore: &DataStore,
+            opctx: &OpContext,
+            slot: &SwitchSlot,
+            client: &dpd_client::Client,
+        ) -> anyhow::Result<()> {
+            let mut tags = HashSet::new();
+            let mut next_page = None;
+            loop {
+                let page = client
+                    .multicast_groups_list(None, next_page.as_deref())
+                    .await
+                    .with_context(|| {
+                        format!("failed to list DPD groups on {slot:?}")
+                    })?
+                    .into_inner();
+                tags.extend(
+                    page.items
+                        .into_iter()
+                        .map(|group| match group {
+                            MulticastGroupResponse::External {
+                                tag, ..
+                            }
+                            | MulticastGroupResponse::Underlay {
+                                tag, ..
+                            } => tag,
+                        })
+                        .filter_map(|tag| {
+                            multicast_tag_group_id(&tag).map(|id| (tag, id))
+                        }),
+                );
+                next_page = page.next_page;
+                if next_page.is_none() {
+                    break;
+                }
+            }
+
+            let ids: Vec<_> = tags.iter().map(|(_, id)| *id).collect();
+            let present = datastore
+                .multicast_groups_present_ids(opctx, &ids)
+                .await
+                .context("failed to query multicast group IDs")?;
+            let stale: Vec<_> = tags
+                .into_iter()
+                .filter(|(_, id)| !present.contains(id))
+                .collect();
+            let errors = stream::iter(stale)
+                .then(|(tag, _)| async move {
+                    let dpd_tag = tag.parse().with_context(|| {
+                        format!("invalid multicast tag {tag}")
+                    })?;
+                    match client.multicast_reset_by_tag(&dpd_tag).await {
+                        Ok(_) => {
+                            info!(
+                                opctx.log,
+                                "removed stale DPD multicast groups";
+                                "switch" => ?slot,
+                                "tag" => %tag,
+                            );
+                            Ok(())
+                        }
+                        Err(dpd_client::Error::ErrorResponse(response))
+                            if response.status()
+                                == reqwest::StatusCode::NOT_FOUND =>
+                        {
+                            Ok(())
+                        }
+                        Err(err) => {
+                            warn!(
+                                opctx.log,
+                                "failed to remove stale DPD multicast groups";
+                                "switch" => ?slot,
+                                "tag" => %tag,
+                                "error" => %err,
+                            );
+                            Err(anyhow!("{slot:?}, tag {tag}: {err}"))
+                        }
+                    }
+                })
+                .filter_map(|result: anyhow::Result<()>| async move {
+                    result.err().map(|err| format!("{err:#}"))
+                })
+                .collect::<Vec<_>>()
+                .await;
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow!(errors.join("; ")))
+            }
+        }
+
+        if dataplane_client.switch_clients().is_empty() {
+            return Err("no DPD clients available for stale group sweep".into());
+        }
+
+        let sweeps: Vec<_> = dataplane_client
+            .switch_clients()
+            .iter()
+            .map(|(slot, client)| {
+                sweep_switch(&self.datastore, opctx, slot, client)
+            })
+            .collect();
+        let errors = stream::iter(sweeps)
+            .buffer_unordered(self.group_concurrency_limit.get())
+            .filter_map(|result| async move {
+                result.err().map(|err| format!("{err:#}"))
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+    }
+
     /// Ensure an underlay group exists for the given external group.
     ///
     /// Handles the XOR-fold mapping and collision retry with salt increment.
@@ -331,17 +435,19 @@ impl MulticastGroupReconciler {
     ) -> anyhow::Result<Option<nexus_db_model::UnderlayMulticastGroup>> {
         let initial_salt: u8 = group.underlay_salt.map_or(0, |s| *s);
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+        let group_ip = group
+            .dpd_multicast_ip()
+            .context("invalid stored external multicast address")?;
 
         for salt in initial_salt..=u8::MAX {
-            let underlay_ip =
-                map_external_to_underlay_ip(group.multicast_ip.ip(), salt);
+            let underlay_ip = map_external_to_underlay_ip(group_ip.ip(), salt);
 
             let result = self
                 .datastore
                 .ensure_underlay_multicast_group(
                     opctx,
                     group.clone(),
-                    underlay_ip.into(),
+                    underlay_ip,
                 )
                 .await;
 
@@ -509,13 +615,14 @@ impl MulticastGroupReconciler {
                         "transition" => ?transition
                     );
                 }
-                Err(e) => {
+                Err(err) => {
                     warn!(
                         opctx.log,
                         "failed to process multicast group";
                         "state" => %state,
-                        "group" => ?group,
-                        "error" => %e
+                        "group_id" => %group.id(),
+                        "multicast_ip" => %group.multicast_ip,
+                        "error" => InlineErrorChain::new(&*err)
                     );
                 }
             }
@@ -722,29 +829,37 @@ impl MulticastGroupReconciler {
         // remain in the MRIB with no group row left for any later pass to
         // reconcile.
         let group_ip = group.multicast_ip.ip();
+        let group_addr = MulticastAddr::new(group_ip)
+            .context("invalid stored multicast group for MRIB cleanup")?;
         let installed_routes =
             switch_zone_client.list_routes_indexed().await.context(
                 "failed to list MRIB routes for 'Deleting' group cleanup",
             )?;
 
-        // The (*,G) key is withdrawn unconditionally so a listing that
-        // omits it, such as one assembled while a switch was unreachable,
-        // still leaves the group route removed.
-        let mut route_keys: HashSet<Option<IpAddr>> = HashSet::from([None]);
+        // For an ASM group the (*,G) key is withdrawn whether or not the
+        // listing shows it. A route the listing missed still gets removed.
+        let mut route_keys = HashSet::new();
+        if !group_addr.is_ssm() {
+            route_keys.insert(MulticastRouteKey::any_source(
+                group_addr,
+                DEFAULT_MULTICAST_VNI,
+            )?);
+        }
         route_keys.extend(
             installed_routes
-                .get(&group_ip)
-                .into_iter()
-                .flat_map(|sources| sources.keys().copied()),
+                .keys()
+                .filter(|key| {
+                    key.group() == group_addr
+                        && key.vni() == DEFAULT_MULTICAST_VNI
+                })
+                .copied(),
         );
 
         // Each key is a distinct route. We fan out so a group with N routes
         // doesn't pay N round-trips serially.
-        try_join_all(route_keys.into_iter().map(|source| async move {
-            switch_zone_client
-                .remove_route(group_ip, source)
-                .await
-                .with_context(|| match source {
+        try_join_all(route_keys.into_iter().map(|key| async move {
+            switch_zone_client.remove_route(key).await.with_context(
+                || match key.source() {
                     Some(source) => format!(
                         "failed to remove MRIB (S,G) route for source {source}"
                     ),
@@ -752,7 +867,8 @@ impl MulticastGroupReconciler {
                         "failed to remove MRIB (*,G) route for 'Deleting' group"
                             .to_string()
                     }
-                })
+                },
+            )
         }))
         .await?;
 
@@ -794,6 +910,23 @@ impl MulticastGroupReconciler {
         let source_filter =
             filter_state_map.get(&group.id()).cloned().unwrap_or_default();
 
+        if source_filter.specific_sources.is_empty()
+            && !source_filter.has_any_source_member
+            && self.get_group_members(opctx, group.id()).await?.is_empty()
+        {
+            super::mrib::reconcile_group(
+                opctx,
+                &self.datastore,
+                switch_zone_client,
+                mrib_route_index,
+                group,
+                &source_filter,
+                underlay_group_id,
+            )
+            .await;
+            return Ok(StateTransition::NoChange);
+        }
+
         // Fetch the underlay group up front. The drift check verifies its
         // replication entry on every switch, and the update path below reuses
         // the same record.
@@ -807,19 +940,25 @@ impl MulticastGroupReconciler {
         // detection). The check expects the entry on every switch, and a
         // fetch failure skips this group's pass, retried on the next
         // activation.
+        let group_ip = group
+            .dpd_multicast_ip()
+            .context("invalid stored external multicast address")?;
+        let underlay_ip = underlay_group
+            .dpd_multicast_ip()
+            .context("invalid stored underlay multicast address")?;
         let check = dataplane_client
-            .fetch_external_group_for_drift_check(
-                group.multicast_ip.ip(),
-                underlay_group.multicast_ip.ip(),
-            )
+            .fetch_external_group_for_drift_check(group_ip, underlay_ip)
             .await
             .context("failed to fetch active group from DPD for drift check")?;
 
         let needs_update = match &check.external_config {
             Some(dpd_group) => {
                 let tag_matches = dpd_state_matches_tag(dpd_group, group);
-                let sources_match =
-                    dpd_state_matches_sources(dpd_group, &source_filter, group);
+                let sources_match = dpd_state_matches_sources(
+                    dpd_group,
+                    &source_filter,
+                    group,
+                )?;
                 let forwarding_matches = dpd_state_matches_forwarding(
                     dpd_group,
                     group,
@@ -860,6 +999,34 @@ impl MulticastGroupReconciler {
         let mut dpd_synced = false;
 
         let res = if needs_update {
+            match self.datastore.multicast_group_fetch(opctx, group_id).await {
+                Ok(current) if current.state == MulticastGroupState::Active => {
+                }
+                Ok(current) => {
+                    debug!(
+                        opctx.log,
+                        "group left 'Active' during this pass, skipping \
+                         drift correction";
+                        "group_id" => %group.id(),
+                        "state" => %current.state,
+                    );
+                    return Ok(StateTransition::NoChange);
+                }
+                Err(external::Error::ObjectNotFound { .. }) => {
+                    debug!(
+                        opctx.log,
+                        "group deleted during this pass, skipping drift \
+                         correction";
+                        "group_id" => %group.id(),
+                    );
+                    return Ok(StateTransition::EntityGone);
+                }
+                Err(e) => {
+                    return Err(anyhow!(e))
+                        .context("failed to re-read group before update");
+                }
+            }
+
             debug!(
                 opctx.log,
                 "updating active multicast group in DPD";
@@ -1010,6 +1177,18 @@ impl MulticastGroupReconciler {
             }
         };
 
+        let is_ssm = is_ssm_address(group.multicast_ip.ip());
+        if is_ssm && self.get_group_members(opctx, group.id()).await?.is_empty()
+        {
+            debug!(
+                opctx.log,
+                "SSM group has no members yet, deferring DPD programming";
+                "group_id" => %group.id(),
+                "multicast_ip" => %group.multicast_ip,
+            );
+            return Ok(true);
+        }
+
         // Launch DPD transaction saga for atomic dataplane configuration
         let saga_params = sagas::multicast_group_dpd_ensure::Params {
             serialized_authn:
@@ -1147,9 +1326,10 @@ impl MulticastGroupReconciler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dpd_client::types::IpSrc;
+    use dpd_types::mcast::UnderlayMulticastIpv6;
 
     use std::collections::BTreeSet;
-    use std::net::IpAddr;
 
     use uuid::Uuid;
 
@@ -1158,6 +1338,252 @@ mod tests {
         MulticastGroupState, Vni,
     };
     use omicron_common::api::external::IdentityMetadataCreateParams;
+
+    #[test]
+    fn test_multicast_tag_group_id() {
+        let id = MulticastGroupUuid::new_v4();
+        for ip in ["239.1.1.1", "ff0e::123", "ff02::1"] {
+            assert_eq!(multicast_tag_group_id(&format!("{id}:{ip}")), Some(id));
+        }
+        for tag in [
+            "operator-tag".to_string(),
+            format!("{id}:192.0.2.1"),
+            format!("{id}:2001:db8::1"),
+            format!("{id}:ff0e:0:0:0:0:0:0:123"),
+            format!("{id}:239.1.1.1:extra"),
+        ] {
+            assert_eq!(multicast_tag_group_id(&tag), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stale_sweep_after_concurrent_recreation() {
+        use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+        use nexus_test_utils::resource_helpers::{
+            create_default_ip_pools, link_ip_pool, object_create,
+        };
+        use nexus_types::external_api::ip_pool::{
+            IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType,
+        };
+        use nexus_types::multicast::MulticastGroupCreate;
+        use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
+        use std::num::NonZeroUsize;
+
+        async fn assert_tag_count(
+            dataplane: &MulticastDataplaneClient,
+            tag: &str,
+            count: usize,
+        ) {
+            assert_eq!(dataplane.switch_count(), 2);
+            for (slot, client) in dataplane.switch_clients() {
+                let mut groups = Vec::new();
+                let mut next_page = None;
+                loop {
+                    let page = client
+                        .multicast_groups_list(None, next_page.as_deref())
+                        .await
+                        .unwrap()
+                        .into_inner();
+                    if page.items.is_empty() {
+                        break;
+                    }
+                    groups.extend(page.items);
+                    match page.next_page {
+                        Some(token) => next_page = Some(token),
+                        None => break,
+                    }
+                }
+                let matching = groups
+                    .iter()
+                    .filter(|group| match group {
+                        MulticastGroupResponse::External {
+                            tag: actual,
+                            ..
+                        }
+                        | MulticastGroupResponse::Underlay {
+                            tag: actual,
+                            ..
+                        } => actual == tag,
+                    })
+                    .count();
+                assert_eq!(matching, count, "{slot:?}");
+            }
+        }
+
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+            "test_stale_sweep_after_concurrent_recreation",
+        )
+        .with_extra_sled_agents(1)
+        .customize_nexus_config(&|config| {
+            config.pkg.multicast.enabled = false;
+        })
+        .start::<crate::Server>()
+        .await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = crate::app::sagas::test_helpers::test_opctx(&cptestctx);
+        let new_reconciler = || {
+            MulticastGroupReconciler::new(
+                datastore.clone(),
+                nexus.resolver().clone(),
+                nexus.sagas.clone(),
+                true,
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(2).unwrap(),
+                chrono::TimeDelta::seconds(60),
+            )
+        };
+        let reconciler_a = new_reconciler();
+        let reconciler_b = new_reconciler();
+        let dataplane_a = MulticastDataplaneClient::new(
+            nexus.resolver().clone(),
+            opctx.log.clone(),
+        )
+        .await;
+        let dataplane_b = MulticastDataplaneClient::new(
+            nexus.resolver().clone(),
+            opctx.log.clone(),
+        )
+        .await;
+        let client = &cptestctx.external_client;
+        create_default_ip_pools(client).await;
+        let pool_name = "stale-sweep-pool";
+        object_create::<_, IpPool>(
+            client,
+            "/v1/system/ip-pools",
+            &IpPoolCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: pool_name.parse().unwrap(),
+                    description: String::new(),
+                },
+                ip_version: IpVersion::V4,
+                pool_type: IpPoolType::Multicast,
+                assignment: IpPoolAssignment::Silos,
+            },
+        )
+        .await;
+        object_create::<_, IpPoolRange>(
+            client,
+            &format!("/v1/system/ip-pools/{pool_name}/ranges/add"),
+            &IpRange::V4(
+                Ipv4Range::new(
+                    "239.70.0.1".parse().unwrap(),
+                    "239.70.0.255".parse().unwrap(),
+                )
+                .unwrap(),
+            ),
+        )
+        .await;
+        link_ip_pool(
+            client,
+            pool_name,
+            &DEFAULT_SILO.id().into_untyped_uuid(),
+            false,
+        )
+        .await;
+
+        let group = datastore
+            .multicast_group_create(
+                &opctx,
+                &MulticastGroupCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "stale-sweep-group".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    multicast_ip: Some("239.70.0.100".parse().unwrap()),
+                    has_sources: false,
+                    ip_version: None,
+                },
+            )
+            .await
+            .unwrap();
+        let id = MulticastGroupUuid::from_untyped_uuid(group.id());
+        let underlay = match datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                group.clone(),
+                "ff04::ef46:64".parse().unwrap(),
+            )
+            .await
+            .unwrap()
+        {
+            EnsureUnderlayResult::Created(group) => group,
+            result => panic!("unexpected underlay result: {result:?}"),
+        };
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::new(),
+            has_any_source_member: true,
+        };
+        let tag = group.tag.as_ref().unwrap();
+        dataplane_a
+            .create_groups(&group, &underlay, &source_filter)
+            .await
+            .unwrap();
+        reconciler_b.sweep_stale_groups(&opctx, &dataplane_b).await.unwrap();
+        assert_tag_count(&dataplane_a, tag, 2).await;
+
+        datastore.multicast_group_set_active(&opctx, id).await.unwrap();
+        let stale_group =
+            datastore.multicast_group_fetch(&opctx, id).await.unwrap();
+        reconciler_b.sweep_stale_groups(&opctx, &dataplane_b).await.unwrap();
+        assert_tag_count(&dataplane_a, tag, 2).await;
+
+        assert!(
+            datastore
+                .multicast_group_mark_removal_if_empty(&opctx, id)
+                .await
+                .unwrap()
+        );
+        reconciler_b.sweep_stale_groups(&opctx, &dataplane_b).await.unwrap();
+        assert_tag_count(&dataplane_a, tag, 2).await;
+
+        let sled = MulticastSledClient::new(
+            datastore.clone(),
+            nexus.resolver().clone(),
+        );
+        let switch_zone = MulticastSwitchZoneClient::new(
+            nexus.resolver().clone(),
+            opctx.log.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reconciler_b
+                .reconcile_deleting_groups(
+                    &opctx,
+                    &dataplane_b,
+                    &sled,
+                    &switch_zone,
+                )
+                .await
+                .unwrap(),
+            1,
+        );
+        assert_tag_count(&dataplane_a, tag, 0).await;
+        assert!(
+            datastore
+                .multicast_groups_present_ids(&opctx, &[id])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        dataplane_a
+            .update_groups(GroupUpdateParams {
+                external_group: &stale_group,
+                underlay_group: &underlay,
+                source_filter: &source_filter,
+            })
+            .await
+            .unwrap();
+        assert_tag_count(&dataplane_a, tag, 2).await;
+
+        reconciler_b.sweep_stale_groups(&opctx, &dataplane_b).await.unwrap();
+        assert_tag_count(&dataplane_a, tag, 0).await;
+        reconciler_a.sweep_stale_groups(&opctx, &dataplane_a).await.unwrap();
+        assert_tag_count(&dataplane_b, tag, 0).await;
+        cptestctx.teardown().await;
+    }
 
     fn create_dpd_group(
         sources: Option<Vec<IpSrc>>,
@@ -1170,24 +1596,22 @@ mod tests {
             external_forwarding: dpd_client::types::ExternalForwarding {
                 vlan_id: None,
             },
-            internal_forwarding: dpd_client::types::ExternalInternalForwarding {
-                nat_target: ExternalNatTarget {
-                    internal_ip: UnderlayMulticastIpv6::new(
-                        "ff04::1".parse().unwrap(),
-                    )
-                    .unwrap(),
-                    inner_mac: MacAddr {
-                        a: "ff04::1"
-                            .parse::<std::net::Ipv6Addr>()
-                            .unwrap()
-                            .derive_multicast_mac(),
+            internal_forwarding:
+                dpd_client::types::ExternalInternalForwarding {
+                    nat_target: ExternalNatTarget {
+                        internal_ip: UnderlayMulticastIpv6::new(
+                            "ff04::1".parse().unwrap(),
+                        )
+                        .unwrap(),
+                        inner_mac: MacAddr {
+                            a: "ff04::1"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap()
+                                .derive_multicast_mac(),
+                        },
+                        vni: omicron_ddm_admin_client::DEFAULT_MULTICAST_VNI,
                     },
-                    vni: super::Vni::new(u32::from(
-                        omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
-                    ))
-                    .unwrap(),
                 },
-            },
         }
     }
 
@@ -1218,8 +1642,8 @@ mod tests {
         // SSM address (232.x.x.x) with specific sources from all members
         let source_filter = SourceFilterState {
             specific_sources: BTreeSet::from([
-                "10.0.0.1".parse::<IpAddr>().unwrap(),
-                "10.0.0.2".parse::<IpAddr>().unwrap(),
+                "10.0.0.1".parse().unwrap(),
+                "10.0.0.2".parse().unwrap(),
             ]),
             has_any_source_member: false,
         };
@@ -1231,25 +1655,37 @@ mod tests {
             IpSrc::Exact("10.0.0.1".parse().unwrap()),
             IpSrc::Exact("10.0.0.2".parse().unwrap()),
         ]));
-        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         // DPD has sources in different order (should still match)
         let dpd_group = create_dpd_group(Some(vec![
             IpSrc::Exact("10.0.0.2".parse().unwrap()),
             IpSrc::Exact("10.0.0.1".parse().unwrap()),
         ]));
-        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         // DPD missing sources (mismatch)
         let dpd_group = create_dpd_group(None);
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         // DPD has wrong sources (mismatch)
         let dpd_group = create_dpd_group(Some(vec![
             IpSrc::Exact("10.0.0.1".parse().unwrap()),
             IpSrc::Exact("10.0.0.3".parse().unwrap()), // wrong
         ]));
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1260,8 +1696,8 @@ mod tests {
         // validation prevents SSM joins without sources.
         let source_filter = SourceFilterState {
             specific_sources: BTreeSet::from([
-                "10.0.0.1".parse::<IpAddr>().unwrap(),
-                "10.0.0.2".parse::<IpAddr>().unwrap(),
+                "10.0.0.1".parse().unwrap(),
+                "10.0.0.2".parse().unwrap(),
             ]),
             has_any_source_member: true, // Ignored for SSM
         };
@@ -1273,20 +1709,24 @@ mod tests {
             IpSrc::Exact("10.0.0.1".parse().unwrap()),
             IpSrc::Exact("10.0.0.2".parse().unwrap()),
         ]));
-        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         // DPD has None (mismatch: SSM must have sources)
         let dpd_group = create_dpd_group(None);
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
     }
 
     #[test]
     fn test_dpd_state_matches_sources_asm_with_specific_sources() {
         // ASM address with specific sources only (no any-source members)
         let source_filter = SourceFilterState {
-            specific_sources: BTreeSet::from(["10.0.0.1"
-                .parse::<IpAddr>()
-                .unwrap()]),
+            specific_sources: BTreeSet::from(["10.0.0.1".parse().unwrap()]),
             has_any_source_member: false,
         };
 
@@ -1295,13 +1735,22 @@ mod tests {
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
             "10.0.0.1".parse().unwrap(),
         )]));
-        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         let dpd_group = create_dpd_group(None);
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Any]));
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1316,12 +1765,18 @@ mod tests {
         let group = create_group("224.1.1.1");
 
         let dpd_group = create_dpd_group(None);
-        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
             "10.0.0.1".parse().unwrap(),
         )]));
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1335,11 +1790,28 @@ mod tests {
         let group = create_group("224.1.1.1");
 
         let dpd_group = create_dpd_group(None);
-        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
 
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
             "10.0.0.1".parse().unwrap(),
         )]));
-        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+        assert!(
+            !dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_rejects_invalid_stored_state() {
+        let dpd_group = create_dpd_group(None);
+        let source_filter = SourceFilterState::default();
+        let group = create_group("232.1.1.1");
+        assert!(
+            dpd_state_matches_sources(&dpd_group, &source_filter, &group)
+                .is_err()
+        );
     }
 }

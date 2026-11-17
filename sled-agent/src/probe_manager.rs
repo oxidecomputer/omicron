@@ -199,7 +199,6 @@ struct JoinerConfig {
 /// stuck, so this timer drives the re-converge.
 const JOINER_RETRY_PERIOD: Duration = Duration::from_secs(30);
 
-/// Translate a probe's membership set into the OPTE port subscription config.
 fn multicast_group_cfgs(
     groups: &[InstanceMulticastMembership],
 ) -> Vec<illumos_utils::opte::MulticastGroupCfg> {
@@ -576,9 +575,32 @@ impl ProbeManagerInner {
             // but probes are supposed to mimic instances as closely as
             // possible. We should consider if we want to support them here.
             attached_subnets: vec![],
-            multicast_groups: &multicast_group_cfgs(&probe.multicast_groups),
+            multicast_groups: &[],
             mtu: None,
         })?;
+
+        // xde rejects a subscribe until the group's M2P entry is installed,
+        // and Nexus pushes M2P on its own schedule. A failed subscribe here
+        // leaves the probe up (unicast included) and
+        // `retry_unrealized_multicast` finishes it later.
+        let subscription_realized = match self
+            .port_manager
+            .multicast_groups_ensure(
+                nic.id,
+                nic.kind,
+                &multicast_group_cfgs(&probe.multicast_groups),
+            ) {
+            Ok(()) => true,
+            Err(e) => {
+                info!(
+                    self.log,
+                    "probe OPTE multicast subscription deferred, will retry";
+                    "probe" => %probe.id,
+                    "error" => %e,
+                );
+                false
+            }
+        };
 
         // Captured before `port` is moved into the zone builder below. The
         // joiner config carries it so `apply_joiner` can pin the probe's
@@ -639,8 +661,7 @@ impl ProbeManagerInner {
                                     .clone(),
                             },
                             joiner_realized: false,
-                            // `create_port` established the subscription.
-                            subscription_realized: true,
+                            subscription_realized,
                             defunct: true,
                         },
                     );
@@ -707,8 +728,7 @@ impl ProbeManagerInner {
                                     .clone(),
                             },
                             joiner_realized: false,
-                            // `create_port` established the subscription.
-                            subscription_realized: true,
+                            subscription_realized,
                             defunct: true,
                         },
                     );
@@ -721,8 +741,8 @@ impl ProbeManagerInner {
         info!(self.log, "started probe {}", probe.id);
 
         // By contrast, a joiner failure (e.g., `manifest-import` still
-        // running) does not fail probe creation. The zone is already
-        // serving its OPTE port subscription, and tearing it down would only
+        // running) does not fail probe creation. The zone is already up
+        // with its OPTE port, and tearing it down would only
         // feed a reconcile loop where Nexus re-pushes the probe and the zone
         // flaps. Keep the zone and let `retry_unrealized_multicast` re-apply
         // the join on a later reconcile.
@@ -770,10 +790,11 @@ impl ProbeManagerInner {
                 external_ips: probe.external_ips.clone(),
                 joiner,
                 joiner_realized,
-                // `create_port` above established the subscription, so it
-                // starts realized. `reconcile_membership` clears it when a
-                // later re-ensure fails.
-                subscription_realized: true,
+                // Starts as whatever the post-create subscribe produced.
+                // `reconcile_membership` clears it when a later re-ensure
+                // fails, and `retry_unrealized_multicast` sets it once a
+                // deferred subscribe goes through.
+                subscription_realized,
                 defunct: false,
             },
         );
@@ -1061,7 +1082,7 @@ impl ProbeManagerInner {
                             "probe" => %id,
                         );
                     }
-                    Err(e) => warn!(
+                    Err(e) => info!(
                         self.log,
                         "probe OPTE multicast subscription retry failed, \
                          will retry again";
@@ -1124,7 +1145,6 @@ impl ProbeManagerInner {
     /// the `retry_unrealized_multicast` call at the end of `do_reconcile`
     /// performs the apply.
     async fn reconcile_membership(&mut self, probe: &ProbeState) {
-        // A target probe without an interface cannot have its port reconciled.
         let Some(nic) = probe.interface.as_ref() else {
             return;
         };
@@ -1154,7 +1174,7 @@ impl ProbeManagerInner {
             ) {
             Ok(()) => true,
             Err(e) => {
-                error!(
+                info!(
                     self.log,
                     "failed to reconcile probe OPTE multicast subscription, \
                      will retry";

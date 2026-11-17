@@ -1515,7 +1515,8 @@ mod test {
         let switch_0_dpd_client = dpd_client::Client::new(
             &format!("http://[{addr}]:{switch0_port}"),
             client_state,
-        );
+        )
+        .expect("created dpd client");
 
         // calls to switch0's dpd should fail
         assert!(switch_0_dpd_client.dpd_uptime().await.is_err());
@@ -1560,7 +1561,8 @@ mod test {
         let dpd_client = dpd_client::Client::new(
             &format!("http://[{addr}]:{port}"),
             client_state.clone(),
-        );
+        )
+        .expect("created dpd client");
 
         let log = opctx.log;
 

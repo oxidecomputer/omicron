@@ -1344,6 +1344,9 @@ pub enum Unimpl {
     ProtectedLookup(Error),
 }
 
+const DPD_DISCOVERY_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(5);
+
 /// Resolve the reachable Dendrite switch zones, returning each switch's
 /// underlay address and a DPD client keyed by switch slot.
 ///
@@ -1359,9 +1362,13 @@ async fn dpd_switches(
     log: &slog::Logger,
 ) -> Result<(HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)>, usize), String>
 {
-    let dpd_socketaddrs = match resolver
-        .lookup_all_socket_v6(ServiceName::Dendrite)
-        .await
+    let deadline = tokio::time::Instant::now() + DPD_DISCOVERY_TIMEOUT;
+    let dpd_socketaddrs = match tokio::time::timeout_at(
+        deadline,
+        resolver.lookup_all_socket_v6(ServiceName::Dendrite),
+    )
+    .await
+    .map_err(|_| "timed out resolving Dendrite services".to_string())?
     {
         Ok(addrs) => addrs,
         Err(e) => {
@@ -1399,34 +1406,54 @@ async fn dpd_switches(
         })
         .collect();
 
-    let mut mappings: HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)> =
-        HashMap::new();
+    let mappings: HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)> =
+        futures::future::join_all(clients.into_iter().map(
+            |(addr, client)| async move {
+                let switch_slot = match tokio::time::timeout_at(
+                    deadline,
+                    client.switch_identifiers(),
+                )
+                .await
+                {
+                    Ok(Ok(response)) => response.slot,
+                    Ok(Err(e)) => {
+                        error!(
+                            log,
+                            "failed to determine switch slot for dendrite";
+                            "error" => %e,
+                            "addr" => %addr,
+                        );
+                        return None;
+                    }
+                    Err(_) => {
+                        warn!(
+                            log,
+                            "timed out determining switch slot for dendrite";
+                            "addr" => %addr,
+                        );
+                        return None;
+                    }
+                };
 
-    for (addr, client) in clients {
-        let switch_slot = match client.switch_identifiers().await {
-            Ok(response) => response.slot,
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to determine switch slot for dendrite";
-                    "error" => %e,
-                    "addr" => %addr,
-                );
-                continue;
-            }
-        };
+                let location = match switch_slot {
+                    0 => SwitchSlot::Switch0,
+                    1 => SwitchSlot::Switch1,
+                    _ => {
+                        warn!(
+                            log,
+                            "unexpected value for switch slot: {switch_slot}"
+                        );
+                        return None;
+                    }
+                };
 
-        let location = match switch_slot {
-            0 => SwitchSlot::Switch0,
-            1 => SwitchSlot::Switch1,
-            _ => {
-                warn!(log, "unexpected value for switch slot: {switch_slot}");
-                continue;
-            }
-        };
-
-        mappings.insert(location, (*addr.ip(), client));
-    }
+                Some((location, (*addr.ip(), client)))
+            },
+        ))
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
 
     // A dendrite advertised in DNS that fails to report a slot leaves the
     // result partial.

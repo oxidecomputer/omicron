@@ -19,6 +19,7 @@ iddqd.workspace = true
 indent_write.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+mg-api-types.workspace = true
 omicron-common.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true

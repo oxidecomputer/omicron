@@ -1598,7 +1598,6 @@ async fn test_both_member_endpoints_have_same_permissions(
         "Instance B should be a member of the group"
     );
 
-    // Create a third instance for testing the instance-centric endpoint
     let instance_c = create_instance(
         client,
         project_a.identity.name.as_str(),

@@ -11,6 +11,7 @@ use crate::quiesce::SagaQuiesceStatus;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use ddm_api_types::db::PeerInfo;
 use futures::future::ready;
 use futures::stream::StreamExt;
 use gateway_types::component::SpType;
@@ -1251,34 +1252,6 @@ pub struct SupportBundleInfo {
     pub fm_case_id: Option<CaseUuid>,
 }
 
-/// DDM session state of an underlay peer.
-///
-/// Mirrors the variants of the DDM admin API's `PeerStatus` without the
-/// state-duration payload, which is carried separately on
-/// [`MulticastDdmPeer::status_duration`] so consumers can match on the
-/// state directly.
-#[derive(
-    Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum MulticastDdmPeerStatus {
-    Init,
-    Solicit,
-    Exchange,
-    Expired,
-}
-
-impl Display for MulticastDdmPeerStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Init => write!(f, "init"),
-            Self::Solicit => write!(f, "solicit"),
-            Self::Exchange => write!(f, "exchange"),
-            Self::Expired => write!(f, "expired"),
-        }
-    }
-}
-
 /// A single DDM underlay peer as observed from a switch zone.
 ///
 /// Under RFD 488, `mg-lower` derives underlay multicast members from the
@@ -1288,16 +1261,8 @@ impl Display for MulticastDdmPeerStatus {
 pub struct MulticastDdmPeer {
     /// The switch zone the peer was observed from.
     pub switch: String,
-    /// The peer's underlay address.
-    pub addr: Ipv6Addr,
-    /// The peer's reported hostname.
-    pub host: String,
-    /// The peer's DDM session state.
-    pub status: MulticastDdmPeerStatus,
-    /// How long the peer has held its current session state.
-    pub status_duration: Duration,
-    /// The switch interface the peer was discovered on, if known.
-    pub if_name: Option<String>,
+    #[serde(flatten)]
+    pub peer: PeerInfo,
 }
 
 /// Read-only view of DDM underlay peers across all switch zones.

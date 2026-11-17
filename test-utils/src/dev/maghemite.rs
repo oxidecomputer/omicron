@@ -37,21 +37,16 @@ impl MgdInstance {
     ///
     /// `mgs_addr` is the required management-gateway (MGS) endpoint mgd is
     /// bound to. In the harness it is the switch's gateway instance.
-    ///
-    /// `dendrite_addr` and `ddm_addr` point mgd's lower half (illumos
-    /// only) at a dpd and a DDM admin endpoint respectively. When set,
-    /// the `mg-lower-mrib` thread syncs the local MRIB to the DDM
-    /// endpoint as multicast origination.
     pub async fn start(
         port: u16,
         mgs_addr: SocketAddr,
-        dendrite_addr: Option<SocketAddr>,
-        ddm_addr: Option<SocketAddr>,
+        dendrite_addr: SocketAddr,
+        ddm_addr: SocketAddr,
     ) -> Result<Self, anyhow::Error> {
         let temp_dir = Utf8TempDir::new()?;
         let port_file = temp_dir.path().join("mgd_port");
 
-        let mut args = vec![
+        let args = vec![
             "run".to_string(),
             "--admin-addr".into(),
             "::1".into(),
@@ -68,16 +63,11 @@ impl MgdInstance {
             uuid::Uuid::new_v4().to_string(),
             "--mgs-addr".into(),
             mgs_addr.to_string(),
+            "--dendrite-addr".into(),
+            dendrite_addr.to_string(),
+            "--ddm-addr".into(),
+            ddm_addr.to_string(),
         ];
-        if let Some(addr) = dendrite_addr {
-            args.push("--dendrite-addr".into());
-            args.push(addr.to_string());
-        }
-        if let Some(addr) = ddm_addr {
-            args.push("--ddm-addr".into());
-            args.push(addr.to_string());
-        }
-
         let mut child = tokio::process::Command::new("mgd")
             .args(&args)
             .stdin(Stdio::null())

@@ -46,13 +46,18 @@
 //! mapped deterministically into this /64 and persisted with a per-group salt
 //! for collision avoidance.
 //!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`UNDERLAY_MULTICAST_SUBNET`]: dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
+use dpd_types::mcast::{
+    ExactSource, ExternalMulticastIp, SourceEntry, SourceFilter,
+    UNDERLAY_MULTICAST_SUBNET, UnderlayMulticastIpv6,
+};
 use ref_cast::RefCast;
 use slog::{debug, error};
+use slog_error_chain::InlineErrorChain;
 
 use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 use nexus_db_lookup::{LookupPath, lookup};
@@ -62,19 +67,17 @@ use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSource
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::multicast;
 use nexus_types::internal_api::views::{
-    MulticastDdmPeer, MulticastDdmPeerStatus, MulticastDdmPeersView,
+    MulticastDdmPeer, MulticastDdmPeersView,
 };
 use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::address::{
     MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
-    UNDERLAY_MULTICAST_SUBNET, is_ssm_address,
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
     IdentityMetadataCreateParams, ListResultVec, LookupResult,
     http_pagination::PaginatedBy,
 };
-use omicron_ddm_admin_client::PeerStatus;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 pub(crate) mod dataplane;
@@ -83,8 +86,9 @@ pub(crate) mod switch_zone;
 
 /// Validate that SSM addresses have source IPs.
 ///
-/// Source-Specific Multicast (SSM) addresses (232/8 for IPv4, ff3x::/32 for
-/// IPv6) require at least one source IP. This is fundamental to SSM semantics:
+/// Source-Specific Multicast (SSM) addresses (232/8 for IPv4, ff3x::/32 and
+/// ffbx::/32 for IPv6) require at least one source IP. This is fundamental to
+/// SSM semantics:
 ///
 /// - **SSM subscription model**: (S, G) - subscribe to traffic from specific
 ///   source(s) to a group. Without sources, the subscription doesn't make
@@ -113,16 +117,27 @@ pub(crate) mod switch_zone;
 /// # Returns
 /// - `Ok(())` if validation passes (ASM address, or SSM with sources)
 /// - `Err` if SSM address without sources
-pub(crate) fn validate_ssm_sources(
+pub(crate) fn validate_multicast_sources(
     group_ip: std::net::IpAddr,
     source_ips: Option<&[std::net::IpAddr]>,
 ) -> Result<(), external::Error> {
-    if is_ssm_address(group_ip) && source_ips.is_none_or(|s| s.is_empty()) {
-        return Err(external::Error::invalid_request(
-            "SSM multicast addresses require at least one source IP",
-        ));
-    }
-    Ok(())
+    let group = ExternalMulticastIp::new(group_ip).map_err(|e| {
+        external::Error::invalid_request(format!(
+            "invalid multicast group address {group_ip}: {e}"
+        ))
+    })?;
+    let entries = source_ips
+        .map(|sources| {
+            sources
+                .iter()
+                .map(|&ip| ExactSource::new(ip).map(SourceEntry::Exact))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(|e| external::Error::invalid_request(e.to_string()))?;
+    SourceFilter::from_entries(group, entries.as_deref())
+        .map(|_| ())
+        .map_err(|e| external::Error::invalid_request(e.to_string()))
 }
 
 /// Validate per-member source IP list shape.
@@ -131,9 +146,7 @@ pub(crate) fn validate_ssm_sources(
 /// group semantics. Enforces:
 ///
 /// - At most [`MAX_SOURCE_IPS_PER_MEMBER`] entries
-/// - No duplicates (rejected explicitly rather than silently deduplicated, so
-///   client bugs are surfaced and downstream consumers can assume the list is
-///   canonical)
+/// - Duplicate entries are rejected
 pub(crate) fn validate_member_source_ips(
     source_ips: Option<&[std::net::IpAddr]>,
 ) -> Result<(), external::Error> {
@@ -152,6 +165,11 @@ pub(crate) fn validate_member_source_ips(
     }
     let mut seen = std::collections::BTreeSet::new();
     for ip in sources {
+        ExactSource::new(*ip).map_err(|e| {
+            external::Error::invalid_request(format!(
+                "invalid multicast source IP {ip}: {e}"
+            ))
+        })?;
         if !seen.insert(*ip) {
             return Err(external::Error::invalid_request(format!(
                 "duplicate source IP {ip} in membership request",
@@ -387,7 +405,8 @@ impl super::Nexus {
     ///
     /// - **IP/name joins**: Creates the group implicitly if it doesn't exist
     /// - **ID joins**: The group must already exist (returns error otherwise)
-    /// - **Source IPs**: Optional for ASM, required for SSM addresses (232/8, ff3x::/32)
+    /// - **Source IPs**: Optional for ASM, but required for SSM addresses
+    ///   ([`dpd_types::mcast::is_ssm_address`])
     /// - **Existing member**: A repeat join acts as an update, rewriting the
     ///   source filter when source IPs are given and leaving the membership
     ///   untouched when omitted. Omitting them on an SSM group is accepted,
@@ -413,8 +432,6 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
-        // Per-member source IP shape (count + duplicate) check runs once
-        // up front, independent of group resolution.
         validate_member_source_ips(source_ips)?;
 
         let current_members = self
@@ -426,13 +443,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // A join that omits `source_ips` keeps the filter the membership
-        // already stores, so it carries no source list for SSM validation to
-        // inspect. Resolve by lookup first and, when the instance already
-        // holds a membership in the resolved group, skip the validating
-        // resolver that would otherwise reject the omitted sources of an SSM
-        // group. A lookup that finds nothing falls through, leaving implicit
-        // creation and its validation to the resolver below.
+        // Omitting `source_ips` preserves an existing membership's filter.
+        // Look up the group first to avoid rejecting that case for SSM. If
+        // either the group or membership is absent, use the validating
+        // resolver below.
         let existing_membership = if source_ips.is_none() {
             match self
                 .resolve_multicast_group_identifier(opctx, group_identifier)
@@ -573,10 +587,8 @@ impl super::Nexus {
         creation_id: Option<uuid::Uuid>,
     ) -> Result<ResolvedGroup, external::Error> {
         // Source IPs must match the multicast group's address family
-        validate_source_address_family(ip, source_ips)?;
-
         // SSM groups always require sources when joining
-        validate_ssm_sources(ip, source_ips)?;
+        validate_multicast_sources(ip, source_ips)?;
 
         // A saga action may be retried after it created the group. Recover
         // ownership from the stable ID before resolving by the user-facing
@@ -726,8 +738,7 @@ impl super::Nexus {
         match group_lookup.fetch_for(authz::Action::Read).await {
             Ok((.., db_group)) => {
                 let group_ip = db_group.multicast_ip.ip();
-                validate_source_address_family(group_ip, source_ips)?;
-                validate_ssm_sources(group_ip, source_ips)?;
+                validate_multicast_sources(group_ip, source_ips)?;
                 return Ok(ResolvedGroup {
                     id: MulticastGroupUuid::from_untyped_uuid(
                         db_group.identity.id,
@@ -776,10 +787,7 @@ impl super::Nexus {
                 // until pool allocation. If validation fails, clean up
                 // the orphaned group immediately.
                 if let Err(e) =
-                    validate_source_address_family(allocated_ip, source_ips)
-                        .and_then(|_| {
-                            validate_ssm_sources(allocated_ip, source_ips)
-                        })
+                    validate_multicast_sources(allocated_ip, source_ips)
                 {
                     if let Err(rollback_err) = self
                         .db_datastore
@@ -818,8 +826,7 @@ impl super::Nexus {
                         Err(e) => return Err(e),
                     };
                 let group_ip = db_group.multicast_ip.ip();
-                validate_source_address_family(group_ip, source_ips)?;
-                validate_ssm_sources(group_ip, source_ips)?;
+                validate_multicast_sources(group_ip, source_ips)?;
                 Ok(ResolvedGroup {
                     id: MulticastGroupUuid::from_untyped_uuid(
                         db_group.identity.id,
@@ -861,8 +868,7 @@ impl super::Nexus {
         match group_lookup.fetch_for(authz::Action::Read).await {
             Ok((.., db_group)) => {
                 let group_ip = db_group.multicast_ip.ip();
-                validate_source_address_family(group_ip, source_ips)?;
-                validate_ssm_sources(group_ip, source_ips)?;
+                validate_multicast_sources(group_ip, source_ips)?;
                 Ok(Some(ResolvedGroup {
                     id: MulticastGroupUuid::from_untyped_uuid(
                         db_group.identity.id,
@@ -894,8 +900,7 @@ impl super::Nexus {
                 opctx.authorize(authz::Action::Read, &authz_group).await?;
 
                 let group_ip = db_group.multicast_ip.ip();
-                validate_source_address_family(group_ip, source_ips)?;
-                validate_ssm_sources(group_ip, source_ips)?;
+                validate_multicast_sources(group_ip, source_ips)?;
                 Ok(Some(ResolvedGroup {
                     id: MulticastGroupUuid::from_untyped_uuid(
                         db_group.identity.id,
@@ -926,8 +931,7 @@ impl super::Nexus {
 
         // Validate source IPs: address family + SSM requirements
         let group_ip = db_group.multicast_ip.ip();
-        validate_source_address_family(group_ip, source_ips)?;
-        validate_ssm_sources(group_ip, source_ips)?;
+        validate_multicast_sources(group_ip, source_ips)?;
 
         Ok(MulticastGroupUuid::from_untyped_uuid(db_group.identity.id))
     }
@@ -997,7 +1001,8 @@ impl super::Nexus {
     ///
     /// Validates internally so callers don't need to validate:
     /// - Address family match (IPv4 sources for IPv4 group, etc.)
-    /// - SSM requirements (232/8, ff3x::/32 require sources)
+    /// - SSM requirements ([`dpd_types::mcast::is_ssm_address`] addresses
+    ///   require sources)
     ///
     /// # Source IPs Semantics
     ///
@@ -1006,7 +1011,8 @@ impl super::Nexus {
     /// - `Some([a,b])` → set sources (required for SSM addresses)
     ///
     /// The address range determines SSM vs ASM mode, not the presence of sources.
-    /// SSM addresses (232/8, ff3x::/32) always require sources.
+    /// SSM addresses ([`dpd_types::mcast::is_ssm_address`]) always require
+    /// sources.
     ///
     /// # Behavior
     ///
@@ -1235,27 +1241,9 @@ impl super::Nexus {
             .ddm_peers_by_switch()
             .await
             .into_iter()
-            .map(|(slot, peer)| {
-                let (status, status_duration) = match peer.status {
-                    PeerStatus::Init(d) => (MulticastDdmPeerStatus::Init, d),
-                    PeerStatus::Solicit(d) => {
-                        (MulticastDdmPeerStatus::Solicit, d)
-                    }
-                    PeerStatus::Exchange(d) => {
-                        (MulticastDdmPeerStatus::Exchange, d)
-                    }
-                    PeerStatus::Expired(d) => {
-                        (MulticastDdmPeerStatus::Expired, d)
-                    }
-                };
-                MulticastDdmPeer {
-                    switch: format!("{slot:?}"),
-                    addr: peer.addr,
-                    host: peer.host,
-                    status,
-                    status_duration,
-                    if_name: peer.if_name,
-                }
+            .map(|(slot, peer)| MulticastDdmPeer {
+                switch: format!("{slot:?}"),
+                peer,
             })
             .collect();
 
@@ -1263,25 +1251,11 @@ impl super::Nexus {
     }
 }
 
-/// Validate that source IPs match the multicast group's address family.
-fn validate_source_address_family(
-    multicast_ip: IpAddr,
-    source_ips: Option<&[IpAddr]>,
-) -> Result<(), external::Error> {
-    let Some(sources) = source_ips else {
-        return Ok(());
-    };
-
-    let is_v4_group = multicast_ip.is_ipv4();
-    for source in sources {
-        if source.is_ipv4() != is_v4_group {
-            return Err(external::Error::invalid_request(&format!(
-                "source IP {source} does not match multicast group address family ({})",
-                if is_v4_group { "IPv4" } else { "IPv6" }
-            )));
-        }
-    }
-    Ok(())
+fn invalid_stored_address(err: impl std::error::Error) -> external::Error {
+    external::Error::internal_error(&format!(
+        "invalid stored multicast address: {}",
+        InlineErrorChain::new(&err)
+    ))
 }
 
 /// Generate a group name from an IP address (e.g., "mcast-224-1-2-3").
@@ -1351,39 +1325,35 @@ fn generate_group_name_from_ip(
 pub(crate) fn map_external_to_underlay_ip(
     external_ip: IpAddr,
     salt: u8,
-) -> IpAddr {
+) -> UnderlayMulticastIpv6 {
+    // Derive constants from the underlay multicast subnet
     const HOST_BITS: u32 = 128 - UNDERLAY_MULTICAST_SUBNET.width() as u32;
-    let prefix_base =
-        u128::from_be_bytes(UNDERLAY_MULTICAST_SUBNET.addr().octets());
+    const HOST_MASK: u128 = (1u128 << HOST_BITS) - 1;
+    let prefix_base = u128::from(UNDERLAY_MULTICAST_SUBNET.addr());
 
-    map_external_to_underlay_ip_impl(prefix_base, HOST_BITS, external_ip, salt)
-}
-
-/// Core implementation separated for testing with custom prefix/host_bits.
-pub(crate) fn map_external_to_underlay_ip_impl(
-    prefix_base: u128,
-    host_bits: u32,
-    external_ip: IpAddr,
-    salt: u8,
-) -> IpAddr {
-    let host_mask: u128 =
-        if host_bits >= 128 { u128::MAX } else { (1u128 << host_bits) - 1 };
-
+    // Derive host value from external IP
     let host_value: u128 = match external_ip {
-        IpAddr::V4(ipv4) => u128::from(u32::from_be_bytes(ipv4.octets())),
+        IpAddr::V4(ipv4) => {
+            // IPv4 (32 bits) fits directly in host space
+            u128::from(u32::from(ipv4))
+        }
         IpAddr::V6(ipv6) => {
-            let full = u128::from_be_bytes(ipv6.octets());
-            if host_bits >= 128 {
-                full
-            } else {
-                (full >> host_bits) ^ (full & host_mask)
-            }
+            // XOR-fold 128 bits → HOST_BITS (upper ^ lower).
+            // This ensures different external addresses (even with identical
+            // lower bits but different scopes) map to different underlay IPs.
+            let full = u128::from(ipv6);
+            (full >> HOST_BITS) ^ (full & HOST_MASK)
         }
     };
 
-    let salted = (host_value ^ u128::from(salt)) & host_mask;
-    let underlay = prefix_base | salted;
-    IpAddr::V6(Ipv6Addr::from(underlay.to_be_bytes()))
+    // XOR salt for collision avoidance retry, masked to stay in host bits.
+    // The salt is applied after folding, ensuring different salts produce
+    // different underlay IPs while staying within the prefix.
+    let salted = (host_value ^ u128::from(salt)) & HOST_MASK;
+
+    // Combine prefix + host (masking guarantees result stays in prefix)
+    UnderlayMulticastIpv6::new(Ipv6Addr::from(prefix_base | salted))
+        .expect("host bits are masked into UNDERLAY_MULTICAST_SUBNET")
 }
 
 #[cfg(test)]
@@ -1391,29 +1361,100 @@ mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    #[test]
-    fn test_is_ssm_address() {
-        // IPv4 SSM range: 232/8
-        assert!(is_ssm_address(IpAddr::V4(Ipv4Addr::new(232, 1, 1, 1))));
-        assert!(is_ssm_address(IpAddr::V4(Ipv4Addr::new(232, 255, 255, 255))));
-        // ASM ranges
-        assert!(!is_ssm_address(IpAddr::V4(Ipv4Addr::new(224, 1, 1, 1))));
-        assert!(!is_ssm_address(IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1))));
+    use dpd_types::mcast;
+    use proptest::prelude::*;
+    use test_strategy::proptest;
 
-        // IPv6 SSM range: ff3x::/32
-        assert!(is_ssm_address(IpAddr::V6(Ipv6Addr::new(
-            0xff31, 0, 0, 0, 0, 0, 0, 1
-        ))));
-        assert!(is_ssm_address(IpAddr::V6(Ipv6Addr::new(
-            0xff3e, 0, 0, 0, 0, 0, 0, 1
-        ))));
-        // ASM ranges
-        assert!(!is_ssm_address(IpAddr::V6(Ipv6Addr::new(
-            0xff0e, 0, 0, 0, 0, 0, 0, 1
-        ))));
-        assert!(!is_ssm_address(IpAddr::V6(Ipv6Addr::new(
-            0xff1e, 0, 0, 0, 0, 0, 0, 1
-        ))));
+    #[test]
+    fn test_member_sources_required_only_for_ssm() {
+        for (addr, requires_sources) in [
+            ("ffbe::1", true),
+            ("ff3e:1000::1", true),
+            ("ffbe:1000::1", true),
+            ("ff3e:1::1", false),
+            ("ff3e:38:2001:db8::1", false),
+        ] {
+            let group_ip: IpAddr = addr
+                .parse()
+                .unwrap_or_else(|err| panic!("failed to parse {addr}: {err}"));
+            assert_eq!(
+                validate_multicast_sources(group_ip, None).is_err(),
+                requires_sources,
+                "{group_ip}"
+            );
+            assert_eq!(
+                validate_multicast_sources(group_ip, Some(&[])).is_err(),
+                requires_sources,
+                "{group_ip}"
+            );
+            let sources = ["2001:db8::1"
+                .parse()
+                .unwrap_or_else(|err| panic!("failed to parse source: {err}"))];
+            assert!(
+                validate_multicast_sources(group_ip, Some(&sources)).is_ok()
+            );
+        }
+    }
+
+    fn group_ip_strategy() -> impl Strategy<Value = mcast::ExternalMulticastIp>
+    {
+        prop_oneof![
+            any::<u32>().prop_map(|bits| {
+                IpAddr::V4(Ipv4Addr::from(0xe000_0000 | (bits >> 4)))
+            }),
+            (0u32..=0x00ff_ffff).prop_map(|bits| {
+                IpAddr::V4(Ipv4Addr::from(0xe800_0000 | bits))
+            }),
+            any::<u128>().prop_map(|bits| {
+                IpAddr::V6(Ipv6Addr::from((0xff_u128 << 120) | (bits >> 8)))
+            }),
+            (
+                proptest::sample::select(vec![0xff30u16, 0xffb0]),
+                0u16..=0xf,
+                any::<u8>(),
+                any::<u64>(),
+            )
+                .prop_map(|(flags, scope, reserved, group)| {
+                    IpAddr::V6(Ipv6Addr::from(
+                        (u128::from(flags | scope) << 112)
+                            | (u128::from(reserved) << 104)
+                            | u128::from(group),
+                    ))
+                }),
+        ]
+        .prop_filter_map("dendrite rejects the group address", |addr| {
+            mcast::ExternalMulticastIp::new(addr).ok()
+        })
+    }
+
+    #[proptest]
+    fn prop_member_sources_required_only_for_ssm(
+        #[strategy(group_ip_strategy())] group_ip: mcast::ExternalMulticastIp,
+    ) {
+        let source = match group_ip.ip() {
+            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V6(_) => {
+                IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))
+            }
+        };
+        let ssm = mcast::is_ssm_address(group_ip.ip());
+
+        prop_assert!(
+            validate_multicast_sources(group_ip.ip(), Some(&[source])).is_ok(),
+            "{group_ip} with source {source}"
+        );
+        prop_assert_eq!(
+            validate_multicast_sources(group_ip.ip(), None).is_ok(),
+            !ssm,
+            "{}",
+            group_ip
+        );
+        prop_assert_eq!(
+            validate_multicast_sources(group_ip.ip(), Some(&[])).is_ok(),
+            !ssm,
+            "{}",
+            group_ip
+        );
     }
 
     #[test]

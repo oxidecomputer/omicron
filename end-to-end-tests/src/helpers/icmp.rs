@@ -71,7 +71,6 @@ pub fn ping4_test_run(
 ) -> Report {
     let p = Pinger4::new(ttl);
     for dst in dst {
-        // use a random number for the ICMP identifier
         p.add_target(rand::random(), *dst, pps, duration);
     }
     // Use an ASCII code to hide the blinking cursor as it makes the output hard
@@ -151,8 +150,6 @@ impl<T> PingState<T> {
         }
     }
 
-    /// Record a sent request at `at`, advancing the transmit count to
-    /// `tx_total`.
     fn record_sent(&mut self, at: Instant, tx_total: u32) {
         self.sent = Some(at);
         self.tx_count = tx_total;
@@ -202,8 +199,6 @@ impl Pinger4 {
                 for (_id, t) in self.targets.lock().unwrap().iter() {
                     print_ping_row(t);
                 }
-                // move the cursor back to the top for another round of
-                // reporting
                 for _ in 0..self.targets.lock().unwrap().len() {
                     print!("{MOVE_CURSOR_UP}");
                 }
@@ -303,7 +298,6 @@ impl Pinger4 {
                                 continue;
                             }
                         };
-                    // correlate the ICMP identifier with a target
                     match self.targets.lock().unwrap().get_mut(&msg.identifier)
                     {
                         Some(ref mut target) => {
@@ -319,7 +313,6 @@ impl Pinger4 {
     }
 }
 
-/// Print the column header shared by the unicast and multicast tickers.
 fn print_ping_header() {
     println!(
         "{:15} {:7} {:7} {:7} {:7} {:7} {:9} {}",
@@ -334,7 +327,6 @@ fn print_ping_header() {
     );
 }
 
-/// Print a single per-target status line shared by both tickers.
 fn print_ping_row<T: Display>(t: &PingState<T>) {
     println!(
         "{:15} {:7} {:7} {:7} {:7} {:7} {:9} {:<7}",
@@ -577,7 +569,6 @@ fn mcast_ping_test_run<P: McastPinger>(
             targets.insert(*member, PingState::new(*member));
         }
     }
-    // Hide the blinking cursor while the live ticker runs.
     print!("{HIDE_CURSOR}");
     pinger.clone().show();
     pinger.clone().tx(pps, duration);

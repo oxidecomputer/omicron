@@ -13,7 +13,7 @@
 //!   DDM client only backs the `omdb nexus multicast ddm-peers` view
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -24,8 +24,8 @@ use slog::{Logger, debug, warn};
 
 use internal_dns_types::names::ServiceName;
 use mg_api_types::mrib::{
-    MribAddStaticRequest, MribDeleteStaticRequest, MulticastAddr,
-    MulticastRouteKey, StaticMulticastRoute, UnderlayMulticastIpv6, Vni,
+    MribAddStaticRequest, MribDeleteStaticRequest, MulticastRouteKey,
+    StaticMulticastRoute, UnderlayMulticastIpv6,
 };
 use omicron_common::address::{DDMD_PORT, MGD_PORT};
 use omicron_ddm_admin_client::PeerInfo;
@@ -60,7 +60,7 @@ pub(crate) struct MulticastSwitchZoneClient {
 }
 
 pub(crate) type MribRouteIndex =
-    HashMap<IpAddr, HashMap<Option<IpAddr>, HashMap<SwitchSlot, Ipv6Addr>>>;
+    HashMap<MulticastRouteKey, HashMap<SwitchSlot, UnderlayMulticastIpv6>>;
 
 // Mirrors `MulticastDataplaneClient::new`'s timeout.
 const SWITCH_ZONE_BUILD_TIMEOUT: Duration = Duration::from_secs(5);
@@ -121,20 +121,28 @@ impl MulticastSwitchZoneClient {
 
         let mgd_clients = switch_zones
             .iter()
-            .map(|(slot, endpoint)| {
+            .filter_map(|(slot, endpoint)| {
                 let socketaddr = mgd_socket_map
                     .get(&endpoint.target)
                     .copied()
                     .unwrap_or_else(|| {
                         SocketAddrV6::new(endpoint.addr, MGD_PORT, 0, 0)
                     });
-                (
-                    *slot,
-                    mg_admin_client::Client::new(
-                        &format!("http://{socketaddr}"),
-                        log.clone(),
-                    ),
-                )
+                match mg_admin_client::Client::new(
+                    &format!("http://{socketaddr}"),
+                    log.clone(),
+                ) {
+                    Ok(c) => Some((*slot, c)),
+                    Err(e) => {
+                        warn!(
+                            log,
+                            "failed to build MGD client for switch zone";
+                            "switch" => ?slot,
+                            "error" => %e,
+                        );
+                        None
+                    }
+                }
             })
             .collect();
 
@@ -168,29 +176,17 @@ impl MulticastSwitchZoneClient {
     /// `mg-lower` watches the MRIB and automatically advertises the
     /// route via DDM to peer sleds. Short-circuits on the first switch
     /// failure as the reconciler retries the full set on the next pass.
-    ///
-    /// # Arguments
-    ///
-    /// * `group_ip`: Overlay multicast group address.
-    /// * `underlay_ip`: Underlay IPv6 address (ff04::/64) the route
-    ///   forwards to.
-    /// * `source`: SSM source for source-specific routes; `None` for ASM.
     pub(crate) async fn add_route(
         &self,
-        group_ip: IpAddr,
-        underlay_ip: Ipv6Addr,
-        source: Option<IpAddr>,
+        route_key: MulticastRouteKey,
+        underlay_ip: UnderlayMulticastIpv6,
     ) -> Result<(), anyhow::Error> {
-        let route_key = make_route_key(group_ip, source)?;
-        let underlay_group = UnderlayMulticastIpv6::new(underlay_ip)
-            .with_context(|| {
-                format!("invalid underlay multicast address {underlay_ip}")
-            })?;
+        let group_ip = route_key.group().ip();
 
         let request = MribAddStaticRequest {
             routes: vec![StaticMulticastRoute {
                 key: route_key,
-                underlay_group,
+                underlay_group: underlay_ip,
             }],
         };
 
@@ -230,10 +226,9 @@ impl MulticastSwitchZoneClient {
     /// switch failure as the reconciler retries on the next pass.
     pub(crate) async fn remove_route(
         &self,
-        group_ip: IpAddr,
-        source: Option<IpAddr>,
+        route_key: MulticastRouteKey,
     ) -> Result<(), anyhow::Error> {
-        let route_key = make_route_key(group_ip, source)?;
+        let group_ip = route_key.group().ip();
 
         let request = MribDeleteStaticRequest { keys: vec![route_key] };
 
@@ -283,13 +278,10 @@ impl MulticastSwitchZoneClient {
                 })?;
 
             for route in routes.into_inner() {
-                let (group_ip, source) = route_identifier(&route.key);
                 index
-                    .entry(group_ip)
+                    .entry(route.key)
                     .or_default()
-                    .entry(source)
-                    .or_default()
-                    .insert(*slot, route.underlay_group.ip());
+                    .insert(*slot, route.underlay_group);
             }
         }
 
@@ -309,22 +301,11 @@ impl MulticastSwitchZoneClient {
     /// revalidator, or simply unreachable) and retries on the next pass.
     pub(crate) async fn route_active_on_all_switches(
         &self,
-        group_ip: IpAddr,
-        source: Option<IpAddr>,
+        route_key: MulticastRouteKey,
     ) -> bool {
-        let vni = default_multicast_vni();
-        let group = match MulticastAddr::new(group_ip) {
-            Ok(group) => group,
-            Err(e) => {
-                warn!(
-                    self.log,
-                    "invalid multicast group address for MRIB query";
-                    "group_ip" => %group_ip,
-                    "error" => %e,
-                );
-                return false;
-            }
-        };
+        let group = route_key.group();
+        let source = route_key.source();
+        let vni = route_key.vni();
 
         for (slot, client) in &self.mgd_clients {
             match client
@@ -338,7 +319,11 @@ impl MulticastSwitchZoneClient {
                 .await
             {
                 Ok(resp) => {
-                    if resp.into_inner().is_empty() {
+                    if !resp
+                        .into_inner()
+                        .iter()
+                        .any(|route| route.key == route_key)
+                    {
                         return false;
                     }
                 }
@@ -347,7 +332,7 @@ impl MulticastSwitchZoneClient {
                         self.log,
                         "mgd get_mrib_selected failed";
                         "switch" => ?slot,
-                        "group_ip" => %group_ip,
+                        "group_ip" => %group,
                         "error" => %e,
                     );
                     return false;
@@ -408,27 +393,6 @@ impl MulticastSwitchZoneClient {
     }
 }
 
-fn default_multicast_vni() -> Vni {
-    Vni::new(u32::from(
-        omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
-    ))
-    .expect("DEFAULT_MULTICAST_VNI is within the 24-bit VNI range")
-}
-
-fn make_route_key(
-    group_ip: IpAddr,
-    source: Option<IpAddr>,
-) -> Result<MulticastRouteKey, anyhow::Error> {
-    let group = MulticastAddr::new(group_ip).with_context(|| {
-        format!("invalid multicast group address {group_ip}")
-    })?;
-    let source = source.filter(|s| s.is_ipv4() == group_ip.is_ipv4());
-    MulticastRouteKey::new(source, group, default_multicast_vni())
-        .with_context(|| {
-            format!("invalid multicast route key for group {group_ip}")
-        })
-}
-
 /// Resolve service sockets from DNS, returning a map of SRV target to socket.
 async fn resolve_service_sockets(
     resolver: &Resolver,
@@ -447,8 +411,4 @@ async fn resolve_service_sockets(
             HashMap::new()
         }
     }
-}
-
-fn route_identifier(key: &MulticastRouteKey) -> (IpAddr, Option<IpAddr>) {
-    (IpAddr::from(key.group()), key.source())
 }

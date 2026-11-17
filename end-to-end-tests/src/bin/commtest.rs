@@ -4,11 +4,13 @@
 
 use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
+use dpd_types::mcast::{
+    ExactSource, ExternalMulticastIp, IPV4_SSM_SUBNET, is_ssm_address,
+};
 use end_to_end_tests::helpers::icmp::{
     McastReport, mcast_ping4_test_run, ping4_test_run,
 };
 use end_to_end_tests::helpers::{cli::oxide_cli_style, try_create_ip_range};
-use omicron_common::address::{IPV4_SSM_SUBNET, is_ssm_address};
 use oxide_client::{
     ClientExperimentalExt, ClientLoginExt, ClientProjectsExt,
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
@@ -153,8 +155,8 @@ struct RunArgs {
 /// dataplane drops the packets and no member replies.
 #[derive(Debug, Clone)]
 struct McastGroup {
-    addr: IpAddr,
-    sources: Vec<IpAddr>,
+    addr: ExternalMulticastIp,
+    sources: Vec<ExactSource>,
     deny: bool,
 }
 
@@ -185,15 +187,14 @@ fn parse_mcast_spec(s: &str, deny: bool) -> Result<McastGroup, String> {
         .trim()
         .parse::<IpAddr>()
         .map_err(|e| format!("invalid group address {group_str:?}: {e}"))?;
-    if !addr.is_multicast() {
-        return Err(format!("group address {addr} is not a multicast address"));
-    }
+    let addr = ExternalMulticastIp::new(addr)
+        .map_err(|e| format!("invalid group address {group_str:?}: {e}"))?;
 
     let sources = src_str
         .map(|srcs| {
             srcs.split(',')
                 .map(|t| {
-                    t.trim().parse::<IpAddr>().map_err(|e| {
+                    t.trim().parse::<ExactSource>().map_err(|e| {
                         format!("invalid source address {t:?}: {e}")
                     })
                 })
@@ -202,7 +203,9 @@ fn parse_mcast_spec(s: &str, deny: bool) -> Result<McastGroup, String> {
         .transpose()?
         .unwrap_or_default();
 
-    if let Some(bad) = sources.iter().find(|s| s.is_ipv4() != addr.is_ipv4()) {
+    if let Some(bad) =
+        sources.iter().find(|s| s.ip().is_ipv4() != addr.ip().is_ipv4())
+    {
         return Err(format!(
             "source {bad} address family does not match group {addr}"
         ));
@@ -253,8 +256,8 @@ impl McastConfig {
     /// yields one pool whose range is the min..max span over the bucket's group
     /// addresses, which guarantees the pool contains every group it must back
     /// while staying entirely ASM or entirely SSM. Classification and the
-    /// block bounds both come from the canonical `IPV4_SSM_SUBNET` (via
-    /// `is_ssm_address`) to stay in lockstep with Nexus.
+    /// block bounds come from dendrite's `is_ssm_address` and
+    /// `IPV4_SSM_SUBNET`, the same helpers Nexus uses.
     fn pools(&self) -> Vec<McastPool> {
         let ssm_block_start = IpAddr::V4(IPV4_SSM_SUBNET.first_addr());
         let ssm_block_end = IpAddr::V4(IPV4_SSM_SUBNET.last_addr());
@@ -285,7 +288,7 @@ impl McastConfig {
         let addrs: Vec<IpAddr> = self
             .groups
             .iter()
-            .map(|group| group.addr)
+            .map(|group| group.addr.ip())
             .filter(|ip| want(*ip))
             .collect();
         let begin = *addrs.iter().min()?;
@@ -326,7 +329,7 @@ impl RunArgs {
         // - add a v6 arm in `test_mcast_connectivity` running
         //   `mcast_ping6_test_run`
         for group in self.mcast_group.iter().chain(&self.mcast_deny_group) {
-            if group.addr.is_ipv6() {
+            if group.addr.ip().is_ipv6() {
                 return Err(format!(
                     "multicast group {} is IPv6; only IPv4 multicast is \
                      currently supported",
@@ -336,7 +339,7 @@ impl RunArgs {
         }
 
         for group in &self.mcast_group {
-            if is_ssm_address(group.addr) && group.sources.is_empty() {
+            if group.addr.is_ssm() && group.sources.is_empty() {
                 return Err(format!(
                     "multicast group {} is in the source-specific (SSM) range \
                      (232.0.0.0/8) but no sources were supplied; SSM groups \
@@ -893,8 +896,9 @@ async fn launch_probes(
                     // Empty sources is any-source `(*, G)`. A non-empty list is
                     // a source-filtered `(S, G)` join permitting only those
                     // sources.
-                    source_ips: (!group.sources.is_empty())
-                        .then(|| group.sources.clone()),
+                    source_ips: (!group.sources.is_empty()).then(|| {
+                        group.sources.iter().map(|s| s.ip()).collect()
+                    }),
                 })
                 .collect()
         })
@@ -1166,7 +1170,7 @@ fn test_mcast_connectivity(
 
     for group in &cfg.groups {
         let expect = if group.deny { Expect::Deny } else { Expect::Deliver };
-        let IpAddr::V4(addr) = group.addr else {
+        let IpAddr::V4(addr) = group.addr.ip() else {
             unreachable!("v6 multicast groups are rejected during validation");
         };
 
@@ -1217,7 +1221,6 @@ fn test_mcast_connectivity(
     Ok(())
 }
 
-/// The pre-test status line, phrased for the group's expectation.
 fn mcast_test_banner<T: std::fmt::Display>(expect: Expect, group: T) -> String {
     match expect {
         Expect::Deliver => {
@@ -1230,7 +1233,6 @@ fn mcast_test_banner<T: std::fmt::Display>(expect: Expect, group: T) -> String {
     }
 }
 
-/// Verify one group's report against its expectation.
 fn verify_mcast<T: std::fmt::Display + PartialEq>(
     group_report: &McastGroupReport<T>,
     expected_members: &[T],
@@ -1399,7 +1401,7 @@ mod tests {
     #[test]
     fn parse_plain_group_is_any_source() {
         let group = parse_mcast_spec("224.1.2.3", false).unwrap();
-        assert_eq!(group.addr, v4("224.1.2.3"));
+        assert_eq!(group.addr.ip(), v4("224.1.2.3"));
         assert!(group.sources.is_empty());
         assert!(!group.deny);
     }
@@ -1408,8 +1410,11 @@ mod tests {
     fn parse_group_with_sources_and_whitespace() {
         let group = parse_mcast_spec(" 232.1.2.3 @ 10.0.0.1 , 10.0.0.2 ", true)
             .unwrap();
-        assert_eq!(group.addr, v4("232.1.2.3"));
-        assert_eq!(group.sources, vec![v4("10.0.0.1"), v4("10.0.0.2")]);
+        assert_eq!(group.addr.ip(), v4("232.1.2.3"));
+        assert_eq!(
+            group.sources.iter().map(|s| s.ip()).collect::<Vec<_>>(),
+            vec![v4("10.0.0.1"), v4("10.0.0.2")]
+        );
         assert!(group.deny);
     }
 
@@ -1458,7 +1463,7 @@ mod tests {
             groups: ["224.0.1.10", "231.9.9.9", "232.1.2.3", "239.0.0.5"]
                 .iter()
                 .map(|s| McastGroup {
-                    addr: v4(s),
+                    addr: ExternalMulticastIp::new(v4(s)).unwrap(),
                     sources: vec![],
                     deny: false,
                 })
@@ -1481,8 +1486,8 @@ mod tests {
     fn pools_omit_empty_buckets() {
         let config = McastConfig {
             groups: vec![McastGroup {
-                addr: v4("232.5.5.5"),
-                sources: vec![v4("10.0.0.1")],
+                addr: ExternalMulticastIp::new(v4("232.5.5.5")).unwrap(),
+                sources: vec!["10.0.0.1".parse().unwrap()],
                 deny: false,
             }],
         };
@@ -1506,7 +1511,6 @@ mod tests {
         assert!(ip_range_contains(&r, v4("224.1.0.15")));
         assert!(!ip_range_contains(&r, v4("224.1.0.9")));
         assert!(!ip_range_contains(&r, v4("224.1.0.21")));
-        // A family mismatch never contains.
         assert!(!ip_range_contains(&r, "ff0e::1".parse().unwrap()));
     }
 
@@ -1532,7 +1536,6 @@ mod tests {
             range_coverage(&requested, [&disjoint].into_iter()),
             (false, false)
         );
-        // A v6 range never covers or overlaps a v4 request.
         assert_eq!(
             range_coverage(&requested, [&v6].into_iter()),
             (false, false)

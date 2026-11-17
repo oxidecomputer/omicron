@@ -141,9 +141,7 @@ pub async fn reconcile_joining_member(
 
     let prior_sled_id = member.sled_id;
 
-    // Determine what action to take based on parent validity
     if !parent_valid {
-        // Parent is invalid - transition to "Left"
         let updated = diesel::update(dsl::multicast_group_member)
             .filter(dsl::id.eq(member.id))
             .filter(dsl::state.eq(MulticastGroupMemberState::Joining))
@@ -181,7 +179,6 @@ pub async fn reconcile_joining_member(
             })
         }
     } else if prior_sled_id != current_sled_id {
-        // Parent is valid but sled_id needs updating
         let updated = diesel::update(dsl::multicast_group_member)
             .filter(dsl::id.eq(member.id))
             .filter(dsl::state.eq(MulticastGroupMemberState::Joining))

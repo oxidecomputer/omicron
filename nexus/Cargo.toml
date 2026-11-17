@@ -7,10 +7,6 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-[features]
-default = ["multicast"]
-multicast = []
-
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -37,6 +33,7 @@ crucible-pantry-client.workspace = true
 crucible-common.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+dpd-types.workspace = true
 diesel.workspace = true
 ereport-types.workspace = true
 mg-admin-client.workspace = true
@@ -209,6 +206,7 @@ oximeter-collector.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 pretty_assertions.workspace = true
+proptest.workspace = true
 rcgen.workspace = true
 reconfigurator-cli.workspace = true
 regex.workspace = true
@@ -219,6 +217,7 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
+test-strategy.workspace = true
 transient-dns-server.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true

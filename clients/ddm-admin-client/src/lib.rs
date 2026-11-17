@@ -8,10 +8,10 @@
 #![allow(clippy::clone_on_copy)]
 pub use ddm_admin_client::Error;
 pub use ddm_admin_client::types;
-pub use ddm_api_types_versions::latest::db::{
-    MulticastRoute, PeerInfo, PeerStatus,
+pub use ddm_api_types::db::{
+    ImportedMulticastRoute, MulticastRoute, PeerInfo, PeerStatus,
 };
-pub use ddm_api_types_versions::latest::net::{
+pub use ddm_api_types::net::{
     MulticastOrigin, OverlayMulticast, UnderlayMulticastIpv6, Vni,
 };
 
@@ -31,6 +31,13 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 
 use crate::types::EnableStatsRequest;
+
+pub const DEFAULT_MULTICAST_VNI: Vni = match Vni::new(
+    omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI.as_u32(),
+) {
+    Ok(vni) => vni,
+    Err(_) => panic!("DEFAULT_MULTICAST_VNI exceeds the 24-bit VNI range"),
+};
 
 #[derive(Debug, Error, SlogInlineError)]
 pub enum DdmError {
@@ -158,10 +165,8 @@ impl Client {
     /// the nexthop peer that advertised it, and the path vector.
     pub async fn get_multicast_groups(
         &self,
-    ) -> Result<Vec<MulticastRoute>, Error<types::Error>> {
-        self.inner.get_multicast_groups().await.map(|resp| {
-            resp.into_inner().into_iter().map(MulticastRoute::from).collect()
-        })
+    ) -> Result<Vec<ImportedMulticastRoute>, Error<types::Error>> {
+        self.inner.get_multicast_groups().await.map(|resp| resp.into_inner())
     }
 
     /// Returns multicast origins that this DDM instance is advertising.

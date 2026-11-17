@@ -239,9 +239,6 @@ async fn test_dpd_failure_during_deleting_state(
     )
     .await;
 
-    // The single converging pass needs sled inventory and DPD ready before
-    // the dpd-ensure saga runs.
-    ensure_inventory_ready(cptestctx).await;
     ensure_dpd_ready(cptestctx).await;
 
     // Create instance and add to group
@@ -535,8 +532,6 @@ async fn test_concurrent_implicit_creation_race(
     });
     let instances = ops::join_all(create_instance_futures).await;
 
-    // Ensure inventory and DPD are ready before adding members to groups
-    ensure_inventory_ready(cptestctx).await;
     ensure_dpd_ready(cptestctx).await;
 
     // Try to add all instances to the non-existent group concurrently
@@ -718,10 +713,6 @@ async fn test_implicit_deletion_race_with_instance_join(
     wait_for_group_deleted(cptestctx, group_name).await;
 }
 
-/// Test that joining a deleted instance to a multicast group returns NOT_FOUND.
-///
-/// This verifies proper error handling when attempting to add an instance that
-/// was previously deleted to a multicast group.
 #[nexus_test]
 async fn test_multicast_join_deleted_instance(
     cptestctx: &ControlPlaneTestContext,
@@ -854,9 +845,37 @@ async fn test_drift_correction_missing_group_in_dpd(
     wait_for_group_active(client, group_name).await;
 
     // Verify drift was corrected: group now exists in DPD again
-    assert!(
-        dpd_client.multicast_group_get(&multicast_ip).await.is_ok(),
-        "Group should exist in DPD after drift correction"
+    let dpd_group = dpd_client
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("Group should exist in DPD after drift correction")
+        .into_inner();
+
+    let dpd_tag = match dpd_group {
+        dpd_client::types::MulticastGroupResponse::External { tag, .. } => {
+            tag.to_string()
+        }
+        other => {
+            panic!("Expected an external group in DPD, received {other:?}")
+        }
+    };
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+    let db_group = datastore
+        .multicast_group_fetch(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(active_group.identity.id),
+        )
+        .await
+        .expect("Should fetch group from the database");
+    assert_eq!(
+        Some(dpd_tag.as_str()),
+        db_group.tag.as_deref(),
+        "DPD should carry the database tag after drift correction, not the \
+         group name"
     );
 
     // Verify group is still "Active" in DB
@@ -878,11 +897,6 @@ async fn test_drift_correction_missing_group_in_dpd(
     wait_for_group_deleted(cptestctx, group_name).await;
 }
 
-/// Test member state transition: "Joining" → "Left" when instance becomes invalid.
-///
-/// When a member is in "Joining" state (waiting for group activation) and the
-/// instance becomes invalid (stopped/failed), the RPW should transition the
-/// member to "Left" state.
 #[nexus_test]
 async fn test_member_joining_to_left_on_instance_stop(
     cptestctx: &ControlPlaneTestContext,
@@ -1116,7 +1130,6 @@ async fn test_multicast_group_underlay_collision_retry(
     let group_a_ip = "224.5.5.5";
     let group_b_ip = "224.1.2.3"; // Maps to ff04::e001:0203 at salt=0
 
-    // Setup: project, pools, instances
     ops::join3(
         create_project(&client, project_name),
         create_default_ip_pools(&client),
@@ -1173,7 +1186,10 @@ async fn test_multicast_group_underlay_collision_retry(
     // tag so B will collide at salt=0.
     cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
-    let collision_ip: ipnetwork::IpNetwork = "ff04::e001:0203".parse().unwrap();
+    let collision_ip: dpd_types::mcast::UnderlayMulticastIpv6 =
+        "ff04::e001:0203".parse().unwrap_or_else(|err| {
+            panic!("failed to parse collision address: {err}")
+        });
     let res = datastore
         .ensure_underlay_multicast_group(
             &opctx,
@@ -1191,7 +1207,6 @@ async fn test_multicast_group_underlay_collision_retry(
         "Should have created underlay group with collision IP"
     );
 
-    // Step 3: create group B.
     multicast_group_attach(
         cptestctx,
         project_name,
@@ -1202,11 +1217,9 @@ async fn test_multicast_group_underlay_collision_retry(
 
     let group_b = get_multicast_group(client, group_b_ip).await;
 
-    // Step 4: restart DPD and run the reconciler.
     cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
     activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Step 5: verify collision was handled correctly.
     wait_for_group_active(client, group_b_ip).await;
 
     let group_b_after = datastore
@@ -1232,7 +1245,6 @@ async fn test_multicast_group_underlay_collision_retry(
         "Group B should have an underlay group after collision retry"
     );
 
-    // Verify A and B both got underlay groups and they differ.
     let group_a_final = datastore
         .multicast_group_fetch(
             &opctx,

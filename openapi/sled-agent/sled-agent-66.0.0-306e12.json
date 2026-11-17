@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "64.0.0"
+    "version": "66.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -380,11 +380,18 @@
     "/multirack-join-complete": {
       "put": {
         "summary": "Report that this sled's multirack join is complete.",
-        "description": "Sent by Nexus once it has observed this sled on the underlay network.",
+        "description": "Sent by Nexus once it has observed this sled on the underlay network. Returns the final bootstore generation written by the multirack join service. Repeated requests return the same generation.\n\nReturns 409 Conflict if this request arrives while a new networking configuration was accepted but not written. Returns 410 Gone if sled-agent restarted after a completed join.",
         "operationId": "multirack_join_complete",
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinCompleteResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -4289,13 +4296,19 @@
         "properties": {
           "group": {
             "description": "Overlay multicast group address.",
-            "type": "string",
-            "format": "ip"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MulticastAddr"
+              }
+            ]
           },
           "underlay": {
-            "description": "Underlay IPv6 multicast address. See [`Mcast2PhysMapping::underlay`].",
-            "type": "string",
-            "format": "ipv6"
+            "description": "Underlay IPv6 multicast address within ff04::/64.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnderlayMulticastIpv6"
+              }
+            ]
           }
         },
         "required": [
@@ -4308,9 +4321,12 @@
         "type": "object",
         "properties": {
           "underlay": {
-            "description": "Underlay IPv6 multicast address. See [`Mcast2PhysMapping::underlay`].",
-            "type": "string",
-            "format": "ipv6"
+            "description": "Underlay IPv6 multicast address within ff04::/64.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnderlayMulticastIpv6"
+              }
+            ]
           }
         },
         "required": [
@@ -7305,18 +7321,24 @@
         "maximum": 32
       },
       "Mcast2PhysMapping": {
-        "description": "Mapping from an overlay multicast group to an underlay multicast address.\n\nThe underlay address must be within the underlay multicast subnet (ff04::/64). This invariant is enforced by mapping in Nexus, not validated at this layer.",
+        "description": "Mapping from an overlay multicast group to an underlay multicast address.",
         "type": "object",
         "properties": {
           "group": {
             "description": "Overlay multicast group address.",
-            "type": "string",
-            "format": "ip"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MulticastAddr"
+              }
+            ]
           },
           "underlay": {
-            "description": "Underlay IPv6 multicast address (ff04::/64).",
-            "type": "string",
-            "format": "ipv6"
+            "description": "Underlay IPv6 multicast address within ff04::/64.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnderlayMulticastIpv6"
+              }
+            ]
           }
         },
         "required": [
@@ -7355,9 +7377,12 @@
             }
           },
           "underlay": {
-            "description": "Underlay IPv6 multicast address. See [`Mcast2PhysMapping::underlay`].",
-            "type": "string",
-            "format": "ipv6"
+            "description": "Underlay IPv6 multicast address within ff04::/64.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UnderlayMulticastIpv6"
+              }
+            ]
           }
         },
         "required": [
@@ -7556,6 +7581,26 @@
               "completed"
             ]
           }
+        ]
+      },
+      "MulticastAddr": {
+        "description": "A validated IPv4 or IPv6 multicast group address.",
+        "type": "string",
+        "format": "ip"
+      },
+      "MultirackJoinCompleteResponse": {
+        "description": "The result of completing a multirack join",
+        "type": "object",
+        "properties": {
+          "bootstore_generation": {
+            "description": "The latest bootstore generation when join completes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bootstore_generation"
         ]
       },
       "MultirackJoinServiceStatus": {
@@ -10907,6 +10952,11 @@
             "format": "int32"
           }
         }
+      },
+      "UnderlayMulticastIpv6": {
+        "description": "A validated underlay multicast IPv6 address.\n\nUnderlay multicast addresses must be within the subnet allocated by Omicron for rack-internal multicast traffic (ff04::/64). This is a subset of the admin-local scope (ff04::/16) defined in RFC 4291.",
+        "type": "string",
+        "format": "ipv6"
       },
       "UplinkAddress": {
         "oneOf": [

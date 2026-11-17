@@ -18,6 +18,7 @@ clickhouse-admin-types.workspace = true
 cockroach-admin-types.workspace = true
 cookie.workspace = true
 daft.workspace = true
+ddm-api-types.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
 dropshot.workspace = true

@@ -61,7 +61,6 @@ use crate::integration_tests::instances::{
 
 const PROJECT_NAME: &str = "test-project";
 
-/// Consolidated multicast lifecycle test that combines multiple scenarios.
 #[nexus_test]
 async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -408,7 +407,6 @@ async fn test_multicast_group_attach_multiple(
     )
     .await;
 
-    // Attach instance to multiple groups (implicitly creates each group)
     let multicast_group_names = &group_names;
     for group_name in multicast_group_names {
         multicast_group_attach(
@@ -478,7 +476,6 @@ async fn test_multicast_group_attach_multiple(
 async fn test_multicast_concurrent_operations(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // Ensure inventory and DPD are ready before creating instances with multicast groups
     ensure_multicast_test_ready(cptestctx).await;
 
     let client = &cptestctx.external_client;
@@ -605,7 +602,6 @@ async fn test_multicast_concurrent_operations(
     let post_rapid_members =
         list_multicast_group_members(client, "concurrent-test-group").await;
 
-    // Wait for all remaining members to reach "Joined" state.
     let expected: Vec<_> = post_rapid_members
         .iter()
         .map(|m| (m.parent_id, MulticastGroupMemberState::Joined))
@@ -1036,7 +1032,6 @@ async fn test_multicast_migration_scenarios(
             "Target sled should have instance subscription after migration",
         );
 
-        // Target sled should have M2P mapping.
         activate_then_wait_for_condition(
             &cptestctx.lockstep_client,
             || async {
@@ -1092,7 +1087,6 @@ async fn test_multicast_migration_scenarios(
         .map(|i| InstanceUuid::from_untyped_uuid(i.identity.id))
         .collect();
 
-    // Start all instances via simulation in parallel.
     ops::join_all(instance_ids.iter().map(|&instance_id| async move {
         instance_simulate(nexus, &instance_id).await;
         instance_wait_for_state(client, instance_id, InstanceState::Running)
@@ -1142,7 +1136,6 @@ async fn test_multicast_migration_scenarios(
         r.expect("Migration should initiate");
     }
 
-    // Complete all migrations in parallel.
     ops::join_all(instance_ids.iter().enumerate().map(|(i, &instance_id)| {
         let source_sled = source_sleds[i];
         let target_sled = target_sleds[i];
@@ -1221,12 +1214,6 @@ async fn test_multicast_migration_scenarios(
     .await;
 }
 
-/// Test that source_ips are preserved across instance stop/start.
-///
-/// This verifies that when an instance is stopped and started:
-/// a) Member goes to "Left" state on stop
-/// b) Member is reactivated on start
-/// c) The `source_ips` configured via explicit API are not wiped
 #[nexus_test]
 async fn test_source_ips_preserved_on_instance_restart(
     cptestctx: &ControlPlaneTestContext,
@@ -1707,10 +1694,6 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     wait_for_group_deleted(cptestctx, &asm_group_name).await;
 }
 
-/// Test creating an instance with SSM multicast groups via MulticastGroupJoinSpec.
-///
-/// This tests the new implicit flow that allows specifying source_ips
-/// when creating an instance with multicast_groups.
 #[nexus_test]
 async fn test_instance_create_with_ssm_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
@@ -1806,13 +1789,6 @@ async fn test_instance_create_with_ssm_multicast_groups(
     wait_for_group_deleted(cptestctx, &ssm_group_name).await;
 }
 
-/// Test that SSM multicast groups without sources fail validation on both
-/// instance create and reconfigure paths.
-///
-/// SSM addresses (232/8 for IPv4) require source IPs to be specified. This
-/// test verifies the validation happens during both:
-/// a). Instance creation (POST /v1/instances) with SSM group without sources
-/// b). Instance reconfigure (PUT /v1/instances) adding new SSM group without sources
 #[nexus_test]
 async fn test_ssm_without_sources_fails_create_and_reconfigure(
     cptestctx: &ControlPlaneTestContext,
@@ -2156,7 +2132,6 @@ async fn test_instance_delete_preserves_other_memberships(
     let available_sleds =
         [cptestctx.first_sled_id(), cptestctx.second_sled_id()];
 
-    // Bring up A, B, C as "Running" with the group attached.
     let instances = ["instance-a", "instance-b", "instance-c"].iter().map(
         |name| async move {
             let inst = instance_for_multicast_groups(
@@ -2422,7 +2397,6 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
 /// (instance delete), not when they're stopped.
 #[nexus_test]
 async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
-    // Ensure inventory and DPD are ready before creating instances with multicast groups
     ensure_multicast_test_ready(cptestctx).await;
 
     let client = &cptestctx.external_client;
@@ -2671,7 +2645,6 @@ async fn test_empty_active_group_reaped_by_sweep(
     )
     .await;
 
-    // Soft-delete the member row directly.
     let group_id =
         MulticastGroupUuid::from_untyped_uuid(group_view.identity.id);
     let member = datastore

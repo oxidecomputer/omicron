@@ -30,6 +30,7 @@ clap.workspace = true
 clickhouse-admin-types.workspace = true
 derive_more.workspace = true
 display-error-chain.workspace = true
+dpd-types.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true

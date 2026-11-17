@@ -53,6 +53,8 @@ progenitor::generate_api!(
         LldpPortConfig = sled_agent_types::early_networking::LldpPortConfig,
         MacAddr = omicron_common::api::external::MacAddr,
         MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
+        MulticastDdmPeer = nexus_types::internal_api::views::MulticastDdmPeer,
+        MulticastDdmPeersView = nexus_types::internal_api::views::MulticastDdmPeersView,
         Name = omicron_common::api::external::Name,
         NetworkInterface = sled_agent_types::inventory::NetworkInterface,
         NetworkInterfaceKind = sled_agent_types::inventory::NetworkInterfaceKind,

@@ -207,8 +207,8 @@ impl From<AttachMemberError> for external::Error {
 /// - `Some([a,b])` → set/replace with new source_ips
 ///
 /// Note: The address range (not sources) determines SSM vs ASM mode. SSM
-/// addresses (232/8, ff3x::/32) require sources and the app layer validates
-/// this before calling.
+/// addresses ([`dpd_types::mcast::is_ssm_address`]) require sources and the
+/// app layer validates this before calling.
 #[must_use = "Queries must be executed"]
 pub(crate) struct AttachMemberToGroupStatement {
     group_id: Uuid,
@@ -402,14 +402,6 @@ impl AttachMemberToGroupStatement {
             MemberParentRef::Probe(_) => PROBE_NOT_FOUND_SENTINEL,
         };
 
-        // SELECT CAST(
-        //   CASE
-        //     WHEN NOT EXISTS (SELECT 1 FROM parent_sled) THEN <parent-sentinel>
-        //     WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN 'group-not-found'
-        //     ELSE 'TRUE'
-        //   END AS BOOL
-        // ) AS validated
-        //
         // Parent is checked first so the more specific error surfaces up front.
         out.push_sql("SELECT CAST(CASE ");
         out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM parent_sled) THEN '");
@@ -442,10 +434,7 @@ impl AttachMemberToGroupStatement {
     /// Computes the size of the source IP union that would result from this
     /// attach: all other active members' source IPs unioned with the proposed
     /// list. This member's existing row (if any) is excluded because its
-    /// sources are being replaced. The exclusion is scoped to the full
-    /// `(parent_kind, parent_id)` key: an instance and a probe may share a
-    /// UUID in the same group, so excluding by `parent_id` alone would drop the
-    /// other kind's sources from the cap check.
+    /// sources are being replaced.
     fn push_proposed_union_size_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -457,13 +446,9 @@ impl AttachMemberToGroupStatement {
                  WHERE external_group_id = ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
-        out.push_sql(" AND NOT (parent_id = ");
+        out.push_sql(" AND parent_id != ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.parent_uuid)?;
-        out.push_sql(" AND parent_kind = ");
-        out.push_sql(super::member_parent_kind_as_sql_literal(
-            self.parent.kind(),
-        ));
-        out.push_sql(") AND time_deleted IS NULL ");
+        out.push_sql(" AND time_deleted IS NULL ");
         out.push_sql("UNION ALL SELECT unnest(");
         out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
             &self.source_ips_for_insert,
@@ -503,11 +488,6 @@ impl AttachMemberToGroupStatement {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        // Schema column order: id, time_created, time_modified, time_deleted,
-        // external_group_id, parent_id, sled_id, state, version_added,
-        // version_removed, multicast_ip, source_ips, parent_kind. The INSERT
-        // names columns explicitly, so the order below is independent of the
-        // table layout.
         out.push_sql(
             "INSERT INTO multicast_group_member (\
                  id, time_created, time_modified, external_group_id, \
@@ -543,7 +523,7 @@ impl AttachMemberToGroupStatement {
         );
 
         // ON CONFLICT: only update "Left" members, preserve other states
-        out.push_sql("ON CONFLICT (external_group_id, parent_kind, parent_id) WHERE time_deleted IS NULL DO UPDATE SET state = CASE WHEN multicast_group_member.state = ");
+        out.push_sql("ON CONFLICT (external_group_id, parent_id) WHERE time_deleted IS NULL DO UPDATE SET state = CASE WHEN multicast_group_member.state = ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Left,
         ));
@@ -624,18 +604,14 @@ impl QueryFragment<Pg> for AttachMemberToGroupStatement {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.unsafe_to_cache_prepared();
 
-        // CTE: Check if group exists and is active
         out.push_sql("WITH valid_group AS (");
         self.push_valid_group_cte(out.reborrow())?;
         out.push_sql("), ");
 
-        // CTE: Validate parent (instance or probe) exists and get sled_id
         out.push_sql("parent_sled AS (");
         self.push_parent_sled_cte(out.reborrow())?;
         out.push_sql("), ");
 
-        // CTE: Compute the prospective per-group source IP union size when
-        // a non-empty source list is being applied.
         if self.check_union_size() {
             out.push_sql("proposed_union_size AS (");
             self.push_proposed_union_size_cte(out.reborrow())?;

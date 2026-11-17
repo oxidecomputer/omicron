@@ -21,9 +21,9 @@ use sled_agent_types_versions::latest::multicast::{
     McastForwardingEntry,
 };
 use sled_agent_types_versions::{
-    latest, v1, v7, v10, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28,
-    v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47,
-    v48, v49, v50, v51, v52, v53, v55,
+    latest, v1, v7, v10, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29,
+    v30, v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48,
+    v49, v50, v51, v52, v53, v55, v64,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -40,6 +40,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (66, MCAST_UPSTREAM_TYPES),
     (65, PROBE_MULTICAST_GROUPS),
     (64, MCAST_M2P_FORWARDING),
     (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
@@ -959,65 +960,167 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/networking/mcast-m2p",
-        versions = VERSION_MCAST_M2P_FORWARDING..,
+        versions = VERSION_MCAST_UPSTREAM_TYPES..,
     }]
     async fn set_mcast_m2p(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<Mcast2PhysMapping>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Set a multicast-to-physical (M2P) mapping in OPTE.
+    #[endpoint {
+        operation_id = "set_mcast_m2p",
+        method = PUT,
+        path = "/networking/mcast-m2p",
+        versions = VERSION_MCAST_M2P_FORWARDING..VERSION_MCAST_UPSTREAM_TYPES,
+    }]
+    async fn set_mcast_m2p_v64(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v64::multicast::Mcast2PhysMapping>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(|b| {
+            Mcast2PhysMapping::try_from(b).map_err(HttpError::from)
+        })?;
+        Self::set_mcast_m2p(rqctx, body).await
+    }
+
     /// Clear a multicast-to-physical (M2P) mapping in OPTE.
     #[endpoint {
         method = DELETE,
         path = "/networking/mcast-m2p",
-        versions = VERSION_MCAST_M2P_FORWARDING..,
+        versions = VERSION_MCAST_UPSTREAM_TYPES..,
     }]
     async fn clear_mcast_m2p(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ClearMcast2Phys>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Clear a multicast-to-physical (M2P) mapping in OPTE.
+    #[endpoint {
+        operation_id = "clear_mcast_m2p",
+        method = DELETE,
+        path = "/networking/mcast-m2p",
+        versions = VERSION_MCAST_M2P_FORWARDING..VERSION_MCAST_UPSTREAM_TYPES,
+    }]
+    async fn clear_mcast_m2p_v64(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v64::multicast::ClearMcast2Phys>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(|b| {
+            ClearMcast2Phys::try_from(b).map_err(HttpError::from)
+        })?;
+        Self::clear_mcast_m2p(rqctx, body).await
+    }
+
     /// Set multicast forwarding entries for an underlay address.
     #[endpoint {
         method = PUT,
         path = "/networking/mcast-fwd",
-        versions = VERSION_MCAST_M2P_FORWARDING..,
+        versions = VERSION_MCAST_UPSTREAM_TYPES..,
     }]
     async fn set_mcast_fwd(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<McastForwardingEntry>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Set multicast forwarding entries for an underlay address.
+    #[endpoint {
+        operation_id = "set_mcast_fwd",
+        method = PUT,
+        path = "/networking/mcast-fwd",
+        versions = VERSION_MCAST_M2P_FORWARDING..VERSION_MCAST_UPSTREAM_TYPES,
+    }]
+    async fn set_mcast_fwd_v64(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v64::multicast::McastForwardingEntry>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(|b| {
+            McastForwardingEntry::try_from(b).map_err(HttpError::from)
+        })?;
+        Self::set_mcast_fwd(rqctx, body).await
+    }
+
     /// Clear multicast forwarding entries for an underlay address.
     #[endpoint {
         method = DELETE,
         path = "/networking/mcast-fwd",
-        versions = VERSION_MCAST_M2P_FORWARDING..,
+        versions = VERSION_MCAST_UPSTREAM_TYPES..,
     }]
     async fn clear_mcast_fwd(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ClearMcastForwarding>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Clear multicast forwarding entries for an underlay address.
+    #[endpoint {
+        operation_id = "clear_mcast_fwd",
+        method = DELETE,
+        path = "/networking/mcast-fwd",
+        versions = VERSION_MCAST_M2P_FORWARDING..VERSION_MCAST_UPSTREAM_TYPES,
+    }]
+    async fn clear_mcast_fwd_v64(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v64::multicast::ClearMcastForwarding>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(|b| {
+            ClearMcastForwarding::try_from(b).map_err(HttpError::from)
+        })?;
+        Self::clear_mcast_fwd(rqctx, body).await
+    }
+
     /// List M2P mappings present on this sled.
     #[endpoint {
         method = GET,
         path = "/networking/mcast-m2p",
-        versions = VERSION_MCAST_M2P_FORWARDING..,
+        versions = VERSION_MCAST_UPSTREAM_TYPES..,
     }]
     async fn list_mcast_m2p(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<Mcast2PhysMapping>>, HttpError>;
 
+    /// List M2P mappings present on this sled.
+    #[endpoint {
+        operation_id = "list_mcast_m2p",
+        method = GET,
+        path = "/networking/mcast-m2p",
+        versions = VERSION_MCAST_M2P_FORWARDING..VERSION_MCAST_UPSTREAM_TYPES,
+    }]
+    async fn list_mcast_m2p_v64(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v64::multicast::Mcast2PhysMapping>>, HttpError>
+    {
+        Ok(Self::list_mcast_m2p(rqctx)
+            .await?
+            .map(|v| v.into_iter().map(Into::into).collect()))
+    }
+
     /// List multicast forwarding entries present on this sled.
     #[endpoint {
         method = GET,
         path = "/networking/mcast-fwd",
-        versions = VERSION_MCAST_M2P_FORWARDING..,
+        versions = VERSION_MCAST_UPSTREAM_TYPES..,
     }]
     async fn list_mcast_fwd(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<McastForwardingEntry>>, HttpError>;
+
+    /// List multicast forwarding entries present on this sled.
+    #[endpoint {
+        operation_id = "list_mcast_fwd",
+        method = GET,
+        path = "/networking/mcast-fwd",
+        versions = VERSION_MCAST_M2P_FORWARDING..VERSION_MCAST_UPSTREAM_TYPES,
+    }]
+    async fn list_mcast_fwd_v64(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<v64::multicast::McastForwardingEntry>>,
+        HttpError,
+    > {
+        Ok(Self::list_mcast_fwd(rqctx)
+            .await?
+            .map(|v| v.into_iter().map(Into::into).collect()))
+    }
 
     #[endpoint {
         method = POST,

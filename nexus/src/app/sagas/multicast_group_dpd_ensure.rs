@@ -56,7 +56,7 @@ declare_saga_actions! {
     }
     // Steno does not run a failed node's own undo, so a `create_groups`
     // call that partially configures switches before erroring is not
-    // rolled back here. That is deliberate: the group stays "Creating",
+    // rolled back here. The group stays "Creating",
     // the reconciler restarts the saga, and the dataplane client's
     // CONFLICT paths fill in missing switches while leaving configured
     // ones forwarding. Attribute drift on configured switches heals in
@@ -167,8 +167,7 @@ async fn mgde_fetch_group_data(
         }
     }
 
-    // Fetch member source filter state for DPD.
-    // SSM addresses (232.x.x.x, ff3x::/32) require at least one source.
+    // SSM addresses (see `is_ssm_address`) require at least one source.
     // ASM addresses can have empty sources (any source allowed).
     let group_id =
         MulticastGroupUuid::from_untyped_uuid(params.external_group_id);
@@ -211,8 +210,7 @@ async fn mgde_update_dataplane(
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
     )
-    .await
-    .map_err(saga_action_failed)?;
+    .await;
 
     debug!(
         osagactx.log(),
@@ -269,29 +267,15 @@ async fn mgde_rollback_dataplane(
         return Ok(());
     };
 
-    let dataplane = match MulticastDataplaneClient::new(
+    let dataplane = MulticastDataplaneClient::new(
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
     )
-    .await
-    {
-        Ok(client) => client,
-        Err(e) => {
-            warn!(
-                osagactx.log(),
-                "failed to create dataplane client during saga rollback, \
-                 next reconciler pass converges the dataplane";
-                "tag" => %multicast_tag,
-                "error" => ?e,
-            );
-            return Ok(());
-        }
-    };
+    .await;
 
     // Client construction tolerates DPD resolution failure by returning an
-    // empty client map, so the error arm above cannot catch that case. An
-    // empty map would make `remove_groups` a vacuous success, so warn here
-    // instead of logging a rollback that removed nothing.
+    // empty client map. Warn here when there are no clients available for
+    // rollback.
     if dataplane.switch_count() == 0 {
         warn!(
             osagactx.log(),

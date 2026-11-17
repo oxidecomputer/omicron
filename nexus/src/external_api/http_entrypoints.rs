@@ -5561,7 +5561,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
         Ok(HttpResponseCreated(member))
     }
 
-    // Same shape as the v2026_11_09_01 variant. Delegate.
     async fn instance_multicast_group_join_v2026_01_08_00(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<

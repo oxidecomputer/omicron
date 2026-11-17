@@ -1131,15 +1131,16 @@ async fn proptest_full_reconciliation() {
     let mut mgdctx = dev::maghemite::MgdInstance::start(
         0,
         mgsctx.address().into(),
-        None,
-        None,
+        "[::1]:0".parse().unwrap(),
+        "[::1]:0".parse().unwrap(),
     )
     .await
     .expect("started mgd");
     let client = Client::new(
         &format!("http://{}", mgdctx.address()),
         logctx.log.clone(),
-    );
+    )
+    .expect("created mgd client");
     let rt = tokio::runtime::Handle::current();
 
     let one_test_invocation = async |input: TestInput| {

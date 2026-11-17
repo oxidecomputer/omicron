@@ -651,7 +651,8 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 tag: String::from("test-restart-wait"),
                 log: self.logctx.log.clone(),
             },
-        );
+        )
+        .expect("created dpd client");
         wait_for_condition(
             || async {
                 match dpd_client.switch_identifiers().await {
@@ -681,14 +682,15 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
+
+        for (_, mut mgd) in self.mgd {
+            mgd.cleanup().await.unwrap();
+        }
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
         for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
-        }
-        for (_, mut mgd) in self.mgd {
-            mgd.cleanup().await.unwrap();
         }
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();

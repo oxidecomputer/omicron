@@ -9282,6 +9282,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_origin AS ENUM (
     'igmp_snooped'
 );
 
+-- Kind of parent referenced by a multicast group member's parent_id
 CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_parent_kind AS ENUM (
     /* A guest instance. */
     'instance',
@@ -9315,7 +9316,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     underlay_group_id UUID,
 
     /* DPD tag to couple external/underlay state for this group */
-    tag STRING(63),
+    tag STRING(80),
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
@@ -9329,12 +9330,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
 
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-local IPv6
-    -- ff04::/16 (admin-local) is reserved for underlay multicast groups
+    -- Match Dendrite's ff04::/64 underlay reservation and external exclusion.
+    -- RFC 7346 section 2 defines admin-local scope 4, while the narrower /64 is
+    -- an Oxide policy.
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
-         NOT multicast_ip << 'ff04::/16')
+         NOT multicast_ip << 'ff04::/64')
     ),
 
     -- Reserved range validation for IPv4 (only link-local is blocked)
@@ -9368,16 +9370,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
-    tag STRING(63),
+    tag STRING(80),
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
     /* Constraints */
-    -- Underlay groups: admin-local scoped IPv6 only (ff04::/16)
+    -- Match Dendrite's ff04::/64 underlay allocation.
     CONSTRAINT underlay_ipv6_admin_scoped CHECK (
-        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/16'
+        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/64'
     )
 );
 
@@ -9418,11 +9420,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* The group's source_ips in API views is the union of all active members */
     source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[],
 
-    /* Origin of this membership (static API vs snooped IGMP/MLD soft-state) */
-    membership_origin omicron.public.multicast_group_member_origin NOT NULL DEFAULT 'static',
+    /* Discriminator for parent_id (instance or probe) */
+    parent_kind omicron.public.multicast_group_member_parent_kind NOT NULL,
 
-    /* Discriminator for `parent_id`. */
-    parent_kind omicron.public.multicast_group_member_parent_kind NOT NULL DEFAULT 'instance'
+    /* Origin of this membership (static API vs snooped IGMP/MLD soft-state) */
+    membership_origin omicron.public.multicast_group_member_origin NOT NULL DEFAULT 'static'
 );
 
 /* External Multicast Group Indexes */
@@ -9573,13 +9575,11 @@ CREATE INDEX IF NOT EXISTS multicast_member_by_parent_and_group ON omicron.publi
     external_group_id
 ) WHERE time_deleted IS NULL;
 
--- One parent (instance or probe) per group, keyed by
--- (external_group_id, parent_kind, parent_id) so two members with the same
--- UUID across kinds are not collapsed by the unique constraint.
--- Supports: SELECT ... WHERE external_group_id = ? AND parent_kind = ? AND parent_id = ? AND time_deleted IS NULL
-CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_unique_kind_parent_per_group ON omicron.public.multicast_group_member (
+-- Parent UUIDs are expected to be unique across resource kinds.
+-- Only one non-deleted membership is allowed per group and parent UUID.
+-- Supports: SELECT ... WHERE external_group_id = ? AND parent_id = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_unique_parent_per_group ON omicron.public.multicast_group_member (
     external_group_id,
-    parent_kind,
     parent_id
 ) WHERE time_deleted IS NULL;
 
@@ -10008,7 +10008,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '322.0.0', NULL)
+    (TRUE, NOW(), NOW(), '324.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -13,6 +13,10 @@ use std::net::IpAddr;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use dpd_types::mcast::{
+    ExactSource, ExternalMulticastIp, MulticastGroupCreateExternalError,
+    SourceEntry, SourceFilter,
+};
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
 use slog::debug;
@@ -44,31 +48,49 @@ use crate::db::pagination::paginated;
 /// Captures both the union of specific source IPs and whether any member
 /// wants "any source". Switch-level filtering behavior depends on address type:
 ///
-/// - **SSM (232.0.0.0/8, ff3x::/32)**: Always use `specific_sources` per RFC 4607.
+/// - **SSM ([`dpd_types::mcast::is_ssm_address`])**: Always use
+///   `specific_sources` per RFC 4607.
 ///   The `has_any_source_member` flag is ignored because API validation
 ///   prevents SSM joins without sources.
-/// - **ASM**: If `has_any_source_member` is true, passes `None` to DPD
-///   (no switch-level filtering). Otherwise, it uses `specific_sources`.
 /// - **OPTE**: Always uses per-member source lists for fine-grained filtering,
 ///   regardless of switch-level behavior.
 ///
 /// This follows the (S,G) model where the switch does coarse filtering
 /// and OPTE does fine-grained per-member filtering.
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceFilterState {
-    /// Union of all specific source IPs from members (deduplicated).
+    /// Union of all specific source IPs from members (deduplicated), as
+    /// stored. Typed when [`SourceFilterState::for_group`] builds the DPD
+    /// filter.
     ///
     /// Contains only explicitly specified sources. Members with empty
     /// `source_ips` (ASM members wanting any source) don't affect this field.
+    #[serde_as(as = "BTreeSet<serde_with::DisplayFromStr>")]
     pub specific_sources: BTreeSet<IpAddr>,
 
     /// True if any member has empty `source_ips` (wants any source).
     ///
-    /// For ASM groups: when true, switch-level source filtering is disabled
-    /// (sources passed as `None` to Dendrite).
     /// For SSM groups: ignored per RFC 4607 (API validation prevents SSM joins
     /// without sources).
     pub has_any_source_member: bool,
+}
+
+impl SourceFilterState {
+    pub fn for_group(
+        &self,
+        group: ExternalMulticastIp,
+    ) -> Result<SourceFilter, MulticastGroupCreateExternalError> {
+        let mut entries = self
+            .specific_sources
+            .iter()
+            .map(|&ip| ExactSource::new(ip).map(SourceEntry::Exact))
+            .collect::<Result<Vec<_>, _>>()?;
+        if self.has_any_source_member && !group.is_ssm() {
+            entries.push(SourceEntry::Any);
+        }
+        SourceFilter::from_entries(group, Some(&entries))
+    }
 }
 
 enum MulticastGroupMemberGroupKey {
@@ -209,9 +231,6 @@ impl DataStore {
         let source_networks: Option<Vec<IpNetwork>> = source_ips
             .map(|ips| ips.iter().copied().map(IpNetwork::from).collect());
 
-        // Execute atomic CTE that validates group (not "Deleting"), validates
-        // the parent (instance or probe), gets `sled_id`, performs upsert,
-        // and returns the full member record.
         ops::member_attach::AttachMemberToGroupStatement::new(
             group_id.into_untyped_uuid(),
             parent,
@@ -530,9 +549,13 @@ impl DataStore {
     ///
     /// # DPD Source Filtering
     ///
-    /// When `has_any_source_member` is true, pass `None` to DPD for sources
-    /// (disabling switch-level filtering). Otherwise, use
-    /// `specific_sources`.
+    /// [`SourceFilterState::for_group`] converts this into the filter sent to
+    /// DPD. For an ASM group, `has_any_source_member` means any source. For an
+    /// SSM group, it's ignored and only `specific_sources` count.
+    ///
+    /// A stored source that fails [`ExactSource`] validation leads to
+    /// [`SourceFilterState::for_group`] failing for that group (the same outcome
+    /// as DPD). Other groups in the batch are unaffected.
     pub async fn multicast_groups_source_filter_state(
         &self,
         opctx: &OpContext,
@@ -593,14 +616,7 @@ impl DataStore {
         let rows: Vec<Vec<IpNetwork>> = dsl::multicast_group_member
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::external_group_id.eq(group_id.into_untyped_uuid()))
-            // Members are keyed by (parent_kind, parent_id), matching the
-            // atomic attach CTE. Excluding on parent_id alone would also
-            // drop an other-kind member that happens to share the UUID.
-            .filter(
-                dsl::parent_kind
-                    .ne(parent.kind())
-                    .or(dsl::parent_id.ne(parent.as_uuid())),
-            )
+            .filter(dsl::parent_id.ne(parent.as_uuid()))
             .select(dsl::source_ips)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -727,9 +743,9 @@ impl DataStore {
 
     /// Get the live member for a multicast IP and parent.
     ///
-    /// This lookup deliberately uses the IP rather than the external group
-    /// UUID so cleanup remains safe if the group row has already been reaped
-    /// and the address has been allocated to a replacement group.
+    /// Use the multicast IP instead of the external group UUID because
+    /// cleanup may run after the group row is reaped and the address
+    /// reallocated.
     pub async fn multicast_group_member_get_by_multicast_ip_and_parent(
         &self,
         opctx: &OpContext,
@@ -1217,6 +1233,37 @@ mod tests {
     };
     use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
+
+    #[test]
+    fn source_filter_state_for_group() {
+        let state = SourceFilterState {
+            specific_sources: BTreeSet::from([
+                "10.0.0.1".parse().unwrap(),
+                "10.0.0.2".parse().unwrap(),
+            ]),
+            has_any_source_member: true,
+        };
+
+        let ssm =
+            ExternalMulticastIp::new("232.1.2.3".parse().unwrap()).unwrap();
+        assert_eq!(
+            state
+                .for_group(ssm)
+                .unwrap()
+                .exact_sources()
+                .unwrap()
+                .iter()
+                .map(|s| s.ip())
+                .collect::<Vec<_>>(),
+            [
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                "10.0.0.2".parse().unwrap(),
+            ],
+        );
+        let asm =
+            ExternalMulticastIp::new("239.1.2.3".parse().unwrap()).unwrap();
+        assert_eq!(state.for_group(asm).unwrap(), SourceFilter::Any);
+    }
 
     // Note: These are datastore-level tests. They validate database state
     // transitions, validations, and query behavior for multicast members.
@@ -1897,7 +1944,6 @@ mod tests {
         )
         .await;
 
-        // Create one instance-parented member.
         let (instance, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
@@ -1911,7 +1957,6 @@ mod tests {
             InstanceUuid::from_untyped_uuid(instance_id),
         );
 
-        // Insert a probe row directly.
         let probe_id = Uuid::new_v4();
         let probe = nexus_db_model::Probe {
             identity: nexus_db_model::ProbeIdentity::new(
@@ -1981,7 +2026,6 @@ mod tests {
             .await
             .expect("Should mark probe member Joined");
 
-        // Detach by probe parent only.
         datastore
             .multicast_group_members_detach_by_parent(&opctx, probe_parent)
             .await
@@ -2473,7 +2517,6 @@ mod tests {
         )
         .await;
 
-        // Insert a probe row directly.
         let probe_id = Uuid::new_v4();
         let probe = nexus_db_model::Probe {
             identity: nexus_db_model::ProbeIdentity::new(
@@ -2518,7 +2561,6 @@ mod tests {
 
         let sled_id_after_attach = attached.sled_id;
 
-        // Joining -> Joined via the polymorphic setter.
         datastore
             .multicast_group_member_set_state_for_parent(
                 &opctx,
@@ -3379,7 +3421,6 @@ mod tests {
         assert_eq!(unchanged_member.state, MulticastGroupMemberState::Joined);
         assert_eq!(unchanged_member.time_modified, before_modification);
 
-        // Test starting instance that has no multicast memberships (should be noop)
         let non_member_instance = InstanceUuid::new_v4();
         datastore
             .multicast_group_member_set_instance_sled(
@@ -3573,7 +3614,6 @@ mod tests {
             .await
             .expect("Should handle duplicate mark for removal");
 
-        // Test marking instance with no memberships (should be noop)
         let non_member_instance = InstanceUuid::new_v4();
         datastore
             .multicast_group_members_mark_for_removal_by_parent(
@@ -3859,7 +3899,6 @@ mod tests {
             .expect("Should list group2 members");
         assert_eq!(group2_members.len(), 2);
 
-        // Test deleting from group with no members (should be noop)
         datastore
             .multicast_group_members_delete_by_group(
                 &opctx,
@@ -3868,7 +3907,6 @@ mod tests {
             .await
             .expect("Should handle deleting from empty group");
 
-        // Test deleting from nonexistent group (should be noop)
         let fake_group_id = Uuid::new_v4();
         datastore
             .multicast_group_members_delete_by_group(
@@ -4022,9 +4060,8 @@ mod tests {
             .expect("Attach 2 should succeed");
 
         // Both should return the same member row, and exactly one call should
-        // observe the insert. The partial unique index admits no second live
-        // row for a (group, instance) pair, so exactly-one is the invariant
-        // that matters.
+        // observe the insert. The partial unique index permits at most one
+        // live row for a (group, instance) pair.
         assert_eq!(result1.member, result2.member);
         assert!(
             (result1.outcome == AttachOutcome::Created)

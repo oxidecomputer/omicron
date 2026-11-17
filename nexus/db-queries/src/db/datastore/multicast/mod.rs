@@ -20,7 +20,7 @@
 //!   - Clear documentation of expected ID types
 //!   - Preventing UUID type confusion
 //!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`UNDERLAY_MULTICAST_SUBNET`]: dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::IpAddr;
 

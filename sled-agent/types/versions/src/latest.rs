@@ -100,15 +100,16 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v64::multicast::ClearMcast2Phys;
-    pub use crate::v64::multicast::ClearMcastForwarding;
-    pub use crate::v64::multicast::Mcast2PhysMapping;
     pub use crate::v64::multicast::McastFilterMode;
-    pub use crate::v64::multicast::McastForwardingEntry;
     pub use crate::v64::multicast::McastForwardingNextHop;
     pub use crate::v64::multicast::McastReplication;
     pub use crate::v64::multicast::McastSourceFilter;
     pub use crate::v64::multicast::MulticastGroupCfg;
+
+    pub use crate::v66::multicast::ClearMcast2Phys;
+    pub use crate::v66::multicast::ClearMcastForwarding;
+    pub use crate::v66::multicast::Mcast2PhysMapping;
+    pub use crate::v66::multicast::McastForwardingEntry;
 }
 
 pub mod instance {

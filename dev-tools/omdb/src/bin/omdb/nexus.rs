@@ -2529,7 +2529,8 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
     ) {
         Err(error) => {
             eprintln!(
-                "warning: failed to interpret task details: {error:?}: {details:?}"
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
             );
             return;
         }
@@ -2537,20 +2538,20 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
     };
 
     if status.disabled {
-        println!("    multicast feature is disabled");
+        println!("    multicast reconciler is disabled");
         return;
     }
 
-    const GROUPS_CREATED: &str = "groups created (Creating->Active):";
+    const GROUPS_CREATING: &str = "groups processed (Creating):";
     const GROUPS_DELETED: &str = "groups deleted (cleanup):";
-    const GROUPS_VERIFIED: &str = "groups verified (Active):";
+    const GROUPS_ACTIVE: &str = "groups processed (Active):";
     const EMPTY_GROUPS_MARKED: &str = "empty groups marked for deletion:";
     const MEMBERS_PROCESSED: &str = "members processed:";
     const MEMBERS_DELETED: &str = "members deleted:";
     const WIDTH: usize = const_max_len(&[
-        GROUPS_CREATED,
+        GROUPS_CREATING,
         GROUPS_DELETED,
-        GROUPS_VERIFIED,
+        GROUPS_ACTIVE,
         EMPTY_GROUPS_MARKED,
         MEMBERS_PROCESSED,
         MEMBERS_DELETED,
@@ -2568,7 +2569,7 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
     }
 
     println!(
-        "    {GROUPS_CREATED:<WIDTH$}{:>NUM_WIDTH$}",
+        "    {GROUPS_CREATING:<WIDTH$}{:>NUM_WIDTH$}",
         status.groups_created
     );
     println!(
@@ -2576,7 +2577,7 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
         status.groups_deleted
     );
     println!(
-        "    {GROUPS_VERIFIED:<WIDTH$}{:>NUM_WIDTH$}",
+        "    {GROUPS_ACTIVE:<WIDTH$}{:>NUM_WIDTH$}",
         status.groups_verified
     );
     println!(
@@ -5430,9 +5431,10 @@ async fn cmd_nexus_multicast_ddm_peers(
         // Members are derived only from peers in DDM `Exchange` on a switch
         // rear-port interface (see the multicast members background task).
         peers.retain(|peer| {
-            peer.status
-                == nexus_lockstep_client::types::MulticastDdmPeerStatus::Exchange
-                && peer.if_name.is_some()
+            matches!(
+                peer.peer.status,
+                ddm_api_types::db::PeerStatus::Exchange(_)
+            ) && peer.peer.if_name.is_some()
         });
     }
 
@@ -5452,20 +5454,26 @@ async fn cmd_nexus_multicast_ddm_peers(
         if_name: String,
     }
 
-    peers.sort_by(|a, b| (&a.switch, &a.addr).cmp(&(&b.switch, &b.addr)));
-    let rows = peers.into_iter().map(|peer| PeerRow {
-        switch: peer.switch,
-        addr: peer.addr.to_string(),
-        host: peer.host,
-        status: peer.status.to_string(),
-        duration: format!(
-            "{:?}",
-            std::time::Duration::new(
-                peer.status_duration.secs,
-                peer.status_duration.nanos,
-            )
-        ),
-        if_name: peer.if_name.unwrap_or_else(|| "-".to_string()),
+    peers.sort_by(|a, b| {
+        (&a.switch, &a.peer.addr).cmp(&(&b.switch, &b.peer.addr))
+    });
+    let rows = peers.into_iter().map(|peer| {
+        use ddm_api_types::db::PeerStatus;
+
+        let (status, duration) = match peer.peer.status {
+            PeerStatus::Init(d) => ("init", d),
+            PeerStatus::Solicit(d) => ("solicit", d),
+            PeerStatus::Exchange(d) => ("exchange", d),
+            PeerStatus::Expired(d) => ("expired", d),
+        };
+        PeerRow {
+            switch: peer.switch,
+            addr: peer.peer.addr.to_string(),
+            host: peer.peer.host,
+            status: status.to_string(),
+            duration: format!("{duration:?}"),
+            if_name: peer.peer.if_name.unwrap_or_else(|| "-".to_string()),
+        }
     });
 
     let table = tabled::Table::new(rows)

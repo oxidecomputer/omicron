@@ -316,6 +316,7 @@ async fn test_omdb_success_cases() {
         &["db", "instances"],
         &["db", "multicast", "groups"],
         &["db", "multicast", "members"],
+        &["db", "multicast", "members", "--include-deleted"],
         &["db", "multicast", "pools"],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],

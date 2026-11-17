@@ -390,9 +390,6 @@ struct MulticastGroupChangePlan {
 
 impl MulticastGroupChangePlan {
     /// Build a change plan from the current memberships and resolved request.
-    ///
-    /// Only set and source-filter transformations here, allowing membership diff
-    /// to stay testable (independently).
     fn from_memberships(
         current_memberships: &[MulticastGroupMember],
         resolved: ResolvedMulticastGroups,
@@ -574,7 +571,6 @@ impl super::Nexus {
             return Ok(None);
         }
 
-        // Enforce the same per-instance bound as instance create.
         if multicast_groups.len() > MAX_MULTICAST_GROUPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "An instance may not join more than {} multicast groups",
@@ -771,10 +767,9 @@ impl super::Nexus {
 
         match self.resolve_multicast_group_identifier(opctx, &spec.group).await
         {
-            // A spec that omits `source_ips` preserves the existing filter, so
-            // a current membership needs no resolution. Source validation is
-            // skipped along with it, since an SSM membership joined earlier
-            // already carries sources the spec is not restating.
+            // An omitted `source_ips` preserves the existing filter. An
+            // existing SSM membership already has sources, so lookup can skip
+            // source validation.
             Ok(group_id)
                 if spec.source_ips.is_none()
                     && current_group_ids
@@ -1500,7 +1495,6 @@ impl super::Nexus {
                 .await?;
         }
 
-        // Activate multicast reconciler to handle switch-level changes
         self.background_tasks.task_multicast_reconciler.activate();
 
         self.db_datastore
@@ -4071,9 +4065,7 @@ mod tests {
             membership_origin: MulticastGroupMemberOrigin::Static,
             version_added: Generation::new(),
             version_removed: None,
-            multicast_ip: IpNetwork::from(IpAddr::V4(Ipv4Addr::new(
-                224, 0, 1, 1,
-            ))),
+            multicast_ip: "224.0.1.1".parse().unwrap(),
             source_ips: source_ips
                 .iter()
                 .copied()

@@ -2583,28 +2583,23 @@ impl InstanceRunner {
         dhcp_config: &DhcpCfg,
         attached_subnets: &IdOrdMap<AttachedSubnet>,
         primary_mtu: Option<u32>,
-        multicast_groups: &'a [illumos_utils::opte::MulticastGroupCfg],
     ) -> PortCreateParams<'a> {
-        // Multicast subscriptions target the primary NIC only.
-        // See the TODO on ensure_multicast_groups.
-        let (external_ips, attached_subnets, multicast_groups, mtu) =
-            if nic.primary {
-                (
-                    external_ips,
-                    attached_subnets.iter().copied().map(Into::into).collect(),
-                    multicast_groups,
-                    primary_mtu,
-                )
-            } else {
-                (&ExternalIpConfig { v4: None, v6: None }, vec![], &[][..], None)
-            };
+        let (external_ips, attached_subnets, mtu) = if nic.primary {
+            (
+                external_ips,
+                attached_subnets.iter().copied().map(Into::into).collect(),
+                primary_mtu,
+            )
+        } else {
+            (&ExternalIpConfig { v4: None, v6: None }, vec![], None)
+        };
         PortCreateParams {
             nic,
             external_ips,
             firewall_rules,
             dhcp_config: dhcp_config.clone(),
             attached_subnets,
-            multicast_groups,
+            multicast_groups: &[],
             mtu,
         }
     }
@@ -2640,7 +2635,6 @@ impl InstanceRunner {
         // for them.
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
         let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
-        let mcast_cfg = self.multicast_group_cfgs();
         for nic in self.requested_nics.iter() {
             let port =
                 self.port_manager.create_port(Self::port_create_params(
@@ -2650,10 +2644,21 @@ impl InstanceRunner {
                     &self.dhcp_config,
                     &self.attached_subnets,
                     self.primary_nic_mtu,
-                    &mcast_cfg,
                 ))?;
             opte_port_names.push(port.name().to_string());
             opte_ports.push(port);
+        }
+
+        if !self.multicast_groups.is_empty() {
+            if let Err(e) = self.ensure_multicast_groups() {
+                info!(
+                    self.log,
+                    "deferring multicast subscriptions until the next \
+                     reconciler pass";
+                    "groups" => self.multicast_groups.len(),
+                    "error" => %e,
+                );
+            }
         }
 
         // When delegatng a zvol, delegating the associated rdsk device does
@@ -2940,8 +2945,6 @@ impl InstanceRunner {
         self.refresh_multicast_groups_inner()
     }
 
-    /// Convert `InstanceMulticastMembership` list to OPTE
-    /// `MulticastGroupCfg` list.
     fn multicast_group_cfgs(
         &self,
     ) -> Vec<illumos_utils::opte::MulticastGroupCfg> {
@@ -2961,8 +2964,8 @@ impl InstanceRunner {
     // InstanceMulticastMembership carries no NIC identifier, same as
     // external IPs and attached subnets (though not firewall rules,
     // which fan out across all VPC ports by VNI). If per-NIC multicast
-    // is needed, the membership type needs a NIC field and both this
-    // function and setup_propolis_zone must be updated.
+    // is needed, the membership type needs a NIC field and this function
+    // must pick the NIC from it.
     fn ensure_multicast_groups(&self) -> Result<(), Error> {
         let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
@@ -2981,15 +2984,12 @@ impl InstanceRunner {
         &mut self,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        if !Self::record_multicast_membership(
+        Self::record_multicast_membership(
             &mut self.multicast_groups,
             membership,
-        ) {
-            return Ok(());
-        }
+        );
 
-        self.ensure_multicast_groups()?;
-        Ok(())
+        self.ensure_multicast_groups()
     }
 
     /// Record `membership` in `groups`, keyed on the group IP.
@@ -3000,16 +3000,13 @@ impl InstanceRunner {
     fn record_multicast_membership(
         groups: &mut Vec<InstanceMulticastMembership>,
         membership: &InstanceMulticastMembership,
-    ) -> bool {
+    ) {
         match groups.iter_mut().find(|m| m.group_ip == membership.group_ip) {
-            Some(existing) if existing.sources == membership.sources => false,
             Some(existing) => {
-                existing.sources = membership.sources.clone();
-                true
+                existing.sources.clone_from(&membership.sources);
             }
             None => {
                 groups.push(membership.clone());
-                true
             }
         }
     }
@@ -5010,15 +5007,10 @@ mod tests {
         };
         let mut groups = vec![old_membership];
 
-        assert!(InstanceRunner::record_multicast_membership(
-            &mut groups,
-            &replacement,
-        ));
+        InstanceRunner::record_multicast_membership(&mut groups, &replacement);
         assert_eq!(groups, vec![replacement.clone()]);
-        assert!(!InstanceRunner::record_multicast_membership(
-            &mut groups,
-            &replacement,
-        ));
+        InstanceRunner::record_multicast_membership(&mut groups, &replacement);
+        assert_eq!(groups, vec![replacement]);
     }
 
     #[test]
@@ -5306,7 +5298,6 @@ mod tests {
                 &dhcp_config,
                 &attached_subnets,
                 mtu,
-                &[],
             );
             if nic.primary {
                 assert_eq!(params.external_ips, &external_ips);

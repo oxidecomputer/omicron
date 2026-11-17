@@ -58,6 +58,12 @@ pub enum OpteError {
     DuplicatePort(String),
     #[error("no such port '{0}'")]
     NoPort(String),
+    #[error("IP address {0} is not a multicast address")]
+    InvalidMulticastGroup(IpAddr),
+    #[error("{0}")]
+    InvalidMulticastSourceFilter(String),
+    #[error("no underlay mapping for multicast group {0}")]
+    MissingMulticastMapping(IpAddr),
     /// Failure requested by a test via `State::fail_next_clear_m2p`.
     #[error("injected clear_m2p failure")]
     InjectedClearM2pFailure,
@@ -94,7 +100,7 @@ pub enum Error {
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 
     #[error(
-        "address {0} is not within the underlay multicast subnet (ff04::/16)"
+        "address {0} is not within the underlay multicast subnet (ff04::/64)"
     )]
     InvalidMcastUnderlay(std::net::Ipv6Addr),
 
@@ -327,45 +333,60 @@ impl Handle {
         Ok(NO_RESPONSE)
     }
 
-    /// Subscribe a port to a multicast group.
     pub fn mcast_subscribe(
         &self,
         req: &McastSubscribeReq,
     ) -> Result<NoResp, OpteError> {
         let mut inner = opte_state().lock().unwrap();
+        if !req.group.is_multicast() {
+            return Err(OpteError::InvalidMulticastGroup(req.group.into()));
+        }
+        req.filter.validate_sources_for_group(req.group).map_err(|e| {
+            OpteError::InvalidMulticastSourceFilter(e.to_string())
+        })?;
+        let underlay = match req.group {
+            oxide_vpc::api::IpAddr::Ip4(_) => {
+                inner.m2p.get(&req.group).copied().ok_or(
+                    OpteError::MissingMulticastMapping(req.group.into()),
+                )?
+            }
+            oxide_vpc::api::IpAddr::Ip6(v6) => inner
+                .m2p
+                .get(&req.group)
+                .copied()
+                .or_else(|| MulticastUnderlay::new(v6).ok())
+                .ok_or(OpteError::MissingMulticastMapping(req.group.into()))?,
+        };
         let Some(port_data) = inner.ports.get_mut(&req.port_name) else {
             return Err(OpteError::NoPort(req.port_name.clone()));
         };
-        let group_ip: IpAddr = match req.group {
-            oxide_vpc::api::IpAddr::Ip4(v4) => {
-                std::net::Ipv4Addr::from(v4).into()
-            }
-            oxide_vpc::api::IpAddr::Ip6(v6) => {
-                std::net::Ipv6Addr::from(v6).into()
-            }
-        };
-        port_data.mcast_subscriptions.insert(group_ip, req.filter.clone());
+        port_data.mcast_subscriptions.insert(
+            std::net::Ipv6Addr::from(underlay.addr()).into(),
+            req.filter.clone(),
+        );
         Ok(NO_RESPONSE)
     }
 
-    /// Unsubscribe a port from a multicast group.
     pub fn mcast_unsubscribe(
         &self,
         req: &McastUnsubscribeReq,
     ) -> Result<NoResp, OpteError> {
         let mut inner = opte_state().lock().unwrap();
+        if !inner.ports.contains_key(&req.port_name) {
+            return Err(OpteError::NoPort(req.port_name.clone()));
+        }
+        if !req.group.is_multicast() {
+            return Err(OpteError::InvalidMulticastGroup(req.group.into()));
+        }
+        let Some(underlay) = inner.m2p.get(&req.group).copied() else {
+            return Ok(NO_RESPONSE);
+        };
         let Some(port_data) = inner.ports.get_mut(&req.port_name) else {
             return Err(OpteError::NoPort(req.port_name.clone()));
         };
-        let group_ip: IpAddr = match req.group {
-            oxide_vpc::api::IpAddr::Ip4(v4) => {
-                std::net::Ipv4Addr::from(v4).into()
-            }
-            oxide_vpc::api::IpAddr::Ip6(v6) => {
-                std::net::Ipv6Addr::from(v6).into()
-            }
-        };
-        port_data.mcast_subscriptions.remove(&group_ip);
+        port_data
+            .mcast_subscriptions
+            .remove(&IpAddr::V6(std::net::Ipv6Addr::from(underlay.addr())));
         Ok(NO_RESPONSE)
     }
 
@@ -417,15 +438,12 @@ impl Handle {
         unimplemented!("Not yet used in tests")
     }
 
-    /// Set a multicast-to-physical mapping.
     pub fn set_m2p(&self, req: &SetMcast2PhysReq) -> Result<NoResp, OpteError> {
         let mut state = opte_state().lock().unwrap();
-        // Upsert: replaces any existing entry for the same group.
         state.m2p.insert(req.group, req.underlay);
         Ok(NO_RESPONSE)
     }
 
-    /// Clear a multicast-to-physical mapping.
     pub fn clear_m2p(
         &self,
         req: &ClearMcast2PhysReq,
@@ -441,7 +459,6 @@ impl Handle {
         Ok(NO_RESPONSE)
     }
 
-    /// Set multicast forwarding for a port.
     pub fn set_mcast_fwd(
         &self,
         _: &SetMcastForwardingReq,
@@ -449,7 +466,6 @@ impl Handle {
         Ok(NO_RESPONSE)
     }
 
-    /// Clear multicast forwarding for a port.
     pub fn clear_mcast_fwd(
         &self,
         _: &ClearMcastForwardingReq,
@@ -457,7 +473,6 @@ impl Handle {
         Ok(NO_RESPONSE)
     }
 
-    /// Dump all multicast-to-physical mappings.
     pub fn dump_m2p(&self) -> Result<DumpMcast2PhysResp, OpteError> {
         let state = opte_state().lock().unwrap();
         let mut ip4 = Vec::new();
@@ -475,7 +490,6 @@ impl Handle {
         Ok(DumpMcast2PhysResp { ip4, ip6 })
     }
 
-    /// Dump all multicast forwarding entries.
     pub fn dump_mcast_fwd(&self) -> Result<DumpMcastForwardingResp, OpteError> {
         Ok(DumpMcastForwardingResp { entries: Vec::new() })
     }

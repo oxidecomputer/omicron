@@ -260,9 +260,6 @@ pub mod multicast {
 
     pub use crate::v2026_11_09_02::multicast::MulticastGroupMember;
     pub use crate::v2026_11_09_02::multicast::MulticastGroupMemberParentKind;
-
-    pub use crate::impls::multicast::validate_multicast_ip;
-    pub use crate::impls::multicast::validate_source_ip;
 }
 
 pub mod multirack {

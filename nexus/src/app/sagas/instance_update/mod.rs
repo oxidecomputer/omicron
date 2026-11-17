@@ -3488,6 +3488,7 @@ mod test {
             &format!("http://[{addr}]:{port}"),
             client_state.clone(),
         )
+        .expect("created dpd client")
     }
 
     /// The NAT subnet used for polling NAT entries in tests.

@@ -69,7 +69,6 @@ async fn test_multicast_external_ip_scenarios(
     )
     .await;
 
-    // Ensure multicast test prerequisites (inventory + DPD) are ready
     ensure_multicast_test_ready(cptestctx).await;
 
     // Case: Basic external IP attach/detach with multicast
@@ -459,11 +458,6 @@ async fn test_multicast_external_ip_scenarios(
     }
 }
 
-/// Verify instances can have both floating IPs and multicast group membership.
-///
-/// Floating IP attachment works for multicast group members, multicast state persists
-/// through floating IP operations, and no conflicts occur between floating IP and
-/// multicast DPD configuration.
 #[nexus_test]
 async fn test_multicast_with_floating_ip_basic(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -533,7 +527,6 @@ async fn test_multicast_with_floating_ip_basic(
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
     instance_wait_for_running_with_simulation(cptestctx, instance_uuid).await;
 
-    // Ensure multicast test prerequisites (inventory + DPD) are ready
     ensure_multicast_test_ready(cptestctx).await;
 
     // Add instance to multicast group via instance-centric API
@@ -729,7 +722,6 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
 
     ensure_multicast_test_ready(cptestctx).await;
 
-    // Create and start an instance.
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -758,7 +750,6 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     instance_wait_for_running_with_simulation(cptestctx, instance_id).await;
-    // Attach instance to a multicast group.
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
         .await;
     wait_for_group_active(client, group_name).await;
@@ -771,7 +762,6 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
     )
     .await;
 
-    // Look up the underlay multicast IPv6 address for verification.
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -799,10 +789,8 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
         other => panic!("Expected IPv6 underlay address, got {other}"),
     };
 
-    // Verify MRIB route was programmed on mgd.
     assert_mrib_route_exists(cptestctx, multicast_ip).await;
 
-    // Verify M2P mapping on the sim sled-agent.
     let sled_agent = cptestctx.first_sled_agent();
     {
         let m2p = sled_agent.m2p_mappings.lock().unwrap();
@@ -868,7 +856,6 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
         );
     }
 
-    // Verify per-VMM multicast subscription on the sim sled-agent.
     {
         let propolis_id = cptestctx
             .server
@@ -943,7 +930,6 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
     .await
     .expect("M2P should be cleared when no Joined members remain");
 
-    // Forwarding should also be cleared when no "Joined" members remain.
     activate_then_wait_for_condition(
         &cptestctx.lockstep_client,
         || async {
@@ -960,11 +946,9 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
     .await
     .expect("Forwarding should be cleared when no Joined members remain");
 
-    // Delete the instance, which should trigger group deletion.
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, group_name).await;
 
-    // Verify M2P and forwarding are cleared.
     {
         let m2p = sled_agent.m2p_mappings.lock().unwrap();
         assert!(
@@ -981,7 +965,6 @@ async fn test_multicast_sled_agent_m2p_and_subscriptions(
         );
     }
 
-    // Verify MRIB route was withdrawn after group deletion.
     assert_mrib_route_absent(cptestctx, multicast_ip).await;
 }
 
@@ -1015,16 +998,10 @@ async fn test_multicast_multi_sled_m2p_propagation(
 
     ensure_multicast_test_ready(cptestctx).await;
 
-    // Collect all sled agents (2 total: 1 default + 1 extra).
-    // We use extra_sled_agents = 1 (not 2) because the gateway sim only
-    // provides SP data for the two well-known sled UUIDs. A 3rd sled with
-    // a random UUID would have no SP entry, causing inventory readiness
-    // to time out. Two sleds is sufficient to verify cross-sled propagation.
     let all_sled_agents: Vec<_> =
         cptestctx.sled_agents.iter().map(|sa| sa.sled_agent()).collect();
     assert_eq!(all_sled_agents.len(), 2, "expected 2 sled agents");
 
-    // Create and start an instance.
     let instance = instance_for_multicast_groups(
         cptestctx,
         project_name,
@@ -1036,7 +1013,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     instance_wait_for_running_with_simulation(cptestctx, instance_id).await;
-    // Attach to a multicast group.
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
         .await;
     wait_for_group_active(client, group_name).await;
@@ -1049,7 +1025,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
     )
     .await;
 
-    // Look up the underlay IPv6 address for verification.
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
@@ -1076,7 +1051,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
         other => panic!("Expected IPv6 underlay address, got {other}"),
     };
 
-    // Look up the hosting sled for subscription verification.
     let info = nexus
         .active_instance_info(&instance_id, None)
         .await
@@ -1085,7 +1059,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
 
     let hosting_sled_id = info.sled_id;
 
-    // Verify MRIB route was programmed.
     assert_mrib_route_exists(cptestctx, multicast_ip).await;
 
     // M2P and forwarding are pushed to all sleds (like V2P). Any
@@ -1106,7 +1079,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
     for (i, sled_agent) in cptestctx.sled_agents.iter().enumerate() {
         let agent = sled_agent.sled_agent();
 
-        // Wait for M2P on every sled.
         wait_for_condition(
             || async {
                 let m2p = agent.m2p_mappings.lock().unwrap();
@@ -1124,10 +1096,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
             panic!("Sled {i} should have M2P mapping within timeout: {e:?}")
         });
 
-        // Verify forwarding on every sled. With a single member on
-        // one sled, the hosting sled's forwarding has no next hops
-        // (local delivery via subscription). Non-hosting sleds list
-        // the hosting sled as a next hop so senders can reach it.
         wait_for_condition(
             || async {
                 let fwd = agent.mcast_fwd.lock().unwrap();
@@ -1173,7 +1141,11 @@ async fn test_multicast_multi_sled_m2p_propagation(
              got: {listed:?}"
         );
         let entry = &listed[0];
-        assert_eq!(entry.underlay, underlay_ipv6, "Sled {i} underlay mismatch");
+        assert_eq!(
+            entry.underlay.ip(),
+            underlay_ipv6,
+            "Sled {i} underlay mismatch"
+        );
         assert_eq!(
             entry.next_hops, next_hops,
             "Sled {i} list_mcast_fwd next hops diverge from raw map"
@@ -1225,14 +1197,11 @@ async fn test_multicast_multi_sled_m2p_propagation(
         )
     });
 
-    // Delete the instance, which triggers group deletion.
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, group_name).await;
 
-    // Verify MRIB route removed after group deletion.
     assert_mrib_route_absent(cptestctx, multicast_ip).await;
 
-    // Verify cleanup on every sled: M2P and forwarding removed.
     for (i, sled_agent) in all_sled_agents.iter().enumerate() {
         activate_then_wait_for_condition(
             &cptestctx.lockstep_client,
@@ -1259,12 +1228,6 @@ async fn test_multicast_multi_sled_m2p_propagation(
     }
 }
 
-/// Verify cross-sled forwarding when members exist on both sleds.
-///
-/// With one member on sled A and another on sled B, each sled's forwarding
-/// entry should list the other sled as its sole next hop (self-exclusion).
-/// This exercises the `.filter(|(id, _)| *id != sled_id)` logic in
-/// `converge_forwarding`.
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_multicast_cross_sled_forwarding(
     cptestctx: &ControlPlaneTestContext,
@@ -1324,7 +1287,6 @@ async fn test_multicast_cross_sled_forwarding(
     let instance_a_id = InstanceUuid::from_untyped_uuid(instance_a.identity.id);
     instance_wait_for_running_with_simulation(cptestctx, instance_a_id).await;
 
-    // Verify instance A landed on sled A.
     let info_a = nexus
         .active_instance_info(&instance_a_id, None)
         .await
@@ -1374,7 +1336,6 @@ async fn test_multicast_cross_sled_forwarding(
     let instance_b_id = InstanceUuid::from_untyped_uuid(instance_b.identity.id);
     instance_wait_for_running_with_simulation(cptestctx, instance_b_id).await;
 
-    // Verify instance B landed on sled B.
     let info_b = nexus
         .active_instance_info(&instance_b_id, None)
         .await
@@ -1383,7 +1344,6 @@ async fn test_multicast_cross_sled_forwarding(
 
     assert_eq!(info_b.sled_id, sled_b_id, "instance B should be on sled B");
 
-    // Both instances join the same multicast group.
     multicast_group_attach(
         cptestctx,
         project_name,
@@ -1402,7 +1362,6 @@ async fn test_multicast_cross_sled_forwarding(
 
     wait_for_group_active(client, group_name).await;
 
-    // Wait for both members to reach "Joined".
     for instance in [&instance_a, &instance_b] {
         wait_for_member_state(
             cptestctx,
@@ -1413,7 +1372,6 @@ async fn test_multicast_cross_sled_forwarding(
         .await;
     }
 
-    // Resolve underlay IPv6 for forwarding assertions.
     let group_view = get_multicast_group(client, group_name).await;
     let external_group = datastore
         .multicast_group_lookup_by_ip(&opctx, group_view.multicast_ip)
@@ -1435,7 +1393,6 @@ async fn test_multicast_cross_sled_forwarding(
         other => panic!("Expected IPv6 underlay address, got {other}"),
     };
 
-    // Verify MRIB route was programmed for the group.
     assert_mrib_route_exists(cptestctx, group_view.multicast_ip).await;
 
     // Wait for forwarding entries on both sleds, then verify each sled's
@@ -1467,7 +1424,6 @@ async fn test_multicast_cross_sled_forwarding(
         });
     }
 
-    // Cleanup.
     cleanup_instances(
         cptestctx,
         client,
@@ -1477,18 +1433,12 @@ async fn test_multicast_cross_sled_forwarding(
     .await;
     wait_for_group_deleted(cptestctx, group_name).await;
 
-    // Verify MRIB route removed after group deletion.
     assert_mrib_route_absent(cptestctx, group_view.multicast_ip).await;
 }
 
 /// Verify multicast state is re-established after simulated cold start.
 /// Analogous to `test_instance_start_creates_networking_state` which tests
 /// V2P re-establishment after forcibly clearing sled-agent state.
-///
-/// Steps: a) create instance, b) join multicast, c) stop instance,
-/// d) forcibly clear all sim sled-agent multicast state, e) restart
-/// instance, f) verify M2P, forwarding, and per-VMM subscriptions are
-/// re-established.
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_multicast_cold_start_reestablishment(
     cptestctx: &ControlPlaneTestContext,
@@ -1516,7 +1466,6 @@ async fn test_multicast_cold_start_reestablishment(
     let all_sled_agents: Vec<_> =
         cptestctx.sled_agents.iter().map(|sa| sa.sled_agent()).collect();
 
-    // Create and start an instance, join a multicast group.
     let instance = instance_for_multicast_groups(
         cptestctx,
         project_name,
@@ -1540,7 +1489,6 @@ async fn test_multicast_cold_start_reestablishment(
     )
     .await;
 
-    // Look up the underlay IPv6.
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
@@ -1567,7 +1515,6 @@ async fn test_multicast_cold_start_reestablishment(
         other => panic!("Expected IPv6 underlay address, got {other}"),
     };
 
-    // Verify MRIB route was programmed.
     assert_mrib_route_exists(cptestctx, multicast_ip).await;
 
     // M2P and forwarding are pushed to all sleds. Verify at least the
@@ -1601,7 +1548,6 @@ async fn test_multicast_cold_start_reestablishment(
     .await
     .expect("Hosting sled M2P should exist before cold start simulation");
 
-    // Stop the instance.
     let stop_url =
         format!("/v1/instances/{instance_name}/stop?project={project_name}");
     NexusRequest::new(
@@ -1633,7 +1579,6 @@ async fn test_multicast_cold_start_reestablishment(
         sled_agent.instance_multicast_groups.lock().unwrap().clear();
     }
 
-    // Restart the instance.
     let start_url =
         format!("/v1/instances/{instance_name}/start?project={project_name}");
     NexusRequest::new(
@@ -1686,7 +1631,6 @@ async fn test_multicast_cold_start_reestablishment(
     .await
     .expect("Instance should reach Running after restart");
 
-    // Wait for the reconciler to re-establish multicast state.
     wait_for_member_state(
         cptestctx,
         group_name,
@@ -1695,14 +1639,12 @@ async fn test_multicast_cold_start_reestablishment(
     )
     .await;
 
-    // Verify MRIB route re-established after cold start.
     assert_mrib_route_exists(cptestctx, multicast_ip).await;
 
     // Drive one pass so the per-sled polls below honor the
     // single-pass contract (same reason as the join path above).
     activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Verify M2P and forwarding re-established on all sleds.
     for (i, sled_agent) in all_sled_agents.iter().enumerate() {
         wait_for_condition(
             || async {
@@ -1785,10 +1727,8 @@ async fn test_multicast_cold_start_reestablishment(
         )
     });
 
-    // Cleanup.
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, group_name).await;
 
-    // Verify MRIB route removed after group deletion.
     assert_mrib_route_absent(cptestctx, multicast_ip).await;
 }

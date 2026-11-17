@@ -4,10 +4,8 @@
 
 //! Member-specific multicast reconciler functions.
 //!
-//! This module handles multicast group member lifecycle operations. Members
-//! represent endpoints that receive multicast traffic, typically instances
-//! running on compute sleds, but potentially other resource types in the
-//! future.
+//! Members are instances or probes that receive multicast traffic on compute
+//! sleds.
 //!
 //! # RPW Member Processing Model
 //!
@@ -52,8 +50,6 @@
 //! - **Sled migration**: Detecting moves and re-subscribing on the new sled
 //!   (no transition to "Left")
 //! - **Cleanup**: Unsubscribing deleted members from their VMM
-//! - **Extensible processing**: Support for different member types (designed for
-//!   future extension)
 //!
 //! ## Separation of Concerns: RPW and Sagas
 //!
@@ -133,9 +129,9 @@ use crate::app::multicast::sled::MulticastSledClient;
 
 /// Whether at least `min_age` has elapsed since `since`.
 ///
-/// Gates implicit group deletion behind a grace period. Orphaned "Creating"
-/// groups are gated on their creation time so a group whose first member attach
-/// is still in flight is not reaped before that member reaches "Joined".
+/// The grace period covers the gap between implicit group creation and the
+/// first member attach. Any live member row protects the group from the
+/// emptiness sweep.
 fn grace_period_elapsed(
     since: chrono::DateTime<chrono::Utc>,
     min_age: chrono::TimeDelta,

@@ -14,16 +14,6 @@
 //!   asserts
 //! - Instance helpers: `instance_for_multicast_groups`, `cleanup_instances`
 //! - Attach/detach: `multicast_group_attach`, `multicast_group_detach`
-//!
-//! ## Test boundary
-//!
-//! The harness runs `ddmd --api-only`, which is only the admin API (no peering
-//! daemon). With the Dendrite-stubbed dataplane, there are no real rear-port
-//! tfports, so rear-port DDM peering never forms. Coverage stops at the
-//! Omicron-owned boundary, which is the group/member state machine, the
-//! Nexus-to-mgd MRIB write, and the forwarding and OPTE state pushed to
-//! sled-agents. The dataplane tail past that point is Maghemite/Dendrite's
-//! domain.
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -40,7 +30,6 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     link_ip_pool, object_create, object_delete, object_get,
 };
-use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::instance::{
     InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
     InstanceState,
@@ -305,133 +294,14 @@ where
     wait_for_condition(condition, poll_interval, timeout).await
 }
 
-/// Ensure inventory collection has completed with SP data for all sleds.
-///
-/// This function verifies that inventory has SP data for EVERY in-service sled,
-/// not just that inventory completed.
-///
-/// Multicast member operations resolve sled placement and switch zones from
-/// inventory. Waiting here keeps tests from racing against early inventory
-/// collection before they drive group/member reconciliation.
-pub(crate) async fn ensure_inventory_ready(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let log = &cptestctx.logctx.log;
-    let nexus = &cptestctx.server.server_context().nexus;
-    let datastore = nexus.datastore();
-
-    info!(log, "waiting for inventory with SP data for all sleds");
-
-    // Wait for inventory to have SP data for all in-service sleds
-    match wait_for_condition(
-        || async {
-            let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-
-            // Get all in-service sleds
-            let sleds = match datastore
-                .sled_list_all_batched(&opctx, SledFilter::InService)
-                .await
-            {
-                Ok(sleds) => sleds,
-                Err(e) => {
-                    warn!(log, "failed to list sleds: {e}");
-                    return Err(CondCheckError::<String>::NotYet {
-                        status: Some(format!("failed to list sleds: {e}")),
-                    });
-                }
-            };
-
-            if sleds.is_empty() {
-                warn!(log, "no in-service sleds found yet");
-                return Err(CondCheckError::<String>::NotYet {
-                    status: Some("no in-service sleds found yet".to_string()),
-                });
-            }
-
-            // Get latest inventory
-            let inventory = match datastore
-                .inventory_get_latest_collection(&opctx)
-                .await
-            {
-                Ok(Some(inv)) => inv,
-                Ok(None) => {
-                    debug!(log, "no inventory collection yet");
-                    return Err(CondCheckError::<String>::NotYet {
-                        status: Some("no inventory collection yet".to_string()),
-                    });
-                }
-                Err(e) => {
-                    warn!(log, "failed to get inventory: {e}");
-                    return Err(CondCheckError::<String>::NotYet {
-                        status: Some(format!("failed to get inventory: {e}")),
-                    });
-                }
-            };
-
-            // Verify inventory has SP data for each sled
-            let mut missing_sleds = Vec::new();
-            for sled in &sleds {
-                let has_sp = inventory.sps.iter().any(|(bb, _)| {
-                    bb.serial_number == sled.serial_number()
-                        && bb.part_number == sled.part_number()
-                });
-
-                if !has_sp {
-                    missing_sleds.push(sled.serial_number().to_string());
-                }
-            }
-
-            if missing_sleds.is_empty() {
-                info!(
-                    log,
-                    "inventory has SP data for all {} sleds",
-                    sleds.len()
-                );
-                Ok(())
-            } else {
-                debug!(
-                    log,
-                    "inventory missing SP data for {} sleds: {:?}",
-                    missing_sleds.len(),
-                    missing_sleds
-                );
-                Err(CondCheckError::<String>::NotYet {
-                    status: Some(format!(
-                        "inventory missing SP data for sleds: \
-                         {missing_sleds:?}"
-                    )),
-                })
-            }
-        },
-        &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
-    )
-    .await
-    {
-        Ok(_) => {
-            info!(log, "inventory ready with SP data for all sleds");
-        }
-        Err(poll::Error::TimedOut { elapsed, .. }) => {
-            panic!(
-                "inventory did not get SP data for all sleds within {elapsed:?}"
-            );
-        }
-        Err(poll::Error::PermanentError(err)) => {
-            panic!("failed waiting for inventory: {err}");
-        }
-    }
-}
-
 /// Ensure multicast test prerequisites are ready.
 ///
-/// This combines inventory collection and DPD readiness (for switch
-/// operations) into a single call. Use this at the beginning of multicast
-/// tests that will add instances to groups.
+/// This waits on DPD readiness (for switch operations). Use this at the
+/// beginning of multicast tests that will add instances to groups.
 pub(crate) async fn ensure_multicast_test_ready(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    ops::join2(ensure_inventory_ready(cptestctx), ensure_dpd_ready(cptestctx))
-        .await;
+    ensure_dpd_ready(cptestctx).await;
 }
 
 /// Ensure DPD (switch infrastructure) is ready and responsive.
@@ -576,7 +446,7 @@ pub(crate) async fn wait_for_group_active(
 
 /// Wait for a multicast group member to reach the expected state.
 ///
-/// Ensures inventory and DPD are ready, drives one reconciler activation,
+/// Ensures DPD is ready, drives one reconciler activation,
 /// then asserts the member is observable in `expected_state`. If the state
 /// does not match after the pass, fails loudly rather than retrying via
 /// reactivation.
@@ -1161,14 +1031,8 @@ pub(crate) async fn instance_for_multicast_groups(
     start: bool,
     multicast_group_names: &[&str],
 ) -> Instance {
-    // Ensure inventory and DPD are ready before creating instances with
-    // multicast groups.
     if !multicast_group_names.is_empty() {
-        ops::join2(
-            ensure_inventory_ready(cptestctx),
-            ensure_dpd_ready(cptestctx),
-        )
-        .await;
+        ensure_dpd_ready(cptestctx).await;
     }
 
     let client = &cptestctx.external_client;
@@ -1519,8 +1383,6 @@ pub(crate) async fn migrate_instance_to(
     .await;
 }
 
-/// Resolve the underlay admin-local IPv6 address for a multicast group
-/// given its external multicast IP.
 pub(crate) async fn fetch_underlay_admin_ip(
     cptestctx: &ControlPlaneTestContext,
     external_multicast_ip: IpAddr,
@@ -1644,16 +1506,14 @@ pub(crate) async fn stop_instances(
 
 /// Attach multiple instances to a multicast group in parallel.
 ///
-/// Ensures inventory and DPD are ready once before attaching all instances, avoiding redundant checks.
+/// Ensures DPD is ready once before attaching all instances, avoiding redundant checks.
 pub(crate) async fn multicast_group_attach_bulk(
     cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_names: &[&str],
     group_name: &str,
 ) {
-    // Check inventory and DPD readiness once for all attachments
-    ops::join2(ensure_inventory_ready(cptestctx), ensure_dpd_ready(cptestctx))
-        .await;
+    ensure_dpd_ready(cptestctx).await;
 
     let attach_futures = instance_names.iter().map(|instance_name| {
         multicast_group_attach(
@@ -1765,10 +1625,7 @@ pub(crate) async fn assert_mrib_route_exists(
                         });
                     }
                 };
-                if routes
-                    .iter()
-                    .any(|r| mrib_route_matches_group(&r.key, group_ip))
-                {
+                if routes.iter().any(|r| r.key.group().ip() == group_ip) {
                     Ok(())
                 } else {
                     Err(CondCheckError::NotYet {
@@ -1787,7 +1644,6 @@ pub(crate) async fn assert_mrib_route_exists(
     .await;
 }
 
-/// Assert that *no* MGD in the fixture has an MRIB route for `group_ip`.
 pub(crate) async fn assert_mrib_route_absent(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
         omicron_nexus::Server,
@@ -1808,10 +1664,7 @@ pub(crate) async fn assert_mrib_route_absent(
                         });
                     }
                 };
-                if routes
-                    .iter()
-                    .any(|r| mrib_route_matches_group(&r.key, group_ip))
-                {
+                if routes.iter().any(|r| r.key.group().ip() == group_ip) {
                     Err(CondCheckError::NotYet {
                         status: Some("route still in MRIB".to_string()),
                     })
@@ -1881,13 +1734,10 @@ pub(crate) async fn assert_mrib_route_sources(
                 };
                 let group_routes: Vec<_> = routes
                     .iter()
-                    .filter(|r| mrib_route_matches_group(&r.key, group_ip))
+                    .filter(|r| r.key.group().ip() == group_ip)
                     .collect();
                 let sources: std::collections::BTreeSet<Option<IpAddr>> =
-                    group_routes
-                        .iter()
-                        .map(|r| mrib_route_source(&r.key))
-                        .collect();
+                    group_routes.iter().map(|r| r.key.source()).collect();
                 if sources != *expected {
                     return Err(CondCheckError::NotYet {
                         status: Some(
@@ -1954,6 +1804,72 @@ pub(crate) async fn assert_mrib_route_sources(
     }
 }
 
+#[cfg(target_os = "illumos")]
+async fn assert_ddm_origins(
+    cptestctx: &ControlPlaneTestContext,
+    group_ip: IpAddr,
+    expected_underlay: Option<omicron_ddm_admin_client::UnderlayMulticastIpv6>,
+) {
+    use omicron_ddm_admin_client::{
+        DEFAULT_MULTICAST_VNI, MulticastOrigin, OverlayMulticast,
+    };
+    use std::collections::HashSet;
+
+    let expected: HashSet<MulticastOrigin> = expected_underlay
+        .map(|underlay| {
+            MulticastOrigin::new(
+                OverlayMulticast::new(group_ip).unwrap(),
+                underlay,
+                DEFAULT_MULTICAST_VNI,
+                None,
+            )
+            .unwrap()
+        })
+        .into_iter()
+        .collect();
+    let expected = &expected;
+    assert!(!cptestctx.ddm.is_empty());
+    for (slot, ddm) in &cptestctx.ddm {
+        let ddm_client = omicron_ddm_admin_client::Client::new(
+            &cptestctx.logctx.log,
+            ddm.address(),
+        )
+        .unwrap();
+        let ddm_client = &ddm_client;
+
+        wait_for_condition::<_, (), _, _>(
+            || async move {
+                let origins = ddm_client
+                    .get_originated_multicast_groups()
+                    .await
+                    .map_err(|err| CondCheckError::NotYet {
+                        status: Some(format!("DDM origins unavailable: {err}")),
+                    })?;
+                let actual: HashSet<_> = origins
+                    .into_iter()
+                    .filter(|origin| origin.overlay_group().ip() == group_ip)
+                    .collect();
+                if &actual == expected {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::NotYet {
+                        status: Some(format!("DDM origins {actual:?}")),
+                    })
+                }
+            },
+            &POLL_INTERVAL,
+            &MULTICAST_OPERATION_TIMEOUT,
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "ddmd on {slot:?} did not converge to origins {expected:?} \
+                 for {group_ip}: {err:?}"
+            )
+        });
+    }
+}
+
 /// Assert the ddm-peers lockstep view is reachable.
 ///
 /// The harness runs `ddmd --api-only` over a stubbed dataplane, so no rear-port
@@ -1969,12 +1885,6 @@ async fn assert_ddm_peers_view_reachable(cptestctx: &ControlPlaneTestContext) {
         .multicast_ddm_peers()
         .await
         .expect("should fetch ddm-peers view from lockstep API");
-}
-
-fn mrib_route_source(
-    key: &mg_api_types::mrib::MulticastRouteKey,
-) -> Option<IpAddr> {
-    key.source()
 }
 
 /// Run a function `f` against every MGD client in the fixture, in `SwitchSlot`
@@ -2002,14 +1912,8 @@ async fn for_each_mgd<F, Fut>(
         let mgd_client = mg_admin_client::Client::new(
             &format!("http://[::1]:{}", mgd.port),
             cptestctx.logctx.log.clone(),
-        );
+        )
+        .expect("created mgd client");
         f(*slot, mgd_client).await;
     }
-}
-
-fn mrib_route_matches_group(
-    key: &mg_api_types::mrib::MulticastRouteKey,
-    group_ip: IpAddr,
-) -> bool {
-    IpAddr::from(key.group()) == group_ip
 }

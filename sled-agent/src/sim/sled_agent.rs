@@ -732,17 +732,6 @@ impl SledAgent {
             self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
         }
 
-        // Real sled-agent applies multicast memberships when it creates OPTE
-        // ports at registration, so migration targets receive them without an
-        // explicit join call. Mirror that here.
-        if !local_config.multicast_groups.is_empty() {
-            let mut groups = self.instance_multicast_groups.lock().unwrap();
-            groups
-                .entry(propolis_id)
-                .or_default()
-                .extend(local_config.multicast_groups.iter().cloned());
-        }
-
         let mut routes = self.vpc_routes.lock().unwrap();
         for nic in &local_config.nics {
             let kinds = std::iter::once(RouterKind::System)
@@ -802,6 +791,7 @@ impl SledAgent {
 
         self.vmms.sim_force_remove(propolis_id).await;
         self.attached_subnets.lock().unwrap().remove(&propolis_id);
+        self.instance_multicast_groups.lock().unwrap().remove(&propolis_id);
         Ok(response)
     }
 
@@ -1095,13 +1085,13 @@ impl SledAgent {
 
     pub fn set_mcast_m2p(&self, req: &Mcast2PhysMapping) -> Result<(), Error> {
         let mut m2p = self.m2p_mappings.lock().unwrap();
-        m2p.insert((req.group, req.underlay));
+        m2p.insert((req.group.ip(), req.underlay.ip()));
         Ok(())
     }
 
     pub fn clear_mcast_m2p(&self, req: &ClearMcast2Phys) -> Result<(), Error> {
         let mut m2p = self.m2p_mappings.lock().unwrap();
-        m2p.remove(&(req.group, req.underlay));
+        m2p.remove(&(req.group.ip(), req.underlay.ip()));
         Ok(())
     }
 
@@ -1117,7 +1107,7 @@ impl SledAgent {
         // replace here would diverge from xde and hide the stale-next-hop
         // accumulation that `converge_forwarding`'s clear-before-set guards
         // against.
-        let entry = fwd.entry(req.underlay).or_default();
+        let entry = fwd.entry(req.underlay.ip()).or_default();
         for hop in &req.next_hops {
             match entry.iter_mut().find(|h| h.next_hop == hop.next_hop) {
                 Some(existing) => *existing = hop.clone(),
@@ -1132,30 +1122,44 @@ impl SledAgent {
         req: &ClearMcastForwarding,
     ) -> Result<(), Error> {
         let mut fwd = self.mcast_fwd.lock().unwrap();
-        fwd.remove(&req.underlay);
+        fwd.remove(&req.underlay.ip());
         Ok(())
     }
 
     pub fn list_mcast_m2p(&self) -> Result<Vec<Mcast2PhysMapping>, Error> {
         let m2p = self.m2p_mappings.lock().unwrap();
-        Ok(m2p
-            .iter()
-            .map(|(group, underlay)| Mcast2PhysMapping {
-                group: *group,
-                underlay: *underlay,
+        m2p.iter()
+            .map(|(group, underlay)| {
+                Ok(Mcast2PhysMapping {
+                    group: (*group).try_into().map_err(|e| {
+                        Error::internal_error(&format!(
+                            "invalid stored multicast group {group}: {e}"
+                        ))
+                    })?,
+                    underlay: (*underlay).try_into().map_err(|e| {
+                        Error::internal_error(&format!(
+                            "invalid stored underlay address {underlay}: {e}"
+                        ))
+                    })?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub fn list_mcast_fwd(&self) -> Result<Vec<McastForwardingEntry>, Error> {
         let fwd = self.mcast_fwd.lock().unwrap();
-        Ok(fwd
-            .iter()
-            .map(|(underlay, next_hops)| McastForwardingEntry {
-                underlay: *underlay,
-                next_hops: next_hops.clone(),
+        fwd.iter()
+            .map(|(underlay, next_hops)| {
+                Ok(McastForwardingEntry {
+                    underlay: (*underlay).try_into().map_err(|e| {
+                        Error::internal_error(&format!(
+                            "invalid stored underlay address {underlay}: {e}"
+                        ))
+                    })?,
+                    next_hops: next_hops.clone(),
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn instance_put_external_ip(

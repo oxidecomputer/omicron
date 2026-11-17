@@ -1263,7 +1263,6 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    /// Install a multicast overlay-to-underlay (M2P) mapping in OPTE.
     pub async fn set_mcast_m2p(
         &self,
         req: &Mcast2PhysMapping,
@@ -1271,7 +1270,6 @@ impl SledAgent {
         self.inner.port_manager.set_mcast_m2p(req).map_err(Error::from)
     }
 
-    /// Remove a multicast overlay-to-underlay (M2P) mapping from OPTE.
     pub async fn clear_mcast_m2p(
         &self,
         req: &ClearMcast2Phys,
@@ -1279,7 +1277,6 @@ impl SledAgent {
         self.inner.port_manager.clear_mcast_m2p(req).map_err(Error::from)
     }
 
-    /// Set multicast forwarding next hops for an underlay group address.
     pub async fn set_mcast_fwd(
         &self,
         req: &McastForwardingEntry,
@@ -1287,7 +1284,6 @@ impl SledAgent {
         self.inner.port_manager.set_mcast_fwd(req).map_err(Error::from)
     }
 
-    /// Remove multicast forwarding entries for an underlay group address.
     pub async fn clear_mcast_fwd(
         &self,
         req: &ClearMcastForwarding,
@@ -1295,14 +1291,12 @@ impl SledAgent {
         self.inner.port_manager.clear_mcast_fwd(req).map_err(Error::from)
     }
 
-    /// List all multicast M2P mappings from OPTE.
     pub async fn list_mcast_m2p(
         &self,
     ) -> Result<Vec<Mcast2PhysMapping>, Error> {
         self.inner.port_manager.list_mcast_m2p().map_err(Error::from)
     }
 
-    /// List all multicast forwarding entries from OPTE.
     pub async fn list_mcast_fwd(
         &self,
     ) -> Result<Vec<McastForwardingEntry>, Error> {

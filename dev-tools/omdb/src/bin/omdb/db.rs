@@ -430,7 +430,6 @@ enum DbCommands {
     #[clap(alias = "migration")]
     Migrations(MigrationsArgs),
     /// Print information about multicast groups
-    #[clap(alias = "mcast")]
     Multicast(multicast::MulticastArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
@@ -1524,30 +1523,9 @@ impl DbArgs {
                     }) => {
                         cmd_db_migrations_list(&datastore, &fetch_opts, args).await
                     }
-                    DbCommands::Multicast(multicast::MulticastArgs {
-                        command: multicast::MulticastCommands::Groups(args),
-                    }) => {
-                        multicast::cmd_db_multicast_groups(
-                            &datastore, &fetch_opts, &args,
-                        )
-                        .await
-                    }
-                    DbCommands::Multicast(multicast::MulticastArgs {
-                        command: multicast::MulticastCommands::Members(args),
-                    }) => {
-                        multicast::cmd_db_multicast_members(&datastore, &fetch_opts, &args)
-                            .await
-                    }
-                    DbCommands::Multicast(multicast::MulticastArgs {
-                        command: multicast::MulticastCommands::Pools,
-                    }) => {
-                        multicast::cmd_db_multicast_pools(&datastore, &fetch_opts).await
-                    }
-                    DbCommands::Multicast(multicast::MulticastArgs {
-                        command: multicast::MulticastCommands::Info(args),
-                    }) => {
-                        multicast::cmd_db_multicast_info(
-                            &datastore, &fetch_opts, &args,
+                    DbCommands::Multicast(args) => {
+                        multicast::cmd_db_multicast(
+                            &opctx, &datastore, &fetch_opts, args,
                         )
                         .await
                     }

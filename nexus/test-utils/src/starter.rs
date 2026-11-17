@@ -481,24 +481,15 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
         let mgs_addr = self.gateway.get(&switch_slot).unwrap().address().into();
-
-        // Point mgd's lower half at this switch's dendrite and ddmd so the
-        // mg-lower-mrib thread (illumos only) syncs MRIB entries to ddmd as
-        // multicast origination.
-        //
-        // Both daemons must be started first.
         let dendrite_addr = self
             .dendrite
             .read()
             .unwrap()
             .get(&switch_slot)
-            .map(|d| SocketAddrV6::new(Ipv6Addr::LOCALHOST, d.port(), 0, 0))
-            .map(std::net::SocketAddr::V6);
-        let ddm_addr = self
-            .ddm
-            .get(&switch_slot)
-            .map(|d| SocketAddrV6::new(Ipv6Addr::LOCALHOST, d.port, 0, 0))
-            .map(std::net::SocketAddr::V6);
+            .unwrap()
+            .address()
+            .into();
+        let ddm_addr = self.ddm.get(&switch_slot).unwrap().address().into();
 
         // Set up an instance of mgd
         let mgd = dev::maghemite::MgdInstance::start(
@@ -1441,14 +1432,14 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         if let Some(producer) = self.producer {
             producer.close().await.unwrap();
         }
+        for (_, mut mgd) in self.mgd {
+            mgd.cleanup().await.unwrap();
+        }
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
         for (_, dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
-        }
-        for (_, mut mgd) in self.mgd {
-            mgd.cleanup().await.unwrap();
         }
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();

@@ -38,6 +38,7 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use dpd_types::mcast::is_ssm_address;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -52,7 +53,6 @@ use nexus_db_schema::enums::IpKindEnum;
 use nexus_db_schema::enums::IpPoolAssignmentEnum;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::IpRange;
-use omicron_common::address::{IPV4_SSM_SUBNET, is_ssm_address};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -1953,16 +1953,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::ip_pool_range::dsl;
 
-        let new_range_is_ssm = match range {
-            IpRange::V4(v4_range) => {
-                let first = v4_range.first_address();
-                IPV4_SSM_SUBNET.contains(first)
-            }
-            IpRange::V6(v6_range) => {
-                let first = v6_range.first_address();
-                is_ssm_address(first.into())
-            }
-        };
+        let new_range_is_ssm = is_ssm_address(range.first_address());
 
         // Query existing ranges within THIS pool only
         let existing_ranges: Vec<IpPoolRange> = dsl::ip_pool_range
@@ -1979,10 +1970,8 @@ impl DataStore {
 
         // Check if any existing range conflicts with the new range type
         for existing_range in &existing_ranges {
-            let existing_is_ssm = match &existing_range.first_address {
-                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => is_ssm_address(net.network().into()),
-            };
+            let existing_is_ssm =
+                is_ssm_address(existing_range.first_address.ip());
 
             // If we have a mix of ASM and SSM within this pool, reject
             if new_range_is_ssm != existing_is_ssm {
@@ -2026,21 +2015,18 @@ impl DataStore {
             ));
         };
 
-        let is_ssm = match range.first_address {
-            IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-            IpNetwork::V6(net) => is_ssm_address(net.network().into()),
-        };
+        let is_ssm = is_ssm_address(range.first_address.ip());
 
         Ok(is_ssm)
     }
 
     /// Look up an SSM multicast pool linked to the caller's silo.
     ///
-    /// Per [RFC 4607], Source-Specific Multicast (SSM) addresses (IPv4 232/8,
-    /// IPv6 ff3x::/32) are used when source IPs are specified. This method
-    /// finds pools with ranges in these SSM address spaces, which is required
-    /// when creating a multicast group with `source_ips` but without an
-    /// explicit pool or IP address.
+    /// Per [RFC 4607], Source-Specific Multicast (SSM) addresses
+    /// ([`is_ssm_address`]) are used when source IPs are specified.
+    /// This method finds pools with ranges in these SSM address spaces, which
+    /// is required when creating a multicast group with `source_ips` but
+    /// without an explicit pool or IP address.
     ///
     /// Prefers the default pool if one exists. If no default exists, falls
     /// back to any linked SSM pool, selecting alphabetically by name (arbitrary
@@ -2065,7 +2051,7 @@ impl DataStore {
             LookupType::ByOther("SSM multicast pool for current silo".into());
 
         // We need to find multicast pools with SSM ranges.
-        // SSM ranges are: IPv4 232.0.0.0/8, IPv6 ff3x::/32
+        // SSM ranges are those where the first address passes `is_ssm_address`.
         let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .inner_join(
@@ -2107,10 +2093,7 @@ impl DataStore {
         let mut ssm_pools: Vec<IpPool> = Vec::new();
         let mut seen_pool_ids = HashSet::new();
         for (pool, range, _is_default) in pools {
-            let is_ssm = match range.first_address {
-                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => is_ssm_address(net.network().into()),
-            };
+            let is_ssm = is_ssm_address(range.first_address.ip());
 
             if is_ssm && seen_pool_ids.insert(pool.id()) {
                 ssm_pools.push(pool);
@@ -2151,10 +2134,10 @@ impl DataStore {
     /// Look up an ASM multicast pool linked to the caller's silo.
     ///
     /// ASM (Any-Source Multicast) addresses are multicast ranges that are not
-    /// in the SSM spaces (IPv4 232/8, IPv6 ff3x::/32). This method finds pools
-    /// with ranges outside those SSM address spaces. Use this when creating a
-    /// multicast group without `source_ips` and without an explicit pool or IP
-    /// address, to ensure an ASM-range pool is selected.
+    /// SSM per [`is_ssm_address`]. This method finds pools with ranges outside
+    /// those SSM address spaces. Use
+    /// this when creating a multicast group without `source_ips` and without
+    /// an explicit pool or IP address, to ensure an ASM-range pool is selected.
     ///
     /// Prefers the default pool if one exists. If no default exists, falls
     /// back to any linked ASM pool, selecting alphabetically by name
@@ -2216,10 +2199,7 @@ impl DataStore {
         let mut asm_pools: Vec<IpPool> = Vec::new();
         let mut seen_pool_ids = HashSet::new();
         for (pool, range, _is_default) in pools {
-            let is_ssm = match range.first_address {
-                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => is_ssm_address(net.network().into()),
-            };
+            let is_ssm = is_ssm_address(range.first_address.ip());
 
             if !is_ssm && seen_pool_ids.insert(pool.id()) {
                 asm_pools.push(pool);
@@ -3988,9 +3968,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Verify SSM pool selection selects pools whose ranges are SSM (232/8),
-    /// and does not get confused with alphabetical ordering or the presence of
-    /// ASM pools.
+    /// Verify SSM pool selection by address range and IP version.
     #[tokio::test]
     async fn test_ip_pools_fetch_ssm_multicast() {
         let logctx = dev::test_setup_log("test_ip_pools_fetch_ssm_multicast");
@@ -4147,11 +4125,11 @@ mod test {
             LookupType::ById(ssm_v6_pool.id()),
         );
 
-        // Add IPv6 SSM range (ff3x::/32 is SSM per RFC 4607)
+        // Add an ffbx SSM range (X flag set).
         let ssm_v6_range = IpRange::V6(
             Ipv6Range::new(
-                "ff3e::1".parse().unwrap(),
-                "ff3e::10".parse().unwrap(),
+                "ffbe::1".parse().unwrap(),
+                "ffbe::10".parse().unwrap(),
             )
             .unwrap(),
         );
@@ -4200,6 +4178,12 @@ mod test {
             .await
             .expect("Should find SSM V6 pool when ip_version specified");
         assert_eq!(found_v6_pool.id(), ssm_v6_pool.id());
+
+        let err = datastore
+            .ip_pools_fetch_asm_multicast(&opctx, Some(IpVersion::V6))
+            .await
+            .unwrap_err();
+        assert_matches!(err, Error::ObjectNotFound { .. });
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -56,7 +56,6 @@ use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;
 
-/// Test that multicast IP pools reject invalid ranges at the pool level
 #[nexus_test]
 async fn test_multicast_ip_pool_range_validation(
     cptestctx: &ControlPlaneTestContext,
@@ -167,7 +166,7 @@ async fn test_multicast_ip_pool_range_validation(
         .await;
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_multicast_group_member_operations(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -280,7 +279,7 @@ async fn test_multicast_group_member_operations(
                 } => {
                     // Check if it starts with ff04 (admin-local multicast)
                     if group_ip.ip().segments()[0] == 0xff04 {
-                        Some(group_ip.clone())
+                        Some(*group_ip)
                     } else {
                         None
                     }
@@ -310,6 +309,9 @@ async fn test_multicast_group_member_operations(
         "wildcard MRIB route once the member is joined",
     )
     .await;
+    #[cfg(target_os = "illumos")]
+    assert_ddm_origins(cptestctx, external_multicast_ip, Some(underlay_ip))
+        .await;
 
     // Test removing instance from multicast group using instance-centric DELETE
     let member_remove_url = format!(
@@ -330,8 +332,9 @@ async fn test_multicast_group_member_operations(
     wait_for_group_deleted(cptestctx, group_name).await;
     wait_for_group_deleted_from_dpd(cptestctx, external_multicast_ip).await;
 
-    // MRIB route is withdrawn along with the dataplane teardown.
     assert_mrib_route_absent(cptestctx, external_multicast_ip).await;
+    #[cfg(target_os = "illumos")]
+    assert_ddm_origins(cptestctx, external_multicast_ip, None).await;
 }
 
 #[nexus_test]
@@ -449,7 +452,6 @@ async fn test_instance_multicast_endpoints(
     )
     .await;
 
-    // Verify instance now belongs to both groups
     let instance_memberships: ResultsPage<MulticastGroupMember> =
         object_get(client, &instance_groups_url).await;
     assert_eq!(
@@ -658,7 +660,6 @@ async fn test_instance_deletion_removes_multicast_memberships(
     assert_eq!(members.len(), 1, "Instance should be a member of the group");
     assert_eq!(members[0].parent_id, instance.identity.id);
 
-    // Verify MRIB route exists while group is active with a joined member.
     assert_mrib_route_exists(cptestctx, multicast_ip).await;
 
     // Case: Instance deletion should clean up multicast memberships
@@ -676,12 +677,9 @@ async fn test_instance_deletion_removes_multicast_memberships(
     // Wait for reconciler to clean up DPD state (activates reconciler repeatedly until DPD confirms deletion)
     wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
 
-    // Verify MRIB route was withdrawn after group deletion.
     assert_mrib_route_absent(cptestctx, multicast_ip).await;
 }
 
-/// Test that the multicast_ip field is correctly populated in MulticastGroupMember API responses.
-/// This validates the denormalized multicast_ip field added for API ergonomics.
 #[nexus_test]
 async fn test_member_response_includes_multicast_ip(
     cptestctx: &ControlPlaneTestContext,
@@ -1133,7 +1131,7 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         cptestctx,
         multicast_ip,
         Some(vec![source1]),
-        "DPD union should shrink to {source1} after inst-2 detaches",
+        &format!("DPD union should shrink to {source1} after inst-2 detaches"),
     )
     .await;
     assert_mrib_route_sources(
@@ -1303,7 +1301,6 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         wait_for_group_deleted(cptestctx, group_name).await;
     }
 
-    // MRIB routes are withdrawn with group deletion.
     assert_mrib_route_absent(cptestctx, multicast_ip).await;
 }
 
@@ -1606,7 +1603,6 @@ async fn test_asm_source_filter_transitions(
     cleanup_instances(cptestctx, client, project_name, &instance_names).await;
     wait_for_group_deleted(cptestctx, group_ip_str).await;
 
-    // MRIB routes are withdrawn with group deletion.
     assert_mrib_route_absent(cptestctx, group_ip).await;
 }
 
@@ -1674,10 +1670,6 @@ async fn test_default_pool_on_implicit_creation(
     wait_for_group_deleted(cptestctx, group_name2).await;
 }
 
-/// Test pool range allocation for multicast groups.
-///
-/// Verifies that multicast IPs are correctly allocated from the specified
-/// pool's ranges, and that exhausted ranges are handled properly.
 #[nexus_test]
 async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -1860,7 +1852,6 @@ async fn test_probe_multicast_member(cptestctx: &ControlPlaneTestContext) {
     let (v4_default_pool, _v6_default_pool) =
         create_default_ip_pools(client).await;
 
-    // v4 setup
     create_multicast_ip_pool_with_range(
         client,
         "probe-mcast-v4-pool",

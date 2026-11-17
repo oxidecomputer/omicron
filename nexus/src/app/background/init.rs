@@ -1133,11 +1133,7 @@ impl BackgroundTasksInitializer {
                 .unwrap_or_else(|_| chrono::TimeDelta::seconds(60)),
             )),
             opctx: opctx.child(BTreeMap::new()),
-            // Wake the reconciler whenever the inventory loader publishes a
-            // fresh collection so newly-discovered sleds become resolvable
-            // (DDM-peer fallback / inventory mapping) within the same tick
-            // instead of waiting for the periodic timer.
-            watchers: vec![Box::new(inventory_load_watcher.clone())],
+            watchers: vec![],
             activator: task_multicast_reconciler,
         });
 

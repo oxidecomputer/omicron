@@ -12,27 +12,26 @@
 //!   advertised, and no prefixes we used to advertise are still advertised
 //! * Updating either of these immediately when changes are requested
 
+use dpd_types::mcast::ExactSource;
 use illumos_utils::opte::PortManager;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_ddm_admin_client::Client;
+use omicron_ddm_admin_client::DEFAULT_MULTICAST_VNI;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::MulticastOrigin;
 use omicron_ddm_admin_client::OverlayMulticast;
 use omicron_ddm_admin_client::UnderlayMulticastIpv6;
-use omicron_ddm_admin_client::Vni;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
 use oxnet::Ipv6Net;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Notify;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
@@ -208,18 +207,18 @@ impl Worker {
         reconcile_multicast_ticker
             .set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        loop {
-            // The OPTE change notify lives inside the (late-bound) PortManager.
-            // Clone the handle out of the watch so we can await it without
-            // holding the watch borrow across the select. When no PortManager
-            // is wired up yet, this arm parks forever and the periodic ticker
-            // plus the `port_manager.changed()` arm cover reconciliation.
-            let mcast_changed = self
-                .port_manager
-                .borrow()
-                .as_ref()
-                .map(PortManager::multicast_changed);
+        // The OPTE change notify lives inside the (late-bound) PortManager.
+        // Clone the handle out of the watch so we can await it without
+        // holding the watch borrow across the select. When no PortManager
+        // is wired up yet, this arm parks forever and the periodic ticker
+        // plus the `port_manager.changed()` arm cover reconciliation.
+        let mut mcast_changed = self
+            .port_manager
+            .borrow()
+            .as_ref()
+            .map(PortManager::multicast_changed);
 
+        loop {
             tokio::select! {
                 // cancel-safe per docs on Interval::tick()
                 _ = reenable_stats_ticker.tick() => {
@@ -249,12 +248,15 @@ impl Worker {
                 // cancel-safe per docs on Receiver::changed(). Kicks an initial
                 // multicast reconcile as soon as the PortManager is wired up.
                 _ = self.port_manager.changed() => {
+                    mcast_changed = self
+                        .port_manager
+                        .borrow_and_update()
+                        .as_ref()
+                        .map(PortManager::multicast_changed);
                     self.try_reconcile_multicast().await;
                 }
 
-                // cancel-safe: `Notify::notified` is cancel-safe, and the
-                // pending future never resolves, so dropping it is a no-op.
-                _ = await_mcast_change(&mcast_changed) => {
+                _ = await_mcast_change(&mut mcast_changed) => {
                     self.try_reconcile_multicast().await;
                 }
             }
@@ -364,9 +366,10 @@ impl Worker {
     ///
     /// The desired set is the union of overlay groups subscribed across all
     /// OPTE ports (covering both guest VMMs and probes), each mapped to its
-    /// underlay group via the M2P table. Originating a `(*,G)` subscription is
-    /// what makes the switch's ddmd import the route and program this sled's
-    /// switch port as a replication target. Without it the group's underlay
+    /// underlay group via the M2P table. The switch's ddmd imports the route
+    /// and programs this sled's switch port as a replication target only once
+    /// the sled originates the group: `(*,G)` for ASM, one `(S,G)` per
+    /// included source for SSM. Without it the group's underlay
     /// member set stays empty and no traffic is replicated to this sled.
     ///
     /// Each pass reads the full OPTE state rather than tracking changes, so
@@ -393,15 +396,26 @@ impl Worker {
                 return;
             }
         };
-        let underlay_by_overlay: HashMap<IpAddr, _> =
-            m2p.into_iter().map(|m| (m.group, m.underlay)).collect();
+        let underlay_by_overlay: HashMap<OverlayMulticast, _> = m2p
+            .into_iter()
+            .filter_map(|m| match OverlayMulticast::new(m.group.ip()) {
+                Ok(group) => Some((group, m.underlay)),
+                Err(err) => {
+                    warn!(
+                        self.log, "skipping M2P mapping with invalid group";
+                        "group" => %m.group,
+                        InlineErrorChain::new(&err),
+                    );
+                    None
+                }
+            })
+            .collect();
 
         // The subscription set is the source of truth for what this sled
         // should originate. The M2P table only supplies the underlay address
         // needed to advertise, so a missing M2P entry gates advertisement but
         // never withdrawal (see the withdraw computation below).
-        let subscribed: HashSet<IpAddr> =
-            port_manager.list_mcast_subscriptions().into_iter().collect();
+        let subscribed = port_manager.list_mcast_subscriptions();
 
         let desired = desired_multicast_origins(
             &subscribed,
@@ -500,9 +514,13 @@ impl Worker {
 /// Parks forever when the `PortManager` is not yet wired up, leaving the
 /// periodic ticker and the `port_manager.changed()` arm to drive
 /// reconciliation until then.
-async fn await_mcast_change(notify: &Option<Arc<Notify>>) {
-    match notify {
-        Some(notify) => notify.notified().await,
+async fn await_mcast_change(changed: &mut Option<watch::Receiver<()>>) {
+    match changed {
+        Some(changed) => {
+            if changed.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
         None => std::future::pending().await,
     }
 }
@@ -513,20 +531,18 @@ async fn await_mcast_change(notify: &Option<Arc<Notify>>) {
 /// A subscribed group with no M2P mapping is skipped. The underlay address is
 /// Nexus-assigned (it carries a collision-avoidance salt) and is not
 /// recomputable here, so without the mapping the group cannot be originated. A
-/// later pass picks it up once the mapping lands. Groups that fail validation
-/// (a non-multicast overlay address, or an underlay outside ff04::/64) are
-/// likewise skipped.
+/// later pass picks it up once the mapping is enforced.
 ///
-/// Each origin is a `(*,G)` subscription (`source: None`). Source-specific
-/// filtering is enforced at the OPTE port, so the underlay binding loses no SSM
-/// semantics.
+/// ASM groups get one `(*,G)` origin. SSM groups get one `(S,G)` origin per
+/// included source, since an SSM origin needs a source (RFC 4607 §1). OPTE
+/// still enforces each port's own source filter.
 fn desired_multicast_origins(
-    subscribed: &HashSet<IpAddr>,
-    underlay_by_overlay: &HashMap<IpAddr, Ipv6Addr>,
+    subscribed: &BTreeMap<OverlayMulticast, BTreeSet<ExactSource>>,
+    underlay_by_overlay: &HashMap<OverlayMulticast, UnderlayMulticastIpv6>,
     log: &Logger,
 ) -> HashSet<MulticastOrigin> {
     let mut desired = HashSet::new();
-    for &group in subscribed {
+    for (&group, included) in subscribed {
         let Some(&underlay) = underlay_by_overlay.get(&group) else {
             debug!(
                 log,
@@ -536,58 +552,43 @@ fn desired_multicast_origins(
             continue;
         };
 
-        let overlay_group = match OverlayMulticast::new(group) {
-            Ok(g) => g,
-            Err(err) => {
-                warn!(
-                    log, "skipping non-multicast subscription group";
+        let sources: Vec<Option<IpAddr>> = if group.is_ssm() {
+            if included.is_empty() {
+                debug!(
+                    log,
+                    "skipping SSM subscription with no included sources";
                     "group" => %group,
-                    InlineErrorChain::new(&err),
                 );
                 continue;
             }
-        };
-        let underlay_group = match UnderlayMulticastIpv6::new(underlay) {
-            Ok(g) => g,
-            Err(err) => {
-                warn!(
-                    log, "skipping M2P mapping with invalid underlay";
-                    "group" => %group,
-                    "underlay" => %underlay,
-                    InlineErrorChain::new(&err),
-                );
-                continue;
-            }
+            included.iter().map(|s| Some(s.ip())).collect()
+        } else {
+            vec![None]
         };
 
-        let origin = match MulticastOrigin::new(
-            overlay_group,
-            underlay_group,
-            default_multicast_vni(),
-            None,
-        ) {
-            Ok(origin) => origin,
-            Err(err) => {
-                warn!(
-                    log, "skipping invalid multicast origin";
-                    "group" => %group,
-                    "underlay" => %underlay,
-                    InlineErrorChain::new(&err),
-                );
-                continue;
+        for source in sources {
+            match MulticastOrigin::new(
+                group,
+                underlay,
+                DEFAULT_MULTICAST_VNI,
+                source,
+            ) {
+                Ok(origin) => {
+                    desired.insert(origin);
+                }
+                Err(err) => {
+                    warn!(
+                        log, "skipping invalid multicast origin";
+                        "group" => %group,
+                        "underlay" => %underlay,
+                        "source" => ?source,
+                        InlineErrorChain::new(&err),
+                    );
+                }
             }
-        };
-
-        desired.insert(origin);
+        }
     }
     desired
-}
-
-fn default_multicast_vni() -> Vni {
-    Vni::new(u32::from(
-        omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI,
-    ))
-    .expect("DEFAULT_MULTICAST_VNI is within the 24-bit VNI range")
 }
 
 /// The set difference between desired and currently-originated multicast
@@ -600,26 +601,33 @@ struct MulticastOriginDelta {
 
 /// Compute the advertise/withdraw delta for multicast origins.
 ///
-/// `to_advertise` is the desired groups not yet originated. `to_withdraw` is
-/// the originated groups no longer desired, minus any group still preserved by
-/// a pending M2P mapping.
+/// `to_advertise` is the desired origins not yet originated. `to_withdraw` is
+/// the originated origins no longer desired, minus any still preserved by a
+/// pending M2P mapping.
 ///
-/// An originated group is preserved (neither advertised nor withdrawn) while
-/// its subscription is still present but its M2P entry is transiently absent:
-/// the underlay address is Nexus-assigned and not recomputable here, so
-/// flapping it off and back on would only churn origination (and the switch's
-/// replication members) until the M2P entry reappears. Withdrawal therefore
-/// keys on the subscription set, not on M2P presence.
+/// An origin is preserved (neither advertised nor withdrawn) while its group
+/// is still subscribed, and for an `(S,G)` its source is still included, but
+/// its M2P entry is transiently absent. The underlay address is
+/// Nexus-assigned and not recomputable here. Dropping and re-adding the
+/// origin would only churn origination (and the switch's replication
+/// members) until the M2P entry reappears. Withdrawal follows the
+/// subscription set and ignores whether M2P is present.
 fn multicast_origin_delta(
     desired: &HashSet<MulticastOrigin>,
     originated: &HashSet<MulticastOrigin>,
-    subscribed: &HashSet<IpAddr>,
-    underlay_by_overlay: &HashMap<IpAddr, Ipv6Addr>,
+    subscribed: &BTreeMap<OverlayMulticast, BTreeSet<ExactSource>>,
+    underlay_by_overlay: &HashMap<OverlayMulticast, UnderlayMulticastIpv6>,
 ) -> MulticastOriginDelta {
     let m2p_pending = |origin: &MulticastOrigin| {
-        let overlay = origin.overlay_group().ip();
-        subscribed.contains(&overlay)
-            && !underlay_by_overlay.contains_key(&overlay)
+        let overlay = origin.overlay_group();
+        let still_subscribed = match (subscribed.get(&overlay), origin.source())
+        {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(included), Some(source)) => ExactSource::new(source)
+                .is_ok_and(|source| included.contains(&source)),
+        };
+        still_subscribed && !underlay_by_overlay.contains_key(&overlay)
     };
 
     let to_advertise = desired.difference(originated).cloned().collect();
@@ -635,35 +643,69 @@ fn multicast_origin_delta(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::FutureExt;
     use omicron_test_utils::dev::test_setup_log;
 
-    fn overlay(s: &str) -> IpAddr {
-        s.parse().unwrap()
+    #[test]
+    fn multicast_notification_survives_cancelled_wait() {
+        let (sender, subscriber) = watch::channel(());
+        let mut subscriber = Some(subscriber);
+
+        assert!(await_mcast_change(&mut subscriber).now_or_never().is_none());
+        sender.send_replace(());
+        assert!(await_mcast_change(&mut subscriber).now_or_never().is_some());
+        assert!(await_mcast_change(&mut subscriber).now_or_never().is_none());
+
+        sender.send_replace(());
+        sender.send_replace(());
+        assert!(await_mcast_change(&mut subscriber).now_or_never().is_some());
     }
 
-    fn underlay(s: &str) -> Ipv6Addr {
-        s.parse().unwrap()
+    #[test]
+    fn multicast_notifications_park_without_sender() {
+        let (sender, subscriber) = watch::channel(());
+        let mut subscriber = Some(subscriber);
+        drop(sender);
+
+        assert!(await_mcast_change(&mut subscriber).now_or_never().is_none());
+        assert!(await_mcast_change(&mut None).now_or_never().is_none());
     }
 
-    // A subscribed group with an M2P mapping becomes a (*,G) origin. The
-    // overlay and underlay addresses round-trip and the source is None.
+    fn overlay(s: &str) -> OverlayMulticast {
+        OverlayMulticast::new(s.parse().unwrap()).unwrap()
+    }
+
+    fn underlay(s: &str) -> UnderlayMulticastIpv6 {
+        UnderlayMulticastIpv6::new(s.parse().unwrap()).unwrap()
+    }
+
+    fn source(s: &str) -> ExactSource {
+        ExactSource::new(s.parse().unwrap()).unwrap()
+    }
+
+    fn any_source(
+        groups: impl IntoIterator<Item = OverlayMulticast>,
+    ) -> BTreeMap<OverlayMulticast, BTreeSet<ExactSource>> {
+        groups.into_iter().map(|g| (g, BTreeSet::new())).collect()
+    }
+
     #[test]
     fn desired_origins_pairs_subscription_with_underlay() {
         let logctx = test_setup_log("desired_origins_pairs_subscription");
         let group = overlay("239.1.1.1");
         let under = underlay("ff04::1");
 
-        let subscribed = HashSet::from([group]);
+        let subscribed = any_source([group]);
         let m2p = HashMap::from([(group, under)]);
 
         let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
 
         assert_eq!(origins.len(), 1);
         let origin = origins.iter().next().unwrap();
-        assert_eq!(origin.overlay_group().ip(), group);
-        assert_eq!(origin.underlay_group().ip(), under);
+        assert_eq!(origin.overlay_group(), group);
+        assert_eq!(origin.underlay_group(), under);
         assert_eq!(origin.source(), None);
-        assert_eq!(origin.vni(), default_multicast_vni());
+        assert_eq!(origin.vni(), DEFAULT_MULTICAST_VNI);
 
         logctx.cleanup_successful();
     }
@@ -677,35 +719,13 @@ mod tests {
         let mapped = overlay("239.1.1.1");
         let unmapped = overlay("239.1.1.2");
 
-        let subscribed = HashSet::from([mapped, unmapped]);
+        let subscribed = any_source([mapped, unmapped]);
         let m2p = HashMap::from([(mapped, underlay("ff04::1"))]);
 
         let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
 
         assert_eq!(origins.len(), 1);
-        assert_eq!(
-            origins.iter().next().unwrap().overlay_group().ip(),
-            mapped,
-        );
-
-        logctx.cleanup_successful();
-    }
-
-    // An M2P entry whose underlay falls outside ff04::/64 fails validation and
-    // is skipped rather than producing an invalid origin.
-    #[test]
-    fn desired_origins_skips_invalid_underlay() {
-        let logctx = test_setup_log("desired_origins_skips_invalid_underlay");
-        let group = overlay("239.1.1.1");
-        // ff0e:: is global scope, not the admin-local ff04::/64 underlay subnet.
-        let bad_underlay = underlay("ff0e::1");
-
-        let subscribed = HashSet::from([group]);
-        let m2p = HashMap::from([(group, bad_underlay)]);
-
-        let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
-
-        assert!(origins.is_empty());
+        assert_eq!(origins.iter().next().unwrap().overlay_group(), mapped);
 
         logctx.cleanup_successful();
     }
@@ -715,7 +735,7 @@ mod tests {
     #[test]
     fn desired_origins_empty_when_no_subscriptions() {
         let logctx = test_setup_log("desired_origins_empty_no_subscriptions");
-        let subscribed = HashSet::new();
+        let subscribed = BTreeMap::new();
         let m2p = HashMap::from([(overlay("239.1.1.1"), underlay("ff04::1"))]);
 
         let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
@@ -725,23 +745,123 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn desired_origins_ssm_emits_one_origin_per_included_source() {
+        let logctx = test_setup_log("desired_origins_ssm_per_source");
+        let group = overlay("232.1.1.1");
+        let under = underlay("ff04::2");
+        let s1 = source("192.0.2.1");
+        let s2 = source("192.0.2.2");
+
+        let subscribed = BTreeMap::from([(group, BTreeSet::from([s1, s2]))]);
+        let m2p = HashMap::from([(group, under)]);
+
+        let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
+
+        assert_eq!(
+            origins,
+            HashSet::from([
+                ssm_origin("232.1.1.1", "ff04::2", "192.0.2.1"),
+                ssm_origin("232.1.1.1", "ff04::2", "192.0.2.2"),
+            ]),
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn desired_origins_skips_ssm_without_included_sources() {
+        let logctx = test_setup_log("desired_origins_skips_ssm_no_sources");
+        let group = overlay("232.1.1.1");
+
+        let subscribed = any_source([group]);
+        let m2p = HashMap::from([(group, underlay("ff04::2"))]);
+
+        let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
+
+        assert!(origins.is_empty(), "Received {origins:?}");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn desired_origins_asm_ignores_included_sources() {
+        let logctx = test_setup_log("desired_origins_asm_ignores_sources");
+        let group = overlay("239.1.1.1");
+
+        let subscribed =
+            BTreeMap::from([(group, BTreeSet::from([source("192.0.2.1")]))]);
+        let m2p = HashMap::from([(group, underlay("ff04::1"))]);
+
+        let origins = desired_multicast_origins(&subscribed, &m2p, &logctx.log);
+
+        assert_eq!(origins, HashSet::from([origin("239.1.1.1", "ff04::1")]));
+
+        logctx.cleanup_successful();
+    }
+
     fn origin(group: &str, under: &str) -> MulticastOrigin {
         MulticastOrigin::new(
-            OverlayMulticast::new(overlay(group)).unwrap(),
-            UnderlayMulticastIpv6::new(underlay(under)).unwrap(),
-            default_multicast_vni(),
+            overlay(group),
+            underlay(under),
+            DEFAULT_MULTICAST_VNI,
             None,
         )
         .unwrap()
     }
 
-    // A desired group that is not yet originated is advertised.
+    fn ssm_origin(group: &str, under: &str, src: &str) -> MulticastOrigin {
+        MulticastOrigin::new(
+            overlay(group),
+            underlay(under),
+            DEFAULT_MULTICAST_VNI,
+            Some(source(src).ip()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn delta_withdraws_only_removed_ssm_source() {
+        let group = overlay("232.1.1.1");
+        let kept = ssm_origin("232.1.1.1", "ff04::2", "192.0.2.1");
+        let dropped = ssm_origin("232.1.1.1", "ff04::2", "192.0.2.2");
+        let desired = HashSet::from([kept.clone()]);
+        let originated = HashSet::from([kept, dropped.clone()]);
+        let subscribed =
+            BTreeMap::from([(group, BTreeSet::from([source("192.0.2.1")]))]);
+        let m2p = HashMap::from([(group, underlay("ff04::2"))]);
+
+        let delta =
+            multicast_origin_delta(&desired, &originated, &subscribed, &m2p);
+
+        assert!(delta.to_advertise.is_empty());
+        assert_eq!(delta.to_withdraw, vec![dropped]);
+    }
+
+    #[test]
+    fn delta_pending_m2p_preserves_only_subscribed_ssm_sources() {
+        let group = overlay("232.1.1.1");
+        let kept = ssm_origin("232.1.1.1", "ff04::2", "192.0.2.1");
+        let dropped = ssm_origin("232.1.1.1", "ff04::2", "192.0.2.2");
+        let desired = HashSet::new();
+        let originated = HashSet::from([kept, dropped.clone()]);
+        let subscribed =
+            BTreeMap::from([(group, BTreeSet::from([source("192.0.2.1")]))]);
+        let m2p = HashMap::new();
+
+        let delta =
+            multicast_origin_delta(&desired, &originated, &subscribed, &m2p);
+
+        assert!(delta.to_advertise.is_empty());
+        assert_eq!(delta.to_withdraw, vec![dropped]);
+    }
+
     #[test]
     fn delta_advertises_new_desired_group() {
         let group = overlay("239.1.1.1");
         let desired = HashSet::from([origin("239.1.1.1", "ff04::1")]);
         let originated = HashSet::new();
-        let subscribed = HashSet::from([group]);
+        let subscribed = any_source([group]);
         let m2p = HashMap::from([(group, underlay("ff04::1"))]);
 
         let delta =
@@ -751,14 +871,11 @@ mod tests {
         assert!(delta.to_withdraw.is_empty());
     }
 
-    // A group no longer subscribed (gone from the desired set, no subscription)
-    // is withdrawn.
     #[test]
     fn delta_withdraws_unsubscribed_group() {
         let desired = HashSet::new();
         let originated = HashSet::from([origin("239.1.1.1", "ff04::1")]);
-        // No subscriptions and no M2P: the group is genuinely gone.
-        let subscribed = HashSet::new();
+        let subscribed = BTreeMap::new();
         let m2p = HashMap::new();
 
         let delta =
@@ -776,11 +893,9 @@ mod tests {
     #[test]
     fn delta_preserves_subscribed_group_with_pending_m2p() {
         let group = overlay("239.1.1.1");
-        // M2P entry is absent, so the group is not in `desired`...
         let desired = HashSet::new();
         let originated = HashSet::from([origin("239.1.1.1", "ff04::1")]);
-        // ...but the subscription is still present.
-        let subscribed = HashSet::from([group]);
+        let subscribed = any_source([group]);
         let m2p = HashMap::new();
 
         let delta =
@@ -795,13 +910,12 @@ mod tests {
         );
     }
 
-    // A group already originated and still desired produces no change.
     #[test]
     fn delta_noop_when_converged() {
         let group = overlay("239.1.1.1");
         let desired = HashSet::from([origin("239.1.1.1", "ff04::1")]);
         let originated = HashSet::from([origin("239.1.1.1", "ff04::1")]);
-        let subscribed = HashSet::from([group]);
+        let subscribed = any_source([group]);
         let m2p = HashMap::from([(group, underlay("ff04::1"))]);
 
         let delta =

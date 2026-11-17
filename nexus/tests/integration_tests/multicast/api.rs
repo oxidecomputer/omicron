@@ -23,6 +23,8 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use http::{Method, StatusCode};
 
+use dpd_client::types::{IpSrc, MulticastGroupResponse};
+use dpd_types::mcast::is_ssm_address;
 use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
 };
@@ -39,7 +41,6 @@ use nexus_types::external_api::multicast::{
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types_versions::latest::instance::Instance;
-use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 
 use super::*;
@@ -887,6 +888,23 @@ async fn test_join_by_ip_existing_group(cptestctx: &ControlPlaneTestContext) {
 async fn test_join_by_ip_asm_with_sources_succeeds(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    async fn dpd_sources(
+        cptestctx: &ControlPlaneTestContext,
+        ip: IpAddr,
+    ) -> Option<Vec<IpSrc>> {
+        match nexus_test_utils::dpd_client(cptestctx)
+            .multicast_group_get(&ip)
+            .await
+            .expect("multicast group should exist in DPD")
+            .into_inner()
+        {
+            MulticastGroupResponse::External { sources, .. } => sources,
+            MulticastGroupResponse::Underlay { .. } => {
+                panic!("expected external multicast group")
+            }
+        }
+    }
+
     let client = &cptestctx.external_client;
     let project_name = "join-by-ip-asm-sources-project";
 
@@ -941,6 +959,12 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     expected_sources.sort();
     assert_eq!(actual_sources, expected_sources);
 
+    let expected_dpd_sources = Some(
+        expected_sources.iter().copied().map(IpSrc::Exact).collect::<Vec<_>>(),
+    );
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
+    assert_eq!(dpd_sources(cptestctx, explicit_ip).await, expected_dpd_sources);
+
     // Second instance joins without sources (any-source subscription)
     let join_url2 = format!(
         "/v1/instances/{}/multicast-groups/{explicit_ip}?project={project_name}",
@@ -991,6 +1015,13 @@ async fn test_join_by_ip_asm_with_sources_succeeds(
     listed_sources.sort();
     assert_eq!(listed_sources, expected_sources);
     assert!(listed_group.has_any_source_member);
+
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
+    assert_eq!(dpd_sources(cptestctx, explicit_ip).await, None);
+
+    object_delete(client, &join_url2).await;
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
+    assert_eq!(dpd_sources(cptestctx, explicit_ip).await, expected_dpd_sources);
 
     cleanup_instances(
         cptestctx,

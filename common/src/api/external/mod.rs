@@ -2191,7 +2191,6 @@ impl JsonSchema for MacAddr {
     Hash,
     PartialOrd,
     Ord,
-    Deserialize,
     Serialize,
     JsonSchema,
     Diffable,
@@ -2238,6 +2237,21 @@ impl Vni {
 impl From<Vni> for u32 {
     fn from(vni: Vni) -> u32 {
         vni.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Vni {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u32::deserialize(deserializer)?;
+        Self::try_from(value).map_err(|_| {
+            let max = Self::MAX_VNI;
+            serde::de::Error::custom(format!(
+                "Geneve VNI {value} exceeds the 24-bit maximum of {max}"
+            ))
+        })
     }
 }
 
@@ -2566,9 +2580,25 @@ mod test {
     use crate::api::external::Error;
     use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
+    use crate::api::external::Vni;
     use semver::Version;
     use std::convert::TryFrom;
     use std::str::FromStr;
+
+    #[test]
+    fn test_vni_deserialize_validates_range() {
+        let max: Vni = serde_json::from_str(&Vni::MAX_VNI.to_string()).unwrap();
+        assert_eq!(u32::from(max), Vni::MAX_VNI);
+        assert_eq!(
+            serde_json::to_string(&max).unwrap(),
+            Vni::MAX_VNI.to_string()
+        );
+
+        for too_big in [(Vni::MAX_VNI + 1).to_string(), u32::MAX.to_string()] {
+            let err = serde_json::from_str::<Vni>(&too_big).unwrap_err();
+            assert!(err.to_string().contains("24-bit"), "Received: {err}");
+        }
+    }
 
     // This test originates from when we had a wrapper struct around
     // `semver::Version`, but it's probably worth carrying this test that

@@ -122,8 +122,9 @@ const ZLOGIN: &'static str = "/usr/sbin/zlogin";
 const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
-const SIDECAR_LITE_BRANCH: &'static str = "zl/multicast";
-const SOFTNPU_BRANCH: &'static str = "zl/multicast";
+const SIDECAR_LITE_COMMIT: &'static str =
+    "4d57f3a1fac7e5ed2a63ab5bc54b9b18b7b2cf73";
+const SOFTNPU_COMMIT: &'static str = "42ff234fbb5e4b2da55eff9e11529694c43589d9";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
 const PXA_WARNING: &'static str = r#"  You have not set up the proxy-ARP environment variables
@@ -356,31 +357,6 @@ fn ensure_simulated_links(
     Ok(())
 }
 
-/// Resolve the head commit of a branch in an oxidecomputer repo.
-///
-/// This allows an image to follow a build (on buildomat) branch rather
-/// than a pinned commit.
-///
-/// TODO: remove in split PR-series
-fn branch_head(repo: &str, branch: &str) -> Result<String> {
-    let output = Command::new("git")
-        .args([
-            "ls-remote",
-            &format!("https://github.com/oxidecomputer/{repo}"),
-            &format!("refs/heads/{branch}"),
-        ])
-        .output()
-        .with_context(|| format!("running git ls-remote for {repo}"))?;
-    if !output.status.success() {
-        bail!("git ls-remote failed for {repo} branch {branch}");
-    }
-    String::from_utf8(output.stdout)?
-        .split_whitespace()
-        .next()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("{repo} branch {branch} not found"))
-}
-
 fn ensure_softnpu_zone(
     npu_zone: &Utf8Path,
     softnpu_commit: Option<String>,
@@ -394,14 +370,10 @@ fn ensure_softnpu_zone(
             );
         }
 
-        let softnpu_commit = match softnpu_commit {
-            Some(sha) => sha,
-            None => branch_head("softnpu", SOFTNPU_BRANCH)?,
-        };
-        let sidecar_lite_commit = match sidecar_lite_commit {
-            Some(sha) => sha,
-            None => branch_head("sidecar-lite", SIDECAR_LITE_BRANCH)?,
-        };
+        let softnpu_commit =
+            softnpu_commit.unwrap_or_else(|| SOFTNPU_COMMIT.to_string());
+        let sidecar_lite_commit = sidecar_lite_commit
+            .unwrap_or_else(|| SIDECAR_LITE_COMMIT.to_string());
         let mut cmd = Command::new(PFEXEC);
         cmd.arg(npu_zone);
         cmd.args([

@@ -26,6 +26,7 @@ use futures::future::join_all;
 use omicron_common::api::external;
 use slog::{debug, info, warn};
 
+use mg_api_types::mrib::{MulticastAddr, UnderlayMulticastIpv6};
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
     MulticastGroup, MulticastGroupMember, MulticastGroupMemberState,
@@ -48,10 +49,6 @@ use sled_agent_client::types::{
 /// Utility methods for sled-agent multicast operations used by the
 /// background task reconciler.
 ///
-/// Groups sled-agent HTTP calls (OPTE subscriptions, M2P mappings,
-/// forwarding entries) behind a single type to keep the reconciler
-/// logic focused on state transitions rather than client construction.
-///
 /// Unlike [`MulticastDataplaneClient`] which pre-builds per-switch
 /// clients, sled clients are constructed on demand since the target
 /// sled set varies per group.
@@ -70,10 +67,6 @@ impl MulticastSledClient {
         Self { datastore, resolver }
     }
 
-    /// Create a sled-agent client for the given sled.
-    ///
-    /// Looks up the sled's address in the database and constructs an HTTP
-    /// client. Follows the same pattern as V2P mapping propagation.
     async fn sled_client(
         &self,
         opctx: &OpContext,
@@ -89,8 +82,6 @@ impl MulticastSledClient {
         .await
     }
 
-    /// Build the membership descriptor sent to sled-agent for
-    /// subscribe/unsubscribe calls.
     fn membership_for(
         group: &MulticastGroup,
         member: &MulticastGroupMember,
@@ -110,10 +101,9 @@ impl MulticastSledClient {
 
     /// Subscribe an instance's active VMM OPTE port to a multicast group.
     ///
-    /// Sled-agent resolves the active Propolis under its per-instance state
-    /// lock and configures OPTE port-level multicast filters. The member's
-    /// per-instance source IPs are passed for SSM filtering. If no active
-    /// VMM is registered the call is a noop since the OPTE port is gone.
+    /// Sled-agent applies the subscription to the VMM that Nexus looks up here.
+    /// The member's source IPs are passed for SSM filtering. If there is no
+    /// active VMM, the call is a noop.
     pub(crate) async fn subscribe_instance(
         &self,
         opctx: &OpContext,
@@ -284,9 +274,10 @@ impl MulticastSledClient {
             })?;
 
         let group_ip = group.multicast_ip.ip();
+        let group_addr = MulticastAddr::new(group_ip).with_context(|| {
+            format!("invalid multicast group address {group_ip}")
+        })?;
 
-        // Compute desired state from DB, determining which sleds should have
-        // M2P and forwarding entries for this group.
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
         let members = self
             .datastore
@@ -304,16 +295,14 @@ impl MulticastSledClient {
             .filter_map(|m| m.sled_id.map(SledUuid::from))
             .collect();
 
-        // Build desired M2P entry.
         let desired_m2p =
-            Mcast2PhysMapping { group: group_ip, underlay: underlay_ip };
+            Mcast2PhysMapping { group: group_addr, underlay: underlay_ip };
 
         // The group is active if any members are "Joined". M2P and
         // forwarding are pushed to all sleds when active, cleared
         // from all sleds when inactive.
         let group_is_active = !member_sled_ids.is_empty();
 
-        // Query all VPC-routing sleds for current state and converge.
         let all_sleds = self
             .datastore
             .sled_list_all_batched(opctx, SledFilter::VpcRouting)
@@ -358,7 +347,7 @@ impl MulticastSledClient {
         }
 
         let convergence_params = GroupConvergenceParams {
-            group_ip,
+            group_addr,
             underlay_ip,
             group_is_active,
             desired_m2p: &desired_m2p,
@@ -430,7 +419,7 @@ impl MulticastSledClient {
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
-    ) -> Result<Ipv6Addr, anyhow::Error> {
+    ) -> Result<UnderlayMulticastIpv6, anyhow::Error> {
         let underlay_group_id = group
             .underlay_group_id
             .context("group missing underlay_group_id")?;
@@ -440,26 +429,27 @@ impl MulticastSledClient {
             .underlay_multicast_group_fetch(opctx, underlay_group_id)
             .await
         {
-            Ok(underlay_group) => match underlay_group.multicast_ip.ip() {
-                IpAddr::V6(v6) => Ok(v6),
-                other => anyhow::bail!(
-                    "underlay multicast address for group {} is {other}, \
-                     expected IPv6",
-                    group.id()
-                ),
-            },
+            Ok(underlay_group) => underlay_group
+                .dpd_multicast_ip()
+                .map_err(anyhow::Error::from)
+                .and_then(|ip| Ok(UnderlayMulticastIpv6::new(ip.ip())?))
+                .with_context(|| {
+                    format!(
+                        "invalid underlay multicast address for group {}",
+                        group.id()
+                    )
+                }),
             Err(external::Error::ObjectNotFound { .. }) => {
                 let salt = group.underlay_salt.map_or(0, |s| *s);
-                match super::map_external_to_underlay_ip(
+                let mapped = super::map_external_to_underlay_ip(
                     group.multicast_ip.ip(),
                     salt,
-                ) {
-                    IpAddr::V6(v6) => Ok(v6),
-                    IpAddr::V4(_) => anyhow::bail!(
-                        "computed IPv4 underlay address for group {}",
-                        group.id()
-                    ),
-                }
+                );
+                UnderlayMulticastIpv6::new(mapped.ip()).with_context(|| {
+                    format!(
+                        "invalid mapped underlay multicast address {mapped}"
+                    )
+                })
             }
             Err(e) => Err(e).context("failed to fetch underlay group"),
         }
@@ -484,8 +474,8 @@ impl MulticastSledClient {
 
 /// Resolved group state used to converge M2P and forwarding on each sled.
 struct GroupConvergenceParams<'a> {
-    group_ip: IpAddr,
-    underlay_ip: Ipv6Addr,
+    group_addr: MulticastAddr,
+    underlay_ip: UnderlayMulticastIpv6,
     group_is_active: bool,
     desired_m2p: &'a Mcast2PhysMapping,
     /// Switch zone underlay IPs programmed as forwarding nexthops, one per
@@ -532,7 +522,7 @@ async fn converge_m2p(
         .into_inner();
 
     let mut has_m2p = false;
-    for mapping in found.iter().filter(|m| m.group == params.group_ip) {
+    for mapping in found.iter().filter(|m| m.group == params.group_addr) {
         if mapping.underlay == params.underlay_ip {
             has_m2p = true;
             continue;
@@ -557,9 +547,8 @@ async fn converge_m2p(
             .await
             .context("failed to add M2P mapping to sled")?;
     } else if has_m2p {
-        // Inactive group has stale M2P: remove it.
         let clear = ClearMcast2Phys {
-            group: params.group_ip,
+            group: params.group_addr,
             underlay: params.underlay_ip,
         };
         client
@@ -573,10 +562,9 @@ async fn converge_m2p(
 
 /// Converge a single sled's forwarding entries for one group.
 ///
-/// When the group is active, this sets a single nexthop to the switch
-/// zone. The switch replicates to member sled ports via its DPD
-/// multicast group membership. When inactive, this clears any stale
-/// entries.
+/// When active, the group gets a nexthop for each reachable switch zone.
+/// The switches replicate to member sled ports via their DPD multicast
+/// group membership. When inactive, stale entries are cleared.
 async fn converge_forwarding(
     client: &sled_agent_client::Client,
     params: &GroupConvergenceParams<'_>,

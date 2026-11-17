@@ -87,10 +87,9 @@ impl super::Nexus {
 
         let new_probe =
             Probe::from_create(new_probe_params, authz_project.id());
-        // The probe row insert and all member attaches run in one transaction
-        // inside the datastore, so the probe distributor never sees a committed
-        // probe row without its committed member rows. A failed attach aborts
-        // the transaction, so no probe row is left behind on error.
+        // The probe insert and member attaches share one transaction. A failed
+        // attach aborts the transaction; the probe distributor cannot observe a
+        // committed probe without its member rows.
         let probe = match self
             .db_datastore
             .probe_create(
@@ -159,9 +158,8 @@ impl super::Nexus {
     ///
     /// This mirrors the validation in [`plan_multicast_group_changes`]
     /// (instance update path) and the cap check in
-    /// [`project_create_instance`]. Probes have no membership-mutation
-    /// API, so create is the only window to reject duplicates or exceed the
-    /// per-parent cap threshold.
+    /// [`project_create_instance`]. Probes have no membership update API, so
+    /// these checks run at creation.
     ///
     /// Returns the resolved group IDs paired with the requested source IPs,
     /// or an empty vector when multicast is disabled or no groups were

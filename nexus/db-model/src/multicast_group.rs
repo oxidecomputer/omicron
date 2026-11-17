@@ -47,7 +47,8 @@
 //!
 //! System-generated admin-local IPv6 multicast groups for internal forwarding:
 //! - Use IPv6 admin-local multicast scope (ff04::/16) per [RFC 7346]
-//!   with addresses allocated within [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64)
+//!   with addresses allocated within dendrite's `UNDERLAY_MULTICAST_SUBNET`
+//!   (ff04::/64)
 //! - Paired 1:1 with external groups for NAT-based forwarding
 //! - Handle rack-internal multicast traffic between switches
 //! - Use individual field pattern for system resources
@@ -79,13 +80,12 @@
 //!   subscribing the VMM on the new sled while the member stays "Joined".
 //! - Deletion marks the member for removal with a deleted timestamp, after
 //!   which the reconciler finishes cleanup.
-//!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
 use diesel::{AsExpression, FromSqlRow, Insertable, Queryable, Selectable};
+use dpd_types::mcast;
 use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -248,65 +248,6 @@ pub struct ExternalMulticastGroup {
     ///
     /// See [MulticastGroupState] for possible values.
     pub state: MulticastGroupState,
-}
-
-/// A reference to the resource that owns a multicast group member (its
-/// "parent"), distinguishing between the parent kinds the control
-/// plane supports.
-///
-/// Multicast group members can have either an instance or a probe (used
-/// for testing network connectivity) as their parent. The two kinds resolve
-/// their hosting sled differently. Instances look up their `sled_id` through
-/// the `vmm` table via `instance.active_propolis_id`, while probes store `sled`
-/// directly on the probe row. The parent kind also determines which sled-agent
-/// endpoints the reconciler invokes for join/leave actions.
-///
-/// The discriminator is persisted on the member row as `parent_kind`
-/// (see [`MulticastGroupMemberParentKind`]), following the same pattern as
-/// [`NetworkInterfaceKind`].
-///
-/// [`NetworkInterfaceKind`]: crate::NetworkInterfaceKind
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MemberParentRef {
-    /// Member is owned by an instance. The hosting sled is resolved via
-    /// `instance` joined with `vmm` on `active_propolis_id`.
-    Instance(InstanceUuid),
-    /// Member is owned by a probe. The hosting sled is read directly
-    /// from the `probe` row.
-    Probe(ProbeUuid),
-}
-
-impl MemberParentRef {
-    /// Returns the underlying parent UUID without distinguishing kind.
-    pub fn as_uuid(&self) -> Uuid {
-        match self {
-            MemberParentRef::Instance(id) => *id.as_untyped_uuid(),
-            MemberParentRef::Probe(id) => *id.as_untyped_uuid(),
-        }
-    }
-
-    /// Returns the persisted [`MulticastGroupMemberParentKind`] discriminator
-    /// for this parent.
-    pub fn kind(&self) -> MulticastGroupMemberParentKind {
-        match self {
-            MemberParentRef::Instance(_) => {
-                MulticastGroupMemberParentKind::Instance
-            }
-            MemberParentRef::Probe(_) => MulticastGroupMemberParentKind::Probe,
-        }
-    }
-}
-
-impl From<InstanceUuid> for MemberParentRef {
-    fn from(id: InstanceUuid) -> Self {
-        MemberParentRef::Instance(id)
-    }
-}
-
-impl From<ProbeUuid> for MemberParentRef {
-    fn from(id: ProbeUuid) -> Self {
-        MemberParentRef::Probe(id)
-    }
 }
 
 /// Values used to create a [MulticastGroupMember] in the database.
@@ -499,7 +440,9 @@ impl MulticastGroupMember {
     }
 
     /// Reconstruct the typed [`MemberParentRef`] from the persisted
-    /// `(parent_id, parent_kind)` pair. The inverse of the split done in
+    /// `(parent_id, parent_kind)` tuple.
+    ///
+    /// Note: This is the inverse of the split performed in
     /// [`MulticastGroupMember::new`].
     pub fn parent_ref(&self) -> MemberParentRef {
         match self.parent_kind {
@@ -513,30 +456,42 @@ impl MulticastGroupMember {
             ),
         }
     }
+}
 
-    /// Typed accessor for the parent when it is an instance.
-    ///
-    /// # Returns
-    ///
-    /// `Some(InstanceUuid)` if `parent_kind` is
-    /// [`MulticastGroupMemberParentKind::Instance`], `None` otherwise.
-    pub fn instance_id(&self) -> Option<InstanceUuid> {
-        match self.parent_ref() {
-            MemberParentRef::Instance(id) => Some(id),
-            MemberParentRef::Probe(_) => None,
+/// Typed parent of a multicast group member.
+///
+/// Multicast group members' parent resource can either be an instance or a
+/// probe (used for testing and debugging network connectivity). This
+/// discriminator is persisted on the member row as `parent_kind` (see
+/// [`MulticastGroupMemberParentKind`]). This follows the pattern from
+/// [`NetworkInterfaceKind`].
+///
+/// [`NetworkInterfaceKind`]: crate::NetworkInterfaceKind
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MemberParentRef {
+    /// Member is owned by an instance.
+    Instance(InstanceUuid),
+    /// Member is owned by a probe.
+    Probe(ProbeUuid),
+}
+
+impl MemberParentRef {
+    /// Extract the untyped parent UUID.
+    pub fn as_uuid(&self) -> Uuid {
+        match self {
+            MemberParentRef::Instance(id) => id.into_untyped_uuid(),
+            MemberParentRef::Probe(id) => id.into_untyped_uuid(),
         }
     }
 
-    /// Typed accessor for the parent when it is a probe.
-    ///
-    /// # Returns
-    ///
-    /// `Some(ProbeUuid)` if `parent_kind` is
-    /// [`MulticastGroupMemberParentKind::Probe`], `None` otherwise.
-    pub fn probe_id(&self) -> Option<ProbeUuid> {
-        match self.parent_ref() {
-            MemberParentRef::Probe(id) => Some(id),
-            MemberParentRef::Instance(_) => None,
+    /// Map this parent resource to its persisted
+    /// [`MulticastGroupMemberParentKind`] discriminator.
+    pub fn kind(&self) -> MulticastGroupMemberParentKind {
+        match self {
+            MemberParentRef::Instance(_) => {
+                MulticastGroupMemberParentKind::Instance
+            }
+            MemberParentRef::Probe(_) => MulticastGroupMemberParentKind::Probe,
         }
     }
 }
@@ -584,4 +539,41 @@ pub struct UnderlayMulticastGroup {
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
+}
+
+impl ExternalMulticastGroup {
+    /// Validate the stored address using `dpd-types`.
+    ///
+    /// The `INET` column is read as `IpNetwork` without `dpd-types` address
+    /// validation. This method validates the stored address before use by DPD.
+    pub fn dpd_multicast_ip(
+        &self,
+    ) -> Result<mcast::ExternalMulticastIp, mcast::ExternalMulticastIpError>
+    {
+        mcast::ExternalMulticastIp::new(self.multicast_ip.ip())
+    }
+}
+
+impl UnderlayMulticastGroup {
+    /// Validate the stored underlay address using `dpd-types`.
+    pub fn dpd_multicast_ip(
+        &self,
+    ) -> Result<mcast::UnderlayMulticastIpv6, UnderlayMulticastIpError> {
+        match self.multicast_ip.ip() {
+            IpAddr::V6(ip) => Ok(mcast::UnderlayMulticastIpv6::new(ip)?),
+            IpAddr::V4(ip) => Err(UnderlayMulticastIpError::NotIpv6(ip)),
+        }
+    }
+}
+
+/// Failure to convert a stored underlay address into Dendrite's
+/// `UnderlayMulticastIpv6`.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum UnderlayMulticastIpError {
+    /// The stored address is IPv4.
+    #[error("underlay multicast address {0} is not IPv6")]
+    NotIpv6(std::net::Ipv4Addr),
+    /// Dendrite rejected the stored IPv6 address.
+    #[error(transparent)]
+    Underlay(#[from] mcast::UnderlayMulticastError),
 }

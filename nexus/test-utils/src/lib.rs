@@ -136,7 +136,6 @@ pub fn dpd_client<N: NexusServer>(
     dpd_client_for(cptestctx, SwitchSlot::Switch0)
 }
 
-/// Build a DPD client targeting a specific switch slot.
 pub fn dpd_client_for<N: NexusServer>(
     cptestctx: &ControlPlaneTestContext<N>,
     switch_slot: sled_agent_types::early_networking::SwitchSlot,
@@ -164,6 +163,7 @@ pub fn dpd_client_for<N: NexusServer>(
 
     let addr = Ipv6Addr::LOCALHOST;
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
+        .expect("created dpd client")
 }
 
 /// Build DPD clients for every switch slot in the test fixture, ordered by
@@ -196,7 +196,8 @@ pub fn dpd_clients_by_switch<N: NexusServer>(
             let client = dpd_client::Client::new(
                 &format!("http://[{addr}]:{port}"),
                 client_state,
-            );
+            )
+            .expect("created dpd client");
             (slot, client)
         })
         .collect()

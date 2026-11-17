@@ -1054,7 +1054,7 @@ pub struct MulticastGroupReconcilerConfig {
     /// Maximum number of members to process concurrently per group.
     ///
     /// Members do not start sagas. Per-member work involves HTTP calls to
-    /// DPD and sled-agent. The default accounts for the outer
+    /// sled-agent. The default accounts for the outer
     /// `group_concurrency_limit` multiplier, since peak in-flight
     /// per-member futures is the product of the two limits.
     ///
@@ -1064,15 +1064,14 @@ pub struct MulticastGroupReconcilerConfig {
     )]
     pub member_concurrency_limit: NonZeroUsize,
 
-    /// Grace period before an orphaned "Creating" group with no members is
+    /// Grace period before a memberless "Creating" group is
     /// reaped by the emptiness sweep.
     ///
-    /// Implicit group creation and first-member attach are not atomic, and even
-    /// static membership must propagate through the ddm/MRIB exchange before a
-    /// group is live. This grace gates reaping on the group's creation time so a
-    /// group whose first attach is still in flight is not collected prematurely.
+    /// Implicit group creation and first-member attach use separate
+    /// transactions. This grace period allows the first attach to finish
+    /// before the memberless group is reaped.
     ///
-    /// The value should bound that worst-case attach-and-propagate latency with
+    /// The value should bound worst-case first-attach latency with
     /// margin. A future IGMP/MLD hold-down for emptied "Active" groups (RFD
     /// 0488) is a sibling timer, not a reuse of this knob: snooped membership
     /// expiry must derive from the protocol's Group Membership Interval
@@ -1087,12 +1086,10 @@ pub struct MulticastGroupReconcilerConfig {
 
 impl MulticastGroupReconcilerConfig {
     const fn default_group_concurrency_limit() -> NonZeroUsize {
-        // Safe to unwrap: the literal is nonzero.
         NonZeroUsize::new(16).unwrap()
     }
 
     const fn default_member_concurrency_limit() -> NonZeroUsize {
-        // Safe to unwrap: the literal is nonzero.
         NonZeroUsize::new(32).unwrap()
     }
 
@@ -2078,7 +2075,6 @@ mod test {
             );
         }
 
-        // Defaults apply when the limits are omitted.
         let config = toml::from_str::<MulticastGroupReconcilerConfig>(
             "period_secs = 60\n",
         )
