@@ -41,8 +41,6 @@ use std::net::IpAddr;
 
 type DpdClientError = dpd_client::Error<dpd_client::types::Error>;
 
-const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
-
 #[derive(Default, Debug)]
 pub(super) struct PortReconciler {
     // The set of QSFP ports is a physical property; it never changes for a
@@ -128,7 +126,10 @@ impl PortReconciler {
         let mut config_by_port = BTreeMap::new();
         for port_id in qsfp_ports.iter().cloned() {
             let settings = client
-                .port_settings_get(&DpdPortId::Qsfp(port_id.clone()), DPD_TAG)
+                .port_settings_get(
+                    &DpdPortId::Qsfp(port_id.clone()),
+                    OMICRON_DPD_TAG,
+                )
                 .await?
                 .into_inner();
             // Check for empty ports and filter those out.
@@ -179,13 +180,10 @@ async fn apply_plan(
     let mut clear_failures = Vec::new();
     for port_id in to_clear {
         let port_id_string = port_id.to_string();
-        match client
-            .port_settings_clear(&DpdPortId::Qsfp(port_id), DPD_TAG)
-            .await
-        {
+        match client.port_settings_clear(&DpdPortId::Qsfp(port_id)).await {
             Ok(_) => {
                 info!(
-                    log, "successfully cleared settings for port";
+                    log, "successfully deleted existing link(s) on port";
                     "port_id" => &port_id_string,
                 );
                 cleared.insert(port_id_string);
@@ -210,7 +208,11 @@ async fn apply_plan(
     for (port_id, settings) in to_apply {
         let port_id_string = port_id.to_string();
         match client
-            .port_settings_apply(&DpdPortId::Qsfp(port_id), DPD_TAG, &settings)
+            .port_settings_apply(
+                &DpdPortId::Qsfp(port_id),
+                OMICRON_DPD_TAG,
+                &settings,
+            )
             .await
         {
             Ok(_) => {

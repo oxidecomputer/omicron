@@ -797,7 +797,10 @@ impl TestInput {
         for port_id in 0..32 {
             let port_id = format!("qsfp{port_id}").parse::<DpdQsfp>().unwrap();
             let settings = client
-                .port_settings_get(&DpdPortId::Qsfp(port_id.clone()), DPD_TAG)
+                .port_settings_get(
+                    &DpdPortId::Qsfp(port_id.clone()),
+                    OMICRON_DPD_TAG,
+                )
                 .await?
                 .into_inner();
             if !settings.links.is_empty() {
@@ -924,7 +927,7 @@ async fn proptest_full_reconciliation() {
         for port_id in 0..32 {
             let port_id = format!("qsfp{port_id}").parse().unwrap();
             client
-                .port_settings_clear(&DpdPortId::Qsfp(port_id), DPD_TAG)
+                .port_settings_clear(&DpdPortId::Qsfp(port_id))
                 .await
                 .expect("cleared port");
         }
@@ -934,7 +937,7 @@ async fn proptest_full_reconciliation() {
             client
                 .port_settings_apply(
                     &DpdPortId::Qsfp(port_id),
-                    DPD_TAG,
+                    OMICRON_DPD_TAG,
                     &settings,
                 )
                 .await
