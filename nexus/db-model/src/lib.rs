@@ -262,6 +262,7 @@ mod vpc_firewall_rule;
 mod vpc_route;
 mod vpc_router;
 mod vpc_subnet;
+mod wicket_ssh_auth;
 mod zpool;
 
 // This module namespacing is a quirk to allow `db-macros` to refer to
@@ -414,6 +415,7 @@ pub use vpc_subnet::*;
 pub use webhook_delivery::*;
 pub use webhook_delivery_attempt_result::*;
 pub use webhook_rx::*;
+pub use wicket_ssh_auth::*;
 pub use zpool::*;
 
 // TODO: The existence of both impl_enum_type and impl_enum_wrapper is a

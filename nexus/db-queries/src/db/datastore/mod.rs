@@ -158,6 +158,7 @@ mod volume;
 mod volume_repair;
 mod vpc;
 pub mod webhook_delivery;
+mod wicket_ssh_auth;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;

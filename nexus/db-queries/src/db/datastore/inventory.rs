@@ -119,6 +119,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -4161,6 +4162,15 @@ impl DataStore {
         // It does not contain the actual disk/dataset/zone configs; we'll start
         // with empty sets and build those up by reading additional tables
         // below.
+        //
+        // The sled config rows each contain the wicket SSH auth generation they
+        // describe, but _not_ the details of that generation. We fill those in
+        // with a dummy value to start, and build up a map of wicket SSH auth
+        // generations we need to look up and rehydrate.
+        let mut wicket_ssh_auth_gens_needed: BTreeMap<
+            WicketSshAuthGeneration,
+            Vec<OmicronSledConfigUuid>,
+        > = BTreeMap::new();
         let mut omicron_sled_configs = {
             use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
 
@@ -4185,9 +4195,14 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
+                    let sled_config_id = sled_config.id.into();
+                    wicket_ssh_auth_gens_needed
+                        .entry(sled_config.wicket_ssh_auth_generation.into())
+                        .or_default()
+                        .push(sled_config_id);
                     configs
                         .insert_unique(OmicronSledConfigWithId {
-                            id: sled_config.id.into(),
+                            id: sled_config_id,
                             config: OmicronSledConfig {
                                 generation: sled_config.generation.into(),
                                 remove_mupdate_override: sled_config
@@ -4201,10 +4216,10 @@ impl DataStore {
                                 update_disposition: sled_config
                                     .update_disposition
                                     .into(),
-                                // TODO-correctness We should store the
-                                // wicket SSH auth reported in inventory in
-                                // the DB! For now we return the initial value
-                                // in all inventory reports.
+                                // As noted above, we fill this in with a dummy
+                                // value, then will rehydrate it with its
+                                // correct value when we look up all the
+                                // generations via wicket_ssh_auth_gens_needed.
                                 wicket_ssh_auth:
                                     WicketSshAuth::unauthenticated_initial_generation(),
                             },
@@ -4221,6 +4236,24 @@ impl DataStore {
 
             configs
         };
+
+        // For each distinct wicket SSH auth generation recorded by the set of
+        // `OmicronSledConfig`s in this collection, look up its details, and
+        // overwrite the placeholder we wrote above.
+        for (wicket_ssh_auth_gen, sled_configs_to_patch) in
+            wicket_ssh_auth_gens_needed
+        {
+            let wicket_ssh_auth = self
+                .wicket_ssh_auth_read_on_connection(&conn, wicket_ssh_auth_gen)
+                .await?;
+            for sled_config_id in sled_configs_to_patch {
+                omicron_sled_configs
+                    .get_mut(sled_config_id)
+                    .expect("sled_configs_to_patch contains valid IDs")
+                    .config
+                    .wicket_ssh_auth = wicket_ssh_auth.clone();
+            }
+        }
 
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items
@@ -5948,6 +5981,7 @@ impl ConfigReconcilerRows {
             config.host_phase_2.clone(),
             config.measurements.clone(),
             config.update_disposition,
+            config.wicket_ssh_auth.generation,
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(

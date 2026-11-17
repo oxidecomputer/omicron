@@ -65,6 +65,7 @@ use omicron_common::address::{
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_generation_kinds::WicketSshAuthGenerationKind;
 use omicron_generation_kinds::{
     SledConfigGeneration, SledConfigGenerationKind,
@@ -3130,6 +3131,8 @@ pub struct InvOmicronSledConfig {
     pub measurements: DbOmicronMeasurements,
 
     pub update_disposition: DbInvSledUpdateDisposition,
+    pub wicket_ssh_auth_generation:
+        DbTypedGeneration<WicketSshAuthGenerationKind>,
 }
 
 impl InvOmicronSledConfig {
@@ -3141,6 +3144,7 @@ impl InvOmicronSledConfig {
         host_phase_2: HostPhase2DesiredSlots,
         measurements: BTreeSet<OmicronSingleMeasurement>,
         update_disposition: OmicronSledUpdateDisposition,
+        wicket_ssh_auth_generation: WicketSshAuthGeneration,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
@@ -3150,6 +3154,7 @@ impl InvOmicronSledConfig {
             host_phase_2: host_phase_2.into(),
             measurements: measurements.into(),
             update_disposition: update_disposition.into(),
+            wicket_ssh_auth_generation: wicket_ssh_auth_generation.into(),
         }
     }
 }

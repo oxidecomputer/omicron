@@ -2208,6 +2208,7 @@ table! {
         host_phase_2_desired_slot_b -> Nullable<Text>,
         measurements -> Nullable<Array<Text>>,
         update_disposition -> crate::enums::InvSledUpdateDispositionEnum,
+        wicket_ssh_auth_generation -> Int8,
     }
 }
 
@@ -3704,3 +3705,20 @@ joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
 // would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
 allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
 allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);
+
+table! {
+    wicket_ssh_auth (generation) {
+        generation -> Int8,
+        time_created -> Timestamptz,
+        description -> Text,
+        allow_support_keys -> Nullable<Bool>,
+    }
+}
+
+table! {
+    wicket_ssh_auth_key (generation, authorized_key) {
+        generation -> Int8,
+        authorized_key -> Text,
+        description -> Text,
+    }
+}
