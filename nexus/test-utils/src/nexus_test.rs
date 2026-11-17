@@ -651,7 +651,8 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 tag: String::from("test-restart-wait"),
                 log: self.logctx.log.clone(),
             },
-        );
+        )
+        .expect("DPD client should initialize");
         wait_for_condition(
             || async {
                 match dpd_client.switch_identifiers().await {
