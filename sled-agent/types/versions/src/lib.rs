@@ -129,6 +129,8 @@ pub mod v61;
 pub mod v62;
 #[path = "multirack_join_complete_generation/mod.rs"]
 pub mod v63;
+#[path = "trust_quorum_members/mod.rs"]
+pub mod v64;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]

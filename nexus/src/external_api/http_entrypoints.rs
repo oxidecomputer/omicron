@@ -6635,11 +6635,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_abort(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<path_params::RackPath>,
+        query_params: Query<rack::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let rack_id =
                 RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
-            let status = nexus.tq_abort_latest_config(&opctx, rack_id).await?;
+            let epoch = query_params.into_inner().version.map(|v| Epoch(v.0));
+            let status = nexus.tq_abort_config(&opctx, rack_id, epoch).await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await
