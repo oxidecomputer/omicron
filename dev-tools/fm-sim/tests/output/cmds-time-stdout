@@ -33,10 +33,18 @@ advanced time by 750ms to 1970-01-01T01:31:31Z
 error: missing closing quote
 
 
+> # A zero duration parses, but is invalid.
+> time advance 0s
+error: duration out of range for the simulated clock
+
+> time show
+1970-01-01T01:31:31Z
+
+
 > # A duration that parses, but that the clock can't reach. The clock stays
 > # where it was.
 > time advance 1000000years
-error: the simulated clock cannot go that far
+error: duration out of range for the simulated clock
 
 > time show
 1970-01-01T01:31:31Z

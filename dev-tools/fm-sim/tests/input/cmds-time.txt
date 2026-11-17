@@ -16,6 +16,10 @@ time advance
 time advance soon
 time advance '1h
 
+# A zero duration parses, but is invalid.
+time advance 0s
+time show
+
 # A duration that parses, but that the clock can't reach. The clock stays
 # where it was.
 time advance 1000000years

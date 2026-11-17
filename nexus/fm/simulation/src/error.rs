@@ -5,9 +5,9 @@
 /// Why an operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// [`time::advance`](crate::time::advance) would put the clock past what
-    /// chrono can represent, either because the duration itself is too long to
-    /// convert or because the sum overflows.
-    #[error("the simulated clock cannot go that far")]
+    /// [`time::advance`](crate::time::advance) was given a duration it cannot
+    /// advance by: either zero, or so long that the clock would exceed what
+    /// chrono can represent.
+    #[error("duration out of range for the simulated clock")]
     TimeOutOfRange,
 }

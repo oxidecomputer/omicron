@@ -12,12 +12,15 @@ use crate::{Error, SimStateBuilder};
 
 /// Moves the simulated clock forward by `duration`, and returns the new time.
 ///
-/// If the result is later than the clock can represent, this returns
-/// `Error::TimeOutOfRange` and leaves the clock unchanged.
+/// If `duration` is zero, or the result is later than the clock can represent,
+/// this returns `Error::TimeOutOfRange` and leaves the clock unchanged.
 pub fn advance(
     builder: &mut SimStateBuilder,
     duration: Duration,
 ) -> Result<DateTime<Utc>, Error> {
+    if duration.is_zero() {
+        return Err(Error::TimeOutOfRange);
+    }
     let delta =
         TimeDelta::from_std(duration).map_err(|_| Error::TimeOutOfRange)?;
     let now =
@@ -40,6 +43,15 @@ mod tests {
             .expect("123ms is within the clock's range");
         assert_eq!(now, SimState::EPOCH + TimeDelta::milliseconds(123));
         assert_eq!(builder.build().now(), now);
+    }
+
+    #[test]
+    fn advance_rejects_a_zero_duration() {
+        let mut builder = SimStateBuilder::new();
+        let error = advance(&mut builder, Duration::ZERO)
+            .expect_err("a zero duration does not move the clock");
+        assert_matches!(error, Error::TimeOutOfRange);
+        assert_eq!(builder.now(), SimState::EPOCH);
     }
 
     #[test]
