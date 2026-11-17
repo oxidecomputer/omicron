@@ -11,6 +11,7 @@ use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::types::{Epoch, Threshold};
 
@@ -104,7 +105,8 @@ impl NexusConfig {
             rack_id,
             epoch: self.epoch,
             last_committed_epoch: self.last_committed_epoch,
-            members: self.members.clone(),
+            members: TrustQuorumMembers::new(self.members.clone())
+                .expect("test membership is within the size bounds"),
             threshold: self.threshold,
         }
     }
@@ -113,7 +115,8 @@ impl NexusConfig {
         LrtqUpgradeMsg {
             rack_id,
             epoch: self.epoch,
-            members: self.members.clone(),
+            members: TrustQuorumMembers::new(self.members.clone())
+                .expect("test membership is within the size bounds"),
             threshold: self.threshold,
         }
     }

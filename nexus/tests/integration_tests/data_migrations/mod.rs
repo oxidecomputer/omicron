@@ -48,6 +48,7 @@ mod support_bundle_sp_components;
 mod support_bundle_time_range;
 mod tufaceous_v2;
 mod vmm_failure_reason_if_failed;
+mod widen_lldp_system_description;
 
 pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let versions: HashMap<&str, Version> = KNOWN_VERSIONS
@@ -95,6 +96,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(add_rack_id_to_inv_sled_agent);
     register!(support_bundle_sp_components);
     register!(drop_multicast_deleted_state);
+    register!(widen_lldp_system_description);
     register!(multicast_member_parent_kind);
 
     map
