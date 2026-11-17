@@ -4,6 +4,6 @@
 
 //! Version `UNADOPTED_RACK_LIST` of the Nexus external API.
 //!
-//! Adds the `/v1/system/multirack/racks-unadopted` endpoint.
+//! Adds the `/v1/system/hardware/racks-unadopted` endpoint.
 
 pub mod multirack;
