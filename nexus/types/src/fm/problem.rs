@@ -467,7 +467,7 @@ impl SitrepProblem {
     }
 
     pub fn is_resolved(&self) -> bool {
-        self.current_revision().resolved_sitrep_id.is_some()
+        self.current_revision().time_resolved.is_some()
     }
 
     pub fn display_summary(
@@ -657,7 +657,7 @@ pub struct SitrepRevision {
     ///
     /// If this is `None`, the problem is active as of this revision; if it is
     /// `Some`, the problem is resolved.
-    pub resolved_sitrep_id: Option<DateTime<Utc>>,
+    pub time_resolved: Option<DateTime<Utc>>,
     /// The problem's problem code as of this revision.
     ///
     /// This determines the problem's class, as well as its documentation.
@@ -680,6 +680,20 @@ impl iddqd::IdOrdItem for SitrepRevision {
     }
 
     iddqd::id_upcast!();
+}
+
+impl SitrepRevision {
+    pub fn report_state(&self) -> super::analysis_reports::ProblemState {
+        match self.time_resolved {
+            Some(time_resolved) => {
+                super::analysis_reports::ProblemState::Resolved {
+                    sitrep_id: self.requested_sitrep_id,
+                    time_resolved,
+                }
+            }
+            None => super::analysis_reports::ProblemState::Active,
+        }
+    }
 }
 
 /// A link between a problem and an alert.
@@ -883,7 +897,7 @@ mod tests {
             revs.insert_unique(SitrepRevision {
                 number: ProblemRevNum::from_u32(number),
                 requested_sitrep_id: sitrep_id,
-                resolved_sitrep_id: None,
+                time_resolved: None,
                 code: ProblemCode::UnhealthyZpool,
                 summary: format!("revision {number}"),
                 description: format!("description of revision {number}"),

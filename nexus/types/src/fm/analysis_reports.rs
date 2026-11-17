@@ -50,7 +50,8 @@ pub struct ActiveProblemReport {
     /// The ID of the sitrep in which the most recent revision of this problem
     /// was made.
     pub revised_sitrep_id: SitrepUuid,
-    pub resolved_sitrep_id: Option<SitrepUuid>,
+    /// Whether the problem is active or resolved as of its latest revision.
+    pub state: ProblemState,
     /// The (operator-facing) summary of this problem, as of its latest
     /// revision.
     pub summary: String,
@@ -64,6 +65,26 @@ pub struct ActiveProblemReport {
     pub total_support_bundles: usize,
     pub new_support_bundles: usize,
     pub log: DebugLog,
+}
+
+/// The state of a problem as of its latest revision, as recorded in an
+/// [`ActiveProblemReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemState {
+    Active,
+    Resolved {
+        /// The sitrep ID of the revision that resolved the problem.
+        sitrep_id: SitrepUuid,
+        /// The `time_resolved` value of that revision.
+        time_resolved: DateTime<Utc>,
+    },
+}
+
+impl ProblemState {
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, Self::Resolved { .. })
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -344,7 +365,7 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
             id,
             requested_sitrep_id,
             revised_sitrep_id,
-            resolved_sitrep_id,
+            state,
             comment,
             summary,
             current_problem_code,
@@ -360,13 +381,15 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
             styles.annotation_if(Some(s) == sitrep_id, " <-- this sitrep")
         };
 
-        let state =
-            if resolved_sitrep_id.is_some() { "resolved" } else { "active" };
+        let state_name = match state {
+            ProblemState::Active => "active",
+            ProblemState::Resolved { .. } => "resolved",
+        };
         writeln!(
             f,
             "{:indent$}{bullet}{}",
             "",
-            styles.heading().style(format_args!("{state} problem {id}"))
+            styles.heading().style(format_args!("{state_name} problem {id}"))
         )?;
 
         const SUMMARY: &str = "operator summary:";
@@ -374,7 +397,8 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
         const REVISION: &str = "latest revision:";
         const REVISED_IN: &str = "  revised in sitrep:";
         const REQUESTED_IN: &str = "requested in sitrep:";
-        const RESOLVED_IN: &str = "resolved in sitrep:";
+        const RESOLVED_IN: &str = "  in sitrep:";
+        const TIME_RESOLVED: &str = "time resolved:";
         const TOTAL_ALERTS: &str = "total alerts:";
         const TOTAL_SUPPORT_BUNDLES: &str = "total support bundles:";
         const NEW_ALERTS_OR_BUNDLES: &str = "  added in this sitrep:";
@@ -384,6 +408,7 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
             REVISION,
             REQUESTED_IN,
             RESOLVED_IN,
+            TIME_RESOLVED,
             REVISED_IN,
             TOTAL_ALERTS,
             TOTAL_SUPPORT_BUNDLES,
@@ -404,13 +429,19 @@ impl fmt::Display for ActiveProblemReportDisplayer<'_> {
             styles.label(REQUESTED_IN, WIDTH),
             this_sitrep(requested_sitrep_id)
         )?;
-        if let Some(resolved_id) = resolved_sitrep_id {
+        if let ProblemState::Resolved { sitrep_id, time_resolved } = state {
             writeln!(
                 f,
-                "{:>indent$}{} {resolved_id}{}",
+                "{:>indent$}{} {time_resolved}",
+                "",
+                styles.label(TIME_RESOLVED, WIDTH),
+            )?;
+            writeln!(
+                f,
+                "{:>indent$}{} {sitrep_id}{}",
                 "",
                 styles.label(RESOLVED_IN, WIDTH),
-                this_sitrep(resolved_id)
+                this_sitrep(sitrep_id)
             )?;
         }
         writeln!(
