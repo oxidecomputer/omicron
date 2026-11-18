@@ -40,35 +40,40 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dice_verifier::verify_cert_chain as verify_platform_cert_chain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
 use gateway_client::Client as MgsClient;
-use gateway_types::component::SpType;
 use omicron_common::address::{
     MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
 };
 use omicron_common::api::external::ByteCount;
 use omicron_ddm_admin_client::Client as DdmClient;
+use omicron_sush_proxy::cubbies::{merge_cubbies, poll_cubbies};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, debug, error, info, o, warn};
+use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::read;
+use std::io;
+use std::iter::once;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use strum::Display;
-use tokio::fs::create_dir_all;
+use tokio::fs::{OpenOptions, create_dir_all};
+use tokio::io::AsyncWriteExt as _;
 use tokio::spawn;
 use tokio::sync::watch;
-use tokio::task::spawn_blocking;
+use tokio::task::{JoinSet, spawn_blocking};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
 use x509_cert::der::{Decode as _, DecodePem as _, Reader as _, SliceReader};
+use x509_cert::time::{Time, Validity};
 
-use sush_common::targets::{Cubbies, MAX_CUBBY};
+use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
+use sush_common::targets::Cubbies;
 use sush_server::executor::PathIsolation;
 use sush_server::gossip::{
     GossipConfig, LinkedBaseboards, Universe, spawn_gossip,
@@ -81,6 +86,13 @@ use sush_server::{JobManager, seed_gossip};
 
 /// Subdirectory of an encrypted dataset that job output is recorded in.
 const SUSH_OUTPUT_SUBDIR: &str = "sush";
+
+/// Path inside the switch zone to the sush proxy's TLS private key.
+/// `write_private` makes it readable by the owner (root) only.
+pub const SUSH_PROXY_KEY_PATH: &str = "/etc/sush-proxy/key.pem";
+
+/// Path inside the switch zone to the sush proxy's TLS certificate chain.
+pub const SUSH_PROXY_CERT_CHAIN_PATH: &str = "/etc/sush-proxy/chain.pem";
 
 /// How often to refresh the cubby map from MGS.
 const MGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -278,10 +290,7 @@ pub async fn spawn_sush_tasks(
             return None;
         }
     };
-    spawn(poll_mgs_for_cubbies(
-        log.new(o!("component" => "cubby map")),
-        tx_cubbies,
-    ));
+    spawn(update_cubbies(log.new(o!("component" => "cubby map")), tx_cubbies));
 
     // The state manager runs until shutdown and nothing waits on it,
     // so all we can usefully do with its handle is notice when it stops.
@@ -374,37 +383,32 @@ async fn promote_output_dir(
     }
 }
 
-/// Discovers the baseboard identity in each cubby in the rack and publishes the
-/// map over the provided watch channel.
-///
-/// This map is used to resolve the sled identity when a job specifies its
-/// target sled cubby number.
-///
-/// This function may start while one or more MGS services are not available,
-/// and must handle failures of both the MGS service or the entire scrimlet
-/// gracefully. Therefore, on every poll, this function will attempt to use the
-/// fixed MGS address on every subnet currently known to `ddmd`, and accepts any
-/// responses it receives. If a response that contains at least one sled is
-/// received, the previously-discovered map is overwritten to avoid leaving
-/// behind stale entries for sleds that are no longer present. Multiple
-/// responses received within the same poll are merged to produce a single map.
-/// If we cannot contact any MGS instance during a poll, the map does not change
-/// until a subsequent poll receives a response.
-async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
-    let clients = || -> anyhow::Result<(DdmClient, reqwest::Client)> {
-        let ddm = DdmClient::localhost(&log)?;
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(MGS_PROBE_TIMEOUT)
-            .timeout(MGS_PROBE_TIMEOUT)
-            .build()?;
-        Ok((ddm, client))
-    };
-    let (ddm, client) = match clients() {
-        Ok(clients) => clients,
+/// Periodically poll each MGS for the sled in each cubby, and merge the
+/// answer from the first MGS to respond into the cubby map. Look for MGS
+/// at the switch zone address in every underlay subnet that DDM knows.
+/// Try every address at once, because most subnets have no switch zone,
+/// and a request to an address with no MGS hangs until it times out.
+async fn update_cubbies(log: Logger, tx_cubbies: watch::Sender<Cubbies>) {
+    let ddm = match DdmClient::localhost(&log) {
+        Ok(ddm) => ddm,
         Err(error) => {
             error!(
-                log, "not polling MGS, cubby-targeted jobs will not run here";
-                "error" => #%error,
+                log, "not polling MGS: cannot build a DDM client";
+                "error" => InlineErrorChain::new(&error),
+            );
+            return;
+        }
+    };
+    let client = match reqwest::ClientBuilder::new()
+        .connect_timeout(MGS_PROBE_TIMEOUT)
+        .timeout(MGS_PROBE_TIMEOUT)
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            error!(
+                log, "not polling MGS: cannot build an HTTP client";
+                "error" => InlineErrorChain::new(&error),
             );
             return;
         }
@@ -412,9 +416,9 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
     loop {
         match ddm.derive_underlay_subnets_from_prefixes().await {
             Ok(subnets) => {
-                let mut map = Cubbies::new();
-                let mut errors = BTreeMap::new();
+                let mut polls = JoinSet::new();
                 for subnet in subnets {
+                    let log = log.clone();
                     let addr = SocketAddrV6::new(
                         get_switch_zone_address(subnet),
                         MGS_PORT,
@@ -426,38 +430,37 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                         client.clone(),
                         log.clone(),
                     );
-                    if let Err(error) = mgs.sp_local_switch_id().await {
-                        errors.insert(addr, error);
-                        continue;
-                    }
-                    for cubby in 0..=MAX_CUBBY {
-                        match mgs.sp_get(&SpType::Sled, cubby.into()).await {
-                            Ok(state) => {
-                                let state = state.into_inner();
-                                map.insert(
-                                    cubby,
-                                    BaseboardId {
-                                        part_number: state.model,
-                                        serial_number: state.serial_number,
-                                    },
-                                );
-                            }
-                            Err(err) => {
-                                debug!(
-                                    log, "no SP state for cubby";
-                                    "cubby" => cubby, "error" => %err,
-                                );
-                            }
+                    polls.spawn(async move {
+                        (addr, poll_cubbies(&log, &mgs).await)
+                    });
+                }
+
+                let mut errors = BTreeMap::new();
+                let mut updated = false;
+                while let Some(joined) = polls.join_next().await {
+                    match joined {
+                        Ok((_, Ok(states))) => {
+                            tx_cubbies.send_modify(|cubbies| {
+                                merge_cubbies(cubbies, states)
+                            });
+                            updated = true;
+                            break;
+                        }
+                        Ok((addr, Err(error))) => {
+                            errors.insert(addr, error);
+                        }
+                        Err(error) => {
+                            warn!(
+                                log, "MGS probe task failed";
+                                "error" => InlineErrorChain::new(&error),
+                            );
                         }
                     }
                 }
-
-                // If this code is running, there must be at least one sled
-                // in the rack, so an empty map means something went wrong.
-                if map.is_empty() {
+                if !updated {
                     warn!(
-                        log, "no sleds found, cubby map unchanged";
-                        "previous_sleds" => cubbies.borrow().len(),
+                        log, "no MGS answered, cubby map unchanged";
+                        "previous_sleds" => tx_cubbies.borrow().len(),
                     );
                     for (addr, error) in &errors {
                         warn!(
@@ -466,19 +469,77 @@ async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
                             "error" => InlineErrorChain::new(error),
                         );
                     }
-                } else {
-                    cubbies.send_replace(map);
                 }
             }
-            Err(err) => {
+            Err(error) => {
                 warn!(
-                    log, "unable to fetch prefixes";
-                    "error" => InlineErrorChain::new(&err),
+                    log, "cannot fetch underlay prefixes from DDM";
+                    "error" => InlineErrorChain::new(&error),
                 );
             }
         }
         sleep(MGS_POLL_INTERVAL).await;
     }
+}
+
+/// Generate the switch zone proxy's TLS identity. This is an ephemeral,
+/// self-signed certificate carrying the RoT's voucher for its key
+/// (a Trust Quorum signature over the tagged SPKI digest; see RFD 620
+/// §4.6.2.1). The key and chain are written as PEM under `zone_root`
+/// for the proxy to serve with.
+pub async fn generate_proxy_identity(
+    log: &Logger,
+    zone_root: &Utf8Path,
+) -> anyhow::Result<()> {
+    let (key_pem, chain_pem) = spawn_blocking(generate_proxy_pems).await??;
+    let key_path = format!("{zone_root}{SUSH_PROXY_KEY_PATH}");
+    let chain_path = format!("{zone_root}{SUSH_PROXY_CERT_CHAIN_PATH}");
+    let dir = Utf8Path::new(&key_path).parent().expect("key path has a parent");
+    create_dir_all(dir)
+        .await
+        .with_context(|| format!("failed to create {dir}"))?;
+    write_private(&key_path, key_pem.as_bytes())
+        .await
+        .with_context(|| format!("failed to write {key_path}"))?;
+    tokio::fs::write(&chain_path, chain_pem.as_bytes())
+        .await
+        .with_context(|| format!("failed to write {chain_path}"))?;
+    info!(log, "generated sush proxy TLS identity"; "key" => key_path);
+    Ok(())
+}
+
+/// Produce the proxy's private key and certificate chain, both PEM
+/// encoded. The chain is leaf first, the way the client expects it.
+/// Uses IPCC, so performs blocking I/O. The vouched certificate never
+/// expires, because (a) we probably don't know what time it actually is
+/// when we generate it, and (b) it's ephemeral and regenerated at every
+/// switch zone startup.
+fn generate_proxy_pems() -> anyhow::Result<(String, String)> {
+    let ipcc = Ipcc::new().context("failed to open IPCC")?;
+    let chain_der = ipcc
+        .rot_get_tq_cert_chain()
+        .context("failed to fetch the TQ cert chain")?;
+    let platform = der_cert_chain(&chain_der)?;
+    let vouched = EphemeralKey::new_vouched(
+        KeyType::Ed25519,
+        "CN=sush-proxy,O=Oxide Computer Company,C=US"
+            .parse()
+            .context("failed to parse the proxy cert subject")?,
+        Validity {
+            not_before: Time::try_from(SystemTime::now())
+                .context("failed to compute the proxy cert validity")?,
+            not_after: Time::INFINITY,
+        },
+        |digest| ipcc.rot_tq_sign(digest),
+    )
+    .context("failed to generate the proxy key")?;
+    let key_pem =
+        vouched.private_key_pem().context("failed to encode the proxy key")?;
+    let chain =
+        once(vouched.cert().clone()).chain(platform).collect::<Vec<_>>();
+    let chain_pem = pem_cert_chain(chain)
+        .context("failed to encode the proxy cert chain")?;
+    Ok((key_pem, chain_pem))
 }
 
 impl SushConfig {
@@ -589,4 +650,17 @@ fn der_cert_chain(bytes: &[u8]) -> anyhow::Result<Vec<Certificate>> {
     }
     ensure!(!chain.is_empty(), "the TQ cert chain is empty");
     Ok(chain)
+}
+
+/// Write a file readable only by the owner.
+async fn write_private(path: &str, contents: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .await?;
+    file.write_all(contents).await?;
+    file.flush().await
 }
