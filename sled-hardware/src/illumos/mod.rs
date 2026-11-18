@@ -172,10 +172,11 @@ impl HardwareSnapshot {
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
-        // One topology snapshot per poll, shared by everything that reads
-        // it. A handle allows only one snapshot (see
-        // <https://github.com/oxidecomputer/libtopo/issues/14>), so each poll
-        // opens its own.
+        // Each poll takes a single topology snapshot, which is used for all
+        // data gathered from libtopo in that poll. A topo handle allows only
+        // one snapshot (see
+        // <https://github.com/oxidecomputer/libtopo/issues/14>), so we open a
+        // new handle for each poll.
         let topo_hdl;
         let topo_snap = match TopoHdl::open() {
             Ok(hdl) => {
