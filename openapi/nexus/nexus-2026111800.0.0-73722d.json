@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111000.0.0"
+    "version": "2026111800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26621,6 +26621,11 @@
             "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
+          },
+          "location": {
+            "nullable": true,
+            "description": "The physical location in the sled at the time of the last inventory collection, e.g. \"N0\" or \"N4\". Null if a location was not observed.",
+            "type": "string"
           },
           "model": {
             "type": "string"
