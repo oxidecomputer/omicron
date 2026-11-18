@@ -2717,15 +2717,15 @@ fault management configuration v1:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
-EXECUTING COMMAND: omdb ["db", "sitrep", "show", "..........<REDACTED_UUID>..........."]
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: ..........<REDACTED_UUID>........... (sitrep)
+                                     ID: 00000000-0000-0000-0000-000000000001 (sitrep)
                        parent sitrep ID: None
-                             created by: ..........<REDACTED_UUID>...........
+                             created by: 00000000-0000-0000-0000-000000000004
                              created at: <REDACTED_TIMESTAMP>
                                 comment:
       an example sitrep with cases
@@ -2733,7 +2733,7 @@ stdout:
                                  status: not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
+                inventory collection ID: 00000000-0000-0000-0000-00000000001e (collection)
       note: this collection no longer exists (perhaps it has been pruned?)
       next inventory minimum start time: <REDACTED_TIMESTAMP>
     
@@ -2745,57 +2745,57 @@ stdout:
 
 == CASES =======================================================================
 
-  * case ..........<REDACTED_UUID>...........
+  * case 00000000-0000-0000-0000-00000000000a
     =========================================
     // zpool is degraded
     diagnosis engine: physical_disk
-    opened in sitrep: ..........<REDACTED_UUID>........... <-- this sitrep
+    opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
     ereports:
     ---------
-    * ereport ..........<REDACTED_UUID>...........:1
-      // ereport ..........<REDACTED_UUID>...........:1 looks relevant
+    * ereport 00000000-0000-0000-0000-000000000003:1
+      // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
       class:         ereport.example.disk
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
-      added in:      ..........<REDACTED_UUID>........... <-- this sitrep
-      assignment ID: ..........<REDACTED_UUID>...........
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-00000000000b
 
-    * ereport ..........<REDACTED_UUID>...........:2
-      // ereport ..........<REDACTED_UUID>...........:2 looks relevant
+    * ereport 00000000-0000-0000-0000-000000000003:2
+      // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
       class:         ereport.example.zpool
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
-      added in:      ..........<REDACTED_UUID>........... <-- this sitrep
-      assignment ID: ..........<REDACTED_UUID>...........
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-00000000000c
 
 
     facts:
     ------
-    * fact ..........<REDACTED_UUID>...........
+    * fact 00000000-0000-0000-0000-00000000000d
       // zpool health was observed in inventory
-      added in: ..........<REDACTED_UUID>........... <-- this sitrep
+      added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
       * payload:
         * engine: physical_disk
         * kind: zpool_unhealthy
         * last_seen_health: degraded
-        * observed_in_inv: ..........<REDACTED_UUID>...........
-        * physical_disk_id: ..........<REDACTED_UUID>...........
+        * observed_in_inv: 00000000-0000-0000-0000-000000000010
+        * physical_disk_id: 00000000-0000-0000-0000-00000000000e
         * time_observed: <REDACTED_TIMESTAMP>
-        * zpool_id: ..........<REDACTED_UUID>...........
+        * zpool_id: 00000000-0000-0000-0000-00000000000f
 
 
     alerts requested:
     -----------------
-    * alert ..........<REDACTED_UUID>...........
+    * alert 00000000-0000-0000-0000-000000000011
       // tell someone about the zpool
       class:        test.foo, v0
-      requested in: ..........<REDACTED_UUID>........... <-- this sitrep
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
 
     support bundles requested:
     -------------------------
-    * bundle ..........<REDACTED_UUID>...........
+    * bundle 00000000-0000-0000-0000-000000000012
       // collect everything
-      requested in: ..........<REDACTED_UUID>........... <-- this sitrep
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
       data:
         - reconfigurator
         - host_info(all)
@@ -2806,21 +2806,21 @@ stdout:
 
 
 
-  * case ..........<REDACTED_UUID>...........
+  * case 00000000-0000-0000-0000-000000000014
     =========================================
     // PSU was reseated
     diagnosis engine: power_shelf
-    opened in sitrep: ..........<REDACTED_UUID>...........
-    closed in sitrep: ..........<REDACTED_UUID>........... <-- this sitrep
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
     ereports:
     ---------
-    * ereport ..........<REDACTED_UUID>...........:3
-      // ereport ..........<REDACTED_UUID>...........:3 looks relevant
+    * ereport 00000000-0000-0000-0000-000000000003:3
+      // ereport 00000000-0000-0000-0000-000000000003:3 looks relevant
       class:         ereport.example.psu
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
-      added in:      ..........<REDACTED_UUID>........... <-- this sitrep
-      assignment ID: ..........<REDACTED_UUID>...........
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-000000000015
 
 
 

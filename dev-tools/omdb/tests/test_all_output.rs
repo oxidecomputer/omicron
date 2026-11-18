@@ -578,16 +578,18 @@ async fn test_omdb_success_cases() {
     }
 
     // The sitrep that Nexus produced has no cases, so also show one that
-    // does.
+    // does. Its IDs are all fixed, so they are not redacted.
     let example_sitrep_id =
         insert_example_sitrep(&opctx, datastore).await.to_string();
+    let mut example_redactor = Redactor::default();
+    example_redactor.uuids(false);
     let p = postgres_url.clone();
     do_run_extra(
         &mut output,
         move |exec| exec.env("OMDB_DB_URL", &p),
         &cmd_path,
         &["db", "sitrep", "show", &example_sitrep_id],
-        &redactor,
+        &example_redactor,
     )
     .await;
 
@@ -1108,8 +1110,10 @@ async fn insert_example_sitrep(
     };
     match datastore.fm_sitrep_insert(opctx, sitrep, None).await {
         Err(InsertSitrepError::ParentNotCurrent(_)) => {}
-        result => panic!(
-            "expected the example sitrep not to be made current: {result:?}"
+        Ok(()) => panic!("the example sitrep was made current"),
+        Err(error) => panic!(
+            "failed to insert the example sitrep: {}",
+            InlineErrorChain::new(&error),
         ),
     }
 

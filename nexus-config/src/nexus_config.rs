@@ -1102,6 +1102,9 @@ pub struct FmTasksConfig {
     pub sitrep_gc_period_secs: Duration,
     /// A toggle to disable garbage collection of fault management sitreps
     ///
+    /// This is intended for tests. If it is left on, sitreps accumulate until
+    /// the sitrep limit is reached, and analysis can no longer write new ones.
+    ///
     /// Default: Off
     #[serde(default)]
     pub sitrep_gc_disable: bool,
@@ -1460,6 +1463,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_gc_disable = true
             fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
@@ -1741,7 +1745,7 @@ mod test {
                             config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
-                            sitrep_gc_disable: false,
+                            sitrep_gc_disable: true,
                             sitrep_history_prune_period_secs:
                                 Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
