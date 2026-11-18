@@ -49,6 +49,7 @@ use omicron_common::api::external::{
     },
     *,
 };
+use omicron_uuid_kinds::RackUuid;
 use openapiv3::OpenAPI;
 use slog_error_chain::InlineErrorChain;
 
@@ -90,6 +91,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_18_00, ADOPT_RACK),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
@@ -7668,6 +7670,18 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::rack::Rack>>, HttpError>;
+
+    /// Add an unadopted rack to the regional cluster
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks",
+        tags = ["system/hardware"],
+        versions = VERSION_ADOPT_RACK..,
+    }]
+    async fn rack_adopt(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<RackUuid>,
+    ) -> Result<HttpResponseCreated<latest::rack::Rack>, HttpError>;
 
     /// Fetch rack
     #[endpoint {
