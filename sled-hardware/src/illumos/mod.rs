@@ -189,7 +189,7 @@ impl HardwareSnapshot {
         let bays = match external_disks {
             ExternalDisks::DetectPhysical => match topo_snap {
                 Ok(ref snap) => {
-                    read_bays(log, snap, sled_type, boot_storage_unit)
+                    poll_bays(log, snap, sled_type, boot_storage_unit)
                 }
                 Err(err) => Err(topo::TopoError::from(err).into()),
             },
@@ -336,7 +336,7 @@ fn find_properties<'a, const N: usize>(
 }
 
 /// Reads every bay from the hardware topology and describes each one.
-fn read_bays(
+fn poll_bays(
     log: &Logger,
     snap: &Snapshot<'_>,
     sled: OxideSled,
