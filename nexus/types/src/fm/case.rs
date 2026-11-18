@@ -665,7 +665,8 @@ impl fmt::Display for DisplayCaseSummary<'_> {
         let de_width = DiagnosisEngineKind::MAX_WIDTH;
 
         let comment = display::Comment::new(comment, 0)
-            .wrap_mode(display::WrapMode::SingleLine);
+            .wrap_mode(display::WrapMode::SingleLine)
+            .colored(colored);
         write!(
             f,
             "{:>indent$}{BULLET}case {}: {state:<STATE_WIDTH$}{new} \
