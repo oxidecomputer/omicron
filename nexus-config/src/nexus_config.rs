@@ -1100,6 +1100,11 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// A toggle to disable garbage collection of fault management sitreps
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub sitrep_gc_disable: bool,
     /// period (in seconds) for periodic activations of the background task that
     /// prunes the oldest entries from the fault management sitrep history
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1126,6 +1131,7 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            sitrep_gc_disable: false,
             // This need not be activated very frequently, as it's triggered
             // whenever a new sitrep is committed and by the analysis task when
             // nearing capacity limits, so periodic activation is only a
@@ -1735,6 +1741,7 @@ mod test {
                             config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_gc_disable: false,
                             sitrep_history_prune_period_secs:
                                 Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),

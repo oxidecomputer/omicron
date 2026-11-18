@@ -32,7 +32,6 @@ use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::TypedUuidKind;
@@ -178,9 +177,8 @@ async fn test_omdb_success_cases() {
             .customize_nexus_config(&|config| {
                 config.pkg.background_tasks.sp_ereport_ingester.disable = false;
                 // `fm_sitrep_gc` would delete the example sitrep inserted
-                // below, so don't activate it periodically.
-                config.pkg.background_tasks.fm.sitrep_gc_period_secs =
-                    Duration::from_secs(86_400);
+                // below.
+                config.pkg.background_tasks.fm.sitrep_gc_disable = true;
             })
             .start::<omicron_nexus::Server>()
             .await;
@@ -533,19 +531,6 @@ async fn test_omdb_success_cases() {
         r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
     );
 
-    // The `fm_sitrep_gc` task's orphan counts are racy. When two `fm_analysis`
-    // activations overlap (e.g. the boot-time activation and the explicit drive
-    // above), both can insert a first sitrep before either is made current; the
-    // loser's sitrep and its stashed analysis report are inserted but orphaned
-    // (see `DataStore::fm_sitrep_insert`'s `ParentNotCurrent` path), and a
-    // later GC pass deletes them. Whether that race happened before this
-    // snapshot is timing-dependent, so redact both counts. Other child tables
-    // stay zero: with no faults, orphaned sitreps carry no cases, facts,
-    // ereports, or bundles.
-    redactor
-        .field("orphaned sitreps deleted:", r"\d+")
-        .field("orphaned fm_sitrep_analysis_report rows deleted:", r"\d+");
-
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.
     // These redactions work around the issue described in
@@ -593,8 +578,7 @@ async fn test_omdb_success_cases() {
     }
 
     // The sitrep that Nexus produced has no cases, so also show one that
-    // does. `fm_sitrep_gc` still runs when the current sitrep changes, which
-    // happens during the setup above, so this is done last.
+    // does.
     let example_sitrep_id =
         insert_example_sitrep(&opctx, datastore).await.to_string();
     let p = postgres_url.clone();
@@ -984,7 +968,7 @@ async fn insert_example_sitrep(
     // Cases and their contents are displayed in ID order, so the IDs are
     // fixed to keep the output stable.
     fn id<T: TypedUuidKind>(n: u128) -> TypedUuid<T> {
-        TypedUuid::from_untyped_uuid(Uuid::from_u128(n))
+        TypedUuid::from_u128(n)
     }
 
     let sitrep_id: SitrepUuid = id(1);
@@ -992,9 +976,10 @@ async fn insert_example_sitrep(
     let now = chrono::Utc::now();
 
     // Reading back a case's ereports requires that they exist in the
-    // `ereport` table.
+    // `ereport` table. No diagnosis engine consumes these classes.
     let restart_id = id(3);
     let collector_id = id(4);
+    let rack_id = id(5);
     let reporter =
         Reporter::Sp { sp_type: nexus_types::inventory::SpType::Sled, slot: 7 };
     let ereport_data = |class: &str| EreportData {
@@ -1004,16 +989,17 @@ async fn insert_example_sitrep(
         report: serde_json::json!({}),
     };
     let disk_ereport = (Ena(1), ereport_data("ereport.example.disk"));
-    let psu_ereport = (Ena(2), ereport_data("ereport.example.psu"));
+    let zpool_ereport = (Ena(2), ereport_data("ereport.example.zpool"));
+    let psu_ereport = (Ena(3), ereport_data("ereport.example.psu"));
     datastore
         .ereports_insert(
             opctx,
             restart_id,
             now,
             collector_id,
-            id(5),
+            rack_id,
             reporter,
-            [disk_ereport.clone(), psu_ereport.clone()],
+            [disk_ereport.clone(), zpool_ereport.clone(), psu_ereport.clone()],
         )
         .await
         .expect("inserted ereports");
@@ -1033,7 +1019,7 @@ async fn insert_example_sitrep(
         }
     };
 
-    // An open case with one of everything a case can hold.
+    // An open case with everything a case can hold.
     let disk_case = fm::Case {
         id: id(10),
         metadata: fm::case::Metadata {
@@ -1042,20 +1028,25 @@ async fn insert_example_sitrep(
             de: fm::DiagnosisEngineKind::PhysicalDisk,
             comment: "zpool is degraded".to_string(),
         },
-        ereports: [case_ereport(11, disk_ereport)].into_iter().collect(),
+        ereports: [
+            case_ereport(11, disk_ereport),
+            case_ereport(12, zpool_ereport),
+        ]
+        .into_iter()
+        .collect(),
         facts: [fm::case::Fact {
             metadata: fm::FactMetadata {
-                id: id(12),
+                id: id(13),
                 created_sitrep_id: sitrep_id,
                 comment: "zpool health was observed in inventory".to_string(),
             },
             payload: fm::DiskFact::ZpoolUnhealthy(
                 fm::ZpoolUnhealthyFactPayload {
-                    physical_disk_id: id(13),
-                    zpool_id: id(14),
+                    physical_disk_id: id(14),
+                    zpool_id: id(15),
                     last_seen_health:
                         nexus_types::inventory::ZpoolHealth::Degraded,
-                    observed_in_inv: id(15),
+                    observed_in_inv: id(16),
                     time_observed: now,
                 },
             )
@@ -1064,7 +1055,7 @@ async fn insert_example_sitrep(
         .into_iter()
         .collect(),
         alerts_requested: [fm::case::AlertRequest {
-            id: id(16),
+            id: id(17),
             class: nexus_types::alert::AlertClass::TestFoo,
             version: 0,
             payload: serde_json::json!({}),
@@ -1074,7 +1065,7 @@ async fn insert_example_sitrep(
         .into_iter()
         .collect(),
         support_bundles_requested: [fm::case::SupportBundleRequest {
-            id: id(17),
+            id: id(18),
             requested_sitrep_id: sitrep_id,
             data_selection:
                 nexus_types::support_bundle::BundleDataSelection::all(),

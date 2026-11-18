@@ -1269,6 +1269,10 @@ pub enum SitrepLoadStatus {
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
+    /// If `true`, then sitrep garbage collection has been explicitly disabled
+    /// by the config file.
+    #[serde(default)]
+    pub disabled: bool,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,

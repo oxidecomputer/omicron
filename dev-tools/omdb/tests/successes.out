@@ -933,38 +933,10 @@ task: "fm_rendezvous"
       errors:          0
 
 task: "fm_sitrep_gc"
-  configured period: every 1day
+  configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                                1000
-    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_alert_request rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_case rows deleted:                                                0
-      batches:                                                                    1
-    orphaned fm_ereport_in_case rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_fact_certificate rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_fact_physical_disk rows deleted:                                  0
-      batches:                                                                    1
-    orphaned fm_fact_saga rows deleted:                                           0
-      batches:                                                                    1
-    orphaned fm_fact_smf_service rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_support_bundle_request rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
-      batches:                                                                    1
+    task explicitly disabled by config!
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -1701,38 +1673,10 @@ task: "fm_rendezvous"
       errors:          0
 
 task: "fm_sitrep_gc"
-  configured period: every 1day
+  configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                                1000
-    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_alert_request rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_case rows deleted:                                                0
-      batches:                                                                    1
-    orphaned fm_ereport_in_case rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_fact_certificate rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_fact_physical_disk rows deleted:                                  0
-      batches:                                                                    1
-    orphaned fm_fact_saga rows deleted:                                           0
-      batches:                                                                    1
-    orphaned fm_fact_smf_service rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_support_bundle_request rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
-      batches:                                                                    1
+    task explicitly disabled by config!
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -2797,7 +2741,7 @@ stdout:
                        alert generation: 1
               support bundle generation: 1
     
-    ereports in this sitrep: 2
+    ereports in this sitrep: 3
 
 == CASES =======================================================================
 
@@ -2812,6 +2756,13 @@ stdout:
     * ereport ..........<REDACTED_UUID>...........:1
       // ereport ..........<REDACTED_UUID>...........:1 looks relevant
       class:         ereport.example.disk
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      ..........<REDACTED_UUID>........... <-- this sitrep
+      assignment ID: ..........<REDACTED_UUID>...........
+
+    * ereport ..........<REDACTED_UUID>...........:2
+      // ereport ..........<REDACTED_UUID>...........:2 looks relevant
+      class:         ereport.example.zpool
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      ..........<REDACTED_UUID>........... <-- this sitrep
       assignment ID: ..........<REDACTED_UUID>...........
@@ -2864,8 +2815,8 @@ stdout:
 
     ereports:
     ---------
-    * ereport ..........<REDACTED_UUID>...........:2
-      // ereport ..........<REDACTED_UUID>...........:2 looks relevant
+    * ereport ..........<REDACTED_UUID>...........:3
+      // ereport ..........<REDACTED_UUID>...........:3 looks relevant
       class:         ereport.example.psu
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      ..........<REDACTED_UUID>........... <-- this sitrep

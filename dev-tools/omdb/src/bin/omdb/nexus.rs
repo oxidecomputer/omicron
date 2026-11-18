@@ -4272,6 +4272,7 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
+        disabled,
         orphaned_sitreps_deleted,
         sitrep_metadata_batches,
         batch_size,
@@ -4287,6 +4288,11 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         }
         Ok(status) => status,
     };
+
+    if disabled {
+        println!("    task explicitly disabled by config!");
+        return;
+    }
 
     const BASE_WIDTH: usize = 40;
     const NUM_WIDTH: usize = 4;
