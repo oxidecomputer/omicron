@@ -307,6 +307,8 @@ pub struct EditedSledScalarEdits {
     pub remove_mupdate_override: bool,
     /// Whether the update disposition kind was modified.
     pub update_disposition: bool,
+    /// Whether the wicket SSH auth setting was modified.
+    pub wicket_ssh_auth: bool,
     /// Whether the debug operation to force a Sled Agent generation bump was
     /// set.
     pub debug_force_generation_bump: bool,
@@ -317,14 +319,23 @@ impl EditedSledScalarEdits {
         Self {
             debug_force_generation_bump: false,
             remove_mupdate_override: false,
+            wicket_ssh_auth: false,
             update_disposition: false,
         }
     }
 
     pub fn has_edits(&self) -> bool {
-        self.debug_force_generation_bump
-            || self.remove_mupdate_override
-            || self.update_disposition
+        let Self {
+            remove_mupdate_override,
+            update_disposition,
+            wicket_ssh_auth,
+            debug_force_generation_bump,
+        } = self;
+
+        *debug_force_generation_bump
+            || *remove_mupdate_override
+            || *wicket_ssh_auth
+            || *update_disposition
     }
 }
 
@@ -994,6 +1005,7 @@ impl<'a> BlueprintBuilder<'a> {
                     debug_force_generation_bump,
                     remove_mupdate_override,
                     update_disposition,
+                    wicket_ssh_auth,
                 } = scalar_edits;
                 debug!(
                     self.log, "sled modified in new blueprint";
@@ -1008,6 +1020,7 @@ impl<'a> BlueprintBuilder<'a> {
                     "remove_mupdate_override_modified" =>
                         remove_mupdate_override,
                     "update_disposition_modified" => update_disposition,
+                    "wicket_ssh_auth_modified" => wicket_ssh_auth,
                 );
             } else {
                 debug!(

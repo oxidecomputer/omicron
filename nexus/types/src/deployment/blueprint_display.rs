@@ -63,6 +63,8 @@ pub mod constants {
     pub const CONFIG_GENERATION: &str = "config generation";
     pub const SUBNET: &str = "subnet";
     pub const LAST_ALLOCATED_IP: &str = "last allocated IP";
+    pub const WICKET_SSH_AUTH_GENERATION: &str = "wicket SSH auth generation";
+    pub const WICKET_SSH_ACCESS: &str = "wicket SSH access";
 }
 use constants::*;
 use std::fmt::Display;

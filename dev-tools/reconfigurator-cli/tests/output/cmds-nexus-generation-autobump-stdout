@@ -1193,11 +1193,13 @@ blueprint  58d5e830-0884-47d8-a7cd-b2b3751adeb4
 parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   3
-    subnet:::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP::   fd00:1122:3344:102::a
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   3
+    subnet:::::::::::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::::::::::   fd00:1122:3344:102::a
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------------
@@ -1274,11 +1276,13 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   3
-    subnet:::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP::   fd00:1122:3344:101::9
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   3
+    subnet:::::::::::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::::::::::   fd00:1122:3344:101::9
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------------
@@ -1352,11 +1356,13 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   3
-    subnet:::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP::   fd00:1122:3344:103::9
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   3
+    subnet:::::::::::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::::::::::   fd00:1122:3344:103::9
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------------

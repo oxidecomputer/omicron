@@ -114,6 +114,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -1372,6 +1373,10 @@ impl DataStore {
                     .map(|id| id.into()),
                 host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
                 measurements,
+                // TODO omicron#11821 We should load this from the db, once it
+                // exists. For now every value is set to gen 1, unauth.
+                wicket_ssh_auth:
+                    WicketSshAuth::unauthenticated_initial_generation(),
             };
             let old = sled_configs.insert(s.sled_id.into(), config);
             bail_unless!(

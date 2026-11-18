@@ -61,6 +61,7 @@ use sled_agent_types::disk::OmicronPhysicalDiskConfig;
 use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::WicketSshAuth;
+use sled_agent_types::inventory::WicketSshAuthKind;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -1595,6 +1596,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 host_phase_2,
                 measurements,
                 update_disposition,
+                wicket_ssh_auth,
             } = config;
 
             // Report toplevel sled info
@@ -1606,6 +1608,30 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 (SUBNET, subnet.to_string()),
                 (LAST_ALLOCATED_IP, last_allocated_ip.to_string()),
             ];
+
+            {
+                let WicketSshAuth { generation, kind } = wicket_ssh_auth;
+                rows.push((WICKET_SSH_AUTH_GENERATION, generation.to_string()));
+                rows.push((
+                    WICKET_SSH_ACCESS,
+                    match kind {
+                        WicketSshAuthKind::Unauthenticated => {
+                            "unauthenticated".to_string()
+                        }
+                        WicketSshAuthKind::PublicKeys {
+                            authorized_keys,
+                            allow_support_keys,
+                        } => {
+                            format!(
+                                "authenticated ({} operator keys; \
+                                 support {}allowed",
+                                authorized_keys.len(),
+                                if *allow_support_keys { "" } else { "not " }
+                            )
+                        }
+                    },
+                ));
+            }
 
             if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
@@ -1748,6 +1774,7 @@ pub struct BlueprintSledConfig {
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
     pub measurements: BlueprintMeasurements,
     pub update_disposition: BlueprintSledUpdateDisposition,
+    pub wicket_ssh_auth: WicketSshAuth,
 }
 
 /// Controls a sled's availability for provisioning and whether its migratable
@@ -1913,11 +1940,7 @@ impl BlueprintSledConfig {
             host_phase_2: self.host_phase_2.into(),
             measurements: self.measurements.into(),
             update_disposition: self.update_disposition.into(),
-            // TODO-correctness This should come from Nexus once we add an API
-            // for the operator to control it; for now, fill in the same default
-            // used by RSS.
-            wicket_ssh_auth: WicketSshAuth::unauthenticated_initial_generation(
-            ),
+            wicket_ssh_auth: self.wicket_ssh_auth,
         }
     }
 

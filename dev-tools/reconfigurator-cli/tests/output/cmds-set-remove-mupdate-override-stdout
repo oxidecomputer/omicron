@@ -50,11 +50,13 @@ blueprint  7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 parent:    df06bb57-ad42-4431-9206-abff322896c7
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   2
-    subnet:::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP::   fd00:1122:3344:102::8
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   2
+    subnet:::::::::::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP::::::::::   fd00:1122:3344:102::8
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------
@@ -114,11 +116,13 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   2
-    subnet:::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP::   fd00:1122:3344:101::7
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   2
+    subnet:::::::::::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::::::::::   fd00:1122:3344:101::7
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------
@@ -180,6 +184,8 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:106::/64
     last allocated IP::::::::::::   fd00:1122:3344:106::7
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -242,6 +248,8 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:104::/64
     last allocated IP::::::::::::   fd00:1122:3344:104::4
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -294,6 +302,8 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:105::/64
     last allocated IP::::::::::::   fd00:1122:3344:105::4
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -346,6 +356,8 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::::::::::::   fd00:1122:3344:103::4
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -398,6 +410,8 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:107::/64
     last allocated IP::::::::::::   fd00:1122:3344:107::4
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -847,6 +861,8 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     config generation::::::::::::   2
     subnet:::::::::::::::::::::::   fd00:1122:3344:108::/64
     last allocated IP::::::::::::   fd00:1122:3344:108::2
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
 
     host phase 2 contents:
@@ -889,6 +905,8 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::::::::::::   fd00:1122:3344:102::8
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
 
     host phase 2 contents:
@@ -949,11 +967,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   2
-    subnet:::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP::   fd00:1122:3344:101::7
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   2
+    subnet:::::::::::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP::::::::::   fd00:1122:3344:101::7
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------
@@ -1015,6 +1035,8 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     config generation::::::::::::   4
     subnet:::::::::::::::::::::::   fd00:1122:3344:106::/64
     last allocated IP::::::::::::   fd00:1122:3344:106::7
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -1077,6 +1099,8 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     config generation::::::::::::   3
     subnet:::::::::::::::::::::::   fd00:1122:3344:104::/64
     last allocated IP::::::::::::   fd00:1122:3344:104::4
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     host phase 2 contents:
@@ -1129,6 +1153,8 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     config generation::::::::::::   4
     subnet:::::::::::::::::::::::   fd00:1122:3344:105::/64
     last allocated IP::::::::::::   fd00:1122:3344:105::4
+    wicket SSH auth generation:::   1
+    wicket SSH access::::::::::::   unauthenticated
     will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
 
     host phase 2 contents:
@@ -1176,11 +1202,13 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
-    state::::::::::::::   active
-    update disposition:   available (generation 1)
-    config generation::   4
-    subnet:::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP::   fd00:1122:3344:103::4
+    state::::::::::::::::::::::   active
+    update disposition:::::::::   available (generation 1)
+    config generation::::::::::   4
+    subnet:::::::::::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP::::::::::   fd00:1122:3344:103::4
+    wicket SSH auth generation:   1
+    wicket SSH access::::::::::   unauthenticated
 
     host phase 2 contents:
     ------------------------
