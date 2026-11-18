@@ -906,6 +906,10 @@ impl super::Nexus {
         let (.., authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Delete).await?;
 
+        // First, set the instance record's intended state to `Destroyed`. This
+        // indicates to other parts of the system that we received a request to
+        // delete the instance, even if other parts of the destroy operation
+        // fail.
         self.db_datastore
             .instance_set_intended_state(
                 opctx,
@@ -1045,17 +1049,20 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let mut state = self
-            .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
-            .await?;
-        state.instance = self
-            .db_datastore
+        // First, set the instance record's intended state to `Running`. This
+        // indicates to other parts of the system that the instance is intended
+        // to be running, even if other parts of the start operation fail.
+        self.db_datastore
             .instance_set_intended_state(
                 opctx,
                 &authz_instance,
                 IntendedState::Running,
             )
+            .await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
         if let Err(e) = self
@@ -1102,17 +1109,20 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let mut state = self
-            .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
-            .await?;
-        state.instance = self
-            .db_datastore
+        // First, set the instance record's intended state to `Runninng`. This
+        // indicates to other parts of the system that we received a request to
+        // start the instance, even if other parts of the start operation fail.
+        self.db_datastore
             .instance_set_intended_state(
                 opctx,
                 &authz_instance,
                 IntendedState::Running,
             )
+            .await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
         match instance_start_allowed(&self.log, &state, reason)? {
@@ -1152,17 +1162,20 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let mut state = self
-            .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
-            .await?;
-        state.instance = self
-            .db_datastore
+        // First, set the instance record's intended state to `Stopped`. This
+        // indicates to other parts of the system that we received a request to
+        // stop the instance, even if other parts of the stop operation fail.
+        self.db_datastore
             .instance_set_intended_state(
                 opctx,
                 &authz_instance,
                 IntendedState::Stopped,
             )
+            .await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
         if let Err(e) = self

@@ -138,7 +138,6 @@ pub mod inventory {
     pub use crate::v1::inventory::BootImageHeader;
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
     pub use crate::v1::inventory::InventoryDataset;
-    pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
@@ -214,7 +213,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v57::inventory::Inventory;
+    pub use crate::v65::inventory::Inventory;
+    pub use crate::v65::inventory::InventoryDisk;
 
     pub use crate::v62::inventory::SledRegistrationInfo;
 
@@ -299,8 +299,9 @@ pub mod trust_quorum {
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 
-    pub use crate::v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
     pub use crate::v61::trust_quorum::TrustQuorumNetworkConfigResponse;
+
+    pub use crate::v64::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 }
 
 pub mod uplink {
