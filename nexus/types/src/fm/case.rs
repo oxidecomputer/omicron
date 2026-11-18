@@ -51,6 +51,14 @@ impl Case {
     ) -> DisplayCase<'_> {
         DisplayCase { case: self, indent, sitrep_id, colored: false }
     }
+
+    pub fn display_summary(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayCaseSummary<'_> {
+        DisplayCaseSummary { case: self, indent, sitrep_id, colored: false }
+    }
 }
 
 impl fmt::Display for Case {
@@ -374,10 +382,10 @@ impl DisplayCase<'_> {
     }
 }
 
+const BULLET: &str = "* ";
+
 impl fmt::Display for DisplayCase<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const BULLET: &str = "* ";
-
         let &Self {
             case:
                 Case {
@@ -597,6 +605,74 @@ impl fmt::Display for DisplayCase<'_> {
 
         writeln!(f)?;
 
+        Ok(())
+    }
+}
+
+/// Displays a summary of a [`Case`] as a single line, as returned by
+/// [`Case::display_summary`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayCaseSummary<'a> {
+    case: &'a Case,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayCaseSummary<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+impl fmt::Display for DisplayCaseSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self {
+            case:
+                Case {
+                    id,
+                    metadata,
+                    ereports: _,
+                    alerts_requested: _,
+                    support_bundles_requested: _,
+                    facts: _,
+                },
+            indent,
+            sitrep_id,
+            colored,
+        } = self;
+        let Metadata { created_sitrep_id, closed_sitrep_id, de, comment } =
+            metadata;
+
+        let styles = display::Styles::new(colored);
+
+        const OPEN: &str = "open";
+        const CLOSED: &str = "closed";
+        const STATE_WIDTH: usize = display::const_max_len(&[OPEN, CLOSED]);
+
+        let state = if closed_sitrep_id.is_some() { CLOSED } else { OPEN };
+        let new = if let Some(ref this_sitrep) = sitrep_id {
+            if created_sitrep_id == this_sitrep {
+                styles.annotation().style(" new")
+            } else {
+                styles.normal().style(" old")
+            }
+        } else {
+            styles.normal().style("")
+        };
+        let de_width = DiagnosisEngineKind::MAX_WIDTH;
+
+        let comment = display::Comment::new(comment, 0)
+            .wrap_mode(display::WrapMode::SingleLine);
+        write!(
+            f,
+            "{:>indent$}{BULLET}case {}: {state:<STATE_WIDTH$}{new} \
+             {de:<de_width$} {comment}",
+            "",
+            styles.heading().style(format_args!("{id}")),
+        )?;
         Ok(())
     }
 }

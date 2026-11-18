@@ -328,6 +328,7 @@ async fn test_omdb_success_cases() {
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
         &["db", "sitrep", "show", "current"],
+        &["db", "sitrep", "show", "current", "--all-cases"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         // Hide "currently executing" to avoid a test flake in case a task is
@@ -583,15 +584,32 @@ async fn test_omdb_success_cases() {
         insert_example_sitrep(&opctx, datastore).await.to_string();
     let mut example_redactor = Redactor::default();
     example_redactor.uuids(false);
-    let p = postgres_url.clone();
-    do_run_extra(
-        &mut output,
-        move |exec| exec.env("OMDB_DB_URL", &p),
-        &cmd_path,
+    // The open physical disk case in `insert_example_sitrep`.
+    let example_case_id = Uuid::from_u128(10).to_string();
+    let sitrep_show_args: &[&[&str]] = &[
         &["db", "sitrep", "show", &example_sitrep_id],
-        &example_redactor,
-    )
-    .await;
+        &["db", "sitrep", "show", &example_sitrep_id, "--all-cases"],
+        &[
+            "db",
+            "sitrep",
+            "show",
+            &example_sitrep_id,
+            "--case",
+            &example_case_id,
+        ],
+    ];
+
+    for args in sitrep_show_args {
+        let p = postgres_url.clone();
+        do_run_extra(
+            &mut output,
+            move |exec| exec.env("OMDB_DB_URL", &p),
+            &cmd_path,
+            args,
+            &example_redactor,
+        )
+        .await;
+    }
 
     output.assert_contents("tests/successes.out");
 

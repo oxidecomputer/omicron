@@ -195,6 +195,38 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "current", "--all-cases"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+                                     ID: ..........<REDACTED_UUID>........... (sitrep)
+                       parent sitrep ID: None
+                             created by: ..........<REDACTED_UUID>...........
+                             created at: <REDACTED_TIMESTAMP>
+                                comment: N/A
+
+                                 status: this is the current sitrep!
+                                version: v1
+                        made current at: <REDACTED_TIMESTAMP>
+
+== DIAGNOSIS INPUTS ============================================================
+                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
+                             started at: <REDACTED_TIMESTAMP>
+                            finished at: <REDACTED_TIMESTAMP>
+      next inventory minimum start time: <REDACTED_TIMESTAMP>
+    
+    rendezvous resource generation numbers:
+                       alert generation: 1
+              support bundle generation: 1
+    
+    ereports in this sitrep: 0
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["mgs", "inventory"]
 termination: Exited(0)
 ---------------------------------------------
@@ -2744,6 +2776,47 @@ stdout:
     ereports in this sitrep: 3
 
 == CASES =======================================================================
+1 open, 1 closed
+
+* case 00000000-0000-0000-0000-00000000000a: open   new physical_disk // zpool is degraded
+* case 00000000-0000-0000-0000-000000000014: closed old power_shelf   // PSU was reseated
+
+(i) to view details for a single case, use:
+    $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --case <CASE_ID>
+(i) or, to show details for all cases in this sitrep, use:
+    $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --all-cases
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001", "--all-cases"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+                                     ID: 00000000-0000-0000-0000-000000000001 (sitrep)
+                       parent sitrep ID: None
+                             created by: 00000000-0000-0000-0000-000000000004
+                             created at: <REDACTED_TIMESTAMP>
+                                comment:
+      an example sitrep with cases
+
+                                 status: not committed to the sitrep history
+
+== DIAGNOSIS INPUTS ============================================================
+                inventory collection ID: 00000000-0000-0000-0000-00000000001e (collection)
+      note: this collection no longer exists (perhaps it has been pruned?)
+      next inventory minimum start time: <REDACTED_TIMESTAMP>
+    
+    rendezvous resource generation numbers:
+                       alert generation: 1
+              support bundle generation: 1
+    
+    ereports in this sitrep: 2
+
+== CASES =======================================================================
 
   * case 00000000-0000-0000-0000-00000000000a
     =========================================
@@ -2759,6 +2832,7 @@ stdout:
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-00000000000b
+<<<<<<< HEAD
 
     * ereport 00000000-0000-0000-0000-000000000003:2
       // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
@@ -2766,26 +2840,43 @@ stdout:
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-00000000000c
+=======
+>>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
 
 
     facts:
     ------
+<<<<<<< HEAD
     * fact 00000000-0000-0000-0000-00000000000d
+=======
+    * fact 00000000-0000-0000-0000-00000000000c
+>>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       // zpool health was observed in inventory
       added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
       * payload:
         * engine: physical_disk
         * kind: zpool_unhealthy
         * last_seen_health: degraded
+<<<<<<< HEAD
         * observed_in_inv: 00000000-0000-0000-0000-000000000010
         * physical_disk_id: 00000000-0000-0000-0000-00000000000e
         * time_observed: <REDACTED_TIMESTAMP>
         * zpool_id: 00000000-0000-0000-0000-00000000000f
+=======
+        * observed_in_inv: 00000000-0000-0000-0000-00000000000f
+        * physical_disk_id: 00000000-0000-0000-0000-00000000000d
+        * time_observed: <REDACTED_TIMESTAMP>
+        * zpool_id: 00000000-0000-0000-0000-00000000000e
+>>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
 
 
     alerts requested:
     -----------------
+<<<<<<< HEAD
     * alert 00000000-0000-0000-0000-000000000011
+=======
+    * alert 00000000-0000-0000-0000-000000000010
+>>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       // tell someone about the zpool
       class:        test.foo, v0
       requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
@@ -2793,7 +2884,11 @@ stdout:
 
     support bundles requested:
     -------------------------
+<<<<<<< HEAD
     * bundle 00000000-0000-0000-0000-000000000012
+=======
+    * bundle 00000000-0000-0000-0000-000000000011
+>>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       // collect everything
       requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
       data:
@@ -2815,12 +2910,80 @@ stdout:
 
     ereports:
     ---------
+<<<<<<< HEAD
     * ereport 00000000-0000-0000-0000-000000000003:3
       // ereport 00000000-0000-0000-0000-000000000003:3 looks relevant
+=======
+    * ereport 00000000-0000-0000-0000-000000000003:2
+      // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
+>>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       class:         ereport.example.psu
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-000000000015
+
+
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001", "--case", "00000000-0000-0000-0000-00000000000a"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+case 00000000-0000-0000-0000-00000000000a
+=========================================
+// zpool is degraded
+diagnosis engine: physical_disk
+opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+ereports:
+---------
+* ereport 00000000-0000-0000-0000-000000000003:1
+  // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
+  class:         ereport.example.disk
+  reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+  added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+  assignment ID: 00000000-0000-0000-0000-00000000000b
+
+
+facts:
+------
+* fact 00000000-0000-0000-0000-00000000000c
+  // zpool health was observed in inventory
+  added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+  * payload:
+    * engine: physical_disk
+    * kind: zpool_unhealthy
+    * last_seen_health: degraded
+    * observed_in_inv: 00000000-0000-0000-0000-00000000000f
+    * physical_disk_id: 00000000-0000-0000-0000-00000000000d
+    * time_observed: <REDACTED_TIMESTAMP>
+    * zpool_id: 00000000-0000-0000-0000-00000000000e
+
+
+alerts requested:
+-----------------
+* alert 00000000-0000-0000-0000-000000000010
+  // tell someone about the zpool
+  class:        test.foo, v0
+  requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+
+support bundles requested:
+-------------------------
+* bundle 00000000-0000-0000-0000-000000000011
+  // collect everything
+  requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+  data:
+    - reconfigurator
+    - host_info(all)
+    - sled_cubby_info
+    - sp_dumps
+    - sp_components
+    - ereports(none)
 
 
 
