@@ -70,13 +70,13 @@ impl<'a> BlueprintDiffSummary<'a> {
             target_release_minimum_generation,
             nexus_generation,
             external_networking_generation,
+            internal_dns_version,
+            external_dns_version,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
             parent_blueprint_id: _,
             reflects_collection: _,
-            internal_dns_version: _,
-            external_dns_version: _,
             cockroachdb_fingerprint: _,
             cockroachdb_setting_preserve_downgrade: _,
             oximeter_read_version: _,
@@ -130,6 +130,20 @@ impl<'a> BlueprintDiffSummary<'a> {
         // sleds also, but it doesn't hurt to double check.)
         if external_networking_generation.before
             != external_networking_generation.after
+        {
+            return true;
+        }
+
+        // Did either DNS generation change?
+        //
+        // The target blueprint must reflect the latest DNS generations in order
+        // for blueprint execution to update DNS at all, even in response to
+        // non-blueprint changes (e.g., scrimlets moving around).  Thus,
+        // blueprints must be considered different if the DNS generations are
+        // differenet.  See the comments in
+        // `nexus_reconfigurator_execution::dns` for details.
+        if internal_dns_version.before != internal_dns_version.after
+            || external_dns_version.before != external_dns_version.after
         {
             return true;
         }

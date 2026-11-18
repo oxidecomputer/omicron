@@ -78,6 +78,7 @@ progenitor::generate_api!(
         SledUpdateDispositionChange = nexus_types::deployment::planning_report::SledUpdateDispositionChange,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
+        TrustQuorumMembers = trust_quorum_types::membership::TrustQuorumMembers,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,

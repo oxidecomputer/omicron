@@ -27,7 +27,10 @@ use dropshot::WhichPage;
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
-use dropshot::{WebsocketChannelResult, WebsocketConnection};
+use dropshot::{
+    WebsocketChannelResult, WebsocketConnection, WebsocketEndpointResult,
+    WebsocketUpgrade,
+};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
@@ -6635,11 +6638,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_abort(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<path_params::RackPath>,
+        query_params: Query<rack::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let rack_id =
                 RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
-            let status = nexus.tq_abort_latest_config(&opctx, rack_id).await?;
+            let epoch = query_params.into_inner().version.map(|v| Epoch(v.0));
+            let status = nexus.tq_abort_config(&opctx, rack_id, epoch).await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await
@@ -6732,6 +6737,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
+    }
+
+    async fn rack_support_shell_tunnel(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::RackPath>,
+        upgrade: WebsocketUpgrade,
+    ) -> WebsocketEndpointResult {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            nexus
+                .support_shell_tunnel(
+                    &opctx,
+                    RackUuid::from_untyped_uuid(path.rack_id),
+                    upgrade,
+                )
+                .await
+        })
+        .await
     }
 
     // This request isn't currently paginated. The query is somewhat complex
@@ -6982,7 +7005,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|d| UnadoptedPhysicalDisk {
                     sled_id: d.sled_id.into(),
-                    slot: d.slot,
+                    slot: d.pcie_slot,
                     variant: d.variant.into(),
                     disk_id: PhysicalDiskManufacturerIdentity {
                         vendor: d.vendor,
