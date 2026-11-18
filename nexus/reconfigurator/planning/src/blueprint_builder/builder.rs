@@ -3818,4 +3818,53 @@ pub mod test {
 
         logctx.cleanup_successful();
     }
+
+    /// Test that a change to either DNS generation counts as a meaningful
+    /// change in the diff.
+    #[test]
+    fn test_dns_generation_change_diff() {
+        static TEST_NAME: &str = "builder_dns_generation_change_diff";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+
+        let (_, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let internal1 = blueprint1.internal_dns_version;
+        let external1 = blueprint1.external_dns_version;
+
+        // Each case gives the internal and external DNS generations for a
+        // child blueprint, along with whether the child should be considered
+        // changed from its parent.  Nothing else about the child changes.
+        let cases = [
+            (internal1, external1, false),
+            (internal1.next(), external1, true),
+            (internal1, external1.next(), true),
+            (internal1.next(), external1.next(), true),
+        ];
+        for (internal2, external2, expected) in cases {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &blueprint1,
+                ReflectsCollection::Indeterminate,
+                TEST_NAME,
+                rng.next_planner_rng(),
+            )
+            .expect("built blueprint builder");
+            builder.set_internal_dns_version(internal2);
+            builder.set_external_dns_version(external2);
+            let blueprint2 = builder.build(BlueprintSource::Test);
+
+            let diff = blueprint2.diff_since_blueprint(&blueprint1);
+            assert_eq!(
+                diff.has_changes(),
+                expected,
+                "unexpected result from has_changes() \
+                 (internal DNS {internal1} -> {internal2}, \
+                 external DNS {external1} -> {external2}):\n{}",
+                diff.display(),
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
 }
