@@ -2174,7 +2174,7 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
-status for operators: Waiting for sled to be evacuated in preparation for update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1): marking sled for evacuation
+status for operators: Evacuating instances from sled in preparation for update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1): marking sled for evacuation
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
