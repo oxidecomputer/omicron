@@ -128,7 +128,14 @@ impl TryFrom<i64> for BootStorageUnit {
 #[derive(Debug)]
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
-    /// `Err` if the disk bays could not be read at all this time.
+    /// The bays which have been observed by this poll. Note that transient
+    /// errors, or errors with individual bays, may cause partial information
+    /// to be observed. Therefore, we translate this "point-in-time" view into
+    /// a "usable" view of disks later, in `resolve_bays`.
+    ///
+    /// See the `disk_bay` module docs for more details.
+    ///
+    /// `Err` only if disk bays could not be read at all this time.
     bays: Result<Vec<PolledBay>, Error>,
 }
 

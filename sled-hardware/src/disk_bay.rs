@@ -7,15 +7,19 @@
 //! On an Oxide sled the hardware topology (libtopo) is the source of truth
 //! for which bays exist and what sits behind each one.
 //!
-//! This module describes what can exist in disk bays, and provides utilities
-//! for:
-//! - combining that with auxiliary information (e.g. NVMe info in
-//!   `describe_bay`),
-//! - deciding when to update disk/bay information, based on recently-polled
-//!   information (in `resolve_bays`). Note that this is slightly more
-//!   complicated than "show the most recent polled info" - e.g., if we fail to
-//!   determine what exists in a bay, we may want to be cautious saying
-//!   "the disk which was previously there is gone".
+//! Each hardware poll becomes the reported bays in two steps:
+//!
+//! 1. The topology is read into `ObservedBay`s, and `describe_bay`
+//!    combines each one with what libnvme says about its controller, giving a
+//!    `PolledBay`. A bay that cannot be described is `PolledBay::Unreadable`.
+//!    The goal for this step is to describe "what can we see from the
+//!    hardware, right now?"
+//! 2. `resolve_bays` merges the poll with the previous view. A disk stays
+//!    in the view until a poll reads its bay and finds it gone.
+//!    The goal for this step is a stable view of the world: difficulties
+//!    scanning topology/NVMe information shouldn't cause flapping (e.g., a
+//!    failure to read a disk doesn't definitively mean a disk no longer
+//!    exists).
 
 // The observed types below are only produced on illumos.
 #![cfg_attr(not(target_os = "illumos"), allow(dead_code))]
