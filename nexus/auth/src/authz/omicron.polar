@@ -468,6 +468,20 @@ resource TargetReleaseConfig {
 has_relation(fleet: Fleet, "parent_fleet", resource: TargetReleaseConfig)
 	if resource.fleet = fleet;
 
+# Describes the policy for reading and modifying the wicket SSH auth settings
+resource WicketSshAuth {
+	permissions = [
+	    "read",          # read the wicket SSH auth settings
+	    "modify",        # change the wicket SSH auth settings
+	];
+
+	relations = { parent_fleet: Fleet };
+	"read" if "viewer" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", resource: WicketSshAuth)
+	if resource.fleet = fleet;
+
 # Describes the policy for accessing fault management configuration
 resource FmConfig {
 	permissions = [
