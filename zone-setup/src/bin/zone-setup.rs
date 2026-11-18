@@ -25,6 +25,7 @@ use std::io::Write as _;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
 use std::path::PathBuf;
+use std::time::SystemTime;
 use uzers::{get_group_by_name, get_user_by_name};
 use zone_setup::switch_zone_user::SwitchZoneUser;
 
@@ -308,11 +309,26 @@ async fn chrony_setup(
     generate_chrony_config(args, log)?;
 
     // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
-    // be added to the system's /etc/logadm.conf. Unfortunately, the service
-    // which does this - system/logadm-upgrade - only processes files with mode
-    // 444 and root:sys ownership so we need to adjust things here (until
-    // omicron package supports including ownership and permissions in the
-    // generated tar files).
+    // be added to the system's /etc/logadm.conf. The service which does this,
+    // logadm-upgrade, skips fragments older than /etc/logadm.conf. The zone
+    // overlay replaces that file after the fragment is installed, so ensure
+    // the fragment is newer by bumping its mtime.
+    //
+    // Open the fragment read-only: once it has mode 444 it can't be opened
+    // for writing, because this service runs without the file_dac_write
+    // privilege. A file's owner can set its mtime whatever its mode.
+    OpenOptions::new()
+        .read(true)
+        .open(LOGADM_CONFIG_FILE)
+        .and_then(|file| file.set_modified(SystemTime::now()))
+        .with_context(|| {
+            format!("failed to update mtime of {LOGADM_CONFIG_FILE}")
+        })?;
+
+    // Unfortunately, logadm-upgrade also only processes files with mode 444
+    // and root:sys ownership so we need to adjust things here (until omicron
+    // package supports including ownership and permissions in the generated
+    // tar files).
     info!(
         log, "Setting mode 444 and root:sys ownership to logadm fragment file";
         "logadm config" => ?LOGADM_CONFIG_FILE,
