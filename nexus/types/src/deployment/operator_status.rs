@@ -60,7 +60,7 @@ impl fmt::Display for OperatorStatus {
             }) => {
                 write!(
                     f,
-                    "Waiting for sled to be evacuated in preparation for \
+                    "Evacuating instances from sled in preparation for \
                      update (sled {sled_id}, baseboard {baseboard_id}): \
                      {progress}",
                 )
@@ -85,12 +85,16 @@ impl fmt::Display for OperatorStatus {
                 if kinds.is_empty() {
                     write!(
                         f,
-                        "Waiting for a zone update to finish \
+                        "Waiting for a control plane zone update to finish \
                          (details unavailable)"
                     )
                 } else {
                     let kinds = kinds.iter().map(|k| k.report_str()).join(", ");
-                    write!(f, "Waiting for a zone update to finish ({kinds})")
+                    write!(
+                        f,
+                        "Waiting for a control plane zone update to finish \
+                         ({kinds})"
+                    )
                 }
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::HandoffSagas) => {
