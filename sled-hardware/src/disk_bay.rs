@@ -56,7 +56,8 @@ impl IdOrdItem for DiskBay {
     id_upcast!();
 }
 
-/// What the hardware topology found behind a bay.
+/// The contents of a disk bay, as reported by the hardware topology and
+/// libnvme.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DiskBayOccupant {
