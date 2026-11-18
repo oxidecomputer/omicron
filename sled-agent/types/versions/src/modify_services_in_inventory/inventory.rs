@@ -10,11 +10,11 @@ use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::SledCpuFamily;
 use std::net::SocketAddrV6;
 
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
+use crate::v1::inventory::SledCpuFamily;
 use crate::v1::inventory::SledRole;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;

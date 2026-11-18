@@ -30,7 +30,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.131'
+NEXTEST_VERSION='0.9.150'
 
 cargo --version
 rustc --version
@@ -101,10 +101,10 @@ export RUSTFLAGS="--cfg tokio_unstable -D warnings"
 export RUSTDOCFLAGS="--document-private-items -D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
-# takes precedence. This path contains oxide specific libraries such as
-# libipcc.
+# takes precedence. These paths contain oxide specific libraries such as
+# libipcc, and the fault management libraries such as libtopo.
 if [[ $target_os == "illumos" ]]; then
-    RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64"
+    RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64:/usr/lib/fm/amd64"
 fi
 export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1

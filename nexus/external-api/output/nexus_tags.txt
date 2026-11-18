@@ -216,6 +216,7 @@ physical_disk_list_adoption_requests     GET      /v1/system/hardware/disk-adopt
 physical_disk_list_unadopted             GET      /v1/system/hardware/disks-unadopted
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
+rack_list_unadopted                      GET      /v1/system/hardware/racks-unadopted
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
@@ -288,6 +289,16 @@ networking_switch_port_settings_view     GET      /v1/system/networking/switch-p
 system_networking_settings_update        PUT      /v1/system/networking/settings
 system_networking_settings_view          GET      /v1/system/networking/settings
 
+API operations found with tag "system/problems"
+OPERATION ID                             METHOD   URL PATH
+problem_alert_list                       GET      /v1/system/problems/{problem_id}/alerts
+problem_causes_list                      GET      /v1/system/problems/{problem_id}/causes
+problem_consequences_list                GET      /v1/system/problems/{problem_id}/consequences
+problem_impact_list                      GET      /v1/system/problems/{problem_id}/impacts
+problem_list                             GET      /v1/system/problems
+problem_support_bundles_list             GET      /v1/system/problems/{problem_id}/support-bundles
+problem_view                             GET      /v1/system/problems/{problem_id}
+
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users
@@ -299,6 +310,10 @@ scim_token_create                        POST     /v1/system/scim/tokens
 scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
 scim_token_list                          GET      /v1/system/scim/tokens
 scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
+silo_certificate_create                  POST     /v1/system/certificates
+silo_certificate_delete                  DELETE   /v1/system/certificates/{certificate}
+silo_certificate_list                    GET      /v1/system/certificates
+silo_certificate_view                    GET      /v1/system/certificates/{certificate}
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers

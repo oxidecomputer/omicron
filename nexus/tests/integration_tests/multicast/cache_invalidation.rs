@@ -182,6 +182,7 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let mut builder = nexus_inventory::CollectionBuilder::new("sled-move-test");
     builder.found_sp_state(
         "test-sp",
+        nexus_test_utils::RACK_UUID,
         SpType::Sled,
         new_slot,
         SpState {
@@ -200,6 +201,10 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let new_collection = builder.build();
 
     // Insert the new inventory collection
+    //
+    // TODO: This is flaky since the background task can kick off an inventory
+    // collection as well. Before enabling this test, fix the flake by disabling
+    // the collection bg task.
     datastore
         .inventory_insert_collection(&opctx, &new_collection)
         .await
@@ -449,6 +454,7 @@ async fn test_cache_ttl_behavior() {
         nexus_inventory::CollectionBuilder::new("ttl-refresh-test");
     builder.found_sp_state(
         "test-sp",
+        nexus_test_utils::RACK_UUID,
         SpType::Sled,
         new_slot,
         SpState {
@@ -467,6 +473,10 @@ async fn test_cache_ttl_behavior() {
     let new_collection = builder.build();
 
     // Insert the new inventory collection
+    //
+    // TODO: This is flaky since the background task can kick off an inventory
+    // collection as well. Before enabling this test, fix the flake by disabling
+    // the collection bg task.
     datastore
         .inventory_insert_collection(&opctx, &new_collection)
         .await

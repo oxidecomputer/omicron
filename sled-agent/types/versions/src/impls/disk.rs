@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::latest::disk::CompressionAlgorithm;
-use crate::latest::disk::DiskStateRequested;
 use crate::latest::disk::DiskVariant;
 use crate::latest::disk::GzipLevel;
 use crate::latest::disk::M2Slot;
@@ -11,18 +10,6 @@ use anyhow::bail;
 use omicron_common::zpool_name::ZpoolKind;
 use std::fmt;
 use std::str::FromStr;
-
-impl DiskStateRequested {
-    /// Returns whether the requested state is attached to an Instance or not.
-    pub fn is_attached(&self) -> bool {
-        match self {
-            DiskStateRequested::Detached => false,
-            DiskStateRequested::Destroyed => false,
-            DiskStateRequested::Faulted => false,
-            DiskStateRequested::Attached(_) => true,
-        }
-    }
-}
 
 impl M2Slot {
     /// Flip from `A` to `B` or vice versa.
@@ -81,8 +68,9 @@ impl TryFrom<i64> for M2Slot {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
-            // Gimlet should have 2 M.2 drives: drive A is assigned slot 17, and
-            // drive B is assigned slot 18.
+            // Gimlet and Cosmo have two M.2 drives. The value here is the
+            // PCIe physical slot number of the bridge above the drive:
+            // drive A is behind slot 0x11 and drive B behind slot 0x12.
             17 => Ok(Self::A),
             18 => Ok(Self::B),
             _ => bail!("unexpected M.2 slot {value}"),

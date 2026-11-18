@@ -21,6 +21,7 @@ use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolType;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
@@ -60,6 +61,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use ref_cast::RefCast;
 use sled_agent_types::inventory::ZoneKind;
 use slog::debug;
@@ -294,7 +296,7 @@ impl DataStore {
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         identity: IdentityMetadataCreateParams,
         allocation: FloatingIpAllocation,
     ) -> CreateResult<ExternalIp> {
@@ -1121,7 +1123,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .filter(dsl::time_deleted.is_null())
         .select(FloatingIp::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -1708,7 +1710,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -1780,7 +1782,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -1965,7 +1967,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -2037,7 +2039,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -2261,7 +2263,7 @@ mod tests {
                 }),
                 description: has_description.then(|| format!("eip {i}")),
                 parent_id: has_parent.then(Uuid::new_v4),
-                project_id: has_project.then(Uuid::new_v4),
+                project_id: has_project.then(|| ProjectUuid::new_v4().into()),
                 is_service,
                 kind,
                 state,
@@ -2474,7 +2476,7 @@ mod tests {
             ip: "10.0.0.1".parse().unwrap(),
             first_port: 0.try_into().unwrap(),
             last_port: 10.try_into().unwrap(),
-            project_id: Some(Uuid::new_v4()),
+            project_id: Some(ProjectUuid::new_v4().into()),
             state: IpAttachState::Attached,
             is_probe: false,
         };
@@ -2511,7 +2513,7 @@ mod tests {
         let eip = ExternalIp {
             id: Uuid::new_v4(),
             ip: "10.0.0.2".parse().unwrap(),
-            project_id: Some(Uuid::new_v4()),
+            project_id: Some(ProjectUuid::new_v4().into()),
             ..eip
         };
         let result = diesel::insert_into(dsl::external_ip)

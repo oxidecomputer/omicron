@@ -7,6 +7,7 @@ use super::ByteCount;
 use super::DiskState;
 use super::Generation;
 use super::impl_enum_type;
+use crate::DbTypedUuid;
 use crate::unsigned::SqlU8;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -14,6 +15,8 @@ use nexus_db_schema::schema::disk;
 use nexus_types::external_api::disk as disk_types;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use uuid::Uuid;
@@ -49,7 +52,7 @@ pub struct Disk {
     rcgen: Generation,
 
     /// id for the project containing this Disk
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
 
     /// runtime state of the Disk
     pub disk_state: String,
@@ -89,7 +92,7 @@ pub struct Disk {
 impl Disk {
     pub fn new(
         disk_id: Uuid,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         params: &disk_types::DiskCreate,
         block_size: BlockSize,
         runtime_initial: DiskRuntimeState,
@@ -100,7 +103,7 @@ impl Disk {
         Self {
             identity,
             rcgen: omicron_generation_kinds::Generation::new().into(),
-            project_id,
+            project_id: project_id.into(),
             disk_state: runtime_initial.disk_state,
             attach_instance_id: runtime_initial.attach_instance_id,
             state_generation: runtime_initial.generation,
@@ -110,6 +113,10 @@ impl Disk {
             block_size,
             disk_type,
         }
+    }
+
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
     }
 
     pub fn state(&self) -> DiskState {

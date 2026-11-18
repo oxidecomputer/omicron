@@ -625,7 +625,7 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.accepting.remove2(&addr) {
+        if let Some(task_handle) = self.accepting.remove2(addr) {
             info!(
                 self.log,
                 "Established server connection";
@@ -679,7 +679,7 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.connecting.remove2(&addr) {
+        if let Some(task_handle) = self.connecting.remove2(addr) {
             info!(
                 self.log,
                 "Established client connection";
@@ -886,7 +886,7 @@ impl ConnMgr {
         &mut self,
         addr: SocketAddrV6,
     ) -> Option<EstablishedTaskHandle> {
-        if let Some(handle) = self.connecting.remove2(&addr) {
+        if let Some(handle) = self.connecting.remove2(addr) {
             // The connection has not yet completed its handshake
             info!(
                 self.log,
@@ -895,7 +895,7 @@ impl ConnMgr {
             );
             handle.abort();
             None
-        } else if let Some(handle) = self.established.remove3(&addr) {
+        } else if let Some(handle) = self.established.remove3(addr) {
             info!(
                 self.log,
                 "Deleting established connection";
@@ -914,7 +914,7 @@ impl ConnMgr {
     /// Return a `DisconnectedPeer` for the given `task_id`.
     fn on_task_exit(&mut self, task_id: task::Id) -> DisconnectedPeer {
         // We're most likely to find the task as established so we start with that
-        if let Some(handle) = self.established.remove2(&task_id) {
+        if let Some(handle) = self.established.remove2(task_id) {
             info!(
                 self.log,
                 "Established connection task exited";
@@ -926,14 +926,14 @@ impl ConnMgr {
                 task_id,
                 peer_id: Some(handle.baseboard_id),
             };
-        } else if let Some(handle) = self.accepting.remove1(&task_id) {
+        } else if let Some(handle) = self.accepting.remove1(task_id) {
             info!(
                 self.log,
                 "Accepting task exited";
                 "task_id" => ?task_id,
                 "peer_addr" => %handle.addr()
             );
-        } else if let Some(handle) = self.connecting.remove1(&task_id) {
+        } else if let Some(handle) = self.connecting.remove1(task_id) {
             info!(
                 self.log,
                 "Connecting task exited";

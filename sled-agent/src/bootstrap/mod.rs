@@ -10,6 +10,7 @@ mod maghemite;
 mod pre_server;
 mod pumpkind;
 mod rack_ops;
+pub(crate) mod rack_unlock;
 pub(crate) mod rss_handle;
 pub mod secret_retriever;
 pub mod server;
@@ -17,6 +18,7 @@ mod sprockets_server;
 pub(crate) mod trust_quorum_setup;
 
 pub(crate) use pre_server::BootstrapNetworking;
+pub(crate) use rack_ops::MultirackJoinAccessor;
 pub use rack_ops::RssAccessError;
 use slog_error_chain::InlineErrorChain;
 

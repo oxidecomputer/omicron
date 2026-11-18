@@ -37,6 +37,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use dropshot::{HttpError, HttpResponse};
+use omicron_uuid_kinds::SiloUuid;
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -504,7 +505,7 @@ impl authn::external::SiloUserSilo for ServerContext {
     async fn silo_user_silo(
         &self,
         silo_user_id: SiloUserUuid,
-    ) -> Result<Uuid, authn::Reason> {
+    ) -> Result<SiloUuid, authn::Reason> {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.lookup_silo_for_authn(opctx, silo_user_id).await
     }

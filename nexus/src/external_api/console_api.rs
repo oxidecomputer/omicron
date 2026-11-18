@@ -14,12 +14,13 @@ use dropshot::Body;
 use dropshot::{HttpError, Path, RequestContext};
 use futures::TryStreamExt;
 use http::{HeaderName, HeaderValue, Response, StatusCode};
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::AuthenticationMode;
 use nexus_types::external_api::console;
 use nexus_types::external_api::saml::RelativeUri;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::{DataPageParams, Error, NameOrId};
+use omicron_common::api::external::{DataPageParams, Error};
 use rustix::fs::{Mode, OFlags, open, openat};
 use rustix::io::Errno;
 use serde_urlencoded;
@@ -185,7 +186,8 @@ pub(crate) async fn get_login_url(
         // It might be nice to have some policy for choosing which one is used
         // here.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        let silo_lookup =
+            LookupPath::new(opctx, nexus.datastore()).silo_id(silo.id());
         let idps = nexus
             .identity_provider_list(
                 opctx,

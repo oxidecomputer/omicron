@@ -45,6 +45,7 @@ use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
@@ -67,10 +68,10 @@ fn get_disk_url(name: &str) -> String {
     format!("/v1/disks/{}?project={}", name, PROJECT_NAME)
 }
 
-async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+async fn create_project_and_pool(client: &ClientTestContext) -> ProjectUuid {
     create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
-    project.identity.id
+    ProjectUuid::from_untyped_uuid(project.identity.id)
 }
 
 #[nexus_test]
@@ -392,7 +393,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
@@ -416,7 +420,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -453,7 +460,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -475,7 +485,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -492,7 +505,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
@@ -506,7 +522,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned.to_bytes(), 0);
@@ -549,7 +568,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     time_deleted: None,
                 },
 
-                project_id,
+                project_id: project_id.into(),
                 disk_id: Uuid::new_v4(),
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -711,7 +730,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                     time_deleted: None,
                 },
 
-                project_id,
+                project_id: project_id.into(),
                 disk_id: Uuid::new_v4(),
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -810,7 +829,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                     time_deleted: None,
                 },
 
-                project_id,
+                project_id: project_id.into(),
                 disk_id: Uuid::new_v4(),
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -1024,7 +1043,7 @@ async fn test_create_snapshot_record_idempotent(
             time_deleted: None,
         },
 
-        project_id,
+        project_id: project_id.into(),
         disk_id,
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
@@ -1075,7 +1094,7 @@ async fn test_create_snapshot_record_idempotent(
             time_deleted: None,
         },
 
-        project_id,
+        project_id: project_id.into(),
         disk_id,
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
@@ -1176,7 +1195,7 @@ async fn test_create_snapshot_record_idempotent(
             time_deleted: None,
         },
 
-        project_id,
+        project_id: project_id.into(),
         disk_id,
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),

@@ -29,7 +29,7 @@
 //!
 //! ## Group State Lifecycle
 //! ```text
-//! "Creating"                  → "Active" → "Deleting" → "Deleted" (removed from DB)
+//! "Creating"                  → "Active" → "Deleting" → (row removed)
 //!     ↓                            ↓           ↓
 //!   (saga=external+underlay)  (check+sync)  (cleanup)
 //! ```
@@ -53,19 +53,20 @@
 //! ### DELETING State Transitions
 //! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
 //! |-----------|-------------------------------|-------------------|--------|------------|
-//! | 1 | Success | Success | Delete DB row | "Deleted" (no row) |
+//! | 1 | Success | Success | Delete DB row | N/A (row removed) |
 //! | 2 | Failed | N/A | Log error, retry next pass | "Deleting" (NoChange) |
 //! | 3 | Success | Failed | Log error, retry next pass | "Deleting" (NoChange) |
 //!
-//! Note: "Deleted" is a terminal outcome (the group row no longer exists). All
-//! DPD cleanup happens while in "Deleting"; there are no transitions for
-//! "Deleted" because the reconciler no longer sees the group.
+//! Note: "Deleting" is the terminally stored state. DPD cleanup is attempted
+//! on every reconciler pass while a group is in the "Deleting" state, and
+//! once both the DPD and DB cleanup operations succeed, the row is deleted
+//! for good.
 //!
 //! ## Triggering Events
 //! - **"Creating"**: Instance joins group (implicitly creates if needed) → DB inserts with "Creating" state
 //! - **"Active"**: DPD ensure saga completes successfully → state = "Active"
 //! - **"Deleting"**: Last member leaves group → state = "Deleting" (implicit lifecycle)
-//! - **"Deleted"**: RPW reconciler completes DPD cleanup → removes from DB
+//! - **Row removal**: RPW reconciler completes DPD cleanup → deletes the row
 //!
 //! ## Error Handling
 //! - **Saga failures**: Group stays in "Creating", reconciler retries
@@ -127,7 +128,6 @@ fn dpd_state_matches_sources(
     source_filter: &SourceFilterState,
     group: &MulticastGroup,
 ) -> bool {
-    let dpd_sources = dpd_group.sources.clone();
     let group_ip = group.multicast_ip.ip();
 
     // Expected DPD state based on source filter logic (RFC 4607)
@@ -139,26 +139,21 @@ fn dpd_state_matches_sources(
         Some(&source_filter.specific_sources)
     };
 
-    match (dpd_sources, expected_sources) {
+    match (&dpd_group.sources, expected_sources) {
         (None, None) => true,
         (Some(_), None) => false, // DPD has sources but shouldn't
         (None, Some(_)) => false, // DPD missing sources
         (Some(dpd_srcs), Some(expected)) => {
             // Extract exact IPs from DPD sources
             let mut dpd_ips: Vec<_> = dpd_srcs
-                .into_iter()
+                .iter()
                 .filter_map(|src| match src {
                     dpd_client::types::IpSrc::Exact(ip) => Some(ip),
                     _ => None,
                 })
                 .collect();
-            dpd_ips.sort();
-
-            let mut expected_sorted: Vec<_> =
-                expected.iter().copied().collect();
-            expected_sorted.sort();
-
-            dpd_ips == expected_sorted
+            dpd_ips.sort_unstable();
+            dpd_ips.into_iter().eq(expected.iter())
         }
     }
 }
@@ -360,21 +355,19 @@ impl MulticastGroupReconciler {
         trace!(opctx.log, "found multicast groups"; "count" => groups.len(), "state" => %state);
 
         // Process groups concurrently with configurable parallelism
-        let results = stream::iter(groups)
+        let total_results = groups.len();
+        let mut results = stream::iter(groups)
             .map(|group| async move {
                 let result = self
                     .process_group_state(opctx, &group, dataplane_client)
                     .await;
                 (group, result)
             })
-            .buffer_unordered(self.group_concurrency_limit)
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(self.group_concurrency_limit);
 
         // Handle results with state-appropriate logging and counting
         let mut processed = 0;
-        let total_results = results.len();
-        for (group, result) in results {
+        while let Some((group, result)) = results.next().await {
             match result {
                 Ok(transition) => {
                     // Count successful transitions based on state expectations
@@ -397,7 +390,6 @@ impl MulticastGroupReconciler {
                             StateTransition::StateChanged
                                 | StateTransition::NoChange
                         ),
-                        MulticastGroupState::Deleted => true,
                     };
 
                     if should_count {
@@ -508,35 +500,6 @@ impl MulticastGroupReconciler {
                     .process_active(self, opctx, group, dataplane_client)
                     .await
             }
-            MulticastGroupState::Deleted => {
-                debug!(
-                    opctx.log,
-                    "cleaning up deleted multicast group from local database";
-                    "group_id" => %group.id(),
-                    "group_name" => group.name().as_str()
-                );
-
-                // Try to delete underlay group record if it exists
-                if let Some(underlay_group_id) = group.underlay_group_id {
-                    self.datastore
-                        .underlay_multicast_group_delete(
-                            opctx,
-                            underlay_group_id,
-                        )
-                        .await
-                        .ok();
-                }
-                // Try to delete external group record
-                self.datastore
-                    .multicast_group_delete(
-                        opctx,
-                        MulticastGroupUuid::from_untyped_uuid(group.id()),
-                    )
-                    .await
-                    .ok();
-
-                Ok(StateTransition::StateChanged)
-            }
         }
     }
 
@@ -626,7 +589,7 @@ impl MulticastGroupReconciler {
     ) -> Result<StateTransition, anyhow::Error> {
         debug!(
             opctx.log,
-            "processing external multicast group transition: 'Deleting' → 'Deleted' (switch cleanup)";
+            "processing external multicast group 'Deleting' cleanup (switch teardown)";
             "group_id" => %group.id(),
             "group_name" => group.name().as_str(),
             "multicast_ip" => %group.multicast_ip,

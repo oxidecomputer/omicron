@@ -52,6 +52,8 @@ zeroize.workspace = true
 omicron-passwords.workspace = true
 oxide-update-engine-types.workspace = true
 oxide-update-engine-display.workspace = true
+oxide-versioned-envelope.workspace = true
+wicket-cli-types.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
 wicketd-commission-client.workspace = true
@@ -65,7 +67,6 @@ slog-error-chain.workspace = true
 assert_cmd.workspace = true
 camino-tempfile.workspace = true
 expectorate.workspace = true
-maplit.workspace = true
 proptest.workspace = true
 
 [[bin]]

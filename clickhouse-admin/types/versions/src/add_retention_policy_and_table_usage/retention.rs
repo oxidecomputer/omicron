@@ -71,7 +71,19 @@ impl Days {
     /// Return a human-friendly string displaying the policy.
     pub fn as_human_str(&self) -> String {
         let n_days = self.0.get();
-        let suffix = if n_days >= 1 { "days" } else { "day" };
+        let suffix = if n_days > 1 { "days" } else { "day" };
         format!("{n_days} {suffix}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn days_as_human_str_pluralizes() {
+        assert_eq!(Days::new(1).unwrap().as_human_str(), "1 day");
+        assert_eq!(Days::new(2).unwrap().as_human_str(), "2 days");
+        assert_eq!(Days::new(MAX_DAYS).unwrap().as_human_str(), "30 days");
     }
 }

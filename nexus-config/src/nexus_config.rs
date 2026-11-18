@@ -447,6 +447,8 @@ pub struct BackgroundTaskConfig {
     pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for capacity metrics task
+    pub capacity_metrics: CapacityMetricsConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
     /// configuration for instance reincarnation task
@@ -457,6 +459,9 @@ pub struct BackgroundTaskConfig {
     pub v2p_mapping_propagation: V2PMappingPropagationConfig,
     /// configuration for abandoned VMM reaper task
     pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
+    /// configuration for the task that stops VMMs marked to be stopped for an
+    /// update
+    pub vmm_stop_for_update: VmmStopForUpdateConfig,
     /// configuration for saga recovery task
     pub saga_recovery: SagaRecoveryConfig,
     /// configuration for lookup region port task
@@ -502,6 +507,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_cleanup: AuditLogCleanupConfig,
     /// configuration for populate switch ports task
     pub populate_switch_ports: PopulateSwitchPortsConfig,
+    /// configuration for the task that marks VMMs to stop for an update
+    pub vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig,
 }
 
 #[serde_as]
@@ -546,6 +553,26 @@ pub struct AuditLogCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_deleted_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmmMarkStopForUpdateConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -759,6 +786,14 @@ pub struct InstanceWatcherConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityMetricsConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InstanceUpdaterConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -813,6 +848,26 @@ pub struct AbandonedVmmReaperConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmmStopForUpdateConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1371,12 +1426,14 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_updater.disable = false
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            vmm_stop_for_update.period_secs = 300
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
@@ -1414,6 +1471,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            vmm_mark_stop_for_update.period_secs = 300
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1598,6 +1656,9 @@ mod test {
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        capacity_metrics: CapacityMetricsConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                         instance_updater: InstanceUpdaterConfig {
                             period_secs: Duration::from_secs(30),
                             disable: false,
@@ -1615,6 +1676,10 @@ mod test {
                         },
                         abandoned_vmm_reaper: AbandonedVmmReaperConfig {
                             period_secs: Duration::from_secs(60),
+                        },
+                        vmm_stop_for_update: VmmStopForUpdateConfig {
+                            period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                         saga_recovery: SagaRecoveryConfig {
                             period_secs: Duration::from_secs(60),
@@ -1706,6 +1771,10 @@ mod test {
                         populate_switch_ports: PopulateSwitchPortsConfig {
                             period_secs: Duration::from_secs(31),
                         },
+                        vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
+                            period_secs: Duration::from_secs(300),
+                            disable: false,
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1784,11 +1853,13 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            vmm_stop_for_update.period_secs = 300
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
@@ -1823,6 +1894,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            vmm_mark_stop_for_update.period_secs = 300
 
             [default_region_allocation_strategy]
             type = "random"

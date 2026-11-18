@@ -12,10 +12,12 @@ iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 progenitor.workspace = true
+progenitor-extras = { workspace = true, features = ["slog"] }
 regress.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+trust-quorum-types-versions.workspace = true
 wicketd-commission-types-versions.workspace = true
 omicron-workspace-hack.workspace = true

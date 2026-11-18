@@ -20,7 +20,7 @@ use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
 use omicron_generation_kinds::{
-    AlertGenerationKind, SupportBundleGenerationKind,
+    SitrepAlertGenerationKind, SitrepSupportBundleGenerationKind,
 };
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
@@ -32,10 +32,16 @@ mod config;
 pub use config::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
+mod fact;
+pub use fact::*;
+mod fact_certificate;
+pub use fact_certificate::*;
 mod fact_physical_disk;
 pub use fact_physical_disk::*;
 mod fact_saga;
 pub use fact_saga::*;
+mod fact_smf_service;
+pub use fact_smf_service::*;
 mod rendezvous_created;
 pub use rendezvous_created::*;
 mod support_bundle_request;
@@ -53,9 +59,9 @@ pub struct SitrepMetadata {
     pub creator_id: DbTypedUuid<OmicronZoneKind>,
     pub comment: String,
     pub next_inv_min_time_started: DateTime<Utc>,
-    pub alert_generation: DbTypedGeneration<AlertGenerationKind>,
+    pub alert_generation: DbTypedGeneration<SitrepAlertGenerationKind>,
     pub support_bundle_generation:
-        DbTypedGeneration<SupportBundleGenerationKind>,
+        DbTypedGeneration<SitrepSupportBundleGenerationKind>,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {

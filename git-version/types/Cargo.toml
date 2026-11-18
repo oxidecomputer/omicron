@@ -1,0 +1,13 @@
+[package]
+name = "omicron-git-version-types"
+description = "The GitVersion type, for comparing Git versions of the omicron repository"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_with.workspace = true
+omicron-workspace-hack.workspace = true
+
+[lints]
+workspace = true

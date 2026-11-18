@@ -5,6 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
+use crate::bootstrap::{MultirackJoinAccessor, RssAccessError};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -14,7 +15,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
-use crate::rot::{RotAttestationHandle, RotAttestationTask};
+use crate::rot::RotAttestor;
 use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
@@ -39,15 +40,12 @@ use illumos_utils::zfs::RemoveReservationError;
 use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -63,6 +61,7 @@ use oxnet::IpNet;
 use sled_agent_bootstrap_common::sprockets::{
     SprocketsClient, SprocketsClientError,
 };
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -78,7 +77,6 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::CompressionAlgorithm;
-use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
@@ -86,7 +84,10 @@ use sled_agent_types::instance::{
     SledVmmState, VmmPutStateResponse, VmmStateRequested,
     VmmUnregisterResponse,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo, SledRole,
+};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -201,6 +202,9 @@ pub enum Error {
 
     #[error(transparent)]
     Rot(#[from] crate::rot::RotError),
+
+    #[error("Failed to complete multirack join request")]
+    MultirackJoin(#[from] crate::bootstrap::RssAccessError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -292,7 +296,8 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    err @ (InstanceError::Timeout(_)
+                    err @ (InstanceError::WaitForService(_)
+                    | InstanceError::PropolisHttpServerTimeout(_)
                     | InstanceError::VnicCreation(_)
                     | InstanceError::Notification(_)
                     | InstanceError::Migration(_)
@@ -401,6 +406,20 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinGenerationUnavailable,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::GONE,
+                err.to_string(),
+            ),
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinPendingConfigUpdate,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
             err @ (Error::BootDiskNotFound
             | Error::Config(_)
             | Error::BackingFs(_)
@@ -422,6 +441,7 @@ impl From<Error> for dropshot::HttpError {
             | Error::UnexpectedRevision(_)
             | Error::RepoDepotStart(_)
             | Error::TimeNotSynchronized
+            | Error::MultirackJoin(_)
             | Error::Rot(_)) => HttpError::for_internal_error(
                 InlineErrorChain::new(&err).to_string(),
             ),
@@ -495,7 +515,7 @@ struct SledAgentInner {
     nexus_notifier: NexusNotifierHandle,
 
     // A handle to the RoT for attestation requests.
-    rot_attestor: RotAttestationHandle,
+    rot_attestor: RotAttestor,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -523,6 +543,9 @@ struct SledAgentInner {
 
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
+
+    // A mechanism to access a multirack join service task
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -546,6 +569,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
@@ -554,6 +578,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -714,8 +739,10 @@ impl SledAgent {
             config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -841,9 +868,7 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
-        // Spawn a background task for handling RoT attestation operations
-        let rot_attest_handle =
-            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+        let rot_attestor = RotAttestor::new(&log, &config.sprockets.attest)?;
 
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
@@ -868,7 +893,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_notifier: nexus_notifier_handle,
-                rot_attestor: rot_attest_handle,
+                rot_attestor,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 trust_quorum: long_running_task_handles.trust_quorum.clone(),
@@ -881,6 +906,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
+                multirack_join_accessor,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -942,7 +968,7 @@ impl SledAgent {
         &self,
         rot: Rot,
         remote_addr: SocketAddr,
-    ) -> Result<&RotAttestationHandle, HttpError> {
+    ) -> Result<&RotAttestor, HttpError> {
         // We currently only support the LPC55 RoT
         let Rot::Oxide = rot;
         // And we only serve sled-local clients
@@ -1047,15 +1073,6 @@ impl SledAgent {
         config: OmicronSledConfig,
     ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
         self.inner.config_reconciler.set_sled_config(config).await
-    }
-
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
     }
 
     /// Idempotently ensures that a given instance is registered with this sled,
@@ -1168,19 +1185,6 @@ impl SledAgent {
             .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
-    }
-
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
@@ -1341,6 +1345,36 @@ impl SledAgent {
         }
     }
 
+    /// Return sled registration info.
+    ///
+    /// IMPORTANT!
+    /// ----------
+    ///
+    /// There are several restrictions associated with this method! Pay close
+    /// attention!
+    ///
+    /// 1. This method MUST NOT be async or take any locks. That is because this
+    ///    is a synchronous callback from Nexus's `upsert_sled`. Any kind of
+    ///    blocking here can lead to deadlocks.
+    ///
+    /// 2. The data returned here MUST be immutable. This is to avoid a tricky
+    ///    ABA race, as documented at
+    ///    <https://claude.ai/artifact/AZNUEPEDh4R8wKpWFh1n5Q>.
+    ///
+    /// This is understandably quite restrictive! In the long term, consider
+    /// completely reworking this:
+    ///
+    /// * Have RSS and the multirack join service populate immutable data,
+    ///   once.
+    /// * Return mutable data through inventory.
+    /// * Remove the `sled_upsert` upcall.
+    pub(crate) fn sled_registration_info(&self) -> SledRegistrationInfo {
+        SledRegistrationInfo {
+            sled_id: self.inner.id,
+            rack_id: self.inner.start_request.body.rack_id,
+        }
+    }
+
     /// Return basic information about ourselves: identity and status
     ///
     /// This is basically a GET version of the information we push to Nexus on
@@ -1350,6 +1384,7 @@ impl SledAgent {
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = self.inner.hardware.baseboard();
+        let rack_id = self.inner.start_request.body.rack_id;
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
@@ -1380,9 +1415,10 @@ impl SledAgent {
             sled_agent_address,
             sled_role,
             baseboard_id: baseboard.into(),
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
-            cpu_family,
+            cpu_family: cpu_family.into(),
             reservoir_size,
             disks,
             zpools,
@@ -1491,11 +1527,8 @@ impl SledAgent {
             .available_datasets_rx()
             .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
-            .any(|path_in_pool| match path_in_pool.pool {
-                ZpoolOrRamdisk::Zpool(zpool_name) => {
-                    zpool_name == ZpoolName::External(zpool_id)
-                }
-                ZpoolOrRamdisk::Ramdisk => false,
+            .any(|path_in_pool| {
+                path_in_pool.pool() == ZpoolName::External(zpool_id)
             });
 
         if !present {
@@ -1571,11 +1604,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1597,11 +1627,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_unencrypted_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1727,6 +1754,23 @@ impl SledAgent {
             .detach_subnet(propolis_id, subnet)
             .await
             .map_err(|e| Error::Instance(e))
+    }
+
+    /// Complete a multirack join operation and return the final bootstore
+    /// generation
+    pub(crate) async fn complete_multirack_join(&self) -> Result<u64, Error> {
+        let generation = self
+            .inner
+            .multirack_join_accessor
+            .complete_multirack_join()
+            .await?;
+        Ok(generation)
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        self.inner.multirack_join_accessor.multirack_join_service_status()
     }
 }
 

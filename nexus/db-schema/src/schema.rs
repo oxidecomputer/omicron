@@ -574,6 +574,16 @@ table! {
 }
 
 table! {
+    project_utilization(project_id) {
+        project_id -> Uuid,
+        silo_id -> Uuid,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+    }
+}
+
+table! {
     silo_auth_settings(silo_id) {
         silo_id -> Uuid,
         time_created -> Timestamptz,
@@ -921,6 +931,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(silo_group, silo);
 allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_user);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_group);
 
 table! {
     identity_provider (silo_id, id) {
@@ -1651,6 +1663,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -1665,10 +1678,16 @@ table! {
 table! {
     support_bundle_data_selection_ereports (bundle_id) {
         bundle_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    support_bundle_data_selection_time_range (bundle_id) {
+        bundle_id -> Uuid,
+        start_time -> Timestamptz,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -1676,6 +1695,7 @@ allow_tables_to_appear_in_same_query!(
     support_bundle_data_selection_flags,
     support_bundle_data_selection_host_info,
     support_bundle_data_selection_ereports,
+    support_bundle_data_selection_time_range,
 );
 
 /* hardware inventory */
@@ -1736,6 +1756,8 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::enums::HwPowerStateEnum,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -1873,6 +1895,51 @@ table! {
 }
 
 table! {
+    inv_power_shelf_psu (inv_collection_id, psc_baseboard_id, location) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        psc_baseboard_id -> Uuid,
+        location -> crate::enums::InvPsuSlotEnum,
+        presence -> crate::enums::SpComponentPresenceEnum,
+        hubris_device_type -> Text,
+        mfr_id -> Nullable<Text>,
+        mfr_model -> Nullable<Text>,
+        mfr_location -> Nullable<Text>,
+        mfr_revision -> Nullable<Text>,
+        mfr_date -> Nullable<Text>,
+        mfr_serial -> Nullable<Text>,
+        vpd_error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_discovered_rack (inv_collection_id, rack_id) {
+        inv_collection_id -> Uuid,
+        rack_id -> Uuid,
+
+        rack_subnet -> Inet,
+        join_service_ip -> Inet,
+    }
+}
+
+table! {
+    inv_discovered_sled (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        rack_id -> Uuid,
+
+        part_number -> Text,
+        serial_number -> Text,
+
+        sled_subnet -> Inet,
+        sled_agent_started -> Bool,
+        last_start_error_seen -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -1912,6 +1979,8 @@ table! {
 
         instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
         instance_manager_num_registered_vmms -> Int8,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -2081,6 +2150,8 @@ table! {
         serial -> Text,
 
         variant -> crate::enums::PhysicalDiskKindEnum,
+
+        location -> Nullable<Text>,
     }
 }
 
@@ -2305,6 +2376,10 @@ table! {
         source -> crate::enums::BpSourceEnum,
 
         external_networking_generation -> Int8,
+
+        reflects_collection_id -> Nullable<Uuid>,
+        reflects_collection_time_started -> Nullable<Timestamptz>,
+        reflects_collection_time_done -> Nullable<Timestamptz>,
     }
 }
 
@@ -2770,6 +2845,7 @@ table! {
 
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
+allow_tables_to_appear_in_same_query!(vmm, rendezvous_sled_bp_availability);
 joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(subnet_pool, subnet_pool_silo_link, silo);
@@ -3114,10 +3190,10 @@ table! {
         multicast_ip -> Inet,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
-        state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
         underlay_salt -> Nullable<Int2>,
+        state -> crate::enums::MulticastGroupStateEnum,
     }
 }
 
@@ -3273,6 +3349,7 @@ table! {
         analysis_enabled -> Nullable<Bool>,
         sitrep_limit -> Nullable<Int8>,
         history_pruning_threshold -> Nullable<Int8>,
+        certificate_expiry_warning_days -> Nullable<Int8>,
     }
 }
 
@@ -3421,6 +3498,36 @@ table! {
 }
 
 table! {
+    fm_fact_certificate (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        silo_id -> Uuid,
+        kind -> crate::enums::FmFactCertificateKindEnum,
+        certificate_id -> Uuid,
+        not_after -> Timestamptz,
+    }
+}
+
+table! {
+    fm_fact_smf_service (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        sled_id -> Uuid,
+        zone_name -> Text,
+        fmri -> Text,
+        kind -> crate::enums::FmFactSmfServiceKindEnum,
+        observed_in_inv -> Uuid,
+        time_observed -> Timestamptz,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3439,6 +3546,10 @@ allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_smf_service);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_smf_service);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3475,6 +3586,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -3491,10 +3603,17 @@ table! {
     fm_support_bundle_request_data_selection_ereports (sitrep_id, request_id) {
         sitrep_id -> Uuid,
         request_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    fm_support_bundle_request_data_selection_time_range (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -3502,6 +3621,7 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_flags,
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
+    fm_support_bundle_request_data_selection_time_range,
 );
 
 table! {
@@ -3520,6 +3640,32 @@ table! {
         created_at_generation -> Int8,
     }
 }
+
+table! {
+    problem (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        current_revision -> Int8,
+    }
+}
+
+table! {
+    problem_revision (problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        time_created -> Timestamptz,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(problem, problem_revision);
+joinable!(problem_revision -> problem (problem_id));
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

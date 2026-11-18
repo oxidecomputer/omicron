@@ -29,18 +29,12 @@ impl_enum_type!(
 );
 
 impl InstanceCpuPlatform {
-    /// Returns a slice containing the set of sled CPU families that can
-    /// accommodate an instance with this CPU platform.
+    /// A convenience helper for the set of sled CPU families which support this
+    /// instance CPU platform, without callers having to convert to a matching
+    /// VMM CPU platform first.
     pub fn compatible_sled_cpu_families(&self) -> &'static [SledCpuFamily] {
-        match self {
-            // Turin-based sleds have a superset of the features made available
-            // in a guest's Milan CPU platform
-            Self::AmdMilan => {
-                &[SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin]
-            }
-            Self::AmdTurin => &[SledCpuFamily::AmdTurin],
-            Self::AmdTurinV2 => &[SledCpuFamily::AmdTurin],
-        }
+        let vmm_platform: crate::VmmCpuPlatform = (*self).into();
+        vmm_platform.compatible_sled_cpu_families()
     }
 }
 

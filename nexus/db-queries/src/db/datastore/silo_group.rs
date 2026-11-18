@@ -20,20 +20,20 @@ use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_types::external_api::user;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use uuid::Uuid;
 
 /// The datastore crate's SiloGroup is intended to provide type safety above the
@@ -61,7 +61,7 @@ impl SiloGroup {
         }
     }
 
-    pub fn silo_id(&self) -> Uuid {
+    pub fn silo_id(&self) -> SiloUuid {
         match &self {
             SiloGroup::ApiOnly(u) => u.silo_id,
             SiloGroup::Jit(u) => u.silo_id,
@@ -79,7 +79,7 @@ impl From<model::SiloGroup> for SiloGroup {
                     time_created: record.time_created(),
                     time_modified: record.time_modified(),
                     time_deleted: record.time_deleted,
-                    silo_id: record.silo_id,
+                    silo_id: record.silo_id.into(),
                     external_id: record.external_id.expect(
                         "the constraint `external_id_consistency` prevents a \
                         group with provision type 'api_only' from having a \
@@ -93,7 +93,7 @@ impl From<model::SiloGroup> for SiloGroup {
                 time_created: record.time_created(),
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
-                silo_id: record.silo_id,
+                silo_id: record.silo_id.into(),
                 external_id: record.external_id.expect(
                     "the constraint `external_id_consistency` prevents a \
                     group with provision type 'jit' from having a null \
@@ -106,7 +106,7 @@ impl From<model::SiloGroup> for SiloGroup {
                 time_created: record.time_created(),
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
-                silo_id: record.silo_id,
+                silo_id: record.silo_id.into(),
                 display_name: record.display_name.expect(
                     "the constraint `display_name_consistency` prevents a \
                     group with provision type 'scim' from having a null \
@@ -144,14 +144,18 @@ pub struct SiloGroupApiOnly {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 
     /// The identity provider's ID for this group.
     pub external_id: String,
 }
 
 impl SiloGroupApiOnly {
-    pub fn new(silo_id: Uuid, id: SiloGroupUuid, external_id: String) -> Self {
+    pub fn new(
+        silo_id: SiloUuid,
+        id: SiloGroupUuid,
+        external_id: String,
+    ) -> Self {
         Self {
             id,
             time_created: Utc::now(),
@@ -172,7 +176,7 @@ impl From<SiloGroupApiOnly> for model::SiloGroup {
                 time_modified: u.time_modified,
             },
             time_deleted: u.time_deleted,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into(),
             external_id: Some(u.external_id),
             user_provision_type: UserProvisionType::ApiOnly,
             display_name: None,
@@ -192,7 +196,7 @@ impl From<SiloGroupApiOnly> for user::Group {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into_untyped_uuid(),
             time_created: u.time_created,
             time_modified: u.time_modified,
         }
@@ -205,14 +209,18 @@ pub struct SiloGroupJit {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 
     /// The identity provider's ID for this user.
     pub external_id: String,
 }
 
 impl SiloGroupJit {
-    pub fn new(silo_id: Uuid, id: SiloGroupUuid, external_id: String) -> Self {
+    pub fn new(
+        silo_id: SiloUuid,
+        id: SiloGroupUuid,
+        external_id: String,
+    ) -> Self {
         Self {
             id,
             time_created: Utc::now(),
@@ -233,7 +241,7 @@ impl From<SiloGroupJit> for model::SiloGroup {
                 time_modified: u.time_modified,
             },
             time_deleted: u.time_deleted,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into(),
             external_id: Some(u.external_id),
             user_provision_type: UserProvisionType::Jit,
             display_name: None,
@@ -253,7 +261,7 @@ impl From<SiloGroupJit> for user::Group {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into_untyped_uuid(),
             time_created: u.time_created,
             time_modified: u.time_modified,
         }
@@ -266,7 +274,7 @@ pub struct SiloGroupScim {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub silo_id: Uuid,
+    pub silo_id: SiloUuid,
 
     /// The identity provider's ID for this group.
     pub display_name: String,
@@ -276,7 +284,7 @@ pub struct SiloGroupScim {
 
 impl SiloGroupScim {
     pub fn new(
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         id: SiloGroupUuid,
         display_name: String,
         external_id: Option<String>,
@@ -302,7 +310,7 @@ impl From<SiloGroupScim> for model::SiloGroup {
                 time_modified: u.time_modified,
             },
             time_deleted: u.time_deleted,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into(),
             external_id: u.external_id,
             user_provision_type: UserProvisionType::Scim,
             display_name: Some(u.display_name),
@@ -322,7 +330,7 @@ impl From<SiloGroupScim> for user::Group {
             id: u.id,
             // TODO the use of display name as display_name is temporary
             display_name: u.display_name,
-            silo_id: u.silo_id,
+            silo_id: u.silo_id.into_untyped_uuid(),
             time_created: u.time_created,
             time_modified: u.time_modified,
         }
@@ -382,7 +390,7 @@ impl DataStore {
         let silo = {
             use nexus_db_schema::schema::silo::dsl;
             dsl::silo
-                .filter(dsl::id.eq(authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(authz_silo.id())))
                 .select(model::Silo::as_select())
                 .get_result_async::<model::Silo>(&*conn)
                 .await
@@ -422,7 +430,7 @@ impl DataStore {
             use nexus_db_schema::schema::silo_group::dsl;
 
             let maybe_silo_group = dsl::silo_group
-                .filter(dsl::silo_id.eq(authz_silo.id()))
+                .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
                 .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
                 .select(model::SiloGroup::as_select())
                 .first_async(&*conn)
@@ -471,7 +479,7 @@ impl DataStore {
         let silo = {
             use nexus_db_schema::schema::silo::dsl;
             dsl::silo
-                .filter(dsl::id.eq(authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(authz_silo.id())))
                 .select(Silo::as_select())
                 .get_result_async::<Silo>(&*conn)
                 .await
@@ -508,7 +516,7 @@ impl DataStore {
         let maybe_silo_group = match silo_group_lookup {
             SiloGroupLookup::ApiOnly { external_id }
             | SiloGroupLookup::Jit { external_id } => dsl::silo_group
-                .filter(dsl::silo_id.eq(authz_silo.id()))
+                .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
                 .filter(dsl::user_provision_type.eq(lookup_user_provision_type))
                 .filter(dsl::external_id.eq(external_id.to_string()))
                 .filter(dsl::time_deleted.is_null())
@@ -521,7 +529,7 @@ impl DataStore {
                 })?,
 
             SiloGroupLookup::Scim { display_name } => dsl::silo_group
-                .filter(dsl::silo_id.eq(authz_silo.id()))
+                .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
                 .filter(dsl::user_provision_type.eq(lookup_user_provision_type))
                 .filter(dsl::display_name.eq(display_name.to_string()))
                 .filter(dsl::time_deleted.is_null())
@@ -670,71 +678,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn silo_group_delete(
-        &self,
-        opctx: &OpContext,
-        authz_silo_group: &authz::SiloGroup,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_silo_group).await?;
-
-        #[derive(Debug, thiserror::Error)]
-        enum SiloDeleteError {
-            #[error("group {0} still has memberships")]
-            GroupStillHasMemberships(SiloGroupUuid),
-        }
-        type TxnError = TransactionError<SiloDeleteError>;
-
-        let group_id = authz_silo_group.id();
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // Prefer to use "transaction_retry_wrapper"
-        self.transaction_non_retry_wrapper("silo_group_delete")
-            .transaction(&conn, |conn| async move {
-                use nexus_db_schema::schema::silo_group_membership;
-
-                // Don't delete groups that still have memberships
-                let group_memberships =
-                    silo_group_membership::dsl::silo_group_membership
-                        .filter(
-                            silo_group_membership::dsl::silo_group_id
-                                .eq(to_db_typed_uuid(group_id)),
-                        )
-                        .select(SiloGroupMembership::as_returning())
-                        .limit(1)
-                        .load_async(&conn)
-                        .await?;
-
-                if !group_memberships.is_empty() {
-                    return Err(TxnError::CustomError(
-                        SiloDeleteError::GroupStillHasMemberships(group_id),
-                    ));
-                }
-
-                // Delete silo group
-                use nexus_db_schema::schema::silo_group::dsl;
-                diesel::update(dsl::silo_group)
-                    .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
-                    .filter(dsl::time_deleted.is_null())
-                    .set(dsl::time_deleted.eq(Utc::now()))
-                    .execute_async(&conn)
-                    .await?;
-
-                Ok(())
-            })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(
-                    SiloDeleteError::GroupStillHasMemberships(id),
-                ) => Error::invalid_request(&format!(
-                    "group {0} still has memberships",
-                    id
-                )),
-                TxnError::Database(error) => {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                }
-            })
-    }
-
     pub async fn silo_groups_list_by_id(
         &self,
         opctx: &OpContext,
@@ -750,7 +693,7 @@ impl DataStore {
         let silo = {
             use nexus_db_schema::schema::silo::dsl;
             dsl::silo
-                .filter(dsl::id.eq(authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(authz_silo.id())))
                 .select(model::Silo::as_select())
                 .get_result_async::<model::Silo>(&*conn)
                 .await
@@ -763,7 +706,7 @@ impl DataStore {
         };
 
         let page = paginated(dsl::silo_group, dsl::id, pagparams)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::user_provision_type.eq(silo.user_provision_type))
             .select(model::SiloGroup::as_select())

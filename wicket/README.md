@@ -1,4 +1,6 @@
-# Overview
+# Wicket
+
+## Overview
 
 Wicket is a TUI built for operator usage at the technician port. It is intended
 to support a limited set of responsibilities including:
@@ -8,10 +10,11 @@ to support a limited set of responsibilities including:
 - Disaster Recovery
 - Minimal rack update / emergency update
 
-Wicket is built on top of [crossterm](https://github.com/crossterm-rs/
-crossterm) and [tui-rs](https://github.com/fdehau/tui-rs).
+Wicket is built on top of
+[crossterm](https://github.com/crossterm-rs/crossterm) and
+[tui-rs](https://github.com/fdehau/tui-rs).
 
-# Navigating
+## Navigating
 
 - `banners` - Files containing "banner-like" output using `#` characters for
   glyph drawing
@@ -27,7 +30,7 @@ crossterm) and [tui-rs](https://github.com/fdehau/tui-rs).
   `Runner` mainloop, as well as by `Control::on` methods. It is used immutably to
   draw the UI.
 
-# Design
+## Design
 
 When wicket starts as a TUI, a `Runner` is created, which is really a bucket of
 state which can be utilized by the `main_loop`. The `Runner` is in charge of:
@@ -101,12 +104,12 @@ return actions when they need to be redrawn. However, the `Runner` also doesn't
 know when a screen animation is ongoing, and so it forwards all ticks to the
 `Screen` which returns an `Action::Redraw` if a redraw is necessary.
 
-# Manually testing wicket
+## Manually testing wicket
 
 Use these to test out particular scenarios with wicket by hand. (Feel free to
 add more as needed!)
 
-## Running an end-to-end-ish test
+### Running an end-to-end-ish test
 
 Part of the edit/compile cycle for wicket mupdates is setting up something
 similar to an end-to-end flow. As a reminder, the general way updates work is
@@ -122,7 +125,7 @@ Based on this, one way to have an end-to-end flow is with:
 Making this simpler is tracked in
 [omicron#5550](https://github.com/oxidecomputer/omicron/issues/5550).
 
-### Running sp-sim and MGS
+#### Running sp-sim and MGS
 
 The easiest way to do this is to run:
 
@@ -132,7 +135,7 @@ cargo xtask mgs-dev run
 
 This will print out a line similar to `mgs-dev: MGS API: http://[::1]:12225`. Note the address for use below.
 
-#### Running sp-sim and MGS by hand
+##### Running sp-sim and MGS by hand
 
 If you need to run sp-sim and MGS separately, you can do so with:
 
@@ -147,7 +150,7 @@ The port number in `--address` is arbitrary.
 that sp-sim is missing support for it! Generally, sp-sim has features added to
 it on an as-needed basis.
 
-### Using a real SP
+#### Using a real SP
 
 The easiest way is to change the mgs config to point to a running SP instead
 of a simulated SP
@@ -162,7 +165,7 @@ ignition-target = 3
 location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 ```
 
-### Running wicketd
+#### Running wicketd
 
 Taking the port number mentioned above, run:
 
@@ -176,12 +179,12 @@ Neither is arbitrary: wicket connects to (respectively) ports 12226 and 12234 by
 default. There is currently no way to specify different ports (but there
 probably should be!)
 
-### Running wicket
+#### Running wicket
 
 After running the above commands, simply running `cargo run -p wicket` should
 connect to the wicketd instance.
 
-## Adding simulated failures to operations
+### Adding simulated failures to operations
 
 Add a simulated failure while starting an update:
 
@@ -203,7 +206,7 @@ Here, `<value>` can be:
     default)
 - (implement more options as needed)
 
-## Adding a test update step
+### Adding a test update step
 
 Add a step which just reports progress and otherwise does nothing else. To add
 such a step, set the environment variable `WICKET_UPDATE_TEST_STEP_SECONDS` to
@@ -213,7 +216,7 @@ an appropriate value. For example:
 WICKET_UPDATE_TEST_STEP_SECONDS=15 cargo run --bin wicket
 ```
 
-## Adding simulated results to individual steps
+### Adding simulated results to individual steps
 
 Some individual steps support having simulated results via environment variables.
 
@@ -229,7 +232,7 @@ The environment variable can be set to:
 - `failure`: A failure.
 - `skipped`: A skipped outcome.
 
-### Example
+#### Example
 
 If wicket is invoked as:
 
@@ -241,7 +244,7 @@ Then, while performing an update, the "Updating RoT" step will be simulated as s
 
 ![Screenshot showing that the "Updating RoT" step has a "skipped" status with a message saying "Simulated skipped result"](https://user-images.githubusercontent.com/180618/254689686-99259bc0-4e68-421d-98ca-362774eef155.png).
 
-## Testing upload functionality
+### Testing upload functionality
 
 Test upload functionality without setting up wicket as an SSH captive shell (see below for instructions). (This is the most common use case.)
 
@@ -255,7 +258,7 @@ Test upload functionality if wicket is set up as an SSH captive shell:
 ssh user@$IP_ADDRESS upload < my-tuf-repo.zip
 ```
 
-## Testing wicket as an SSH captive shell
+### Testing wicket as an SSH captive shell
 
 Wicket is meant to be used as a captive shell over ssh. If you're making changes to the SSH shell support, you'll likely want to test the captive shell support on a local Unix machine. Here's how to do so.
 

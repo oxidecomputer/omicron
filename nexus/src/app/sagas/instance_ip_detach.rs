@@ -16,12 +16,12 @@ use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::{Error, NameOrId};
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
-use uuid::Uuid;
 
 // This runs on similar logic to instance IP attach: see its head
 // comment for an explanation of the structure wrt. other sagas.
@@ -56,7 +56,7 @@ declare_saga_actions! {
 pub struct Params {
     pub delete_params: instance::ExternalIpDetach,
     pub authz_instance: authz::Instance,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
@@ -318,6 +318,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{Name, SimpleIdentityOrName};
     use std::sync::Arc;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;

@@ -103,7 +103,8 @@
             prefix = "${upperName}=\"";
           in
           trivial.pipe shas [
-            (lists.findFirst (strings.hasPrefix prefix) "")
+            (lists.findFirst (strings.hasPrefix prefix)
+              (throw "findSha: no '${upperName}' entry found in the provided checksums -- add it to the corresponding tools/*_checksums file"))
             (strings.removePrefix prefix)
             (strings.removeSuffix "\"")
           ]);

@@ -15,12 +15,16 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::planning_report::FailedRotUpdateReason;
+use nexus_types::deployment::planning_report::TargetArtifactError;
+use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::CabooseWithVersion;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
 use std::sync::Arc;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::RotKeyTableHash;
@@ -119,57 +123,16 @@ pub(super) fn try_make_update(
     let Some(rot_state) = inventory.rots.get(baseboard_id) else {
         return Err(FailedRotUpdateReason::RotStateNotInInventory);
     };
-
     let active_slot = rot_state.active_slot;
-
-    let active_caboose_which = CabooseWhich::from_rot_slot(active_slot);
-    let Some(active_caboose) =
-        inventory.caboose_for(active_caboose_which, baseboard_id)
-    else {
-        return Err(FailedRotUpdateReason::CabooseNotInInventory(
-            active_caboose_which,
-        ));
-    };
-
-    let expected_active_version = match active_caboose.caboose.version.parse() {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(FailedRotUpdateReason::FailedVersionParse {
-                caboose: active_caboose_which,
-                err: format!("{}", e),
-            });
-        }
-    };
-
-    let rot_board = active_caboose.caboose.board.clone();
-    let Some(rkth) = active_caboose.caboose.sign.clone() else {
-        return Err(FailedRotUpdateReason::CabooseMissingSign(
-            active_caboose_which,
-        ));
-    };
-
-    let tags = KnownArtifactTags::Rot(RotTags {
-        rot_board,
-        rot_rkth: Some(RotKeyTableHash(rkth)),
-        // We'll be updating the inactive slot, so we choose the
-        // artifact based on the inactive slot's kind.
-        rot_slot: match active_slot.toggled() {
-            RotSlot::A => tufaceous_artifact::RotSlot::A,
-            RotSlot::B => tufaceous_artifact::RotSlot::B,
-        },
-    });
+    let CabooseWithVersion {
+        caboose: active_caboose,
+        version: expected_active_version,
+    } = inventory.caboose_with_version_for(
+        CabooseWhich::from_rot_slot(active_slot),
+        baseboard_id,
+    )?;
     let artifact =
-        current_artifacts.artifacts.get_only(&tags).map_err(|err| {
-            let tags = tags.to_string();
-            match err {
-                GetError::NotFound => {
-                    FailedRotUpdateReason::NoMatchingArtifactFound(tags)
-                }
-                GetError::TooMany => {
-                    FailedRotUpdateReason::TooManyMatchingArtifacts(tags)
-                }
-            }
-        })?;
+        target_artifact(active_slot, active_caboose, current_artifacts)?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
@@ -186,20 +149,10 @@ pub(super) fn try_make_update(
     // Begin configuring an update.
     let inactive_caboose_which =
         CabooseWhich::from_rot_slot(active_slot.toggled());
-    let expected_inactive_version = match inventory
-        .caboose_for(inactive_caboose_which, baseboard_id)
-        .map(|c| c.caboose.version.parse::<ArtifactVersion>())
-        .transpose()
-    {
-        Ok(None) => ExpectedVersion::NoValidVersion,
-        Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(e) => {
-            return Err(FailedRotUpdateReason::FailedVersionParse {
-                caboose: inactive_caboose_which,
-                err: format!("{}", e),
-            });
-        }
-    };
+    let expected_inactive_version = ExpectedVersion::for_inactive_caboose(
+        inventory
+            .caboose_with_version_for(inactive_caboose_which, baseboard_id),
+    )?;
 
     Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
@@ -220,8 +173,50 @@ pub(super) fn try_make_update(
     }))
 }
 
+/// Returns the RoT artifact in `current_artifacts` that applies to a board
+/// whose RoT is running from `active_slot`, which contains `active_caboose`
+///
+/// The artifact is chosen based on the board name and signing key in that
+/// caboose.  The artifact is the one for the RoT's _inactive_ slot because
+/// that is the slot an update would write.
+pub(super) fn target_artifact<'a>(
+    active_slot: RotSlot,
+    active_caboose: &Caboose,
+    current_artifacts: &'a TufRepoDescription,
+) -> Result<&'a Artifact, TargetArtifactError> {
+    let rot_board = active_caboose.board.clone();
+    let Some(rkth) = active_caboose.sign.clone() else {
+        return Err(TargetArtifactError::CabooseMissingSign(
+            CabooseWhich::from_rot_slot(active_slot),
+        ));
+    };
+
+    let tags = KnownArtifactTags::Rot(RotTags {
+        rot_board,
+        rot_rkth: Some(RotKeyTableHash(rkth)),
+        // We'll be updating the inactive slot, so we choose the
+        // artifact based on the inactive slot's kind.
+        rot_slot: match active_slot.toggled() {
+            RotSlot::A => tufaceous_artifact::RotSlot::A,
+            RotSlot::B => tufaceous_artifact::RotSlot::B,
+        },
+    });
+    current_artifacts.artifacts.get_only(&tags).map_err(|err| {
+        let tags = tags.to_string();
+        match err {
+            GetError::NotFound => {
+                TargetArtifactError::NoMatchingArtifactFound(tags)
+            }
+            GetError::TooMany => {
+                TargetArtifactError::TooManyMatchingArtifacts(tags)
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::mgs_updates::EvacuatingSleds;
     use crate::mgs_updates::ImpossibleUpdatePolicy;
     use crate::mgs_updates::MgsUpdatePlanner;
     use crate::mgs_updates::PlannedMgsUpdates;
@@ -241,6 +236,7 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotDetails;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
     use std::collections::BTreeSet;
@@ -256,6 +252,7 @@ mod tests {
         );
         let log = &logctx.log;
         let test_boards = TestBoards::new(test_name);
+        let planner_config = PlannerConfig::default();
 
         // Test that with no updates pending and no TUF repo specified, there
         // will remain no updates pending.
@@ -271,9 +268,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::Initial,
                 nmax_updates,
@@ -288,9 +287,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -313,9 +314,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -337,9 +340,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &later_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -371,9 +376,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &later_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -398,9 +405,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: later_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &updated_collection,
                 current_boards,
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &later_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -420,9 +429,11 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &BTreeSet::new(),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -435,11 +446,13 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -491,11 +504,13 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -537,11 +552,13 @@ mod tests {
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
             MgsUpdatePlanner {
                 log,
+                planner_config: &planner_config,
                 inventory: &collection,
                 current_boards: &UpdateableBoard::all_from_collection(
                     &collection,
                 ),
                 zone_safety_checks: &ZoneSafetyChecks::empty(),
+                evacuating_sleds: &EvacuatingSleds::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),

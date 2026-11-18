@@ -300,6 +300,8 @@ pub mod errors {
     /// changing a setting frozen with `<readonly/>` (such as
     /// `max_execution_time`).
     pub const SETTING_CONSTRAINT_VIOLATION: i32 = 452;
+    /// A query was rejected because the remote URL was blocked.
+    pub const UNACCEPTABLE_URL: i32 = 491;
     /// A query was rejected because the user lacks the required grant.
     pub const ACCESS_DENIED: i32 = 497;
 }

@@ -6,7 +6,6 @@
 //! management blueprint.
 
 use crate::app::background::BackgroundTask;
-use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
@@ -16,6 +15,7 @@ use nexus_db_queries::db::datastore::FmSupportBundleCreateError;
 use nexus_db_queries::db::datastore::MarkerGcResult;
 use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_types::fm;
+use nexus_types::fm::CurrentSitrep;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
 use nexus_types::internal_api::background::fm_rendezvous::*;
@@ -634,14 +634,15 @@ mod tests {
     use diesel::prelude::*;
     use nexus_db_queries::db;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_schema::schema::alert::dsl as alert_dsl;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::EreportData;
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::support_bundle::BundleDataSelection;
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::CaseEreportUuid;
@@ -753,8 +754,9 @@ mod tests {
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -870,8 +872,9 @@ mod tests {
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1032,8 +1035,9 @@ mod tests {
                     comment: "stale sitrep".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::from_u32(1),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::from_u32(1),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1057,8 +1061,8 @@ mod tests {
                 comment: "current sitrep".to_string(),
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::from_u32(2),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::from_u32(2),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: iddqd::IdOrdMap::new(),
             ereports_by_id: Default::default(),
@@ -1207,8 +1211,9 @@ mod tests {
                     comment: "stale sitrep".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -1232,8 +1237,8 @@ mod tests {
                 comment: "current sitrep".to_string(),
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new()
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new()
                     .next(),
             },
             cases: iddqd::IdOrdMap::new(),
@@ -1524,8 +1529,9 @@ mod tests {
                     comment: "sitrep with ereports 1 and 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1737,8 +1743,9 @@ mod tests {
                     comment: "sitrep 1: only ereport 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1849,8 +1856,9 @@ mod tests {
                     comment: "sitrep 2: all three ereports".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
@@ -1908,7 +1916,6 @@ mod tests {
         opctx: &OpContext,
         pool_count: usize,
     ) {
-        use nexus_db_model::Generation;
         use nexus_db_model::RendezvousDebugDataset;
         use nexus_db_model::SledBaseboard;
         use nexus_db_model::SledCpuFamily;
@@ -1916,6 +1923,7 @@ mod tests {
         use nexus_db_model::SledUpdate;
         use nexus_db_model::Zpool;
         use omicron_common::api::external::ByteCount;
+        use omicron_generation_kinds::SledRegistrationGeneration;
         use omicron_uuid_kinds::BlueprintUuid;
         use omicron_uuid_kinds::DatasetUuid;
         use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1941,9 +1949,9 @@ mod tests {
                 cpu_family: SledCpuFamily::AmdMilan,
             },
             RackUuid::new_v4(),
-            Generation::new(),
+            SledRegistrationGeneration::new(),
         );
-        datastore.sled_upsert(sled).await.unwrap();
+        sled_upsert_expect_written(datastore, sled).await;
 
         let blueprint_id = BlueprintUuid::new_v4();
         for _ in 0..pool_count {
@@ -2048,8 +2056,9 @@ mod tests {
                     comment: "test sitrep 1".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -2112,6 +2121,21 @@ mod tests {
             "DE-provided comment should be used as reason_for_creation",
         );
 
+        // The DE-built selection had no time bounds; creation must have
+        // stamped the default start bound onto the persisted selection.
+        let authz_bundle = nexus_db_queries::authz::SupportBundle::new(
+            nexus_db_queries::authz::FLEET,
+            bundle1_id,
+            omicron_common::api::external::LookupType::ById(
+                bundle1_id.into_untyped_uuid(),
+            ),
+        );
+        let selection = datastore
+            .support_bundle_data_selection_get(opctx, &authz_bundle)
+            .await
+            .expect("should read created bundle's data selection");
+        assert!(selection.time_range().start().is_some());
+
         // The collector should have been activated.
         support_bundle_collector_activator.assert_activated(
             "collector should be activated when bundles are created",
@@ -2145,8 +2169,9 @@ mod tests {
                     comment: "test sitrep 2".to_string(),
                     time_created: Utc::now(),
                     next_inv_min_time_started: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
@@ -2262,8 +2287,9 @@ mod tests {
                     creator_id: OmicronZoneUuid::new_v4(),
                     comment: "test sitrep no capacity".to_string(),
                     time_created: Utc::now(),
-                    alert_generation: AlertGeneration::new(),
-                    support_bundle_generation: SupportBundleGeneration::new(),
+                    alert_generation: SitrepAlertGeneration::new(),
+                    support_bundle_generation:
+                        SitrepSupportBundleGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),

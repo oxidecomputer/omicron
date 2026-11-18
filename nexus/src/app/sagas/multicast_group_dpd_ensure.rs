@@ -496,7 +496,13 @@ mod test {
         object_create::<_, IpPoolRange>(client, &range_url, &asm_range).await;
 
         // Link pool to silo
-        link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+        link_ip_pool(
+            client,
+            pool_name,
+            &DEFAULT_SILO.id().into_untyped_uuid(),
+            false,
+        )
+        .await;
 
         let group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {

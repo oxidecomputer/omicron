@@ -32,7 +32,8 @@ use wicketd_commission_types_versions::latest::rack_setup::{
     PutRecoveryUserPasswordHash, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types_versions::latest::update::{
-    StartUpdateOptions, StartUpdateParams, UpdateState, UpdateTargets,
+    GetUpdateProgressResponse, RepositoryDescription, StartUpdateOptions,
+    StartUpdateParams, UpdateState, UpdateTargets,
 };
 use zeroize::Zeroizing;
 
@@ -78,6 +79,7 @@ async fn test_commission_inventory() {
     let gateway =
         gateway_setup::test_setup("test_commission_inventory", SpPort::One)
             .await;
+    let n_sps = gateway.simrack.num_sps();
     let ctx = WicketdTestContext::setup(gateway).await;
 
     // Wait for MGS inventory, ignition, and cabooses.
@@ -93,7 +95,7 @@ async fn test_commission_inventory() {
     })
     .await;
 
-    assert_eq!(sps.len(), 4, "four simulated SPs");
+    assert_eq!(sps.len(), n_sps, "{n_sps} simulated SPs");
 
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
@@ -155,8 +157,8 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        4,
-        "four simulated SPs after forced refresh"
+        n_sps,
+        "{n_sps} simulated SPs after forced refresh"
     );
     assert!(
         refreshed.transceivers.is_empty(),
@@ -286,6 +288,21 @@ async fn test_commission_start_update() {
     assert_eq!(
         repo.system_version, None,
         "no repository uploaded yet, so no system version"
+    );
+    let progress = ctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert_eq!(
+        progress,
+        GetUpdateProgressResponse {
+            repository: RepositoryDescription { system_version: None },
+            sps: IdOrdMap::new(),
+        },
+        "no repository uploaded yet, so progress has no system version and \
+         no updates",
     );
 
     // Wait until sled 0's SP is populated.

@@ -20,7 +20,9 @@ use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
 use tokio::sync::oneshot;
+use zerocopy::ConvertError;
 use zerocopy::IntoBytes;
+use zerocopy::TryFromBytes;
 
 pub(crate) struct EreportState {
     ereports: VecDeque<EreportListEntry>,
@@ -105,23 +107,9 @@ struct EreportListEntry {
     bytes: Vec<u8>,
 }
 
-pub(crate) async fn recv_request(
-    sock: Option<&mut UdpServer>,
-) -> anyhow::Result<(Request, SocketAddrV6, &mut UdpServer)> {
-    use zerocopy::TryFromBytes;
-    match sock {
-        Some(sock) => {
-            let (packet, addr) = sock.recv_from().await?;
-            let req = Request::try_read_from_bytes(packet).map_err(|e| {
-                anyhow::anyhow!(
-                    "couldn't understand ereport header from {addr}: {e:?}"
-                )
-            })?;
-            Ok((req, addr, sock))
-        }
-        None => futures::future::pending().await,
-    }
-}
+/// Enough leading bytes so callers can hopefully identify the source of a
+/// malformed datagram without dumping all of it.
+const MALFORMED_PREFIX_LEN: usize = 32;
 
 impl EreportState {
     pub(crate) fn new(
@@ -221,14 +209,58 @@ impl EreportState {
         ena
     }
 
+    pub(crate) async fn recv_request<'sock>(
+        &self,
+        sock: Option<&'sock mut UdpServer>,
+    ) -> anyhow::Result<(Request, SocketAddrV6, &'sock mut UdpServer)> {
+        let Some(sock) = sock else {
+            return futures::future::pending().await;
+        };
+        loop {
+            let local_addr = sock.local_addr();
+            let (packet, addr) = sock.recv_from().await?;
+            match Request::try_read_from_bytes(packet) {
+                Ok(request) => return Ok((request, addr, sock)),
+                Err(ConvertError::Alignment(never)) => match never {},
+                // Drop undecodable datagrams, matching the behavior of the real
+                // SP.
+                Err(ConvertError::Size(_)) => {
+                    slog::warn!(
+                        self.log,
+                        "dropping ereport request with wrong size";
+                        "src_addr" => %addr,
+                        "local_addr" => %local_addr,
+                        "packet_len" => packet.len(),
+                        "expected_len" => std::mem::size_of::<Request>(),
+                        "packet_prefix" => hex::encode(
+                            &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
+                        ),
+                    );
+                }
+                Err(ConvertError::Validity(_)) => {
+                    // zerocopy reports Validity only after the size matched, so
+                    // packet is non-empty here and packet[0] will not panic.
+                    slog::warn!(
+                        self.log,
+                        "dropping ereport request with unknown version";
+                        "src_addr" => %addr,
+                        "local_addr" => %local_addr,
+                        "version" => format!("{:#04x}", packet[0]),
+                        "packet_prefix" => hex::encode(
+                            &packet[..packet.len().min(MALFORMED_PREFIX_LEN)]
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     pub(crate) fn handle_request<'buf>(
         &mut self,
         request: &Request,
         addr: SocketAddrV6,
         buf: &'buf mut [u8],
     ) -> &'buf [u8] {
-        use serde::ser::Serializer;
-
         let Request::V0(req) = request;
         slog::info!(
             self.log,
@@ -308,25 +340,27 @@ impl EreportState {
         let mut pos = std::mem::size_of::<ResponseHeader>();
 
         // Serialize the metadata map.
-        use serde::ser::SerializeMap;
-
         let mut cursor = Cursor::new(&mut buf[pos..]);
-        // Rather than just using `serde_cbor::to_writer`, we'll manually
-        // construct a `Serializer`, so that we can call the `serialize_map`
-        // method *without* a length to force it to use the "indefinite-length"
-        // encoding.
-        let mut serializer = serde_cbor::Serializer::new(
-            serde_cbor::ser::IoWrite::new(&mut cursor),
-        );
-        let mut map = serializer.serialize_map(None).expect("map should start");
+        // Rather than just using `ciborium::into_writer` on the whole map,
+        // we'll emit the map header *without* a length ourselves, forcing the
+        // "indefinite-length" encoding, and then serialize each entry
+        // directly into the buffer.
+        ciborium_ll::Encoder::from(&mut cursor)
+            .push(ciborium_ll::Header::Map(None))
+            .expect("map should start");
 
         for (key, value) in
             meta_map.into_iter().flat_map(IntoIterator::into_iter)
         {
-            map.serialize_entry(key, value).expect("element should serialize");
+            ciborium::into_writer(key, &mut cursor)
+                .expect("key should serialize");
+            ciborium::into_writer(value, &mut cursor)
+                .expect("value should serialize");
         }
 
-        map.end().expect("map should end");
+        ciborium_ll::Encoder::from(&mut cursor)
+            .push(ciborium_ll::Header::Break)
+            .expect("map should end");
 
         let meta_bytes = cursor.position() as usize;
         slog::debug!(
@@ -395,26 +429,25 @@ impl EreportState {
 impl Ereport {
     fn to_entry(self, ena: Ena) -> EreportListEntry {
         let &Ereport { uptime, task_gen, ref task_name, ref data } = &self;
-        let body_bytes = match serde_cbor::to_vec(data) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                panic!("Failed to serialize ereport body: {e}\ndata: {data:#?}",)
-            }
-        };
-        let bytes = match serde_cbor::to_vec(&(
-            task_name,
-            task_gen,
-            uptime,
-            // force byte array serialization --- serde will by default turn a
-            // `Vec<u8>` into a sequence of integers, which is ghastly (and not
-            // what MGS expects...)
-            serde_cbor::Value::Bytes(body_bytes),
-        )) {
-            Ok(bytes) => bytes,
-            Err(e) => panic!(
-                "Failed to serialize ereport tuple: {e}\nereport: {self:#?}",
+        let mut body_bytes = Vec::new();
+        if let Err(e) = ciborium::into_writer(data, &mut body_bytes) {
+            panic!("Failed to serialize ereport body: {e}\ndata: {data:#?}",)
+        }
+        let mut bytes = Vec::new();
+        if let Err(e) = ciborium::into_writer(
+            &(
+                task_name,
+                task_gen,
+                uptime,
+                // force byte array serialization --- serde will by default
+                // turn a `Vec<u8>` into a sequence of integers, which is
+                // ghastly (and not what MGS expects...)
+                ciborium::Value::Bytes(body_bytes),
             ),
-        };
+            &mut bytes,
+        ) {
+            panic!("Failed to serialize ereport tuple: {e}\nereport: {self:#?}",)
+        }
         EreportListEntry { ena, ereport: self, bytes }
     }
 
@@ -429,9 +462,9 @@ impl Ereport {
         match amount {
             Some(amount) => data.insert(
                 "lost".to_string(),
-                serde_cbor::Value::Integer(i128::from(amount)),
+                ciborium::Value::Integer(amount.into()),
             ),
-            None => data.insert("lost".to_string(), serde_cbor::Value::Null),
+            None => data.insert("lost".to_string(), ciborium::Value::Null),
         };
         Self {
             task_name: "packrat".to_string(),

@@ -207,8 +207,7 @@ mod test {
     use diesel::prelude::*;
     use iddqd::IdOrdMap;
     use nexus_db_model::{
-        AbandonMetadata, Saga, SagaExecState, SagaId, SagaReasonAbandoned,
-        SagaState,
+        AbandonMetadata, Saga, SagaExecState, SagaReasonAbandoned, SagaState,
     };
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_inventory::now_db_precision;
@@ -216,6 +215,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::{
         BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
         BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
@@ -246,6 +246,7 @@ mod test {
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
+    use steno::SagaId;
     use uuid::Uuid;
 
     // Build an in-memory blueprint containing exactly the given top level
@@ -334,6 +335,7 @@ mod test {
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
@@ -399,6 +401,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint1,
+            ReflectsCollection::Indeterminate,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -459,6 +462,7 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint2,
+            ReflectsCollection::Indeterminate,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -779,7 +783,7 @@ mod test {
                 sagas_to_insert.push(Saga::new(
                     sec,
                     steno::SagaCreateParams {
-                        id: steno::SagaId(Uuid::new_v4()),
+                        id: steno::SagaId::new_v4(),
                         name: steno::SagaName::new("test saga"),
                         dag: serde_json::Value::Null,
                         state,
@@ -788,7 +792,7 @@ mod test {
             }
             sagas_to_insert.push(Saga::new_abandoned(
                 sec,
-                SagaId(steno::SagaId(Uuid::new_v4())),
+                SagaId::new_v4(),
                 "test saga".to_string(),
                 serde_json::Value::Null,
                 AbandonMetadata {
@@ -839,7 +843,11 @@ mod test {
 
         // Read every saga we inserted back. Query by primary key to avoid a
         // full table scan.
-        let all_ids: Vec<SagaId> = initial_state.keys().copied().collect();
+        let all_ids: Vec<_> = initial_state
+            .keys()
+            .copied()
+            .map(nexus_db_model::to_db_typed_uuid)
+            .collect();
         let loaded: Vec<Saga> = {
             use nexus_db_schema::schema::saga::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();

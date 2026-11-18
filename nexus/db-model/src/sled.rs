@@ -8,6 +8,7 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::sled_policy::DbSledPolicy;
+use crate::typed_generation::DbTypedGeneration;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, sled, zpool};
@@ -18,12 +19,16 @@ use nexus_types::{
     internal_api::params,
     inventory,
 };
+use omicron_generation_kinds::{
+    SledRegistrationGeneration, SledRegistrationGenerationKind,
+};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
+use std::collections::HashSet;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -51,7 +56,7 @@ pub struct SledSystemHardware {
 }
 
 /// Database representation of a Sled.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, PartialEq, Selectable, Asset)]
 #[diesel(table_name = sled)]
 #[asset(uuid_kind = SledKind)]
 pub struct Sled {
@@ -86,9 +91,13 @@ pub struct Sled {
 
     /// A generation number owned and incremented by sled-agent
     ///
-    /// This is specifically distinct from `rcgen`, which is incremented by
-    /// child resources as part of `DatastoreCollectionConfig`.
-    pub sled_agent_gen: Generation,
+    /// This is specifically distinct from:
+    ///
+    /// * `rcgen`, which is incremented by child resources as part of
+    ///   `DatastoreCollectionConfig`.
+    /// * The blueprint's `sled_agent_generation`, which is a
+    ///   `SledConfigGeneration`.
+    pub sled_agent_gen: DbTypedGeneration<SledRegistrationGenerationKind>,
 
     // ServiceAddress (Repo Depot API). Uses `ip`.
     pub repo_depot_port: SqlU16,
@@ -287,7 +296,7 @@ pub struct SledUpdate {
     pub cpu_family: SledCpuFamily,
 
     // Generation number - owned and incremented by sled-agent.
-    pub sled_agent_gen: Generation,
+    pub sled_agent_gen: SledRegistrationGeneration,
 }
 
 impl SledUpdate {
@@ -298,7 +307,7 @@ impl SledUpdate {
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: RackUuid,
-        sled_agent_gen: Generation,
+        sled_agent_gen: SledRegistrationGeneration,
     ) -> Self {
         Self {
             id,
@@ -353,7 +362,7 @@ impl SledUpdate {
             port: self.port,
             repo_depot_port: self.repo_depot_port,
             last_used_address,
-            sled_agent_gen: self.sled_agent_gen,
+            sled_agent_gen: self.sled_agent_gen.into(),
             cpu_family: self.cpu_family,
         }
     }
@@ -386,25 +395,42 @@ impl SledUpdate {
 /// A set of constraints that can be placed on operations that select a sled.
 #[derive(Clone, Debug)]
 pub struct SledReservationConstraints {
-    must_select_from: Vec<SledUuid>,
+    must_select_from: HashSet<SledUuid>,
+    must_not_select_from: HashSet<SledUuid>,
     cpu_families: Vec<SledCpuFamily>,
 }
 
 impl SledReservationConstraints {
     /// Creates a constraint set with no constraints in it.
     pub fn none() -> Self {
-        Self { must_select_from: Vec::new(), cpu_families: Vec::new() }
+        Self {
+            must_select_from: HashSet::new(),
+            must_not_select_from: HashSet::new(),
+            cpu_families: Vec::new(),
+        }
     }
 
     /// If the constraints include a set of sleds that the caller must select
-    /// from, returns `Some` and a slice containing the members of that set.
+    /// from, returns `Some` and the members of that set.
     ///
     /// If no "must select from these" constraint exists, returns None.
-    pub fn must_select_from(&self) -> Option<&[SledUuid]> {
+    pub fn must_select_from(&self) -> Option<&HashSet<SledUuid>> {
         if self.must_select_from.is_empty() {
             None
         } else {
             Some(&self.must_select_from)
+        }
+    }
+
+    /// If the constraints include a set of sleds that the caller must not
+    /// select from, returns `Some` and the members of that set.
+    ///
+    /// If no "must not select from these" constraint exists, returns None.
+    pub fn must_not_select_from(&self) -> Option<&HashSet<SledUuid>> {
+        if self.must_not_select_from.is_empty() {
+            None
+        } else {
+            Some(&self.must_not_select_from)
         }
     }
 
@@ -439,6 +465,14 @@ impl SledReservationConstraintBuilder {
     /// select from" list.
     pub fn must_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
         self.constraints.must_select_from.extend(sled_ids);
+        self
+    }
+
+    /// Adds a "must not select from the following sled IDs" constraint. If such
+    /// a constraint already exists, appends the supplied sled IDs to the "must
+    /// not select from" list.
+    pub fn must_not_select_from(mut self, sled_ids: &[SledUuid]) -> Self {
+        self.constraints.must_not_select_from.extend(sled_ids);
         self
     }
 

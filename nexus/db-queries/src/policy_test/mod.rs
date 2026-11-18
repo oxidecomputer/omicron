@@ -36,6 +36,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::SiloUuid;
 use resource_builder::DynAuthorizedResource;
 use resource_builder::ResourceBuilder;
 use resource_builder::ResourceSet;
@@ -47,10 +48,9 @@ use std::io::Cursor;
 use std::io::Write;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use uuid::Uuid;
 
 struct TestPrepOutput {
-    main_silo_id: Uuid,
+    main_silo_id: SiloUuid,
     main_silo: authz::Silo,
 }
 
@@ -107,7 +107,7 @@ async fn test_iam_prep(
     let main_silo = authz::Silo::new(
         authz::FLEET,
         main_silo_id,
-        LookupType::ById(main_silo_id),
+        LookupType::by_id(main_silo_id),
     );
 
     datastore
@@ -453,7 +453,7 @@ async fn test_conferred_roles() {
     // resources above can't exercise that cross-Silo path. This also exercises
     // the 404-vs-403 distinction: a user with no path to this Silo can't even
     // see it, so it gets a 404 (∅) rather than a 403 (✘).
-    let other_silo_id: Uuid =
+    let other_silo_id: SiloUuid =
         "22222222-2222-4222-8222-222222222222".parse().unwrap();
     builder.new_resource(authz::Silo::new(
         authz::FLEET,

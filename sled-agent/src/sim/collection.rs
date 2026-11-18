@@ -12,11 +12,12 @@ use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::TypedUuid;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
 
 use super::simulatable::Simulatable;
 
@@ -182,7 +183,7 @@ pub struct SimCollection<S: Simulatable> {
     /// simulation mode: automatic (timer-based) or explicit (using an API)
     sim_mode: SimMode,
     /// list of objects being simulated
-    objects: Mutex<BTreeMap<Uuid, SimObject<S>>>,
+    objects: Mutex<BTreeMap<TypedUuid<S::Id>, SimObject<S>>>,
 }
 
 impl<S: Simulatable + 'static> SimCollection<S> {
@@ -210,7 +211,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /// transition is currently outstanding.
     ///
     /// This is only used for `SimMode::Auto`.
-    async fn sim_step(&self, id: Uuid, mut rx: Receiver<()>) {
+    async fn sim_step(&self, id: TypedUuid<S::Id>, mut rx: Receiver<()>) {
         while rx.next().await.is_some() {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             self.sim_poke(id, PokeMode::Drain).await;
@@ -219,7 +220,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 
     /// Forcibly removes the object `id` from the collection without simulating
     /// any further state changes for it.
-    pub async fn sim_force_remove(&self, id: Uuid) {
+    pub async fn sim_force_remove(&self, id: TypedUuid<S::Id>) {
         let mut objects = self.objects.lock().await;
         let object = objects.remove(&id).unwrap();
         if let Some(mut tx) = object.channel_tx {
@@ -231,7 +232,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /// This is invoked either by `sim_step()` (if the simulation mode is
     /// `SimMode::Auto`) or `instance_finish_transition` (if the simulation mode
     /// is `SimMode::Api).
-    pub async fn sim_poke(&self, id: Uuid, mode: PokeMode) {
+    pub async fn sim_poke(&self, id: TypedUuid<S::Id>, mode: PokeMode) {
         let mut should_step = true;
 
         while should_step {
@@ -305,7 +306,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /// the `NexusClient` object.
     pub async fn sim_ensure(
         self: &Arc<Self>,
-        id: &Uuid,
+        id: &TypedUuid<S::Id>,
         current: S::CurrentState,
         target: Option<S::RequestedState>,
     ) -> Result<S::CurrentState, Error> {
@@ -345,7 +346,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         rv
     }
 
-    pub async fn contains_key(self: &Arc<Self>, id: &Uuid) -> bool {
+    pub async fn contains_key(self: &Arc<Self>, id: &TypedUuid<S::Id>) -> bool {
         self.objects.lock().await.contains_key(id)
     }
 }
@@ -353,12 +354,12 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 impl<S: Simulatable + Clone + 'static> SimCollection<S> {
     pub async fn sim_get_cloned_object(
         self: &Arc<Self>,
-        id: &Uuid,
+        id: &TypedUuid<S::Id>,
     ) -> Result<S, Error> {
         let objects = self.objects.lock().await;
-        let instance = objects
-            .get(id)
-            .ok_or_else(|| Error::not_found_by_id(S::resource_type(), id))?;
+        let instance = objects.get(id).ok_or_else(|| {
+            Error::not_found_by_id(S::resource_type(), &id.into_untyped_uuid())
+        })?;
         Ok(instance.object.clone())
     }
 }

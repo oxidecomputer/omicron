@@ -1078,9 +1078,9 @@ If you're debugging an authz success that you expected to fail, then there must 
 
 == Background
 
-For background, please read xref:../nexus/src/authz/mod.rs[the authz subsystem documentation].  There's useful background there about actors, actions, resources, and how authz actually works.  This section is a really rough summary.
+For background, please read xref:../nexus/auth/src/authz/mod.rs[the authz subsystem documentation].  There's useful background there about actors, actions, resources, and how authz actually works.  This section is a really rough summary.
 
-In Nexus, authz checks generally boil down to: is this **actor** (the currently-authenticated user) allowed to perform this **action** on this **resource**?  The authz decision is made by a library called https://docs.osohq.com/index.html[Oso] based on a single Nexus-wide xref:../nexus/src/authz/omicron.polar[**policy** file] written in Oso's domain specific language called https://docs.osohq.com/reference/polar.html[Polar].
+In Nexus, authz checks generally boil down to: is this **actor** (the currently-authenticated user) allowed to perform this **action** on this **resource**?  The authz decision is made by a library called https://docs.osohq.com/index.html[Oso] based on a single Nexus-wide xref:../nexus/auth/src/authz/omicron.polar[**policy** file] written in Oso's domain specific language called https://docs.osohq.com/reference/polar.html[Polar].
 
 An authz check starts when Nexus code at-large invokes `OpContext::authorize()`.  Here's roughly how it works:
 

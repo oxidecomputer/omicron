@@ -5,6 +5,7 @@
 use crate::ControlPlaneTestContext;
 use crate::OXIMETER_UUID;
 use crate::PRODUCER_UUID;
+use crate::RACK_UUID;
 use crate::SLED_AGENT_UUID;
 use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
@@ -62,6 +63,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
+use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -88,6 +90,7 @@ use omicron_generation_kinds::{
     Generation, NexusGeneration, SledConfigGeneration, TargetReleaseGeneration,
 };
 use omicron_sled_agent::sim;
+use omicron_sled_agent::sim::SledCpuFamily;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::TestTempDir;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -96,6 +99,7 @@ use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
@@ -115,7 +119,6 @@ use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZoneDataset;
-use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -887,6 +890,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: dns_config.generation,
             external_dns_version: Generation::new(),
             target_release_minimum_generation: TargetReleaseGeneration::new(),
@@ -991,6 +995,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_sled(
         &mut self,
         sled_id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: sim::SimMode,
         reconcilers_mode: Option<ScrimletReconcilersMode>,
     ) {
@@ -1010,11 +1015,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             nexus_address,
             sled_id,
+            rack_id,
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
             sled_role,
             &self.simulated_upstairs,
+            sim::NexusRegistration::WaitForCompletion,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1111,15 +1118,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     update_disposition: OmicronSledUpdateDisposition::Available,
                 })
                 .await
-                .expect("Failed to configure sled agent {sled_id} with zones");
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to configure sled agent {sled_id} \
+                         with zones: {err:?}"
+                    )
+                });
 
             client
                 .write_network_bootstore_config(&early_network_config)
                 .await
-                .expect(
-                    "Failed to write early networking config \
-                     to bootstore on sled {sled_id}",
-                );
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to write early networking config \
+                         to bootstore on sled {sled_id}: {err:?}"
+                    )
+                });
         }
     }
 
@@ -1127,6 +1141,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn extra_sled_agent(
         &mut self,
         sled_id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: sim::SimMode,
     ) {
         let nexus_address =
@@ -1139,11 +1154,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             )),
             nexus_address,
             sled_id,
+            rack_id,
             self.sled_index_allocator.next(),
             sim_mode,
             SledCpuFamily::AmdMilan,
             SledRole::Gimlet,
             &self.simulated_upstairs,
+            sim::NexusRegistration::WaitForCompletion,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1893,15 +1910,23 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
                         .address()
                         .into();
+                    let ddmd_addr: SocketAddr = builder
+                        .ddm
+                        .get(&slot)
+                        .unwrap_or_else(|| panic!("start_ddm() must be called for {slot:?} before starting a scrimlet sled"))
+                        .address()
+                        .into();
                     let mode = ScrimletReconcilersMode::Test {
                         mgs_addr,
                         dpd_addr,
                         mgd_addr,
+                        ddmd_addr,
                         bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                     };
                     builder
                         .start_sled(
                             SLED_AGENT_UUID.parse().unwrap(),
+                            RACK_UUID,
                             sim_mode,
                             Some(mode),
                         )
@@ -1939,15 +1964,23 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             .unwrap_or_else(|| panic!("start_mgd() must be called for {slot:?} before starting a scrimlet sled"))
                             .address()
                             .into();
+                        let ddmd_addr: SocketAddr = builder
+                            .ddm
+                            .get(&slot)
+                            .unwrap_or_else(|| panic!("start_ddm() must be called for {slot:?} before starting a scrimlet sled"))
+                            .address()
+                            .into();
                         let mode = ScrimletReconcilersMode::Test {
                             mgs_addr,
                             dpd_addr,
                             mgd_addr,
+                            ddmd_addr,
                             bgp_socket_config: BgpSocketConfig::for_test(mgd_addr),
                         };
                         builder
                             .start_sled(
                                 SLED_AGENT2_UUID.parse().unwrap(),
+                                RACK_UUID,
                                 sim_mode,
                                 Some(mode),
                             )
@@ -1966,7 +1999,11 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     "add_extra_sled_agent",
                     Box::new(move |builder| {
                         builder
-                            .extra_sled_agent(SledUuid::new_v4(), sim_mode)
+                            .extra_sled_agent(
+                                SledUuid::new_v4(),
+                                RACK_UUID,
+                                sim_mode,
+                            )
                             .boxed()
                     }),
                 )],
@@ -2072,17 +2109,21 @@ impl SledIndexAllocator {
 ///
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
 /// `nexus_test` instead! To start a sled agent partway through a test, use
-/// [`ControlPlaneTestContext::add_sled`].
+/// [`ControlPlaneTestContext::add_sled`], or
+/// [`ControlPlaneTestContext::start_unregistered_sled`] for one that does not
+/// register with Nexus.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: SledUuid,
+    rack_id: RackUuid,
     sled_index: u16,
     sim_mode: sim::SimMode,
     cpu_family: SledCpuFamily,
     sled_role: SledRole,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+    nexus_registration: sim::NexusRegistration,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
     // (SimGimlet00, SimGimlet01, etc.) so that inventory can link sled agents
@@ -2091,6 +2132,7 @@ pub(crate) async fn start_sled_agent(
 
     let config = sim::Config::for_testing_with_baseboard(
         id,
+        rack_id,
         sim_mode,
         Some(nexus_address),
         sim::ZpoolConfig::None,
@@ -2098,8 +2140,14 @@ pub(crate) async fn start_sled_agent(
         Some(baseboard_serial),
         sled_role,
     );
-    start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
-        .await
+    start_sled_agent_with_config(
+        log,
+        &config,
+        sled_index,
+        simulated_upstairs,
+        nexus_registration,
+    )
+    .await
 }
 
 async fn start_sled_agent_with_config(
@@ -2107,11 +2155,12 @@ async fn start_sled_agent_with_config(
     config: &sim::Config,
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+    nexus_registration: sim::NexusRegistration,
 ) -> Result<sim::Server, String> {
     let server = sim::Server::start(
         &config,
         &log,
-        sim::NexusRegistration::WaitForCompletion,
+        nexus_registration,
         simulated_upstairs,
         sled_index,
     )

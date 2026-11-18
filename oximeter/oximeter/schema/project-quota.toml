@@ -1,0 +1,48 @@
+format_version = 1
+
+[target]
+name = "project_quota"
+description = "Project quota provisioned resources"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "nexus_id", "project_id", "silo_id" ] },
+]
+
+[fields.nexus_id]
+type = "uuid"
+description = "ID of the Nexus reporting the sample. We emit quota metrics from each Nexus, so aggregate over Nexus instances by mean or max, but not sum, to avoid double-counting."
+
+[fields.silo_id]
+type = "uuid"
+description = "ID of the silo"
+
+[fields.project_id]
+type = "uuid"
+description = "ID of the project"
+
+[[metrics]]
+name = "memory_provisioned"
+description = "Provisioned memory charged against the quota"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "cpu_provisioned"
+description = "Provisioned vCPUs charged against the quota"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "virtual_storage_provisioned"
+description = "Provisioned virtual disk and snapshot storage charged against the quota"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]

@@ -8,28 +8,19 @@
 
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
-use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-lockstep.json",
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     crates = {
         "iddqd" = "*",
         "omicron-generation-kinds" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
+        "steno" = "*",
     },
     replace = {
         BaseboardId = sled_hardware_types::BaseboardId,
@@ -86,6 +77,7 @@ progenitor::generate_api!(
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
+        TrustQuorumMembers = trust_quorum_types::membership::TrustQuorumMembers,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
@@ -99,8 +91,10 @@ progenitor::generate_api!(
     }
 );
 
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
+
 impl IdOrdItem for types::PendingSagaInfo {
-    type Key<'a> = Uuid;
+    type Key<'a> = steno::SagaId;
 
     fn key(&self) -> Self::Key<'_> {
         self.saga_id

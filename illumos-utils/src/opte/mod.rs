@@ -37,7 +37,6 @@ pub use port::PortInfo;
 pub use port_manager::MulticastGroupCfg;
 pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;
-pub use port_manager::PortTicket;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 

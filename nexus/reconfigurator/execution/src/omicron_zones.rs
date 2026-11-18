@@ -21,6 +21,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -278,8 +279,11 @@ async fn decommission_cockroachdb_node<R: CleanupResolver>(
     for admin_addr in admin_addrs {
         let admin_url = format!("http://{admin_addr}");
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
-        let client =
-            cockroach_admin_client::Client::new(&admin_url, log.clone());
+        let client = cockroach_admin_client::Client::new_with_client(
+            &admin_url,
+            internal_http_client(),
+            log.clone(),
+        );
 
         let body = NodeId { node_id: node_id.clone() };
         match client

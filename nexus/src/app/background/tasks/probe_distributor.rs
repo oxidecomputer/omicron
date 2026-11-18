@@ -15,7 +15,7 @@ use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ProbeError;
 use serde_json::json;
-use sled_agent_client::types::ProbeSet;
+use sled_agent_types::probes::ProbeSet;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -32,7 +32,10 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::backoff::BackoffError;
 use omicron_common::backoff::backon_retry_policy_internal_service;
+use omicron_common::backoff::retry_notify_ext;
+use omicron_common::backoff::retry_policy_internal_service;
 use omicron_generation_kinds::InstanceStateGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -46,7 +49,6 @@ use progenitor_extras::retry::{
 use seq_macro::seq;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::types::LocalStorageDatasetEnsureRequest;
-use slog::error;
 use slog::info;
 use steno::ActionError;
 
@@ -77,6 +79,9 @@ pub(crate) enum Reason {
     /// The instance has failed and is being automatically restarted by the
     /// control plane.
     AutoRestart,
+    /// The instance's VMM was stopped because its sled is being evacuated. The
+    /// instance is being restarted by the control plane.
+    SledEvacuation,
 }
 
 declare_saga_actions! {
@@ -126,9 +131,27 @@ declare_saga_actions! {
         - sis_v2p_ensure_undo
     }
 
+    // This node is essentially the undo action of the `ensure_registered` node,
+    // but factored out into a separate node that's pushed *before*
+    // `sis_ensure_registered`. This is necessary because we want to ensure that
+    // an unwinding saga always attempts to unregister the VMM it may have
+    // created on a sled, regardless of whether the `sis_ensure_registered` node
+    // completes or fails. If that action sends a VMM ensure request to the sled
+    // but then encounters an error and begins unwinding before the node
+    // *completes*, we may have still created a VMM and must attempt to tear it
+    // down. Because undo actions are only performed for *completed* nodes, we
+    // must push a node immediately *before* `sis_ensure_registered` with a
+    // no-op forwards action and `sis_ensure_unregistered` as its undo action.
+    // That way, if we have reached the point where we were going to attempt to
+    // ensure a VMM, we ensure it does not exist while unwinding regardless of
+    // whether we made it past that node.
+    ENSURE_UNREGISTERED_IF_UNWINDING -> "ensure_unregistered_if_unwinding" {
+        + sis_noop
+        - sis_ensure_unregistered
+    }
+
     ENSURE_REGISTERED -> "ensure_registered" {
         + sis_ensure_registered
-        - sis_ensure_registered_undo
     }
 
     UPDATE_MULTICAST_SLED_ID -> "multicast_sled_id" {
@@ -198,6 +221,7 @@ impl NexusSaga for SagaInstanceStart {
 
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
+        builder.append(ensure_unregistered_if_unwinding_action());
         builder.append(ensure_registered_action());
         builder.append(update_multicast_sled_id_action());
         builder.append(add_virtual_resources_action());
@@ -344,11 +368,26 @@ async fn sis_destroy_vmm_record(
     osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
 
     // Now that the VMM record has been marked as `SagaUnwound`, the instance
-    // may be permitted to reincarnate. If it is, activate the instance
-    // reincarnation background task to help it along.
+    // may be permitted to reincarnate. If it is, and the reason for it to be
+    // started is not `SledEvacuation`, activate the instance reincarnation
+    // background task to help it along.
+    //
+    // We don't enforce the cooldown period for restarts due to sled
+    // evacuation. This means that activating the reincarnation background task
+    // here could turn into "spam reincarnations as fast as possible", if
+    // there's an instance that's failing to reincarnate. So, instead of
+    // activating the task here, we rely on its periodic run (every minute).
+    //
+    // Now, this `SledEvacuation` exception here sucks. Due to the urgency of
+    // delivering live update with sled evacuation, we're taking a small
+    // shortcut until https://github.com/oxidecomputer/omicron/issues/11707 is
+    // implemented.
     let karmic_status =
         db_instance.auto_restart.can_reincarnate(&db_instance.runtime());
-    if karmic_status == db::model::Reincarnatability::WillReincarnate {
+    let is_reason_sled_evacuation = params.reason == Reason::SledEvacuation;
+    if karmic_status == db::model::Reincarnatability::WillReincarnate
+        && !is_reason_sled_evacuation
+    {
         info!(
             osagactx.log(),
             "start saga unwound; instance may reincarnate";
@@ -361,6 +400,16 @@ async fn sis_destroy_vmm_record(
             .background_tasks
             .task_instance_reincarnation
             .activate();
+    } else if is_reason_sled_evacuation {
+        debug!(
+            osagactx.log(),
+            "start saga unwound; instance may reincarnate during the next \
+             periodic run of the instance reincarnation background task";
+            "instance_id" => %db_instance.id(),
+            "auto_restart_config" => ?db_instance.auto_restart,
+            "start_reason" => ?params.reason,
+            "karmic_status" => ?karmic_status,
+        );
     } else {
         debug!(
             osagactx.log(),
@@ -450,10 +499,11 @@ async fn sis_move_to_starting(
     let new_runtime = {
         // If we are performing an automated restart of a Failed instance,
         // remember to update the timestamp.
-        let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
-            Some(Utc::now())
-        } else {
-            db_instance.runtime().time_last_auto_restarted
+        let time_last_auto_restarted = match params.reason {
+            Reason::AutoRestart => Some(Utc::now()),
+            Reason::SledEvacuation | Reason::User | Reason::AutoStart => {
+                db_instance.runtime().time_last_auto_restarted
+            }
         };
         db::model::InstanceRuntimeState {
             nexus_state: db::model::InstanceState::Vmm,
@@ -495,32 +545,133 @@ async fn sis_move_to_starting_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-    info!(osagactx.log(), "start saga failed; returning instance to Stopped";
-          "instance_id" => %instance_id);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
-    let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::NoVmm,
-        propolis_id: None,
-        generation: InstanceStateGeneration::from(db_instance.state_generation)
-            .next()
-            .into(),
-        ..db_instance.runtime()
-    };
+    // If an instance was being restarted due to its VMM's sled being evacuated,
+    // and its intended state is currently `Running`, we return it to
+    // `SledEvacuating`. We want the instance reincarnation task to attempt to
+    // restart it again. Any other case returns the instance to `NoVmm`. In
+    // this state, the reincarnation task will no longer attempt to reincarnate
+    // it, and will remain stopped for the end user.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            let nexus_state = match params.reason {
+                Reason::SledEvacuation => {
+                    // At the time of writing this comment, there is a
+                    // possibility of a race where a user may have stopped the
+                    // instance while this saga was running. More details in
+                    // https://github.com/oxidecomputer/omicron/issues/11706
+                    //
+                    // Meanwhile, to reduce the chance of this happening, we
+                    // check the instance first to make sure the intended state
+                    // is still `Running`.
+                    match LookupPath::new(&opctx, osagactx.datastore())
+                        .instance_id(instance_id.into_untyped_uuid())
+                        .fetch()
+                        .await
+                    {
+                        Ok((.., current_instance)) => {
+                            match current_instance.intended_state {
+                                db::model::InstanceIntendedState::Running => {
+                                    db::model::InstanceState::SledEvacuating
+                                }
+                                db::model::InstanceIntendedState::Destroyed
+                                | db::model::InstanceIntendedState::GuestShutdown
+                                | db::model::InstanceIntendedState::Stopped => {
+                                    db::model::InstanceState::NoVmm
+                                }
+                            }
+                        }
+                        // The instance is not there anymore; there is no state
+                        // to reset.
+                        Err(
+                            error @ (Error::ObjectNotFound { .. }
+                            | Error::NotFound { .. }
+                            | Error::Gone),
+                        ) => {
+                            info!(
+                                osagactx.log(),
+                                "start saga failed; instance has been \
+                                 deleted, not resetting its state";
+                                "instance_id" => %instance_id,
+                                "start_reason" => ?params.reason,
+                                "error" => %error,
+                            );
+                            return Ok(());
+                        }
+                        Err(error) => return Err(into_backoff_error(error)),
+                    }
+                }
+                Reason::AutoStart | Reason::User | Reason::AutoRestart => {
+                    db::model::InstanceState::NoVmm
+                }
+            };
+            info!(
+                osagactx.log(),
+                "start saga failed; resetting instance state to {nexus_state};";
+                "instance_id" => %instance_id,
+                "start_reason" => ?params.reason
+            );
 
-    if !osagactx
-        .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime)
-        .await?
-    {
-        info!(osagactx.log(),
-              "did not return instance to Stopped: old generation number";
-              "instance_id" => %instance_id);
-    }
+            let new_runtime = db::model::InstanceRuntimeState {
+                nexus_state,
+                propolis_id: None,
+                generation: InstanceStateGeneration::from(
+                    db_instance.state_generation,
+                )
+                .next()
+                .into(),
+                ..db_instance.runtime()
+            };
+
+            if !osagactx
+                .datastore()
+                .instance_update_runtime(&instance_id, &new_runtime)
+                .await
+                .map_err(into_backoff_error)?
+            {
+                info!(
+                    osagactx.log(),
+                    "did not reset instance state to {nexus_state}: \
+                     old generation number";
+                    "instance_id" => %instance_id,
+                    "start_reason" => ?params.reason
+                );
+            }
+
+            Ok(())
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "start saga: failed to reset instance state; retrying";
+                "instance_id" => %instance_id,
+                "start_reason" => ?params.reason,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
+    )
+    .await?;
 
     Ok(())
+}
+
+fn into_backoff_error(error: Error) -> BackoffError<Error> {
+    if error.retryable() {
+        BackoffError::transient(error)
+    } else {
+        BackoffError::permanent(error)
+    }
 }
 
 async fn sis_account_virtual_resources(
@@ -540,7 +691,7 @@ async fn sis_account_virtual_resources(
         .virtual_provisioning_collection_insert_instance(
             &opctx,
             instance_id,
-            params.db_instance.project_id,
+            params.db_instance.project_id(),
             i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
@@ -566,7 +717,7 @@ async fn sis_account_virtual_resources_undo(
         .virtual_provisioning_collection_delete_instance(
             &opctx,
             instance_id,
-            params.db_instance.project_id,
+            params.db_instance.project_id(),
             i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
@@ -903,7 +1054,7 @@ async fn sis_ensure_registered(
                       "start saga: sled agent failed to register instance";
                       "instance_id" => %instance_id,
                       "sled_id" =>  %sled_id,
-                      "error" => ?inner,
+                      "error" => InlineErrorChain::new(&inner),
                       "start_reason" => ?params.reason);
 
                 // Don't set the instance to Failed in this case. Instead, allow
@@ -916,132 +1067,60 @@ async fn sis_ensure_registered(
                 info!(osagactx.log(),
                       "start saga: internal error registering instance";
                       "instance_id" => %instance_id,
-                      "error" => ?inner,
+                      "error" => InlineErrorChain::new(&inner),
                       "start_reason" => ?params.reason);
                 saga_action_failed(inner)
             }
         })
 }
 
-async fn sis_ensure_registered_undo(
+async fn sis_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+async fn sis_ensure_unregistered(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
-    let db_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
 
-    info!(osagactx.log(), "start saga: unregistering instance from sled";
-          "instance_id" => %instance_id,
-          "propolis_id" => %propolis_id,
-          "sled_id" => %sled_id,
-          "start_reason" => ?params.reason);
+    // `ensure_vmm_unregistered` will not retry errors checking if the sled is
+    // out of service (which may include potentially transient errors querying
+    // the database), nor will it retry errors from the sled-agent that
+    // progenitor-extras considers "permanent". Therefore, we wrap the entire
+    // thing in a second retry loop, so that the saga doesn't get stuck.
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            super::instance_common::ensure_vmm_unregistered(
+                &sagactx,
+                &params.serialized_authn,
+                instance_id,
+                propolis_id,
+                sled_id,
+            )
+            .await
+            .map_err(BackoffError::transient)
+        },
+        |error, call_count, total_duration| {
+            warn!(
+                osagactx.log(),
+                "start saga: failed to unregister VMM; retrying";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "sled_id" => %sled_id,
+                "call_count" => call_count,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
+    )
+    .await?;
 
-    // Fetch the latest record so that this callee can drive the instance into
-    // a Failed state if the unregister call fails.
-    let (.., authz_instance, _) = LookupPath::new(&opctx, datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .fetch()
-        .await
-        .map_err(saga_action_failed)?;
-
-    // If the sled successfully unregistered the instance, allow the rest of
-    // saga unwind to restore the instance record to its prior state (without
-    // writing back the state returned from sled agent). Otherwise, try to
-    // reason about the next action from the specific kind of error that was
-    // returned.
-    let unregister_result = osagactx
-        .nexus()
-        .instance_ensure_unregistered(&propolis_id, &sled_id)
-        .await;
-
-    // Handle the unregister result
-    if let Err(e) = unregister_result {
-        error!(osagactx.log(),
-               "start saga: failed to unregister instance from sled";
-               "instance_id" => %instance_id,
-               "start_reason" => ?params.reason,
-               "error" => ?e);
-
-        // If the failure came from talking to sled agent, and the error code
-        // indicates the instance or sled might be unhealthy, manual
-        // intervention is likely to be needed, so try to mark the instance as
-        // Failed and then bail on unwinding.
-        //
-        // If sled agent is in good shape but just doesn't know about the
-        // instance, this saga still owns the instance's state, so allow
-        // unwinding to continue.
-        //
-        // If some other Nexus error occurred, this saga is in bad shape, so
-        // return an error indicating that intervention is needed without trying
-        // to modify the instance further.
-        //
-        // TODO(#3238): `instance_unhealthy` does not take an especially nuanced
-        // view of the meanings of the error codes sled agent could return, so
-        // assuming that an error that isn't `instance_unhealthy` means
-        // that everything is hunky-dory and it's OK to continue unwinding may
-        // be a bit of a stretch. See the definition of `instance_unhealthy` for
-        // more details.
-        match e {
-            InstanceStateChangeError::SledAgent(inner) => {
-                if let Some(reason) = inner.vmm_failure_reason() {
-                    error!(osagactx.log(),
-                           "start saga: failing instance after unregister failure";
-                           "instance_id" => %instance_id,
-                           "start_reason" => ?params.reason,
-                           "error" => ?inner,
-                           "reason" => %reason);
-
-                    if let Err(set_failed_error) = osagactx
-                        .nexus()
-                        .mark_vmm_failed(
-                            &opctx,
-                            authz_instance,
-                            &db_vmm,
-                            &inner,
-                            reason,
-                        )
-                        .await
-                    {
-                        error!(osagactx.log(),
-                               "start saga: failed to mark instance as failed";
-                               "instance_id" => %instance_id,
-                               "start_reason" => ?params.reason,
-                               "error" => ?set_failed_error);
-
-                        Err(set_failed_error.into())
-                    } else {
-                        Err(inner.0.into())
-                    }
-                } else {
-                    info!(osagactx.log(),
-                           "start saga: instance already unregistered from sled";
-                           "instance_id" => %instance_id,
-                           "start_reason" => ?params.reason);
-
-                    Ok(())
-                }
-            }
-            InstanceStateChangeError::Other(inner) => {
-                error!(osagactx.log(),
-                       "start saga: internal error unregistering instance";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason,
-                       "error" => ?inner);
-
-                Err(inner.into())
-            }
-        }
-    } else {
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn sis_update_multicast_sled_id(
@@ -1170,13 +1249,11 @@ async fn sis_ensure_running(
 
 #[cfg(test)]
 mod test {
-    use core::time::Duration;
-    use nexus_types::identity::Asset as _;
-
     use crate::app::sagas::disk_delete::test::ExpungeTestHarness;
     use crate::app::sagas::disk_delete::test::create_disk;
     use crate::app::sagas::disk_delete::test::new_local_disk_create_params;
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
+    use core::time::Duration;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::DiskTest;
@@ -1186,6 +1263,7 @@ mod test {
     };
     use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
+    use nexus_types::identity::Asset as _;
     use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
@@ -1667,7 +1745,7 @@ mod test {
         cptestctx.teardown().await;
     }
 
-    /// Tests that if a start saga unwinds because sled agent returned failure
+    /// Ensures that if a start saga unwinds because sled agent returned failure
     /// from a call to ensure the instance was running, then the system returns
     /// to the correct state.
     ///
@@ -1675,10 +1753,256 @@ mod test {
     /// test causes saga nodes to "fail" without actually executing anything,
     /// whereas this test injects a failure into the normal operation of the
     /// ensure-running node.
+    async fn ensure_running_unwind(
+        test_name: &str,
+        case: EnsureRunningUnwindCase,
+    ) {
+        let EnsureRunningUnwindCase {
+            reason,
+            user_stops_during_saga,
+            expected_state,
+        } = case;
+
+        let cptestctx = test_helpers::instance_saga_test_builder(test_name)
+            .start::<crate::Server>()
+            .await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+
+        let sled_agent = cptestctx.first_sled_agent();
+
+        // The instance's intended state should be `Running` when the saga
+        // starts.
+        datastore
+            .instance_set_intended_state(
+                &opctx,
+                &authz_instance,
+                nexus_db_model::InstanceIntendedState::Running,
+            )
+            .await
+            .expect("intended state should be set");
+
+        let db_instance = test_helpers::instance_fetch(&cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+            reason,
+        };
+
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+
+        // The ensure_running node is last in the saga. This should be the node
+        // where the failure ultimately occurs.
+        let last_node_name = dag
+            .get_nodes()
+            .last()
+            .expect("saga should have at least one node")
+            .name()
+            .clone();
+
+        let next_registration = if user_stops_during_saga {
+            // To simulate a user stopping the instance while the saga is
+            // running, pause the saga when it registers the VMM with the sled
+            // agent.
+            Some(sled_agent.pause_next_vmm_registration())
+        } else {
+            None
+        };
+
+        // Inject failure at the simulated sled agent level. This allows the
+        // ensure-running node to attempt to change the instance's state, but
+        // forces this operation to fail and produce whatever side effects
+        // result from that failure. The ensure-running node's request to run
+        // the VMM is the first `vmm_put_state` request the saga sends.
+        let next_put_state = sled_agent.pause_next_vmm_put_state();
+
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
+
+        if let Some(next_registration) = next_registration {
+            let paused = next_registration
+                .wait_for_request(Duration::from_secs(60))
+                .await;
+            datastore
+                .instance_set_intended_state(
+                    &opctx,
+                    &authz_instance,
+                    nexus_db_model::InstanceIntendedState::Stopped,
+                )
+                .await
+                .expect("intended state should be set");
+            paused.resume();
+        }
+
+        next_put_state
+            .wait_for_request(Duration::from_secs(60))
+            .await
+            .fail(Error::internal_error(format!("injected by {test_name}")));
+
+        let saga_error = running_saga
+            .wait_until_stopped()
+            .await
+            .into_raw_result()
+            .kind
+            .expect_err("saga should fail due to injected error");
+
+        assert_eq!(
+            saga_error.error_node_name, last_node_name,
+            "start reason: {reason:?}, user stops during saga: \
+             {user_stops_during_saga}",
+        );
+
+        let db_instance =
+            test_helpers::instance_fetch(&cptestctx, instance_id).await;
+
+        assert_eq!(
+            db_instance.instance().nexus_state,
+            expected_state,
+            "start reason: {reason:?}, user stops during saga: \
+             {user_stops_during_saga}",
+        );
+        assert!(db_instance.vmm().is_none());
+
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                &cptestctx
+            )
+            .await
+        );
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
+        cptestctx.teardown().await;
+    }
+
+    // The state that the instance returns to when the saga unwinds depends
+    // on the instance's reason for starting, and on whether a user stopped
+    // the instance while the saga was running.
+    //
+    // For any reason other than `SledEvacuation`, the end state will be
+    // `NoVmm` (stopped), so it doesn't really matter if the user stops the
+    // instance while the saga is running. We don't test a user stopping the
+    // instance in those cases.
+    struct EnsureRunningUnwindCase {
+        reason: Reason,
+        user_stops_during_saga: bool,
+        expected_state: nexus_db_model::InstanceState,
+    }
+
     #[tokio::test]
-    async fn test_ensure_running_unwind() {
+    async fn test_ensure_running_unwind_user() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_user",
+            EnsureRunningUnwindCase {
+                reason: Reason::User,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_auto_restart() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_auto_restart",
+            EnsureRunningUnwindCase {
+                reason: Reason::AutoRestart,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_auto_start() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_auto_start",
+            EnsureRunningUnwindCase {
+                reason: Reason::AutoStart,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_sled_evacuation() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_sled_evacuation",
+            EnsureRunningUnwindCase {
+                reason: Reason::SledEvacuation,
+                user_stops_during_saga: false,
+                expected_state: nexus_db_model::InstanceState::SledEvacuating,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_ensure_running_unwind_sled_evacuation_user_stops() {
+        ensure_running_unwind(
+            "test_ensure_running_unwind_sled_evacuation_user_stops",
+            EnsureRunningUnwindCase {
+                reason: Reason::SledEvacuation,
+                user_stops_during_saga: true,
+                expected_state: nexus_db_model::InstanceState::NoVmm,
+            },
+        )
+        .await;
+    }
+
+    /// Regression test for omicron#11560: if a VMM record is created by a start
+    /// saga (in the `Creating`) state, but the VMM record is marked `Failed`
+    /// before it has been registered with the sled-agent, the start saga must
+    /// not leave that VMM running.
+    ///
+    /// In the race described in omicron#11560, an external API stop request is
+    /// received while the VMM record is `Creating`, and is forwarded to the
+    /// sled agent. At this point in time, the sled-agent has not yet received a
+    /// request to register that VMM, and (correctly) indicates that it does not
+    /// exist, which results in Nexus moving the VMM to `Failed` and kicking off
+    /// an `instance_update` saga to transition the instance to `Failed` and
+    /// delete the `vmm` record. However, this is invisible to the start saga,
+    /// which continues its attempt to register and run the VMM, rather than
+    /// unwinding. This ultimately results in the sled-agent running a VMM that
+    /// the control plane considers dead. The control plane may then attempt to
+    /// restart the instance elsewhere, which gets stuck when the new VMM tries
+    /// to activate the same crucible disk(s) that the zombie VMM is already
+    /// using.
+    ///
+    /// Here, we reproduce this race by pausing the `instance_ensure_register`
+    /// request once it's received by the sled-agent simulator, and then marking
+    /// the VMM as `Failed` before the registration request is allowed to
+    /// complete.
+    #[tokio::test]
+    async fn test_vmm_failed_before_registration() {
+        use crate::app::instance::SledAgentInstanceError;
+
         let cptestctx = test_helpers::instance_saga_test_builder(
-            "test_ensure_running_unwind",
+            "test_vmm_failed_before_registration",
         )
         .start::<crate::Server>()
         .await;
@@ -1694,62 +2018,134 @@ mod test {
             .instance()
             .clone();
 
+        // There's only one sled, so this is where the saga will put the VMM.
+        let register_pause =
+            cptestctx.first_sled_agent().pause_next_vmm_registration();
+
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
             reason: Reason::User,
         };
-
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-
-        // The ensure_running node is last in the saga. This should be the node
-        // where the failure ultimately occurs.
-        let last_node_name = dag
-            .get_nodes()
-            .last()
-            .expect("saga should have at least one node")
-            .name()
-            .clone();
-
-        // Inject failure at the simulated sled agent level. This allows the
-        // ensure-running node to attempt to change the instance's state, but
-        // forces this operation to fail and produce whatever side effects
-        // result from that failure.
-        let sled_agent = cptestctx.first_sled_agent();
-        sled_agent
-            .set_instance_ensure_state_error(Some(Error::internal_error(
-                "injected by test_ensure_running_unwind",
-            )))
-            .await;
-
-        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
-        let saga_result = runnable_saga
-            .run_to_completion()
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
             .await
-            .expect("saga execution should have started")
-            .into_raw_result();
-        let saga_error = saga_result
-            .kind
-            .expect_err("saga should fail due to injected error");
+            .expect("saga should be prepared")
+            .start()
+            .await
+            .expect("saga should start");
 
-        assert_eq!(saga_error.error_node_name, last_node_name);
+        let paused_registration =
+            register_pause.wait_for_request(Duration::from_secs(60)).await;
+        let propolis_id = paused_registration.propolis_id();
 
-        let db_instance =
-            test_helpers::instance_fetch(&cptestctx, instance_id).await;
+        // The saga is now waiting on the `instance_ensure_registered` request
+        // to complete, so its VMM is linked to the instance but unknown to
+        // sled-agent.
+        let creating_vmm =
+            test_helpers::instance_fetch(&cptestctx, instance_id)
+                .await
+                .vmm()
+                .clone()
+                .expect("the start saga should have linked its VMM");
+        assert_eq!(creating_vmm.id, propolis_id.into_untyped_uuid());
+        assert_eq!(creating_vmm.state, nexus_db_model::VmmState::Creating);
 
-        assert_eq!(
-            db_instance.instance().nexus_state,
-            nexus_db_model::InstanceState::NoVmm
-        );
-        assert!(db_instance.vmm().is_none());
-
-        assert!(
-            test_helpers::no_virtual_provisioning_resource_records_exist(
-                &cptestctx
+        // Fail the VMM, as though a request to sled-agent had received a
+        // NO_SUCH_INSTANCE response.
+        let no_such_instance =
+            SledAgentInstanceError(sled_agent_client::Error::ErrorResponse(
+                progenitor_client::ResponseValue::new(
+                    sled_agent_client::types::Error {
+                        error_code: Some("NO_SUCH_INSTANCE".to_string()),
+                        message: "pretend its gone lol".to_string(),
+                        request_id: Uuid::new_v4().to_string(),
+                    },
+                    http::StatusCode::NOT_FOUND,
+                    Default::default(),
+                ),
+            ));
+        let reason = no_such_instance
+            .vmm_failure_reason()
+            .expect("this should fail the vmm");
+        let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance should exist");
+        nexus
+            .mark_vmm_failed(
+                &opctx,
+                authz_instance,
+                &creating_vmm,
+                &no_such_instance,
+                reason,
             )
             .await
+            .expect("marking the VMM failed should succeed");
+        let vmm_after_failure =
+            test_helpers::vmm_fetch_including_deleted(&cptestctx, propolis_id)
+                .await;
+        assert_eq!(
+            dbg!(vmm_after_failure).state,
+            nexus_db_model::VmmState::Failed,
+            "VMM {propolis_id} should have been marked failed",
         );
-        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(&cptestctx).await);
+
+        paused_registration.resume();
+        let saga_result =
+            running_saga.wait_until_stopped().await.into_raw_result();
+        match dbg!(saga_result.kind) {
+            // The start saga's VMM failed before it was registered, so the saga
+            // must unwind, and unwinding must unregister the VMM.
+            Ok(output) => {
+                let db_vmm = test_helpers::vmm_fetch_including_deleted(
+                    &cptestctx,
+                    propolis_id,
+                )
+                .await;
+                panic!(
+                    "the start saga succeeded ({output:?}), even though its \
+                     VMM {propolis_id} was marked failed before it was \
+                     registered! \
+                     this is supposed to cause the saga to unwind, so something \
+                     is broken here!\n\
+                     the VMM's database record is {:?} (time_deleted: {:?})",
+                    db_vmm.state, db_vmm.time_deleted,
+                );
+            }
+            // If the saga failed, make sure it did not get stuck unwinding.
+            Err(saga_err) => {
+                if let Some((node, error)) = &saga_err.undo_failure {
+                    panic!(
+                        "saga got stuck unwinding (at node {node:?}): {error:?}"
+                    )
+                }
+            }
+        };
+
+        let sled_state = nexus
+            .sled_client(&creating_vmm.sled_id())
+            .await
+            .expect("sled-agent client should be available")
+            .vmm_get_state(&propolis_id)
+            .await
+            .map(|state| state.into_inner())
+            .map_err(SledAgentInstanceError);
+        match &sled_state {
+            Err(e) if e.vmm_gone() => {}
+            Ok(state) => panic!(
+                "the start saga unwound, but did not unregister VMM \
+                {propolis_id} from the sled-agent! (vmm was in state {state:?})",
+            ),
+            Err(e) => panic!(
+                "unexpected error asking sled-agent about VMM {propolis_id}: \
+                 {}",
+                InlineErrorChain::new(e),
+            ),
+        }
 
         cptestctx.teardown().await;
     }

@@ -1294,6 +1294,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
 ) WHERE
     time_deleted IS NULL;
 
+/**
+ * A view of the amount of provisioned resources on a given project.
+ */
+CREATE VIEW IF NOT EXISTS omicron.public.project_utilization
+AS SELECT
+    p.id AS project_id,
+    s.silo_id AS silo_id,
+    c.cpus_provisioned AS cpus_provisioned,
+    c.ram_provisioned AS memory_provisioned,
+    c.virtual_disk_bytes_provisioned AS storage_provisioned
+FROM
+    omicron.public.virtual_provisioning_collection AS c
+    INNER JOIN omicron.public.project AS p
+    ON c.id = p.id
+    INNER JOIN omicron.public.silo_utilization AS s
+    ON p.silo_id = s.silo_id
+WHERE
+    c.collection_type = 'Project'
+    AND (
+        s.silo_discoverable IS TRUE
+            OR s.cpus_allocated > 0
+            OR s.memory_allocated > 0
+            OR s.storage_allocated > 0
+    )
+    AND p.time_deleted IS NULL;
+
 /*
  * Instances
  */
@@ -1315,7 +1341,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
     'failed',
 
     /* The instance has been destroyed. */
-    'destroyed'
+    'destroyed',
+
+    /*
+     * The instance has no active VMM due to a sled being evacutated.
+     * Corresponds to the "rebooting" external state.
+     */
+    'sled_evacuating'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
@@ -3356,6 +3388,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_flags (
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (bundle_id)
 );
@@ -3373,13 +3406,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_host_inf
 
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports (
     bundle_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (bundle_id)
+);
+
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set,
+-- and a persisted range always carries a start bound (stamped at bundle
+-- creation).
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_range (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (bundle_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        end_time IS NULL OR start_time <= end_time
+    )
 );
 
 /*******************************************************************/
@@ -4292,6 +4337,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 
+    -- the rack ID that this SP was found in (determined based on which MGS
+    -- reported it)
+    rack_id UUID NOT NULL,
+
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
@@ -4589,6 +4638,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- Number of VMMs currently registered with the instance manager.
     instance_manager_num_registered_vmms INT8 NOT NULL CHECK (instance_manager_num_registered_vmms >= 0),
 
+    -- ID of the row in the `rack` table that corresponds to this sled's rack
+    rack_id UUID NOT NULL,
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
@@ -4781,7 +4833,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
-    -- The slot where this disk was last observed
+    -- The PCIe physical slot number of the bridge above this disk, as
+    -- reported by the sled. This is internal to the board's PCIe topology and
+    -- board-specific (the same U.2 bay is numbered differently on Gimlet and
+    -- Cosmo); it is not the location printed on the chassis. See `location`
+    -- for that. The column is named "slot" for historical reasons; the
+    -- corresponding Rust field is `pcie_slot`.
     slot INT8 CHECK (slot >= 0) NOT NULL,
 
     vendor STRING(63) NOT NULL,
@@ -4790,10 +4847,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
+    -- Where the disk sits in the chassis, as labelled by the sled's hardware
+    -- topology (e.g. "N5" for a U.2 bay, "M.2 East" for a boot device). NULL
+    -- if the sled did not report one.
+    location STRING(63),
+
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
-    -- - The slot in which this disk was found
+    -- - The PCIe slot in which this disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
@@ -4805,7 +4867,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
-    -- The slot where this disk was last observed
+    -- The PCIe physical slot number of the disk this firmware belongs to;
+    -- matches `inv_physical_disk.slot`.
     slot INT8 CHECK (slot >= 0) NOT NULL,
 
     -- total number of firmware slots the device has
@@ -4822,7 +4885,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
-    -- - The slot in which the disk was found
+    -- - The PCIe slot in which the disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
@@ -5555,6 +5618,192 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_fmd_resource (
     PRIMARY KEY (inv_collection_id, sled_id, resource_id)
 );
 
+
+-- Description of the presence or absence of a component, as reported by a SP.
+--
+--  The presence of some components may vary based on the power state of the
+-- sled (e.g., components that time out or appear unavailable if the sled is in
+-- A2 may become present when the sled moves to A0).
+CREATE TYPE IF NOT EXISTS omicron.public.sp_component_presence AS ENUM (
+    -- The component is present.
+    'present',
+    -- The component is not present.
+    'not_present',
+    -- The component is present but in a failed or faulty state.
+    'failed',
+    -- The SP is unable to determine the presence of the component.
+    'unavailable',
+    -- The SP's attempt to determine the presence of the component timed out.
+    'timeout',
+    -- The SP's attempt to determine the presence of the component failed.
+    'error'
+);
+
+-- The location of a power supply unit (PSU) in a power shelf.
+--
+-- This is determined from the SP-reported component ID, and can be converted
+-- back into that value when requesting additional data from that SP.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_psu_slot AS ENUM (
+    'PSU0',
+    'PSU1',
+    'PSU2',
+    'PSU3',
+    'PSU4',
+    'PSU5'
+);
+
+
+-- inventory table for power supply units (PSUs) in a power shelf
+CREATE TABLE IF NOT EXISTS omicron.public.inv_power_shelf_psu (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+    -- baseboard of the power shelf controller which told us about this PSU
+    -- (foreign key into `hw_baseboard_id` table)
+    psc_baseboard_id UUID NOT NULL,
+
+    -- which slot in the power shelf this record represents. this is determined
+    -- based on the SP component ID reported by the SP's inventory response.
+    location omicron.public.inv_psu_slot NOT NULL,
+
+    -- the SP-reported presence value for this PSU.
+    presence omicron.public.sp_component_presence NOT NULL,
+
+    -- the Hubris device type string reported by the SP's inventory.
+    --
+    -- this identifies which Hubris driver is used to communicate with the PSU,
+    -- and is a property of the SP's Hubris image, not a value reported by the
+    -- PSU itself.
+    hubris_device_type TEXT NOT NULL,
+
+    -- PMBus vital product data reported by the PSU. these fields are present
+    -- when the VPD was collected successfully, and are null if it was not, or
+    -- if the PSU is not present.
+    mfr_id TEXT,
+    mfr_model TEXT,
+    mfr_location TEXT,
+    -- the value of the PMBus "MFR_REVISION" command. This is used by Murata to
+    -- represent the firmware revisions of the PSU's primary and secondary MCUs.
+    mfr_revision TEXT,
+    mfr_date TEXT,
+    mfr_serial TEXT,
+
+    -- an error that occurred while reading PMBus VPD. this is NULL if the VPD
+    -- fields are present or if the PSU is not present, and is set if the
+    -- VPD fields are NULL because an attempt to read the VPD failed.
+    vpd_error TEXT,
+
+    CONSTRAINT vpd_result_valid CHECK (
+        (
+            presence != 'not_present'
+            AND vpd_error IS NULL
+            AND mfr_id IS NOT NULL
+            AND mfr_model IS NOT NULL
+            AND mfr_revision IS NOT NULL
+            AND mfr_location IS NOT NULL
+            AND mfr_date IS NOT NULL
+            AND mfr_serial IS NOT NULL
+        ) OR (
+            presence != 'not_present'
+            AND vpd_error IS NOT NULL
+            AND mfr_id IS NULL
+            AND mfr_model IS NULL
+            AND mfr_revision IS NULL
+            AND mfr_location IS NULL
+            AND mfr_date IS NULL
+            AND mfr_serial IS NULL
+        ) OR (
+            presence = 'not_present'
+            AND vpd_error IS NULL
+            AND mfr_id IS NULL
+            AND mfr_model IS NULL
+            AND mfr_revision IS NULL
+            AND mfr_location IS NULL
+            AND mfr_date IS NULL
+            AND mfr_serial IS NULL
+        )
+    ),
+
+
+    PRIMARY KEY (inv_collection_id, psc_baseboard_id, location)
+);
+
+-- Inventory of other racks discovered via DDM that are not necessarily part of
+-- the multirack cluster yet.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_discovered_rack (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- This is the same id that gets used in the `rack` table if/when the rack
+    -- is adopted:
+    rack_id UUID NOT NULL,
+
+    -- The IPv6 underlay /56 prefix for the rack:
+    rack_subnet INET NOT NULL,
+
+    -- Underlay address of the sled running the multirack join service:
+    join_service_ip INET NOT NULL,
+
+    -- Only allow IPv6 INET values for rack_subnet:
+    CONSTRAINT rack_subnet_family CHECK (
+        family(rack_subnet) = 6
+    ),
+    -- Enforce the correct length of the rack subnet:
+    CONSTRAINT rack_subnet_prefix CHECK (
+        masklen(rack_subnet) = 56
+    ),
+
+    PRIMARY KEY (inv_collection_id, rack_id)
+);
+
+-- Inventory of sleds on other racks discovered via the multirack join service.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_discovered_sled (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- This is the same id the sled-agent uses to upsert itself into the `sled`
+    -- table if/when the sled is adopted:
+    sled_id UUID NOT NULL,
+
+    -- Foreign key into `inv_discovered_rack` for the same collection:
+    rack_id UUID NOT NULL,
+
+    -- Baseboard info about the sled:
+    part_number STRING(63) NOT NULL,
+    serial_number STRING(63) NOT NULL,
+
+    -- The IPv6 underlay /64 prefix for the sled:
+    sled_subnet INET NOT NULL,
+
+    -- Whether the join service reports the sled-agent as started:
+    sled_agent_started BOOL NOT NULL,
+    -- The most recent error seen starting the sled-agent, if any:
+    last_start_error_seen TEXT,
+
+    -- Only allow IPv6 INET values for sled_subnet:
+    CONSTRAINT sled_subnet_family CHECK (
+        family(sled_subnet) = 6
+    ),
+    -- Enforce the correct length of the sled subnet:
+    CONSTRAINT sled_subnet_prefix CHECK (
+        masklen(sled_subnet) = 64
+    ),
+
+    -- Once the sled-agent starts successfully, we no longer want to track the
+    -- last error seen:
+    CONSTRAINT start_error_is_null_if_started CHECK (
+        (NOT sled_agent_started) OR (last_start_error_seen IS NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.reconfigurator_disruption_policy AS ENUM (
     'terminate',
     'migrate_or_terminate',
@@ -5711,7 +5960,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
 
     -- The generation of the collective set of all external networking config
     -- described by the blueprint
-    external_networking_generation INT8 NOT NULL
+    external_networking_generation INT8 NOT NULL,
+
+    -- These columns describe the inventory collection that this blueprint
+    -- reflects.  They are currently used for debugging, but they may be used
+    -- for other purposes in the future.  They are either all NULL (if it's not
+    -- known which collection the blueprint reflects) or all non-NULL.
+    -- Like `parent_blueprint_id`, `reflects_collection_id` is not a real
+    -- foreign key because the collection may have since been deleted.
+    reflects_collection_id UUID,
+    reflects_collection_time_started TIMESTAMPTZ,
+    reflects_collection_time_done TIMESTAMPTZ,
+
+    CONSTRAINT reflects_collection_all_or_none CHECK (
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_started IS NULL) AND
+        (reflects_collection_id IS NULL) =
+            (reflects_collection_time_done IS NULL)
+    )
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -6430,6 +6696,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_sled_bp_availability (
 CREATE INDEX IF NOT EXISTS lookup_available_sled
     ON omicron.public.rendezvous_sled_bp_availability (sled_id)
     WHERE bp_availability = 'available';
+
+/* Add an index which lets us find unavailable sleds */
+CREATE INDEX IF NOT EXISTS lookup_unavailable_sled
+    ON omicron.public.rendezvous_sled_bp_availability (sled_id)
+    WHERE bp_availability = 'unavailable';
 
 /*******************************************************************/
 
@@ -7500,7 +7771,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
     'test.quux.bar',
     'test.quux.bar.baz',
     'hardware.power_shelf.psu.insert',
-    'hardware.power_shelf.psu.remove'
+    'hardware.power_shelf.psu.remove',
+    'silo.certificate.expiring',
+    'silo.certificate.expired'
     -- Add new alert classes here!
 );
 
@@ -8294,7 +8567,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
     'physical_disk',
-    'saga'
+    'saga',
+    'certificate',
+    'smf_service'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8439,6 +8714,87 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
     )
 );
 
+-- The certificate diagnosis engine's facts. See the comment on the
+-- physical-disk engine above: one table per engine, fact content as typed
+-- columns.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_certificate_kind AS ENUM (
+    'best_certificate_expiring',
+    'best_certificate_expired'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_certificate (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The silo this fact is about. Common to every kind of certificate fact
+    -- (the case is keyed by it), so it is always present regardless of
+    -- `kind`.
+    --
+    -- Fact payloads carry only the fields that define the condition; data
+    -- that merely describes the silo or certificate (e.g., their names) is
+    -- looked up from the silo and certificate tables when a case is acted on.
+    silo_id UUID NOT NULL,
+
+    -- Which certificate fact this row represents.
+    kind omicron.public.fm_fact_certificate_kind NOT NULL,
+
+    -- Both kinds carry the same payload: the silo's best certificate (latest
+    -- leaf `not_after`) when the fact was recorded, and that `not_after`. A
+    -- kind with a different payload would add nullable columns here with a
+    -- CHECK constraint keyed on `kind`, as `fm_fact_saga` does.
+    certificate_id UUID NOT NULL,
+    not_after TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+-- The SMF service diagnosis engine's facts.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_smf_service_kind AS ENUM (
+    'in_maintenance'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_smf_service (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The SMF service instance this fact is about. Common to every kind of
+    -- SMF service fact (the case is keyed by it), so it is always present
+    -- regardless of `kind`.
+    sled_id UUID NOT NULL,
+    zone_name TEXT NOT NULL,
+    fmri TEXT NOT NULL,
+
+    -- Which SMF service fact this row represents.
+    kind omicron.public.fm_fact_smf_service_kind NOT NULL,
+
+    -- The inventory collection in which the service was observed, and when
+    -- the sled agent observed it.
+    observed_in_inv UUID NOT NULL,
+    time_observed TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
     -- ID of this association. When an ereport is assigned to a case, that
     -- association is assigned a UUID. These are used primarily to aid in
@@ -8566,6 +8922,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     include_reconfigurator BOOL NOT NULL,
     include_sled_cubby_info BOOL NOT NULL,
     include_sp_dumps BOOL NOT NULL,
+    include_sp_components BOOL NOT NULL,
 
     PRIMARY KEY (sitrep_id, request_id)
 );
@@ -8585,13 +8942,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
 CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_ereports (
     sitrep_id UUID NOT NULL,
     request_id UUID NOT NULL,
-    start_time TIMESTAMPTZ,
-    end_time TIMESTAMPTZ,
     only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
     only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
 
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_time_range (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
     PRIMARY KEY (sitrep_id, request_id),
-    CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
 );
 
 -- Marker written by `SitrepGuardedInsert` atomically with a corresponding
@@ -8903,8 +9271,7 @@ CREATE SEQUENCE IF NOT EXISTS omicron.public.multicast_group_version START 1 INC
 CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_state AS ENUM (
     'creating',
     'active',
-    'deleting',
-    'deleted'
+    'deleting'
 );
 
 -- Multicast group member state for RPW pattern
@@ -8942,16 +9309,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* DPD tag to couple external/underlay state for this group */
     tag STRING(63),
 
-    /* Current state of the multicast group (for RPW) */
-    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
-
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
     /* Salt for underlay IP collision avoidance (XORed into mapping) */
-    /* Note: Column added via migration, must be at end for schema compatibility */
     underlay_salt INT2,
+
+    /* Current state of the multicast group (for RPW) */
+    /* Note: Recreated by migration, must be at end for schema compatibility */
+    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
 
     /* Constraints */
     -- External groups: IPv4 multicast or non-admin-local IPv6
@@ -9495,6 +9862,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     --
     -- This must be less than `sitrep_limit`, and must be at least 2.
     history_pruning_threshold INT8,
+    -- The number of days before a silo's external TLS certificate expires at
+    -- which the certificate diagnosis engine opens a case and requests an
+    -- alert, if no later-expiring certificate is installed for the silo.
+    --
+    -- This must be at least 1 and at most 3650.
+    certificate_expiry_warning_days INT8,
 
     CONSTRAINT versions_are_positive CHECK (version > 0),
 
@@ -9519,9 +9892,95 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
         (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
             history_pruning_threshold < sitrep_limit
+    ),
+    CONSTRAINT certificate_expiry_warning_days_validity CHECK (
+        certificate_expiry_warning_days IS NULL OR (
+            certificate_expiry_warning_days >= 1 AND
+            certificate_expiry_warning_days <= 3650
+        )
     )
 );
 
+-- A problem detected by the fault management subsystem (see RFD 699).
+--
+-- This table contains relatively little data, because most of the data
+-- associated with a problem exists at a given revision. In order to allow
+-- exporting the historical revisions of a problem, we store all revisions of
+-- the problem since it was created. Therefore, this table basically just stores
+-- the unique ID of the problem and the latest revision number, and can be
+-- JOINed with `problem_revision` and other tables to fetch the latest revision.
+--
+-- Everything which may be changed across revisions lives instead in the
+-- `problem_revision` table and its friends.
+CREATE TABLE IF NOT EXISTS omicron.public.problem (
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- The latest revision number of this problem. This can be used to
+    -- select the current revision from the `problem_revision` table.
+    current_revision INT8 NOT NULL,
+
+    CONSTRAINT revision_is_non_negative CHECK (current_revision >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_problem_by_time_created
+ON
+    omicron.public.problem (time_created)
+WHERE
+    time_deleted IS NULL;
+
+-- A revision of a problem (see RFD 699). This table allows us to store the
+-- revision history of a given problem, along with the current revision.
+-- Querying the current version is done by looking up the problem from the
+-- `problem` table and then selecting the entry from *this* table as of the
+-- `current_revision` revision.
+CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
+    problem_id UUID NOT NULL,
+    -- The revision number of this revision.
+    --
+    -- This is referenced by the `current_revision` field in the
+    -- `problem` table.
+    revision INT8 NOT NULL,
+
+    -- The time at which *this revision* was created. This is **not** the time
+    -- the problem itself was created, and will correspond to the `time_modified`
+    -- at which this revision was made current.
+    --
+    -- This column is used primarily when exporting the complete revision
+    -- history of a problem.
+    time_created TIMESTAMPTZ NOT NULL,
+
+    -- If this is NULL, the problem is in the "active" state, and if it is
+    -- non-NULL, the problem is in the "resolved" state.
+    time_resolved TIMESTAMPTZ,
+
+    -- The problem's problem code as of this revision.
+    --
+    -- This determines the problem class, as well as the problem's
+    -- documentation.
+    code INT8 NOT NULL,
+
+    -- A human-readable summary (one sentence) describing this problem at this
+    -- revision.
+    summary STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) describing the
+    -- problem at this revision.
+    description STRING NOT NULL,
+
+    -- A human-readable description (one or more paragraphs) of any operator
+    -- actions required to address this problem.
+    action_required STRING NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+    CONSTRAINT problem_code_is_non_negative CHECK (code >= 0),
+
+    PRIMARY KEY (problem_id, revision)
+);
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
@@ -9532,7 +9991,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '303.0.0', NULL)
+    (TRUE, NOW(), NOW(), '321.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

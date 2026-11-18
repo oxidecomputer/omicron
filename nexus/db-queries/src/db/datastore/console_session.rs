@@ -141,7 +141,7 @@ impl DataStore {
 
         Ok(authn::ConsoleSessionWithSiloId {
             console_session,
-            silo_id: db_silo_user.silo_id,
+            silo_id: db_silo_user.silo_id(),
         })
     }
 

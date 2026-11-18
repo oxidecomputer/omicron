@@ -13,6 +13,7 @@ use futures::FutureExt as _;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -26,9 +27,9 @@ use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use serde_json::Value;
 use serde_json::json;
-use sled_agent_client::types::AttachedSubnet;
-use sled_agent_client::types::AttachedSubnetKind;
-use sled_agent_client::types::AttachedSubnets;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnetKind;
+use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::debug;
@@ -83,6 +84,13 @@ impl Manager {
                 };
                 (*subnet, tgt)
             })
+            // TODO: For a duplicate subnet, this silently keeps the last entry.
+            // Dendrite keys attachments by subnet alone, so this map relies on
+            // its input being globally unique per subnet. This is true for
+            // external subnets once the primary-NIC join is 1:1 (explained in
+            // more detail in the TODO referenced below), but not for VPC
+            // subnets (#9580), which should be filtered out here. See the TODO
+            // in `DataStore::list_all_attached_subnets_batched`.
             .collect::<HashMap<_, _>>();
 
         // Loop over each Dendrite instance, find the subnets it has and the
@@ -201,9 +209,9 @@ impl Manager {
         // would spread the work out across the different sleds, rather than
         // sending each sled all its subnets in a short time. But it's not clear
         // there's any meaningful difference at this point.
-        let attachments_by_sled =
-            group_attached_subnets_by_sled_and_vmm(attachments);
         let mut res = HashMap::<_, SledSubnetDetails>::new();
+        let attachments_by_sled =
+            group_attached_subnets_by_sled_and_vmm(log, attachments, &mut res);
         'sleds: for ((sled_id, sled_ip), attachments_by_sled) in
             attachments_by_sled.iter()
         {
@@ -299,25 +307,58 @@ type SledAttachedSubnetMap =
 // We really care about the instance ID, but the sled-agent API exposes a
 // per-VMM endpoint for replacing attached subnets.
 fn group_attached_subnets_by_sled_and_vmm(
+    log: &Logger,
     attachments: &[shared::AttachedSubnet],
+    details_by_sled: &mut HashMap<SledUuid, SledSubnetDetails>,
 ) -> SledAttachedSubnetMap {
     let mut attachments_by_sled = SledAttachedSubnetMap::new();
     for attachment in attachments.iter() {
-        attachments_by_sled
-            .entry((attachment.sled_id, attachment.sled_ip))
+        let &shared::AttachedSubnet {
+            sled_id,
+            sled_ip,
+            vmm_id,
+            subnet,
+            subnet_id,
+            ..
+        } = attachment;
+        let result = attachments_by_sled
+            .entry((sled_id, sled_ip))
             .or_default()
-            .entry(attachment.vmm_id)
-            .or_insert_with(|| AttachedSubnets { subnets: Vec::new() })
+            .entry(vmm_id)
+            .or_insert_with(|| AttachedSubnets { subnets: IdOrdMap::new() })
             .subnets
-            .push(AttachedSubnet {
-                subnet: attachment.subnet,
-                kind: match attachment.subnet_id {
+            .insert_unique(AttachedSubnet {
+                subnet,
+                kind: match subnet_id {
                     AttachedSubnetId::External(_) => {
                         AttachedSubnetKind::External
                     }
                     AttachedSubnetId::Vpc(_) => AttachedSubnetKind::Vpc,
                 },
             });
+        if let Err(err) = result {
+            // TODO: Duplicates here indicate an invariant violation. See the
+            // TODO in `DataStore::list_all_attached_subnets_batched`. Once that
+            // function returns an appropriately-keyed map, this branch should
+            // go away.
+            let err = InlineErrorChain::new(&err);
+            let message = format!(
+                "subnet attached to the same VMM more than once, keeping \
+                the first attachment: sled_id={sled_id}, sled_ip={sled_ip}, \
+                vmm_id={vmm_id}, subnet={subnet}: {err}",
+            );
+            error!(
+                log,
+                "subnet attached to the same VMM more than once, keeping \
+                the first attachment";
+                "sled_id" => %sled_id,
+                "sled_ip" => %sled_ip,
+                "vmm_id" => %vmm_id,
+                "subnet" => %subnet,
+                &err,
+            );
+            details_by_sled.entry(sled_id).or_default().errors.push(message);
+        }
     }
     attachments_by_sled
 }
@@ -372,22 +413,6 @@ impl BackgroundTask for Manager {
         async {
             let log = &opctx.log;
             info!(log, "starting attached subnet manager work");
-            let mut out = AttachedSubnetManagerStatus::default();
-
-            // Fetch Dendrite clients. We will need to move this into the loop
-            // when we resolve #5201, since we'll look up Dendrite instances per
-            // rack in that case.
-            let maybe_dpd_clients = dpd_clients(&self.resolver, &log)
-                .await
-                .inspect_err(|e| {
-                    error!(
-                        log,
-                        "failed to lookup Dendrite clients, will \
-                        not be able to forward attachments to Dendrite";
-                        "error" => %e
-                    )
-                })
-                .ok();
             let attachments = match self
                 .datastore
                 .list_all_attached_subnets_batched(opctx)
@@ -408,26 +433,40 @@ impl BackgroundTask for Manager {
                         "failed to list attached subnets";
                         "error" => &err,
                     );
-                    out.db_error = Some(err.to_string());
-                    return json!(out);
+                    return json!(AttachedSubnetManagerStatus::DatabaseError {
+                        error: err.to_string(),
+                    });
                 }
             };
 
-            out.dendrite = match &maybe_dpd_clients {
-                None => HashMap::new(),
-                Some(clients) => {
-                    self.send_attachments_to_dendrite(
-                        &log,
-                        &clients,
-                        &attachments,
-                    )
-                    .await
+            // Fetch Dendrite clients. We will need to move this into the loop
+            // when we resolve #5201, since we'll look up Dendrite instances per
+            // rack in that case.
+            let dendrite = match dpd_clients(&self.resolver, &log).await {
+                Ok(clients) => {
+                    let dendrite_details = self
+                        .send_attachments_to_dendrite(
+                            &log,
+                            &clients,
+                            &attachments,
+                        )
+                        .await;
+                    Ok(dendrite_details)
+                }
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to lookup Dendrite clients, will \
+                        not be able to forward attachments to Dendrite";
+                        "error" => %e
+                    );
+                    Err(e)
                 }
             };
-            out.sled = self
+            let sled = self
                 .send_attachments_to_sled_agents(&log, opctx, &attachments)
                 .await;
-            json!(out)
+            json!(AttachedSubnetManagerStatus::Listed { dendrite, sled })
         }
         .boxed()
     }
@@ -442,6 +481,7 @@ mod test {
     use diesel::QueryDsl as _;
     use dpd_client::types::MacAddr;
     use dpd_client::types::Vni;
+    use iddqd::id_ord_map;
     use nexus_db_model::IpAttachState;
     use nexus_db_schema::schema::external_subnet::dsl;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
@@ -453,9 +493,12 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::address::IpVersion;
     use omicron_common::api::internal::shared;
+    use omicron_uuid_kinds::ExternalSubnetUuid;
     use omicron_uuid_kinds::GenericUuid;
-    use sled_agent_types::attached_subnet::AttachedSubnetKind;
+    use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::RackUuid;
     use std::collections::BTreeSet;
+    use uuid::Uuid;
 
     #[test]
     fn attached_subnet_diff_works_with_empty_sets() {
@@ -544,6 +587,80 @@ mod test {
 
         // And add the entire new mapping.
         assert_eq!(to_add, desired.iter().collect());
+    }
+
+    #[test]
+    fn group_attached_subnets_rejects_duplicate_subnets_per_vmm() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "group_attached_subnets_rejects_duplicate_subnets_per_vmm",
+        );
+        let rack_id = RackUuid::new_v4();
+        let sled_id = SledUuid::new_v4();
+        let sled_ip: Ipv6Addr = "fd00::1".parse().unwrap();
+        let vmm_id = PropolisUuid::new_v4();
+        let other_vmm_id = PropolisUuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+        let subnet: IpNet = "10.0.0.0/24".parse().unwrap();
+        let other_subnet: IpNet = "10.0.1.0/24".parse().unwrap();
+        let make = |vmm_id, subnet, subnet_id| shared::AttachedSubnet {
+            rack_id,
+            sled_id,
+            sled_ip,
+            vmm_id,
+            instance_id,
+            subnet_id,
+            subnet,
+            mac: "a8:40:25:00:00:01".parse().unwrap(),
+            vni: omicron_common::api::external::Vni::try_from(100u32).unwrap(),
+        };
+        let external_id =
+            AttachedSubnetId::External(ExternalSubnetUuid::new_v4());
+        let vpc_id = AttachedSubnetId::Vpc(Uuid::new_v4());
+        let attachments = [
+            make(vmm_id, subnet, external_id),
+            make(vmm_id, other_subnet, external_id),
+            make(vmm_id, subnet, vpc_id),
+            make(other_vmm_id, subnet, vpc_id),
+        ];
+
+        let mut details_by_sled = HashMap::new();
+        let grouped = group_attached_subnets_by_sled_and_vmm(
+            &logctx.log,
+            &attachments,
+            &mut details_by_sled,
+        );
+
+        let expected_vmm_subnets = id_ord_map! {
+            AttachedSubnet { subnet, kind: AttachedSubnetKind::External },
+            AttachedSubnet {
+                subnet: other_subnet,
+                kind: AttachedSubnetKind::External,
+            },
+        };
+        let expected_other_vmm_subnets = id_ord_map! {
+            AttachedSubnet { subnet, kind: AttachedSubnetKind::Vpc },
+        };
+        assert_eq!(grouped.len(), 1);
+        let by_vmm = &grouped[&(sled_id, sled_ip)];
+        assert_eq!(by_vmm.len(), 2);
+        assert_eq!(by_vmm[&vmm_id].subnets, expected_vmm_subnets);
+        assert_eq!(by_vmm[&other_vmm_id].subnets, expected_other_vmm_subnets);
+
+        assert_eq!(details_by_sled.len(), 1);
+        let details = &details_by_sled[&sled_id];
+        assert_eq!(details.n_subnets, 0);
+        let existing =
+            AttachedSubnet { subnet, kind: AttachedSubnetKind::External };
+        let new = AttachedSubnet { subnet, kind: AttachedSubnetKind::Vpc };
+        let expected_error = format!(
+            "subnet attached to the same VMM more than once, keeping the \
+             first attachment: sled_id={sled_id}, sled_ip={sled_ip}, \
+             vmm_id={vmm_id}, subnet={subnet}: new item: {new:?} conflicts \
+             with existing: [{existing:?}]",
+        );
+        assert_eq!(details.errors, [expected_error]);
+
+        logctx.cleanup_successful();
     }
 
     type ControlPlaneTestContext =
@@ -691,17 +808,7 @@ mod test {
                 attached.iter().all(|att| att.sled_id == sa.sled_agent_id())
             );
             let sa_subnets = sa.sled_agent().attached_subnets.lock().unwrap();
-            assert_eq!(sa_subnets.len(), attached.len());
-            for att in attached.iter() {
-                let on_sled = sa_subnets.get(&att.vmm_id).unwrap();
-                assert_eq!(on_sled.len(), 1);
-                let attached_on_sled = on_sled.iter().next().unwrap();
-                assert!(matches!(
-                    attached_on_sled.kind,
-                    AttachedSubnetKind::External
-                ));
-                assert_eq!(attached_on_sled.subnet, att.subnet);
-            }
+            assert_sled_agent_attached_subnets(&sa_subnets, &attached);
         }
 
         // Now detach the one on the first instance, and check that the
@@ -778,20 +885,45 @@ mod test {
 
             // It should still have a mapping for the _instance_ we detached the
             // subnet from, but that should be empty.
-            assert_eq!(sa_subnets.len(), attached.len() + 1);
             assert!(sa_subnets.get(&removed.vmm_id).unwrap().is_empty());
 
-            // All the attached subnets should still be there.
-            for att in attached.iter() {
-                let on_sled = sa_subnets.get(&att.vmm_id).unwrap();
-                assert_eq!(on_sled.len(), 1);
-                let attached_on_sled = on_sled.iter().next().unwrap();
-                assert!(matches!(
-                    attached_on_sled.kind,
-                    AttachedSubnetKind::External
-                ));
-                assert_eq!(attached_on_sled.subnet, att.subnet);
-            }
+            assert_sled_agent_attached_subnets(&sa_subnets, &attached);
+        }
+    }
+
+    /// Assert that the per-VMM contents from Sled Agent match `attached`.
+    fn assert_sled_agent_attached_subnets(
+        sa_subnets: &HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>,
+        attached: &[shared::AttachedSubnet],
+    ) {
+        let mut expected: HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>> =
+            HashMap::new();
+        for att in attached {
+            expected
+                .entry(att.vmm_id)
+                .or_default()
+                .insert_unique(AttachedSubnet {
+                    subnet: att.subnet,
+                    kind: AttachedSubnetKind::External,
+                })
+                .expect("each attached subnet appears at most once per VMM");
+        }
+
+        let empty = IdOrdMap::new();
+        for (vmm_id, on_sled) in sa_subnets {
+            let expected_for_vmm = expected.get(vmm_id).unwrap_or(&empty);
+            assert_eq!(
+                on_sled, expected_for_vmm,
+                "sled-agent attached subnets for VMM {vmm_id} \
+                 don't match expectations"
+            );
+        }
+
+        for vmm_id in expected.keys() {
+            assert!(
+                sa_subnets.contains_key(vmm_id),
+                "sled-agent is missing an entry for attached VMM {vmm_id}"
+            );
         }
     }
 
@@ -802,12 +934,11 @@ mod test {
         removed: &[shared::AttachedSubnet],
     ) {
         // No errors
-        assert!(result.contains_key("db_error"));
-        assert!(result["db_error"].is_null());
+        assert_eq!(result["status"], "listed");
 
         // Dendrite should have added all the mappings.
         assert!(result.contains_key("dendrite"));
-        let dendrite = result["dendrite"].as_object().unwrap();
+        let dendrite = result["dendrite"]["ok"].as_object().unwrap();
         let switch0 = dendrite["switch0"].as_object().unwrap();
         assert!(switch0["errors"].as_array().unwrap().is_empty());
         assert_eq!(
@@ -840,12 +971,11 @@ mod test {
         result: &serde_json::Map<String, serde_json::Value>,
     ) {
         // No errors.
-        assert!(result.contains_key("db_error"));
-        assert!(result["db_error"].is_null());
+        assert_eq!(result["status"], "listed");
 
         // We have a dendrite key with a switch, but there are no mappings.
         assert!(result.contains_key("dendrite"));
-        let dendrite = result["dendrite"].as_object().unwrap();
+        let dendrite = result["dendrite"]["ok"].as_object().unwrap();
         let switch0 = dendrite["switch0"].as_object().unwrap();
         assert!(switch0["errors"].as_array().unwrap().is_empty());
         assert_eq!(

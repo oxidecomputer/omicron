@@ -5,6 +5,7 @@
 //! A mechanism for for discovering peer sleds on the bootstrap network via DDM
 //! and the bootstrap agent.
 
+use omicron_common::http_client::internal_http_client;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::warn;
@@ -66,8 +67,9 @@ async fn scan_for_peers(
     let mut prev_sleds = None;
     loop {
         // Query the local bootstrap agent for all known peers
-        let client = bootstrap_agent_lockstep_client::Client::new(
+        let client = bootstrap_agent_lockstep_client::Client::new_with_client(
             &format!("http://{bootstrap_agent_lockstep_address}"),
+            internal_http_client(),
             log.clone(),
         );
 

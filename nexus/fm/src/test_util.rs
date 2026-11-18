@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::analysis_input::{Builder, Input, InvalidInputs};
+use crate::analysis_input::{Builder, Input, InventoryStale};
 use crate::builder::{SitrepBuilder, SitrepBuilderRng};
 use chrono::DateTime;
 use chrono::Utc;
@@ -15,15 +15,16 @@ use nexus_types::fm::ereport::{
     Ena, Ereport, EreportData, EreportId, Reporter,
 };
 use nexus_types::fm::{
-    DiskFact, SagaAbandonedFactPayload, SagaFact, Sitrep, SitrepVersion,
-    ZpoolUnhealthyFactPayload,
+    DiskFact, FmConfig, SagaAbandonedFactPayload, SagaFact, Sitrep,
+    SitrepVersion, ZpoolUnhealthyFactPayload,
 };
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use nexus_types::inventory::ZpoolHealth;
+use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
-use omicron_generation_kinds::AlertGeneration;
-use omicron_generation_kinds::SupportBundleGeneration;
+use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -38,6 +39,7 @@ use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 use typed_rng::TypedUuidRng;
@@ -80,16 +82,23 @@ impl FmTest {
     // TODO(eliza): eventually it would be nice if the inventory collection and
     // in-service-disks were generated from the `ExampleSystemBuilder`
     // somehow...
+    #[allow(clippy::too_many_arguments)]
     pub fn input_builder(
         &self,
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+        in_service_sleds: Arc<BTreeSet<SledUuid>>,
         observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
-    ) -> Result<Builder, InvalidInputs> {
+        observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
+        config: FmConfig,
+    ) -> Result<Builder, InventoryStale> {
         let mut builder = Input::builder(parent_sitrep, inv)?
             .in_service_disks(in_service_disks)
-            .observed_sagas(observed_sagas);
+            .in_service_sleds(in_service_sleds)
+            .observed_sagas(observed_sagas)
+            .observed_silo_certificates(observed_silo_certificates)
+            .config(config);
         builder.add_ereporter_restarts(
             self.reporters.ereporter_restarts().iter().cloned(),
         );
@@ -488,7 +497,7 @@ pub fn make_zpool_degraded_fact(
     zpool_id: ZpoolUuid,
 ) -> fm::case::Fact {
     fm::case::Fact {
-        metadata: fm::case::FactMetadata {
+        metadata: fm::FactMetadata {
             id: FactUuid::new_v4(),
             created_sitrep_id: parent_sitrep_id,
             comment: format!("zpool {zpool_id} degraded"),
@@ -509,9 +518,9 @@ pub fn make_abandoned_saga_fact(
     parent_sitrep_id: SitrepUuid,
     saga_n: u128,
 ) -> fm::case::Fact {
-    let saga_id = steno::SagaId(uuid::Uuid::from_u128(saga_n));
+    let saga_id = steno::SagaId::from_u128(saga_n);
     fm::case::Fact {
-        metadata: fm::case::FactMetadata {
+        metadata: fm::FactMetadata {
             id: FactUuid::new_v4(),
             created_sitrep_id: parent_sitrep_id,
             comment: format!("saga {saga_id} abandoned"),
@@ -590,8 +599,8 @@ pub fn make_parent_sitrep(
             time_created: Utc::now(),
             next_inv_min_time_started: Utc::now(),
             comment: String::new(),
-            alert_generation: AlertGeneration::new(),
-            support_bundle_generation: SupportBundleGeneration::new(),
+            alert_generation: SitrepAlertGeneration::new(),
+            support_bundle_generation: SitrepSupportBundleGeneration::new(),
         },
         cases: case_map,
         ereports_by_id: Default::default(),

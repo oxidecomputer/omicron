@@ -69,7 +69,7 @@ true
 
 Having found a boundary zone, log into it and check the following things:
 
-===== Basic networking
+=== Basic networking
 
 First, confirm that the zone has basic networking configuration and
 connectivity with the outside world. In some environments this may be limited
@@ -174,7 +174,7 @@ root@oxz_ntp_cb901d3e:~# getent hosts time.cloudflare.com
 162.159.200.1   time.cloudflare.com
 ----
 
-===== NTP Service (chrony)
+=== NTP Service (chrony)
 
 Having established that basic networking and DNS are working, now look at the
 running NTP service (chrony).

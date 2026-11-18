@@ -53,6 +53,7 @@ tokio-util.workspace = true
 toml.workspace = true
 tough.workspace = true
 transceiver-controller.workspace = true
+trust-quorum-types.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-lockstep-client.workspace = true
@@ -101,6 +102,7 @@ maplit.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
+oxide-versioned-envelope.workspace = true
 serde_json.workspace = true
 sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-resolvable-files.workspace = true
@@ -111,4 +113,5 @@ subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 wicket.workspace = true
+wicket-cli-types.workspace = true
 zeroize.workspace = true

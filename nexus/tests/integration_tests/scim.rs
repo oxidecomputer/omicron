@@ -5,6 +5,7 @@
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
 use crate::integration_tests::saml::SAML_RESPONSE_WITH_GROUPS;
+use crate::integration_tests::silos::policy_identity_ids;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use base64::Engine;
 use chrono::Utc;
@@ -34,8 +35,10 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
 
+use omicron_uuid_kinds::SiloUuid;
 use scim2_test_client::Tester;
 
 type ControlPlaneTestContext =
@@ -485,7 +488,7 @@ async fn test_scim_client_no_auth_with_expired_token(
             time_created: now,
             time_deleted: None,
             time_expires: Some(now),
-            silo_id: silo.identity.id,
+            silo_id: SiloUuid::from_untyped_uuid(silo.identity.id).into(),
             bearer_token: String::from("testpost"),
         };
 
@@ -2158,4 +2161,224 @@ async fn test_time_modified_updated_on_scim_user_and_group_update(
         before={group_time_modified_at_creation}, \
         after={group_time_modified_after_update}",
     );
+}
+
+// Test that deleting a SCIM user or group removes its role assignments
+#[nexus_test]
+async fn test_scim_delete_clean_up_role_assignments(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        nexus.datastore().clone(),
+    );
+
+    const SILO_NAME: &str = "saml-scim-silo";
+    create_silo(&client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
+
+    let silo_url = format!("/v1/system/silos/{SILO_NAME}");
+    let silo_policy_url = format!("{silo_url}/policy");
+    let fleet_url = "/v1/system";
+    let fleet_policy_url = "/v1/system/policy";
+
+    let privileged_user_id =
+        opctx.authn.actor().unwrap().silo_user_id().unwrap();
+    grant_iam(
+        client,
+        &silo_url,
+        policy::SiloRole::Admin,
+        privileged_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let created_token: scim::ScimClientBearerTokenValue =
+        object_create_no_body(
+            client,
+            &format!("/v1/system/scim/tokens?silo={}", SILO_NAME),
+        )
+        .await;
+
+    let created_user: serde_json::Value = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer {}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "userName": "mscott",
+                    "externalId": "mscott@dundermifflin.com",
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute()
+    .await
+    .expect("expected 201")
+    .parsed_body()
+    .expect("created user");
+
+    let created_group: serde_json::Value = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer {}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "displayName": "Sales",
+                    "externalId": "sales@dundermifflin.com",
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute()
+    .await
+    .expect("expected 201")
+    .parsed_body()
+    .expect("created group");
+
+    let user_id: SiloUserUuid =
+        created_user["id"].as_str().unwrap().parse().unwrap();
+    let group_id: SiloGroupUuid =
+        created_group["id"].as_str().unwrap().parse().unwrap();
+
+    // Give the user and the group roles on the silo and on the fleet, so that
+    // deletion has to clean up assignments inside and outside the silo.
+    grant_iam(
+        client,
+        &silo_url,
+        policy::SiloRole::Viewer,
+        user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam_for_group(
+        client,
+        &silo_url,
+        policy::SiloRole::Viewer,
+        group_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam(
+        client,
+        fleet_url,
+        policy::FleetRole::Viewer,
+        user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam_for_group(
+        client,
+        fleet_url,
+        policy::FleetRole::Viewer,
+        group_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let user_id = user_id.into_untyped_uuid();
+    let group_id = group_id.into_untyped_uuid();
+    let privileged_user_id = privileged_user_id.into_untyped_uuid();
+
+    let silo_ids = policy_identity_ids::<policy::SiloRole>(
+        client,
+        &silo_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let fleet_ids = policy_identity_ids::<policy::FleetRole>(
+        client,
+        fleet_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    assert!(silo_ids.contains(&user_id));
+    assert!(silo_ids.contains(&group_id));
+    assert!(fleet_ids.contains(&user_id));
+    assert!(fleet_ids.contains(&group_id));
+
+    // Delete the user. The group's assignments must stay.
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::DELETE,
+            &format!("/scim/v2/Users/{}", user_id),
+        )
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {}", created_token.bearer_token),
+        )
+        .allow_non_dropshot_errors()
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .execute()
+    .await
+    .expect("expected 204");
+
+    let silo_ids = policy_identity_ids::<policy::SiloRole>(
+        client,
+        &silo_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let fleet_ids = policy_identity_ids::<policy::FleetRole>(
+        client,
+        fleet_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    assert!(!silo_ids.contains(&user_id));
+    assert!(!fleet_ids.contains(&user_id));
+    assert!(silo_ids.contains(&group_id));
+    assert!(fleet_ids.contains(&group_id));
+
+    // Delete the group.
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::DELETE,
+            &format!("/scim/v2/Groups/{}", group_id),
+        )
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {}", created_token.bearer_token),
+        )
+        .allow_non_dropshot_errors()
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .execute()
+    .await
+    .expect("expected 204");
+
+    let silo_ids = policy_identity_ids::<policy::SiloRole>(
+        client,
+        &silo_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let fleet_ids = policy_identity_ids::<policy::FleetRole>(
+        client,
+        fleet_policy_url,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    assert!(!silo_ids.contains(&group_id));
+    assert!(!fleet_ids.contains(&group_id));
+
+    // Assignments held by an identity that was not deleted must stay.
+    assert!(silo_ids.contains(&privileged_user_id));
+    assert!(fleet_ids.contains(&privileged_user_id));
 }

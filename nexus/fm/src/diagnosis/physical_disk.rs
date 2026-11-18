@@ -927,14 +927,14 @@ mod tests {
         let parent_id = SitrepUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let foreign_fact = fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_id,
                 comment: "a fact belonging to the saga engine".to_string(),
             },
             payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
                 fm::SagaAbandonedFactPayload {
-                    saga_id: steno::SagaId(uuid::Uuid::from_u128(1)),
+                    saga_id: steno::SagaId::from_u128(1),
                 },
             )),
         };

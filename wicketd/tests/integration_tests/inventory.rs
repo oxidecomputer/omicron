@@ -22,6 +22,7 @@ use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 async fn test_inventory() {
     let gateway =
         gateway_setup::test_setup("test_inventory", SpPort::One).await;
+    let n_sps = gateway.simrack.num_sps();
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let params = GetInventoryParams { force_refresh: Vec::new() };
 
@@ -83,8 +84,7 @@ async fn test_inventory() {
 
     info!(wicketd_testctx.log(), "inventory returned"; "inventory" => ?inventory);
 
-    // 4 SPs attached to the inventory.
-    assert_eq!(inventory.sps.len(), 4);
+    assert_eq!(inventory.sps.len(), n_sps);
 
     // Test CLI with JSON output
     {

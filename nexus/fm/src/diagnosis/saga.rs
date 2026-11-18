@@ -442,14 +442,14 @@ mod tests {
     use nexus_types::observed_saga::{
         OrphanedReason, SagaOwnerState, SagaProgressState,
     };
-    use omicron_generation_kinds::AlertGeneration;
-    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{OmicronZoneUuid, SitrepUuid};
     use std::sync::Arc;
 
     fn saga_id(n: u128) -> steno::SagaId {
-        steno::SagaId(uuid::Uuid::from_u128(n))
+        steno::SagaId::from_u128(n)
     }
 
     /// Build a synthetic example collection (only used here for its
@@ -562,7 +562,7 @@ mod tests {
         payload: SagaFact,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
                 comment: "parent saga fact".to_string(),
@@ -621,8 +621,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: String::new(),
-                alert_generation: AlertGeneration::new(),
-                support_bundle_generation: SupportBundleGeneration::new(),
+                alert_generation: SitrepAlertGeneration::new(),
+                support_bundle_generation: SitrepSupportBundleGeneration::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),
@@ -1088,7 +1088,7 @@ mod tests {
         last_event_time: chrono::DateTime<Utc>,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id,
                 created_sitrep_id,
                 comment: "parent saga fact".to_string(),
@@ -1249,7 +1249,7 @@ mod tests {
         saga: steno::SagaId,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id,
                 created_sitrep_id,
                 comment: "parent abandoned fact".to_string(),
@@ -1596,7 +1596,7 @@ mod tests {
         let parent_id = SitrepUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let foreign_fact = fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_id,
                 comment: "a fact belonging to the physical-disk engine"

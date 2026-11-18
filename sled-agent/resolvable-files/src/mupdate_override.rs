@@ -156,7 +156,7 @@ impl AllMupdateOverrides {
         let mut non_boot_disk_info = IdOrdMap::new();
         for zpool_id in internal_disks.non_boot_disk_zpool_ids() {
             let (path, clear_result) =
-                match self.non_boot_disk_overrides.get_mut(&zpool_id) {
+                match self.non_boot_disk_overrides.get_mut(zpool_id) {
                     Some(mut info) => {
                         let (new_result, clear_result) =
                             clear_non_boot_disk(&boot_disk_result, &info);

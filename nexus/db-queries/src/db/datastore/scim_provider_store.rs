@@ -27,7 +27,6 @@ use nexus_auth::authz::SiloUserList;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatabaseString;
-use nexus_db_model::IdentityType;
 use nexus_types::external_api::policy::SiloRole;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
@@ -142,7 +141,9 @@ impl<'a> CrdbScimProviderStore<'a> {
             .inner_join(
                 group_dsl::silo_group.on(dsl::silo_group_id.eq(group_dsl::id)),
             )
-            .filter(group_dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(
+                group_dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())),
+            )
             .filter(
                 group_dsl::user_provision_type
                     .eq(model::UserProvisionType::Scim),
@@ -221,7 +222,7 @@ impl<'a> CrdbScimProviderStore<'a> {
             use nexus_db_schema::schema::silo_user::dsl;
 
             dsl::silo_user
-                .filter(dsl::silo_id.eq(self.authz_silo.id()))
+                .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
                 .filter(
                     dsl::user_provision_type.eq(model::UserProvisionType::Scim),
                 )
@@ -261,7 +262,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // userName that already exists, reject it
 
         let maybe_other_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::user_name).eq(lower(user_request.name.clone())))
             .filter(dsl::time_deleted.is_null())
@@ -307,7 +308,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_user::dsl;
 
         let mut query = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::time_deleted.is_null())
             .into_boxed();
@@ -368,7 +369,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_user::dsl;
 
         let maybe_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -389,7 +390,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // userName to one that already exists, reject it
 
         let maybe_other_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::user_name).eq(lower(name.clone())))
             .filter(dsl::id.ne(to_db_typed_uuid(user_id)))
@@ -415,7 +416,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let updated = diesel::update(dsl::silo_user)
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -435,7 +436,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -467,7 +468,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_user::dsl;
 
         let maybe_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -481,7 +482,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let updated = diesel::update(dsl::silo_user)
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -505,15 +506,12 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         // Cleanup role assignment records for the deleted user
-        {
-            use nexus_db_schema::schema::role_assignment::dsl;
-
-            diesel::delete(dsl::role_assignment)
-                .filter(dsl::identity_type.eq(IdentityType::SiloUser))
-                .filter(dsl::identity_id.eq(to_db_typed_uuid(user_id)))
-                .execute_async(conn)
-                .await?;
-        }
+        self.datastore
+            .role_assignment_delete_by_identity_on_connection(
+                conn,
+                user_id.into_untyped_uuid(),
+            )
+            .await?;
 
         // Finally we should cleanup all auth related things like sessions and
         // tokens.
@@ -531,7 +529,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -600,7 +598,10 @@ impl<'a> CrdbScimProviderStore<'a> {
                     use nexus_db_schema::schema::silo_user::dsl;
 
                     let maybe_user: Option<Uuid> = dsl::silo_user
-                        .filter(dsl::silo_id.eq(self.authz_silo.id()))
+                        .filter(
+                            dsl::silo_id
+                                .eq(to_db_typed_uuid(self.authz_silo.id())),
+                        )
                         .filter(
                             dsl::user_provision_type
                                 .eq(model::UserProvisionType::Scim),
@@ -639,7 +640,9 @@ impl<'a> CrdbScimProviderStore<'a> {
                 use nexus_db_schema::schema::silo_user::dsl;
 
                 dsl::silo_user
-                    .filter(dsl::silo_id.eq(self.authz_silo.id()))
+                    .filter(
+                        dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())),
+                    )
                     .filter(
                         dsl::user_provision_type
                             .eq(model::UserProvisionType::Scim),
@@ -656,7 +659,9 @@ impl<'a> CrdbScimProviderStore<'a> {
                 use nexus_db_schema::schema::silo_group::dsl;
 
                 dsl::silo_group
-                    .filter(dsl::silo_id.eq(self.authz_silo.id()))
+                    .filter(
+                        dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())),
+                    )
                     .filter(
                         dsl::user_provision_type
                             .eq(model::UserProvisionType::Scim),
@@ -726,7 +731,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // but our / Nexus groups have to be unique due to the lookup by Name.
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::display_name).eq(lower(display_name.clone())))
             .filter(dsl::time_deleted.is_null())
@@ -809,7 +814,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         {
             use nexus_db_schema::schema::silo::dsl;
             let silo = dsl::silo
-                .filter(dsl::id.eq(self.authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(self.authz_silo.id())))
                 .select(model::Silo::as_select())
                 .first_async(conn)
                 .await?;
@@ -848,7 +853,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let mut query = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::time_deleted.is_null())
             .into_boxed();
@@ -913,7 +918,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -935,7 +940,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // the displayName to one that already exists, reject it.
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::display_name).eq(lower(display_name.clone())))
             .filter(dsl::id.ne(to_db_typed_uuid(group_id)))
@@ -958,7 +963,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // Stash the group for later
 
         let existing_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -975,7 +980,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // Overwrite all fields based on CreateGroupRequest.
 
         let updated = diesel::update(dsl::silo_group)
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -994,7 +999,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -1070,7 +1075,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         {
             use nexus_db_schema::schema::silo::dsl;
             let silo = dsl::silo
-                .filter(dsl::id.eq(self.authz_silo.id()))
+                .filter(dsl::id.eq(to_db_typed_uuid(self.authz_silo.id())))
                 .select(model::Silo::as_select())
                 .first_async(conn)
                 .await?;
@@ -1078,7 +1083,7 @@ impl<'a> CrdbScimProviderStore<'a> {
             let authz_silo = authz::Silo::new(
                 authz::FLEET,
                 self.authz_silo.id(),
-                LookupType::ById(self.authz_silo.id()),
+                LookupType::by_id(self.authz_silo.id()),
             );
 
             if let Some(admin_group_name) = silo.admin_group_name {
@@ -1109,7 +1114,10 @@ impl<'a> CrdbScimProviderStore<'a> {
                                 dsl::resource_type
                                     .eq(authz_silo.resource_type().to_string()),
                             )
-                            .filter(dsl::resource_id.eq(authz_silo.id()))
+                            .filter(
+                                dsl::resource_id
+                                    .eq(authz_silo.id().into_untyped_uuid()),
+                            )
                             .filter(
                                 dsl::role_name
                                     .eq(SiloRole::Admin.to_database_string()),
@@ -1167,7 +1175,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -1181,7 +1189,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let updated = diesel::update(dsl::silo_group)
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(dsl::silo_id.eq(to_db_typed_uuid(self.authz_silo.id())))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -1205,15 +1213,12 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         // Cleanup role assignment records for the deleted group
-        {
-            use nexus_db_schema::schema::role_assignment::dsl;
-
-            diesel::delete(dsl::role_assignment)
-                .filter(dsl::identity_id.eq(to_db_typed_uuid(group_id)))
-                .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
-                .execute_async(conn)
-                .await?;
-        }
+        self.datastore
+            .role_assignment_delete_by_identity_on_connection(
+                conn,
+                group_id.into_untyped_uuid(),
+            )
+            .await?;
 
         Ok(true)
     }

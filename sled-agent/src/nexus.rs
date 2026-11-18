@@ -7,6 +7,7 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
@@ -34,7 +35,7 @@ pub(crate) fn make_nexus_client_with_port(
     resolver: Arc<Resolver>,
     port: u16,
 ) -> NexusClient {
-    let client = reqwest::ClientBuilder::new()
+    let client = internal_http_client_builder()
         .dns_resolver(resolver)
         .build()
         .expect("Failed to build client");

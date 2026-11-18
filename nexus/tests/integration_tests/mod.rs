@@ -38,6 +38,7 @@ mod metrics;
 mod metrics_querier;
 #[cfg(feature = "multicast")]
 mod multicast;
+mod multirack;
 mod oximeter;
 mod pantry;
 mod password_login;

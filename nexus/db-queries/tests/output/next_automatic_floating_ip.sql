@@ -127,7 +127,7 @@ WITH
       UPDATE
         ip_pool_range
       SET
-        time_modified = $20, rcgen = rcgen + 1
+        rcgen = rcgen + 1
       WHERE
         id = (SELECT ip_pool_range_id FROM next_external_ip) AND time_deleted IS NULL
       RETURNING
@@ -144,11 +144,11 @@ WITH
             FROM
               ip_pool_resource
             WHERE
-              ip_pool_id = $21 AND resource_type = 'silo' AND resource_id = $22
+              ip_pool_id = $20 AND resource_type = 'silo' AND resource_id = $21
           )
-          AND (SELECT assignment FROM ip_pool WHERE id = $23 AND time_deleted IS NULL) = 'silos'
+          AND (SELECT assignment FROM ip_pool WHERE id = $22 AND time_deleted IS NULL) = 'silos'
           THEN 'TRUE'
-          ELSE $24
+          ELSE $23
           END
             AS BOOL
         )

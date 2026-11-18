@@ -97,6 +97,8 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
+use omicron_common::http_client::internal_http_client;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_ddm_admin_client::DdmError;
 use omicron_generation_kinds::{
     Generation, GenericGeneration, SledConfigGeneration,
@@ -133,6 +135,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
 /// Operations RSS performs on the local bootstrap agent during rack setup.
@@ -342,7 +345,7 @@ impl ServiceInner {
         sled_config: OmicronSledConfig,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -420,7 +423,7 @@ impl ServiceInner {
         generation: SledConfigGeneration,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -637,8 +640,9 @@ impl ServiceInner {
         for ip_addr in dns_server_ips {
             let log = log.new(o!("dns_config_addr" => ip_addr.to_string()));
             info!(log, "Configuring DNS server");
-            let dns_config_client = dns_service_client::Client::new(
+            let dns_config_client = dns_service_client::Client::new_with_client(
                 &format!("http://{}", ip_addr),
+                internal_http_client(),
                 log.clone(),
             );
 
@@ -757,7 +761,7 @@ impl ServiceInner {
         );
 
         const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
-        let client = reqwest::Client::builder()
+        let client = internal_http_client_builder()
             .connect_timeout(CLIENT_TIMEOUT)
             .timeout(CLIENT_TIMEOUT)
             .build()
@@ -918,7 +922,8 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)
         };
         let log_failure = |err, _| {
-            info!(self.log, "Failed to handoff to nexus: {err}");
+            info!(self.log, "Failed to handoff to nexus";
+                InlineErrorChain::new(&err));
         };
 
         retry_notify(
@@ -955,7 +960,7 @@ impl ServiceInner {
             })
             .expect("Should not create service plans without CockroachDb");
         let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
@@ -1072,19 +1077,18 @@ impl ServiceInner {
 
         let initial_trust_quorum_configuration =
             if let Some(peers) = &config.trust_quorum_peers {
-                let tq_members: BTreeSet<_> = peers.iter().cloned().collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
                 init_trust_quorum(
                     &self.log,
                     ctx.trust_quorum_handle.clone(),
-                    tq_members.clone(),
+                    peers.clone(),
                     rack_id,
                 )
                 .await?;
 
                 Some(InitialTrustQuorumConfig {
-                    members: tq_members.into_iter().collect(),
+                    members: peers.clone(),
                     coordinator: ctx.trust_quorum_handle.baseboard_id().clone(),
                 })
             } else {
@@ -1255,7 +1259,7 @@ impl ServiceInner {
                 .into_iter()
                 .map(|address| {
                     let dur = std::time::Duration::from_secs(60);
-                    let client = reqwest::ClientBuilder::new()
+                    let client = internal_http_client_builder()
                         .connect_timeout(dur)
                         .timeout(dur)
                         .build()
@@ -1332,12 +1336,11 @@ impl ServiceInner {
 async fn init_trust_quorum(
     log: &Logger,
     trust_quorum_handle: trust_quorum::NodeTaskHandle,
-    members: BTreeSet<BaseboardId>,
+    members: TrustQuorumMembers,
     rack_id: RackUuid,
 ) -> Result<(), SetupServiceError> {
-    let threshold = trust_quorum_types::types::Threshold(
-        u8::try_from(members.len()).unwrap() / 2 + 1,
-    );
+    let threshold =
+        trust_quorum_types::types::Threshold(members.num_members() / 2 + 1);
 
     let initial_epoch = trust_quorum_types::types::Epoch(1);
 
@@ -1360,13 +1363,15 @@ async fn init_trust_quorum(
             .await?
             .expect("This node is a coordinator");
 
-        if status.acked_prepares == members {
+        if status.acked_prepares == *members.as_set() {
             info!(log, "RSS: trust quorum prepared at all nodes");
             break;
         }
 
-        let still_waiting =
-            itertools::join(members.difference(&status.acked_prepares), ",");
+        let still_waiting = itertools::join(
+            members.as_set().difference(&status.acked_prepares),
+            ",",
+        );
         info!(
             log,
             "RSS: Trust quorum coordinator waiting for PrepareAcks";
@@ -1632,6 +1637,7 @@ mod test {
     };
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
+    use nexus_test_utils::RACK_UUID;
     use omicron_common::{
         address::{
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
@@ -1668,6 +1674,7 @@ mod test {
 
     fn make_sled_info(
         sled_id: SledUuid,
+        rack_id: RackUuid,
         subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
@@ -1684,6 +1691,7 @@ mod test {
                     part_number: "test".to_string(),
                     serial_number: "test".to_string(),
                 },
+                rack_id,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1696,7 +1704,8 @@ mod test {
                             model: "v1".to_string(),
                         },
                         variant: DiskVariant::U2,
-                        slot: i.try_into().unwrap(),
+                        pcie_slot: i.try_into().unwrap(),
+                        location: Some(format!("N{i}")),
                         active_firmware_slot: 1,
                         next_active_firmware_slot: None,
                         number_of_firmware_slots: 1,
@@ -1725,6 +1734,7 @@ mod test {
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
@@ -1732,6 +1742,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
@@ -1739,6 +1750,7 @@ mod test {
             ),
             make_sled_info(
                 SledUuid::new_v4(),
+                RACK_UUID,
                 Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),
