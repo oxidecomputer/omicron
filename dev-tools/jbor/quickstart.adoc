@@ -181,10 +181,6 @@ oxide system networking link add --rack $RACK_ID \
   --speed 100g
 ----
 
-[source,json,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
@@ -195,10 +191,6 @@ oxide system hardware switch-port apply-settings \
   --rack-id $RACK_ID \
   --switch-slot switch1 \
   --port-settings "switch1-qsfp0"
-----
-
-[source,json,doctest=response]
-----
 ----
 
 Repeat for rack 1:
@@ -214,10 +206,6 @@ oxide system networking link add --rack $RACK_ID \
   --speed 100g
 ----
 
-[source,json,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
@@ -228,10 +216,6 @@ oxide system hardware switch-port apply-settings \
   --rack-id $RACK_ID \
   --switch-slot switch1 \
   --port-settings "switch1-qsfp0"
-----
-
-[source,json,doctest=response]
-----
 ----
 
 == Configure BGP on Rack 0
@@ -418,10 +402,6 @@ oxide system networking addr add \
   --lot peering
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
@@ -433,10 +413,6 @@ oxide system networking addr add \
   --port qsfp0 \
   --addr 100.64.0.11/24 \
   --lot peering
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 === Configure BGP Peers on Switch0 and Switch1
@@ -462,10 +438,6 @@ oxide system networking bgp peer set \
   --keepalive 2
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
@@ -482,10 +454,6 @@ oxide system networking bgp peer set \
   --delay-open 0 \
   --connect-retry 3 \
   --keepalive 2
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 [source,sh,doctest=command]
@@ -506,10 +474,6 @@ oxide system networking bgp peer set \
   --keepalive 2
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
@@ -528,10 +492,6 @@ oxide system networking bgp peer set \
   --keepalive 2
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 == Configure BGP Neighbors on Peer Routers for Rack 0
 
 Each peer router needs a neighbor entry pointing to the rack switches it will
@@ -548,10 +508,6 @@ mgadm -p $PR0_PORT bgp config neighbor create \
   --enable-ipv4
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
@@ -560,10 +516,6 @@ mgadm -p $PR1_PORT bgp config neighbor create \
   --port 1049 \
   --src-addr 100.64.0.2 \
   --enable-ipv4
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 [source,sh,doctest=command]
@@ -576,10 +528,6 @@ mgadm -p $PR0_PORT bgp config neighbor create \
   --enable-ipv4
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
@@ -588,10 +536,6 @@ mgadm -p $PR1_PORT bgp config neighbor create \
   --port 1049 \
   --src-addr 100.64.0.2 \
   --enable-ipv4
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 == Verify BGP Sessions on Rack 0
@@ -822,10 +766,6 @@ oxide system networking addr add \
   --lot peering
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
@@ -837,10 +777,6 @@ oxide system networking addr add \
   --port qsfp0 \
   --addr 100.64.0.21/24 \
   --lot peering
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 === Configure BGP Peers on Switch0 and Switch1
@@ -865,10 +801,6 @@ oxide system networking bgp peer set \
   --keepalive 2
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
@@ -885,10 +817,6 @@ oxide system networking bgp peer set \
   --delay-open 0 \
   --connect-retry 3 \
   --keepalive 2
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 [source,sh,doctest=command]
@@ -909,10 +837,6 @@ oxide system networking bgp peer set \
   --keepalive 2
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
@@ -931,10 +855,6 @@ oxide system networking bgp peer set \
   --keepalive 2
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 == Configure BGP Neighbors on Peer Routers for Rack 1
 
 Add a neighbor entry on each peer router pointing to switch0 and switch1 of
@@ -950,10 +870,6 @@ mgadm -p $PR0_PORT bgp config neighbor create \
   --enable-ipv4
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
@@ -962,10 +878,6 @@ mgadm -p $PR1_PORT bgp config neighbor create \
   --port 1049 \
   --src-addr 100.64.0.2 \
   --enable-ipv4
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 [source,sh,doctest=command]
@@ -978,10 +890,6 @@ mgadm -p $PR0_PORT bgp config neighbor create \
   --enable-ipv4
 ----
 
-[source,sh,doctest=response]
-----
-----
-
 [source,sh,doctest=command]
 ----
 PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
@@ -990,10 +898,6 @@ mgadm -p $PR1_PORT bgp config neighbor create \
   --port 1049 \
   --src-addr 100.64.0.2 \
   --enable-ipv4
-----
-
-[source,sh,doctest=response]
-----
 ----
 
 == Verify BGP Sessions on Rack 1

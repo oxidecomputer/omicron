@@ -585,6 +585,7 @@ impl JborArgs {
             });
         }
 
+        println!("\njbor: writing state to file...");
         let jbor_state =
             JborState { peer_routers: peer_router_infos, racks: rack_infos };
         let state_json = serde_json::to_string_pretty(&jbor_state)
