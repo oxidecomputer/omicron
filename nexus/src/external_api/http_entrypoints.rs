@@ -6724,6 +6724,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn rack_adopt(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<RackUuid>,
+    ) -> Result<HttpResponseCreated<Rack>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let rack_id = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let rack_info = nexus.rack_adopt(&opctx, rack_id).await?;
+
+            Ok(HttpResponseCreated(rack_info.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn rack_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::RackPath>,
