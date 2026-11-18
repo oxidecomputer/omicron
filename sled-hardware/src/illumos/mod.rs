@@ -350,8 +350,11 @@ fn read_bays(
         .collect())
 }
 
-/// Describes one bay the topology reported and, when it holds an NVMe disk
-/// with a namespace, the disk to manage.
+/// Describes one bay reported by the topology snapshot, and the NVMe disk
+/// in that bay (if it contains one).
+///
+/// Returns `PolledBay::Unreadable` if the topology or libnvme could not
+/// describe the bay.
 fn poll_bay(
     log: &Logger,
     nvme: &Nvme,
