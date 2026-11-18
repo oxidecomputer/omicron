@@ -534,7 +534,7 @@ mod tests {
         payload: impl Into<fm::FactPayload>,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
                 comment: "parent certificate fact".to_string(),

@@ -6638,11 +6638,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_abort(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<path_params::RackPath>,
+        query_params: Query<rack::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let rack_id =
                 RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
-            let status = nexus.tq_abort_latest_config(&opctx, rack_id).await?;
+            let epoch = query_params.into_inner().version.map(|v| Epoch(v.0));
+            let status = nexus.tq_abort_config(&opctx, rack_id, epoch).await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await
@@ -7003,7 +7005,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|d| UnadoptedPhysicalDisk {
                     sled_id: d.sled_id.into(),
-                    slot: d.slot,
+                    slot: d.pcie_slot,
                     variant: d.variant.into(),
                     disk_id: PhysicalDiskManufacturerIdentity {
                         vendor: d.vendor,
@@ -8902,19 +8904,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     async fn console_silo_access(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<Response<Body>, HttpError> {
-        console_api::console_index_or_login_redirect(rqctx).await
-    }
-
-    async fn console_silo_users(
-        rqctx: RequestContext<Self::Context>,
-        _path_params: Path<console::RestPathParam>,
-    ) -> Result<Response<Body>, HttpError> {
-        console_api::console_index_or_login_redirect(rqctx).await
-    }
-
-    async fn console_silo_groups(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {

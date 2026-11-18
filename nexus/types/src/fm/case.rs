@@ -8,6 +8,7 @@ use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::fm::EreportId;
+use crate::fm::FactMetadata;
 use crate::fm::FactPayload;
 use crate::fm::{CertificateFact, DiskFact, SagaFact, SmfServiceFact};
 use crate::support_bundle::BundleDataSelection;
@@ -197,19 +198,6 @@ pub struct Fact {
     #[serde(flatten)]
     pub metadata: FactMetadata,
     pub payload: FactPayload,
-}
-
-/// The diagnosis-engine-agnostic part of a [`Fact`]: everything that is not
-/// the typed [`payload`](Fact::payload). Every diagnosis engine's facts share
-/// these fields.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct FactMetadata {
-    pub id: FactUuid,
-    /// The sitrep in which this fact was first added. Preserved
-    /// unchanged when the fact is carried forward into a child sitrep.
-    /// Debug-only.
-    pub created_sitrep_id: SitrepUuid,
-    pub comment: String,
 }
 
 impl Fact {

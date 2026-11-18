@@ -45,7 +45,7 @@ use std::time::Duration;
 use swrite::{SWrite, swrite, swriteln};
 use tokio::task::JoinSet;
 use trust_quorum_types::messages::{CommitRequest, PrepareAndCommitRequest};
-use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::{CommitStatus, NotCoordinatingStatus};
 use trust_quorum_types::types::Epoch;
 
 const MAX_SLED_AGENT_REQUEST_CONCURRENCY: usize = 5;
@@ -351,9 +351,12 @@ async fn prepare(
         .into_inner();
     let status = match response {
         TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
-        TrustQuorumCoordinatorStatusResponse::NotCoordinating {
-            latest_config_epoch,
-        } => {
+        TrustQuorumCoordinatorStatusResponse::NotCoordinating(
+            NotCoordinatingStatus {
+                latest_config_epoch,
+                latest_committed_epoch: _,
+            },
+        ) => {
             let latest_config_epoch = match latest_config_epoch {
                 Some(epoch) => epoch.to_string(),
                 None => "none".to_string(),
@@ -991,6 +994,7 @@ mod tests {
     use trust_quorum_types::crypto::{
         EncryptedRackSecrets, Salt, Sha3_256Digest,
     };
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use uuid::Uuid;
 
     async fn load_config(
@@ -1046,7 +1050,8 @@ mod tests {
             opctx,
             &conn,
             authz::TrustQuorumConfig::for_rack_id(rack_id),
-            members.clone(),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
             members.first().expect("at least one member").clone(),
         )
         .await
@@ -1060,7 +1065,8 @@ mod tests {
                     is_lrtq_upgrade: IsLrtqUpgrade::No {
                         last_committed_epoch: Epoch(1),
                     },
-                    members: members.clone(),
+                    members: TrustQuorumMembers::new(members.clone())
+                        .expect("test members are within the size bounds"),
                 },
             )
             .await
