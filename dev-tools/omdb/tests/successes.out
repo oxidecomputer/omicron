@@ -169,8 +169,8 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-ID:                          ..........<REDACTED_UUID>........... (sitrep)
-parent sitrep ID:            None
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
 created by:                  ..........<REDACTED_UUID>...........
 created at:                  <REDACTED_TIMESTAMP>
     comment:                     N/A
@@ -180,7 +180,7 @@ status:                      this is the current sitrep!
   made current at:           <REDACTED_TIMESTAMP>
 
 == DIAGNOSIS INPUTS ============================================================
-inventory collection ID:     ..........<REDACTED_UUID>........... (collection)
+inventory collection ID:     ..........<REDACTED_UUID>...........
   started at:                <REDACTED_TIMESTAMP>
   finished at:               <REDACTED_TIMESTAMP>
   next inv must start after: <REDACTED_TIMESTAMP>
@@ -201,8 +201,8 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-ID:                          ..........<REDACTED_UUID>........... (sitrep)
-parent sitrep ID:            None
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
 created by:                  ..........<REDACTED_UUID>...........
 created at:                  <REDACTED_TIMESTAMP>
     comment:                     N/A
@@ -212,7 +212,7 @@ status:                      this is the current sitrep!
   made current at:           <REDACTED_TIMESTAMP>
 
 == DIAGNOSIS INPUTS ============================================================
-inventory collection ID:     ..........<REDACTED_UUID>........... (collection)
+inventory collection ID:     ..........<REDACTED_UUID>...........
   started at:                <REDACTED_TIMESTAMP>
   finished at:               <REDACTED_TIMESTAMP>
   next inv must start after: <REDACTED_TIMESTAMP>
@@ -2755,8 +2755,8 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-ID:                          00000000-0000-0000-0000-000000000001 (sitrep)
-parent sitrep ID:            None
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
 comment:                    
@@ -2765,7 +2765,7 @@ comment:
 status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
-inventory collection ID:     00000000-0000-0000-0000-00000000001e (collection)
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
   (i) note: this collection no longer exists (perhaps it has been pruned?)
   next inv must start after: <REDACTED_TIMESTAMP>
 
@@ -2803,8 +2803,8 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-ID:                          00000000-0000-0000-0000-000000000001 (sitrep)
-parent sitrep ID:            None
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
 comment:                    
@@ -2813,7 +2813,7 @@ comment:
 status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
-inventory collection ID:     00000000-0000-0000-0000-00000000001e (collection)
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
   (i) note: this collection no longer exists (perhaps it has been pruned?)
   next inv must start after: <REDACTED_TIMESTAMP>
 

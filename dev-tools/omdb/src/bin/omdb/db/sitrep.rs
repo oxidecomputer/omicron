@@ -475,8 +475,12 @@ async fn cmd_db_sitrep_show(
     ]);
 
     println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
-    println!("{ID:<WIDTH$} {id:?}");
-    println!("{PARENT_SITREP_ID:<WIDTH$} {parent_sitrep_id:?}");
+    println!("{ID:<WIDTH$} {id}");
+    if let Some(parent_id) = parent_sitrep_id {
+        println!("{PARENT_SITREP_ID:<WIDTH$} {parent_id}");
+    } else {
+        println!("{PARENT_SITREP_ID:<WIDTH$} N/A");
+    }
     println!("{CREATED_BY:<WIDTH$} {creator_id}");
     println!("{CREATED_AT:<WIDTH$} {time_created}");
     if comment.is_empty() {
@@ -502,8 +506,8 @@ async fn cmd_db_sitrep_show(
                 Some(v) if v.id == id => {}
                 Some(fm::SitrepVersion { version, id, .. }) => {
                     println!(
-                        "  (i) note: the current sitrep is {id:?} \
-                        (at v{version})",
+                        "  (i) note: the current sitrep is {id} \
+                         (at v{version})",
                     );
                 }
                 None => {
@@ -518,7 +522,7 @@ async fn cmd_db_sitrep_show(
     }
 
     println!("\n{:=<80}", "== DIAGNOSIS INPUTS ");
-    println!("{INV_COLLECTION_ID:<WIDTH$} {inv_collection_id:?}");
+    println!("{INV_COLLECTION_ID:<WIDTH$} {inv_collection_id}");
     let inv_collection = inv_collection_dsl::inv_collection
         .filter(
             inv_collection_dsl::id.eq(inv_collection_id.into_untyped_uuid()),
