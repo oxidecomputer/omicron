@@ -993,6 +993,7 @@ async fn insert_example_sitrep(
 
     let sitrep_id: SitrepUuid = id(1);
     let earlier_sitrep_id: SitrepUuid = id(2);
+    let even_earlier_sitrep_id: SitrepUuid = id(6);
     let now = chrono::Utc::now();
 
     // Reading back a case's ereports requires that they exist in the
@@ -1095,7 +1096,8 @@ async fn insert_example_sitrep(
         .collect(),
     };
 
-    // A case from an earlier sitrep which this sitrep closed.
+    // A case from an earlier sitrep. In this sitrep, an ereport was added and
+    // the case was closed.
     let psu_case = fm::Case {
         id: id(20),
         metadata: fm::case::Metadata {
@@ -1110,6 +1112,70 @@ async fn insert_example_sitrep(
         support_bundles_requested: Default::default(),
     };
 
+    let empty_case = |n: u128,
+                      de: fm::DiagnosisEngineKind,
+                      created_sitrep_id: SitrepUuid,
+                      closed_sitrep_id: Option<SitrepUuid>,
+                      comment: &str| fm::Case {
+        id: id(n),
+        metadata: fm::case::Metadata {
+            created_sitrep_id,
+            closed_sitrep_id,
+            de,
+            comment: comment.to_string(),
+        },
+        ereports: Default::default(),
+        facts: Default::default(),
+        alerts_requested: Default::default(),
+        support_bundles_requested: Default::default(),
+    };
+    let unchanged_case = empty_case(
+        40,
+        fm::DiagnosisEngineKind::Saga,
+        earlier_sitrep_id,
+        None,
+        "opened earlier, no changes in this sitrep",
+    );
+    let mut changed_case = empty_case(
+        50,
+        fm::DiagnosisEngineKind::Certificate,
+        earlier_sitrep_id,
+        None,
+        "opened earlier,\nalert requested in this sitrep",
+    );
+    changed_case
+        .alerts_requested
+        .insert_unique(fm::case::AlertRequest {
+            id: id(51),
+            class: nexus_types::alert::AlertClass::TestFoo,
+            version: 0,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: sitrep_id,
+            comment: "the certificate is still bad".to_string(),
+        })
+        .expect("alert request IDs are unique");
+    let transient_case = empty_case(
+        60,
+        fm::DiagnosisEngineKind::SmfService,
+        sitrep_id,
+        Some(sitrep_id),
+        "opened and closed in this sitrep",
+    );
+    let closed_here_case = empty_case(
+        70,
+        fm::DiagnosisEngineKind::PhysicalDisk,
+        earlier_sitrep_id,
+        Some(sitrep_id),
+        "opened earlier, closed in this sitrep",
+    );
+    let closed_earlier_case = empty_case(
+        80,
+        fm::DiagnosisEngineKind::PowerShelf,
+        even_earlier_sitrep_id,
+        Some(earlier_sitrep_id),
+        "closed in an earlier sitrep",
+    );
+
     let sitrep = fm::Sitrep {
         metadata: fm::SitrepMetadata {
             id: sitrep_id,
@@ -1123,7 +1189,17 @@ async fn insert_example_sitrep(
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
         },
-        cases: [disk_case, psu_case].into_iter().collect(),
+        cases: [
+            disk_case,
+            psu_case,
+            unchanged_case,
+            changed_case,
+            transient_case,
+            closed_here_case,
+            closed_earlier_case,
+        ]
+        .into_iter()
+        .collect(),
         ereports_by_id: Default::default(),
     };
     match datastore.fm_sitrep_insert(opctx, sitrep, None).await {

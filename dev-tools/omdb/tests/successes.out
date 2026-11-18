@@ -2776,10 +2776,17 @@ stdout:
     ereports in this sitrep: 3
 
 == CASES =======================================================================
-1 open, 1 closed
+3 open, 4 closed
 
-* case 00000000-0000-0000-0000-00000000000a: open   new physical_disk // zpool is degraded
-* case 00000000-0000-0000-0000-000000000014: closed old power_shelf   // PSU was reseated
+(i) activity in this sitrep: + opened, * changed, - closed
+
+*  case 00000000-0000-0000-0000-000000000032: open   certificate   // opened earlier, alert requested in this sitrep
++  case 00000000-0000-0000-0000-00000000000a: open   physical_disk // zpool is degraded
+ - case 00000000-0000-0000-0000-000000000046: closed physical_disk // opened earlier, closed in this sitrep
+*- case 00000000-0000-0000-0000-000000000014: closed power_shelf   // PSU was reseated
+   case 00000000-0000-0000-0000-000000000050: closed power_shelf   // closed in an earlier sitrep
+   case 00000000-0000-0000-0000-000000000028: open   saga          // opened earlier, no changes in this sitrep
++- case 00000000-0000-0000-0000-00000000003c: closed smf_service   // opened and closed in this sitrep
 
 (i) to view details for a single case, use:
     $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --case <CASE_ID>
@@ -2814,7 +2821,7 @@ stdout:
                        alert generation: 1
               support bundle generation: 1
     
-    ereports in this sitrep: 2
+    ereports in this sitrep: 3
 
 == CASES =======================================================================
 
@@ -2832,7 +2839,6 @@ stdout:
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-00000000000b
-<<<<<<< HEAD
 
     * ereport 00000000-0000-0000-0000-000000000003:2
       // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
@@ -2840,43 +2846,26 @@ stdout:
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-00000000000c
-=======
->>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
 
 
     facts:
     ------
-<<<<<<< HEAD
     * fact 00000000-0000-0000-0000-00000000000d
-=======
-    * fact 00000000-0000-0000-0000-00000000000c
->>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       // zpool health was observed in inventory
       added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
       * payload:
         * engine: physical_disk
         * kind: zpool_unhealthy
         * last_seen_health: degraded
-<<<<<<< HEAD
         * observed_in_inv: 00000000-0000-0000-0000-000000000010
         * physical_disk_id: 00000000-0000-0000-0000-00000000000e
         * time_observed: <REDACTED_TIMESTAMP>
         * zpool_id: 00000000-0000-0000-0000-00000000000f
-=======
-        * observed_in_inv: 00000000-0000-0000-0000-00000000000f
-        * physical_disk_id: 00000000-0000-0000-0000-00000000000d
-        * time_observed: <REDACTED_TIMESTAMP>
-        * zpool_id: 00000000-0000-0000-0000-00000000000e
->>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
 
 
     alerts requested:
     -----------------
-<<<<<<< HEAD
     * alert 00000000-0000-0000-0000-000000000011
-=======
-    * alert 00000000-0000-0000-0000-000000000010
->>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       // tell someone about the zpool
       class:        test.foo, v0
       requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
@@ -2884,11 +2873,7 @@ stdout:
 
     support bundles requested:
     -------------------------
-<<<<<<< HEAD
     * bundle 00000000-0000-0000-0000-000000000012
-=======
-    * bundle 00000000-0000-0000-0000-000000000011
->>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       // collect everything
       requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
       data:
@@ -2910,18 +2895,59 @@ stdout:
 
     ereports:
     ---------
-<<<<<<< HEAD
     * ereport 00000000-0000-0000-0000-000000000003:3
       // ereport 00000000-0000-0000-0000-000000000003:3 looks relevant
-=======
-    * ereport 00000000-0000-0000-0000-000000000003:2
-      // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
->>>>>>> bfdedf3b7 (un-merge-conflict Sean's example tests)
       class:         ereport.example.psu
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-000000000015
 
+
+
+  * case 00000000-0000-0000-0000-000000000028
+    =========================================
+    // opened earlier, no changes in this sitrep
+    diagnosis engine: saga
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+
+
+  * case 00000000-0000-0000-0000-000000000032
+    =========================================
+    // opened earlier, alert requested in this sitrep
+    diagnosis engine: certificate
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+
+    alerts requested:
+    -----------------
+    * alert 00000000-0000-0000-0000-000000000033
+      // the certificate is still bad
+      class:        test.foo, v0
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+
+
+  * case 00000000-0000-0000-0000-00000000003c
+    =========================================
+    // opened and closed in this sitrep
+    diagnosis engine: smf_service
+    opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+
+  * case 00000000-0000-0000-0000-000000000046
+    =========================================
+    // opened earlier, closed in this sitrep
+    diagnosis engine: physical_disk
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+
+  * case 00000000-0000-0000-0000-000000000050
+    =========================================
+    // closed in an earlier sitrep
+    diagnosis engine: power_shelf
+    opened in sitrep: 00000000-0000-0000-0000-000000000006
+    closed in sitrep: 00000000-0000-0000-0000-000000000002
 
 
 ---------------------------------------------
@@ -2948,25 +2974,32 @@ ereports:
   added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
   assignment ID: 00000000-0000-0000-0000-00000000000b
 
+* ereport 00000000-0000-0000-0000-000000000003:2
+  // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
+  class:         ereport.example.zpool
+  reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+  added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+  assignment ID: 00000000-0000-0000-0000-00000000000c
+
 
 facts:
 ------
-* fact 00000000-0000-0000-0000-00000000000c
+* fact 00000000-0000-0000-0000-00000000000d
   // zpool health was observed in inventory
   added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
   * payload:
     * engine: physical_disk
     * kind: zpool_unhealthy
     * last_seen_health: degraded
-    * observed_in_inv: 00000000-0000-0000-0000-00000000000f
-    * physical_disk_id: 00000000-0000-0000-0000-00000000000d
+    * observed_in_inv: 00000000-0000-0000-0000-000000000010
+    * physical_disk_id: 00000000-0000-0000-0000-00000000000e
     * time_observed: <REDACTED_TIMESTAMP>
-    * zpool_id: 00000000-0000-0000-0000-00000000000e
+    * zpool_id: 00000000-0000-0000-0000-00000000000f
 
 
 alerts requested:
 -----------------
-* alert 00000000-0000-0000-0000-000000000010
+* alert 00000000-0000-0000-0000-000000000011
   // tell someone about the zpool
   class:        test.foo, v0
   requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
@@ -2974,7 +3007,7 @@ alerts requested:
 
 support bundles requested:
 -------------------------
-* bundle 00000000-0000-0000-0000-000000000011
+* bundle 00000000-0000-0000-0000-000000000012
   // collect everything
   requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
   data:

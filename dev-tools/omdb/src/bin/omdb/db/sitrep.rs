@@ -574,6 +574,10 @@ async fn cmd_db_sitrep_show(
 
     println!("\n{:=<80}", "== CASES ");
     println!("{num_open} open, {num_closed} closed\n");
+    println!(
+        "(i) {}\n",
+        fm::case::DisplayCaseSummary::legend().colored(colored)
+    );
     for case in cases {
         println!("{}", case.display_summary(0, Some(id)).colored(colored));
     }

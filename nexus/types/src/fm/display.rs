@@ -76,6 +76,24 @@ impl Styles {
         self.style(|s| s.cyan())
     }
 
+    /// Diff markers for something added in the sitrep being displayed (e.g.
+    /// the `+` gutter marker for a case opened in this sitrep).
+    pub(crate) fn added(self) -> Style {
+        self.style(|s| s.green())
+    }
+
+    /// Diff markers for something removed in the sitrep being displayed (e.g.
+    /// the `-` gutter marker for a case closed in this sitrep).
+    pub(crate) fn removed(self) -> Style {
+        self.style(|s| s.red())
+    }
+
+    /// Diff markers for something modified in the sitrep being displayed
+    /// (e.g. the `*` gutter marker for a case changed in this sitrep).
+    pub(crate) fn modified(self) -> Style {
+        self.style(|s| s.purple())
+    }
+
     /// Placeholders for missing values (`<none>`, `<UNKNOWN>`) appearing on
     /// the value side of a key-value pair. Not for standalone notes that a
     /// section is empty; those are [headings](Self::heading).
