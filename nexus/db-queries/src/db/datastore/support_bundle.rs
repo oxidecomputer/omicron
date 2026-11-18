@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
-use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::sitrep_guard::SitrepGuardedInsert;
 use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
@@ -464,7 +463,7 @@ impl DataStore {
     pub async fn support_bundle_list_assigned_to_nexus(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
         nexus_id: OmicronZoneUuid,
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
@@ -472,14 +471,17 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::support_bundle, dsl::id, pagparams)
-            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
-            .filter(dsl::state.eq_any(states))
-            .order(dsl::time_created.asc())
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated_multicolumn(
+            dsl::support_bundle,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+        .filter(dsl::state.eq_any(states))
+        .select(SupportBundle::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Marks support bundles as failed if their assigned Nexus or backing

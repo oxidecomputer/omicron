@@ -1730,10 +1730,7 @@ impl DataStore {
             let batch = self
                 .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
                 .await?;
-            // The use of `last_address` here assumes `paginator` is sorting
-            // in Ascending order (which it does - see the implementation of
-            // `current_pagparams()`).
-            paginator = p.found_batch(&batch, &|r| r.last_address);
+            paginator = p.found_batch(&batch, &|r| r.first_address);
             ip_ranges.extend(batch);
         }
         Ok(ip_ranges)

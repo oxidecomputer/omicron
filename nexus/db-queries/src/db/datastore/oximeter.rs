@@ -224,7 +224,6 @@ impl DataStore {
         use nexus_db_schema::schema::metric_producer::dsl;
         paginated(dsl::metric_producer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
-            .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -251,7 +250,6 @@ impl DataStore {
 
         paginated(dsl::metric_producer, dsl::id, pagparams)
             .filter(dsl::time_modified.lt(expiration))
-            .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
