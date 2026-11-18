@@ -53,3 +53,4 @@ pub mod timeseries;
 pub mod update;
 pub mod user;
 pub mod vpc;
+pub mod wicket_ssh_auth;

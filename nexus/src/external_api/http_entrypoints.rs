@@ -36,6 +36,7 @@ use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::WicketSshAuthGenerationDescription;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
@@ -46,7 +47,7 @@ use nexus_types::external_api::{
     internet_gateway, ip_pool, metrics, multicast, multirack, networking, oxql,
     path_params, policy, probe, problem, project, rack, scim, silo, sled,
     snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
-    system_networking, timeseries, update, user, vpc,
+    system_networking, timeseries, update, user, vpc, wicket_ssh_auth,
 };
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
@@ -9630,5 +9631,73 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }))
         })
         .await
+    }
+
+    async fn wicket_ssh_auth_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<wicket_ssh_auth::WicketSshAuthCreate>,
+    ) -> Result<HttpResponseCreated<wicket_ssh_auth::WicketSshAuth>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let params = params.into_inner();
+            let wicket_ssh_auth =
+                nexus.wicket_ssh_auth_insert(&opctx, params).await?;
+            Ok(HttpResponseCreated(wicket_ssh_auth))
+        })
+        .await
+    }
+
+    async fn wicket_ssh_auth_view_latest(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<wicket_ssh_auth::WicketSshAuth>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let wicket_ssh_auth = nexus
+                .wicket_ssh_auth_view(
+                    &opctx,
+                    WicketSshAuthGenerationDescription::Latest,
+                )
+                .await?;
+            Ok(HttpResponseOk(wicket_ssh_auth))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn wicket_ssh_auth_view_generation(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<wicket_ssh_auth::WicketSshAuthPath>,
+    ) -> Result<HttpResponseOk<wicket_ssh_auth::WicketSshAuth>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let path_params = path_params.into_inner();
+            let wicket_ssh_auth = nexus
+                .wicket_ssh_auth_view(
+                    &opctx,
+                    WicketSshAuthGenerationDescription::Specific(
+                        path_params.generation,
+                    ),
+                )
+                .await?;
+            Ok(HttpResponseOk(wicket_ssh_auth))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 }

@@ -121,6 +121,7 @@ mod vpc;
 mod vpc_router;
 mod vpc_subnet;
 mod webhook;
+mod wicket_ssh_auth;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.

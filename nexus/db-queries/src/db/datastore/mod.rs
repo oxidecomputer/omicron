@@ -225,6 +225,7 @@ pub use vmm::VmmBulkMarkStopForUpdateResult;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
 pub use webhook_delivery::WebhookDeliveryFilters;
+pub use wicket_ssh_auth::WicketSshAuthGenerationDescription;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

@@ -55,3 +55,4 @@ mod silo;
 mod sled;
 mod switch;
 mod user;
+mod wicket_ssh_auth;

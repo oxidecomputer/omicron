@@ -89,6 +89,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_18_00, WICKET_SSH_AUTH),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
@@ -10014,6 +10015,48 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::alert::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // WICKET SSH AUTH
+
+    /// TODO-john docs
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/wicket-ssh-auth",
+        tags = ["system/update"], // right tag? wicket is kinda for updates...
+        versions = VERSION_WICKET_SSH_AUTH..,
+    }]
+    async fn wicket_ssh_auth_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::wicket_ssh_auth::WicketSshAuthCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::wicket_ssh_auth::WicketSshAuth>,
+        HttpError,
+    >;
+
+    /// TODO-john docs
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/wicket-ssh-auth",
+        tags = ["system/update"], // right tag? wicket is kinda for updates...
+        versions = VERSION_WICKET_SSH_AUTH..,
+    }]
+    async fn wicket_ssh_auth_view_latest(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::wicket_ssh_auth::WicketSshAuth>, HttpError>;
+
+    /// TODO-john docs
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/wicket-ssh-auth/generation/{generation}",
+        tags = ["system/update"], // right tag? wicket is kinda for updates...
+        versions = VERSION_WICKET_SSH_AUTH..,
+    }]
+    async fn wicket_ssh_auth_view_generation(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::wicket_ssh_auth::WicketSshAuthPath>,
+    ) -> Result<HttpResponseOk<latest::wicket_ssh_auth::WicketSshAuth>, HttpError>;
+
+    // TODO-john STATUS ENDPOINT
 }
 
 /// Perform extra validations on the OpenAPI document, and generate the

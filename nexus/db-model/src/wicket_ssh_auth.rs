@@ -9,10 +9,10 @@ use crate::DbTypedGeneration;
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::{wicket_ssh_auth, wicket_ssh_auth_key};
+use nexus_types::external_api::wicket_ssh_auth as nexus_types;
 use omicron_common::now_db_precision;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_generation_kinds::WicketSshAuthGenerationKind;
-use sled_agent_types::inventory::WicketSshAuthKind;
-use std::collections::BTreeSet;
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = wicket_ssh_auth)]
@@ -32,20 +32,20 @@ pub struct WicketSshAuth {
 
 impl WicketSshAuth {
     pub fn new(
-        wicket_ssh_auth: &sled_agent_types::inventory::WicketSshAuth,
-        description: String,
+        wicket_ssh_auth: &nexus_types::WicketSshAuthCreate,
+        generation: WicketSshAuthGeneration,
     ) -> Self {
         let allow_support_keys = match &wicket_ssh_auth.kind {
-            WicketSshAuthKind::Unauthenticated => None,
-            WicketSshAuthKind::PublicKeys {
+            nexus_types::WicketSshAuthKindCreate::Unauthenticated => None,
+            nexus_types::WicketSshAuthKindCreate::PublicKeys {
                 authorized_keys: _,
                 allow_support_keys,
             } => Some(*allow_support_keys),
         };
         Self {
-            generation: wicket_ssh_auth.generation.into(),
+            generation: generation.into(),
             time_created: now_db_precision(),
-            description,
+            description: wicket_ssh_auth.description.clone(),
             allow_support_keys,
         }
     }
@@ -61,18 +61,22 @@ impl WicketSshAuth {
     /// appropriate generation of keys via [`WicketSshAuthKey`].
     pub fn to_wicket_ssh_auth_without_operator_keys(
         &self,
-    ) -> sled_agent_types::inventory::WicketSshAuth {
+    ) -> nexus_types::WicketSshAuth {
         let kind = match self.allow_support_keys {
-            None => WicketSshAuthKind::Unauthenticated,
-            Some(allow_support_keys) => WicketSshAuthKind::PublicKeys {
-                authorized_keys: BTreeSet::new(),
-                allow_support_keys,
-            },
+            None => nexus_types::WicketSshAuthKind::Unauthenticated,
+            Some(allow_support_keys) => {
+                nexus_types::WicketSshAuthKind::PublicKeys {
+                    authorized_keys: Vec::new(),
+                    allow_support_keys,
+                }
+            }
         };
 
-        sled_agent_types::inventory::WicketSshAuth {
+        nexus_types::WicketSshAuth {
             generation: self.generation.into(),
             kind,
+            time_created: self.time_created,
+            description: self.description.clone(),
         }
     }
 }
@@ -83,4 +87,23 @@ pub struct WicketSshAuthKey {
     pub generation: DbTypedGeneration<WicketSshAuthGenerationKind>,
     pub authorized_key: String,
     pub description: String,
+}
+
+impl WicketSshAuthKey {
+    pub fn new(
+        auth_key: nexus_types::WicketSshKeyCreate,
+        generation: WicketSshAuthGeneration,
+    ) -> Self {
+        Self {
+            generation: generation.into(),
+            authorized_key: auth_key.key.into_string(),
+            description: auth_key.description,
+        }
+    }
+}
+
+impl From<WicketSshAuthKey> for nexus_types::WicketSshKey {
+    fn from(value: WicketSshAuthKey) -> Self {
+        Self { key: value.authorized_key, description: value.description }
+    }
 }

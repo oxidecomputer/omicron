@@ -840,9 +840,10 @@ impl DataStore {
                                 &conn, wicket_gen,
                             )
                             .await
-                            .internal_context(
-                                format!("reading blueprint {blueprint_id}"),
-                            )?,
+                            .internal_context(format!(
+                                "reading blueprint {blueprint_id}"
+                            ))?
+                            .into(),
                         );
                     }
                 }

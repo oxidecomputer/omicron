@@ -20,20 +20,31 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::DbTypedGeneration;
 use nexus_db_model::WicketSshAuth as DbWicketSshAuth;
 use nexus_db_model::WicketSshAuthKey as DbWicketSshAuthKey;
 use nexus_db_model::to_db_typed_generation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::external_api::wicket_ssh_auth::WicketSshAuth;
+use nexus_types::external_api::wicket_ssh_auth::WicketSshAuthCreate;
+use nexus_types::external_api::wicket_ssh_auth::WicketSshAuthKind;
+use nexus_types::external_api::wicket_ssh_auth::WicketSshAuthKindCreate;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::WicketSshAuthGeneration;
+use omicron_generation_kinds::WicketSshAuthGenerationKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::WicketSshAuth;
-use sled_agent_types::inventory::WicketSshAuthKind;
+use sled_agent_types::inventory::WicketSshAuth as SaWicketSshAuth;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
+
+#[derive(Debug, Clone, Copy)]
+pub enum WicketSshAuthGenerationDescription {
+    Latest,
+    Specific(WicketSshAuthGeneration),
+}
 
 /// The set of distinct wicket SSH auth settings referenced by something about
 /// to be inserted (a blueprint or an inventory collection).
@@ -44,7 +55,7 @@ pub(crate) struct WicketSshAuthRefs {
 
 #[derive(Debug)]
 struct WicketSshAuthRef {
-    auth: WicketSshAuth,
+    auth: SaWicketSshAuth,
     referenced_by: SledUuid,
 }
 
@@ -123,7 +134,7 @@ impl WicketSshAuthRefs {
 
     fn insert(
         by_generation: &mut BTreeMap<WicketSshAuthGeneration, WicketSshAuthRef>,
-        auth: &WicketSshAuth,
+        auth: &SaWicketSshAuth,
         referenced_by: SledUuid,
     ) -> Result<(), WicketSshAuthRefError> {
         match by_generation.entry(auth.generation) {
@@ -206,10 +217,12 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        let initial = WicketSshAuth::unauthenticated_initial_generation();
         let row = DbWicketSshAuth::new(
-            &initial,
-            "initial setting (unauthenticated)".into(),
+            &WicketSshAuthCreate {
+                description: "initial setting (unauthenticated)".into(),
+                kind: WicketSshAuthKindCreate::Unauthenticated,
+            },
+            WicketSshAuthGeneration::new(),
         );
         diesel::insert_into(dsl::wicket_ssh_auth)
             .values(row)
@@ -220,6 +233,88 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    pub async fn wicket_ssh_auth_insert(
+        &self,
+        opctx: &OpContext,
+        params: WicketSshAuthCreate,
+    ) -> Result<WicketSshAuth, Error> {
+        use nexus_db_schema::schema::wicket_ssh_auth::dsl as auth_dsl;
+        use nexus_db_schema::schema::wicket_ssh_auth_key::dsl as key_dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::WICKET_SSH_AUTH).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let generation = self
+            .transaction_retry_wrapper("wicket_ssh_auth_insert")
+            .transaction(&conn, |conn| {
+                let params = params.clone();
+                async move {
+                    // Read the latest generation present in the table; we'll
+                    // create the new record at that generation plus 1. (This
+                    // doesn't prevent dueling administrators, but it doesn't
+                    // seem worth it to complicate the API to deal with that for
+                    // something so rarely-used.)
+                    let latest_gen =
+                        Self::wicket_ssh_auth_latest_generation_on_connection(
+                            &conn,
+                        )
+                        .await?;
+                    let generation = latest_gen.next();
+
+                    let auth_to_insert =
+                        DbWicketSshAuth::new(&params, generation);
+                    let keys_to_insert = match params.kind.clone() {
+                        WicketSshAuthKindCreate::Unauthenticated => Vec::new(),
+                        WicketSshAuthKindCreate::PublicKeys {
+                            authorized_keys,
+                            allow_support_keys: _,
+                        } => authorized_keys
+                            .into_iter()
+                            .map(|ak| DbWicketSshAuthKey::new(ak, generation))
+                            .collect(),
+                    };
+
+                    // Insert all the keys...
+                    if !keys_to_insert.is_empty() {
+                        diesel::insert_into(key_dsl::wicket_ssh_auth_key)
+                            .values(keys_to_insert)
+                            .execute_async(&conn)
+                            .await?;
+                    }
+
+                    // ... and the top-level metadata row.
+                    diesel::insert_into(auth_dsl::wicket_ssh_auth)
+                        .values(auth_to_insert)
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(generation)
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Read back the settings we just wrote; this ensures we return the same
+        // thing a caller trying to read this same generation would see (e.g.,
+        // key ordering).
+        self.wicket_ssh_auth_read_on_connection(&conn, generation).await
+    }
+
+    async fn wicket_ssh_auth_latest_generation_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<WicketSshAuthGeneration, DieselError> {
+        use nexus_db_schema::schema::wicket_ssh_auth::dsl;
+
+        let latest_gen: DbTypedGeneration<WicketSshAuthGenerationKind> =
+            dsl::wicket_ssh_auth
+                .select(dsl::generation)
+                .order_by(dsl::generation.desc())
+                .limit(1)
+                .first_async(conn)
+                .await?;
+        Ok(latest_gen.into())
     }
 
     /// Check that every generation in `refs` exists in the database with
@@ -250,7 +345,7 @@ impl DataStore {
                     },
                 ));
             };
-            if stored != expected.auth {
+            if SaWicketSshAuth::from(stored) != expected.auth {
                 return Err(TransactionError::CustomError(
                     WicketSshAuthRefError::ContentsDiffer {
                         generation,
@@ -262,12 +357,31 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn wicket_ssh_auth_read(
+        &self,
+        opctx: &OpContext,
+        generation: WicketSshAuthGenerationDescription,
+    ) -> Result<WicketSshAuth, Error> {
+        opctx.authorize(authz::Action::Read, &authz::WICKET_SSH_AUTH).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let generation = match generation {
+            WicketSshAuthGenerationDescription::Latest => {
+                Self::wicket_ssh_auth_latest_generation_on_connection(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?
+            }
+            WicketSshAuthGenerationDescription::Specific(generation) => {
+                generation
+            }
+        };
+
+        self.wicket_ssh_auth_read_on_connection(&conn, generation).await
+    }
+
     /// Read the full wicket SSH auth setting for `generation`.
-    //
-    // TODO omicron#11821 This returns the sled-agent `WicketSshAuth` type, for
-    // now. As a part of the upcoming external API, we'll want to return a Nexus
-    // type here instead (from which we can project to the sled-agent type as
-    // needed).
     pub(crate) async fn wicket_ssh_auth_read_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -277,7 +391,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .ok_or_else(|| {
-                Error::internal_error(&format!(
+                Error::non_resourcetype_not_found(&format!(
                     "wicket SSH auth generation {generation} does not exist"
                 ))
             })
@@ -338,7 +452,7 @@ impl DataStore {
                             row.authorized_key.clone()
                         });
                     for row in batch {
-                        authorized_keys.insert(row.authorized_key);
+                        authorized_keys.push(row.into());
                     }
                 }
             }

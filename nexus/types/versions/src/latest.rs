@@ -645,3 +645,14 @@ pub mod path_params {
     pub use crate::v2025_11_20_00::path_params::UserPath;
     pub use crate::v2025_11_20_00::path_params::VpcPath;
 }
+
+pub mod wicket_ssh_auth {
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshAuth;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshAuthCreate;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshAuthKind;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshAuthKindCreate;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshAuthPath;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshAuthorizedKey;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshKey;
+    pub use crate::v2026_11_18_00::wicket_ssh_auth::WicketSshKeyCreate;
+}

@@ -4253,7 +4253,7 @@ impl DataStore {
                                     .internal_context(format!(
                                         "reading inventory collection {id}"
                                     ))?;
-                                entry.insert(auth).clone()
+                                entry.insert(auth.into()).clone()
                             }
                         };
                     configs
