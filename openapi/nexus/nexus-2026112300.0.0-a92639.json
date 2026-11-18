@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111100.0.0"
+    "version": "2026112300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -8055,6 +8055,41 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Add an unadopted rack to the regional cluster",
+        "operationId": "rack_adopt",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RackAdoptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rack"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -28018,6 +28053,23 @@
           "time_modified"
         ]
       },
+      "RackAdoptRequest": {
+        "description": "Request to adopt a rack into the regional cluster",
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "description": "ID of the unadopted rack to add",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rack_id"
+        ]
+      },
       "RackMembershipAddSledsRequest": {
         "type": "object",
         "properties": {
@@ -28138,6 +28190,15 @@
         "required": [
           "items"
         ]
+      },
+      "RackUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "RelatedProblem": {
         "description": "A problem that is a cause or consequence of another problem",
