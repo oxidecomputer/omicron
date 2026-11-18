@@ -87,6 +87,7 @@ pub async fn make_resources(
     builder.new_resource(authz::QUIESCE_STATE);
     builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
+    builder.new_resource(authz::WICKET_SSH_AUTH);
     builder.new_resource(authz::ALERT_CLASS_LIST);
     builder.new_resource(authz::AUDIT_LOG);
     builder.new_resource(authz::SUBNET_POOL_LIST);

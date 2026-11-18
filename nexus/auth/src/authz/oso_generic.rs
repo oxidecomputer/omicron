@@ -125,6 +125,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SubnetPoolList::get_polar_class(),
         UpdateTrustRootList::get_polar_class(),
         TargetReleaseConfig::get_polar_class(),
+        WicketSshAuth::get_polar_class(),
         AlertClassList::get_polar_class(),
         ScimClientBearerTokenList::get_polar_class(),
         MulticastGroupList::get_polar_class(),
