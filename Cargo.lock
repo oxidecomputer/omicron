@@ -6377,7 +6377,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot",
+ "dropshot 0.18.0",
  "fmd-adm-sys",
  "futures",
  "gateway-client",
@@ -9466,7 +9466,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "dropshot",
+ "dropshot 0.18.0",
  "futures",
  "libc",
  "nexus-config",

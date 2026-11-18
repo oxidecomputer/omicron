@@ -80,9 +80,163 @@ oxide system hardware rack list | jq -r '.[0].id'
 ..........<REDACTED_UUID>...........
 ----
 
+== Initial Setup
+
+The jbor environment comes with one "uplink" already configured on switch0 for
+each rack:
+
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+oxide system networking switch-port-settings view --port default-uplink0
+----
+
+
+[source,json,doctest=response]
+----
+{
+  "addresses": [],
+  "bgp_peers": [],
+  "description": "initial uplink configuration",
+  "groups": [],
+  "id": "..........<REDACTED_UUID>...........",
+  "interfaces": [],
+  "links": [
+    {
+      "autoneg": false,
+      "link_name": "phy0",
+      "lldp_link_config": {
+        "enabled": false,
+        "id": "..........<REDACTED_UUID>..........."
+      },
+      "mtu": 1500,
+      "port_settings_id": "..........<REDACTED_UUID>...........",
+      "speed": "speed100_g"
+    }
+  ],
+  "name": "default-uplink0",
+  "port": {
+    "geometry": "qsfp28x1",
+    "port_settings_id": "..........<REDACTED_UUID>..........."
+  },
+  "routes": [],
+  "time_created": "<REDACTED_TIMESTAMP>",
+  "time_modified": "<REDACTED_TIMESTAMP>"
+}
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+oxide system networking switch-port-settings view --port default-uplink0
+----
+
+[source,json,doctest=response]
+----
+{
+  "addresses": [],
+  "bgp_peers": [],
+  "description": "initial uplink configuration",
+  "groups": [],
+  "id": "..........<REDACTED_UUID>...........",
+  "interfaces": [],
+  "links": [
+    {
+      "autoneg": false,
+      "link_name": "phy0",
+      "lldp_link_config": {
+        "enabled": false,
+        "id": "..........<REDACTED_UUID>..........."
+      },
+      "mtu": 1500,
+      "port_settings_id": "..........<REDACTED_UUID>...........",
+      "speed": "speed100_g"
+    }
+  ],
+  "name": "default-uplink0",
+  "port": {
+    "geometry": "qsfp28x1",
+    "port_settings_id": "..........<REDACTED_UUID>..........."
+  },
+  "routes": [],
+  "time_created": "<REDACTED_TIMESTAMP>",
+  "time_modified": "<REDACTED_TIMESTAMP>"
+}
+----
+
+For this topology, we need to configure the "uplinks" for switch1 on
+each rack as well:
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking link add --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --speed 100g
+----
+
+[source,json,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system hardware switch-port apply-settings \
+  --port qsfp0 \
+  --rack-id $RACK_ID \
+  --switch-slot switch1 \
+  --port-settings "switch1-qsfp0"
+----
+
+[source,json,doctest=response]
+----
+----
+
+Repeat for rack 1:
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking link add --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --speed 100g
+----
+
+[source,json,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system hardware switch-port apply-settings \
+  --port qsfp0 \
+  --rack-id $RACK_ID \
+  --switch-slot switch1 \
+  --port-settings "switch1-qsfp0"
+----
+
+[source,json,doctest=response]
+----
+----
+
 == Configure BGP on Rack 0
 
-The following steps configure BGP on switch0 of rack 0, peering with both
+The following steps configure BGP on switch0 and switch1 of rack 0, peering with both
 external peer routers (`100.64.0.1` and `100.64.0.2`) launched by jbor.
 
 === Create a Peering Address Lot
@@ -94,8 +248,8 @@ an address from that subnet:
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 cat > /tmp/peering-lot.json <<'EOF'
 {
   "name": "peering",
@@ -143,8 +297,8 @@ We use `198.51.100.0/24` (TEST-NET-2, RFC 5737) as a placeholder prefix:
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 cat > /tmp/instances-lot.json <<'EOF'
 {
   "name": "rack0-instances",
@@ -184,8 +338,8 @@ oxide system networking address-lot create \
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 cat > /tmp/announce-set.json <<'EOF'
 {
   "name": "rack0-prefixes",
@@ -223,8 +377,8 @@ will be eBGP:
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 oxide system networking bgp config create \
   --name rack0-bgp \
   --description 'rack 0 bgp configuration' \
@@ -245,16 +399,16 @@ oxide system networking bgp config create \
 }
 ----
 
-=== Add a Peering Address to Switch0
+=== Add Peering Addresses to Switch0 and Switch1
 
-Assign address `100.64.0.10/24` from the `peering` lot to switch0's uplink
-port. This address is on the same subnet as the peer routers and serves as
-the source address for BGP sessions:
+Assign addresses `100.64.0.10/24` (switch0) and `100.64.0.11/24` (switch1)
+from the `peering` lot to their uplink ports. These addresses are on the same
+subnet as the peer routers and serve as the source addresses for BGP sessions:
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
 oxide system networking addr add \
   --rack $RACK_ID \
@@ -268,15 +422,32 @@ oxide system networking addr add \
 ----
 ----
 
-=== Configure BGP Peers on Switch0
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking addr add \
+  --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --addr 100.64.0.11/24 \
+  --lot peering
+----
 
-Add both peer routers as BGP peers on switch0. Run the command once for
-each peer router:
+[source,sh,doctest=response]
+----
+----
+
+=== Configure BGP Peers on Switch0 and Switch1
+
+Add both peer routers as BGP peers on switch0 and switch1. Run the command
+once for each switch and each peer router:
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
 oxide system networking bgp peer set \
   --rack $RACK_ID \
@@ -297,8 +468,8 @@ oxide system networking bgp peer set \
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
 RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
 oxide system networking bgp peer set \
   --rack $RACK_ID \
@@ -317,11 +488,55 @@ oxide system networking bgp peer set \
 ----
 ----
 
-== Configure BGP Neighbors on Peer Routers
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking bgp peer set \
+  --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --addr 100.64.0.1 \
+  --bgp-config rack0-bgp \
+  --hold-time 6 \
+  --idle-hold-time 6 \
+  --delay-open 0 \
+  --connect-retry 3 \
+  --keepalive 2
+----
 
-Each peer router needs a neighbor entry pointing to the rack switch it will
-peer with. Read the peer router admin ports from `jbor.json` and add a
-neighbor for switch0 of rack 0:
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking bgp peer set \
+  --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --addr 100.64.0.2 \
+  --bgp-config rack0-bgp \
+  --hold-time 6 \
+  --idle-hold-time 6 \
+  --delay-open 0 \
+  --connect-retry 3 \
+  --keepalive 2
+----
+
+[source,sh,doctest=response]
+----
+----
+
+== Configure BGP Neighbors on Peer Routers for Rack 0
+
+Each peer router needs a neighbor entry pointing to the rack switches it will
+peer with. Read the peer router admin ports from `jbor.json` and add
+neighbors for switch0 and switch1 of rack 0:
 
 [source,sh,doctest=command]
 ----
@@ -351,16 +566,44 @@ mgadm -p $PR1_PORT bgp config neighbor create \
 ----
 ----
 
-== Verify BGP Sessions
+[source,sh,doctest=command]
+----
+PR0_PORT=$(jq -r '.peer_routers[0].mgd_port' jbor.json)
+mgadm -p $PR0_PORT bgp config neighbor create \
+  rack0-switch1 100.64.1.1 default 65100 \
+  --port 1049 \
+  --src-addr 100.64.0.1 \
+  --enable-ipv4
+----
 
-Check that both peer sessions have reached the established state. It may
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
+mgadm -p $PR1_PORT bgp config neighbor create \
+  rack0-switch1 100.64.1.1 default 65101 \
+  --port 1049 \
+  --src-addr 100.64.0.2 \
+  --enable-ipv4
+----
+
+[source,sh,doctest=response]
+----
+----
+
+== Verify BGP Sessions on Rack 0
+
+Check that all four peer sessions have reached the established state. It may
 take a few seconds after the peer configuration is applied:
 
 [source,sh,doctest=command]
 ----
-export OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
-export OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
-oxide system networking bgp status | sed '/duration/d' | jq 'sort_by(.addr)'
+OXIDE_HOST=$(jq -r '.racks[0].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[0].oxide_token' jbor.json)
+oxide system networking bgp status | sed '/duration/d' | jq 'sort_by([.addr, .switch])'
 ----
 
 [source,json,doctest=response]
@@ -375,25 +618,432 @@ oxide system networking bgp status | sed '/duration/d' | jq 'sort_by(.addr)'
     "switch": "switch0"
   },
   {
+    "addr": "100.64.0.1",
+    "local_asn": 65000,
+    "peer_id": "100.64.0.1",
+    "remote_asn": 65100,
+    "state": "established",
+    "switch": "switch1"
+  },
+  {
     "addr": "100.64.0.2",
     "local_asn": 65000,
     "peer_id": "100.64.0.2",
     "remote_asn": 65101,
     "state": "established",
     "switch": "switch0"
+  },
+  {
+    "addr": "100.64.0.2",
+    "local_asn": 65000,
+    "peer_id": "100.64.0.2",
+    "remote_asn": 65101,
+    "state": "established",
+    "switch": "switch1"
   }
 ]
 ----
 (note for mighty-docs users: this output does not come sorted from the API,
 so we sort it with jq for now to stabilize the output)
 
-Both sessions show `established`, confirming the rack is exchanging routes with
-both peer routers. The command filtered `duration` from the output to make
+All four sessions show `established`, confirming the rack is exchanging routes with
+both peer routers on both switches. The command filtered `duration` from the output to make
 it a stable comparison for `mighty-docs`.
 
-To apply the same configuration to rack 1, repeat the steps above against
-rack 1's Nexus URL using ASN `65001` and addresses `100.64.2.0:1049`
-(switch0) / `100.64.2.1:1049` (switch1).
+== Configure BGP on Rack 1
+
+The following steps mirror the rack 0 configuration on rack 1. Rack 1 uses
+ASN `65001`; its switch0 BGP dispatcher is at `100.64.2.0:1049` and switch1
+is at `100.64.2.1:1049`.
+
+=== Create a Peering Address Lot
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+cat > /tmp/peering-lot-r1.json <<'EOF'
+{
+  "name": "peering",
+  "description": "addresses for bgp peering",
+  "kind": "infra",
+  "blocks": [
+    {"first_address": "100.64.0.20", "last_address": "100.64.0.21"}
+  ]
+}
+EOF
+oxide system networking address-lot create \
+  --name peering \
+  --description 'addresses for bgp peering' \
+  --json-body /tmp/peering-lot-r1.json
+----
+
+[source,json,doctest=response]
+----
+{
+  "blocks": [
+    {
+      "first_address": "100.64.0.20",
+      "id": "..........<REDACTED_UUID>...........",
+      "last_address": "100.64.0.21"
+    }
+  ],
+  "lot": {
+    "description": "addresses for bgp peering",
+    "id": "..........<REDACTED_UUID>...........",
+    "kind": "infra",
+    "name": "peering",
+    "time_created": "<REDACTED_TIMESTAMP>",
+    "time_modified": "<REDACTED_TIMESTAMP>"
+  }
+}
+----
+
+=== Create a BGP Announce Set
+
+We use `203.0.113.0/24` (TEST-NET-3, RFC 5737) as a placeholder prefix for
+rack 1:
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+cat > /tmp/instances-lot-r1.json <<'EOF'
+{
+  "name": "rack1-instances",
+  "description": "instance prefixes for rack 1",
+  "kind": "pool",
+  "blocks": [
+    {"first_address": "203.0.113.0", "last_address": "203.0.113.255"}
+  ]
+}
+EOF
+oxide system networking address-lot create \
+  --name rack1-instances \
+  --description 'instance prefixes for rack 1' \
+  --json-body /tmp/instances-lot-r1.json
+----
+
+[source,json,doctest=response]
+----
+{
+  "blocks": [
+    {
+      "first_address": "203.0.113.0",
+      "id": "..........<REDACTED_UUID>...........",
+      "last_address": "203.0.113.255"
+    }
+  ],
+  "lot": {
+    "description": "instance prefixes for rack 1",
+    "id": "..........<REDACTED_UUID>...........",
+    "kind": "pool",
+    "name": "rack1-instances",
+    "time_created": "<REDACTED_TIMESTAMP>",
+    "time_modified": "<REDACTED_TIMESTAMP>"
+  }
+}
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+cat > /tmp/announce-set-r1.json <<'EOF'
+{
+  "name": "rack1-prefixes",
+  "description": "prefixes to announce from rack 1",
+  "announcement": [
+    {
+      "address_lot_block": "rack1-instances",
+      "network": "203.0.113.0/24"
+    }
+  ]
+}
+EOF
+oxide system networking bgp announce-set update \
+  --name rack1-prefixes \
+  --description 'prefixes to announce from rack 1' \
+  --json-body /tmp/announce-set-r1.json
+----
+
+[source,json,doctest=response]
+----
+{
+  "description": "prefixes to announce from rack 1",
+  "id": "..........<REDACTED_UUID>...........",
+  "name": "rack1-prefixes",
+  "time_created": "<REDACTED_TIMESTAMP>",
+  "time_modified": "<REDACTED_TIMESTAMP>"
+}
+----
+
+=== Create a BGP Configuration
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+oxide system networking bgp config create \
+  --name rack1-bgp \
+  --description 'rack 1 bgp configuration' \
+  --asn 65001 \
+  --bgp-announce-set-id rack1-prefixes
+----
+
+[source,json,doctest=response]
+----
+{
+  "asn": 65001,
+  "description": "rack 1 bgp configuration",
+  "id": "..........<REDACTED_UUID>...........",
+  "max_paths": 1,
+  "name": "rack1-bgp",
+  "time_created": "<REDACTED_TIMESTAMP>",
+  "time_modified": "<REDACTED_TIMESTAMP>"
+}
+----
+
+=== Add Peering Addresses to Switch0 and Switch1
+
+Assign addresses `100.64.0.20/24` (switch0) and `100.64.0.21/24` (switch1)
+from the `peering` lot to their uplink ports on rack 1:
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking addr add \
+  --rack $RACK_ID \
+  --switch switch0 \
+  --port qsfp0 \
+  --addr 100.64.0.20/24 \
+  --lot peering
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking addr add \
+  --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --addr 100.64.0.21/24 \
+  --lot peering
+----
+
+[source,sh,doctest=response]
+----
+----
+
+=== Configure BGP Peers on Switch0 and Switch1
+
+Add both peer routers as BGP peers on switch0 and switch1 of rack 1:
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking bgp peer set \
+  --rack $RACK_ID \
+  --switch switch0 \
+  --port qsfp0 \
+  --addr 100.64.0.1 \
+  --bgp-config rack1-bgp \
+  --hold-time 6 \
+  --idle-hold-time 6 \
+  --delay-open 0 \
+  --connect-retry 3 \
+  --keepalive 2
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking bgp peer set \
+  --rack $RACK_ID \
+  --switch switch0 \
+  --port qsfp0 \
+  --addr 100.64.0.2 \
+  --bgp-config rack1-bgp \
+  --hold-time 6 \
+  --idle-hold-time 6 \
+  --delay-open 0 \
+  --connect-retry 3 \
+  --keepalive 2
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking bgp peer set \
+  --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --addr 100.64.0.1 \
+  --bgp-config rack1-bgp \
+  --hold-time 6 \
+  --idle-hold-time 6 \
+  --delay-open 0 \
+  --connect-retry 3 \
+  --keepalive 2
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+RACK_ID=$(oxide system hardware rack list | jq -r '.[0].id')
+oxide system networking bgp peer set \
+  --rack $RACK_ID \
+  --switch switch1 \
+  --port qsfp0 \
+  --addr 100.64.0.2 \
+  --bgp-config rack1-bgp \
+  --hold-time 6 \
+  --idle-hold-time 6 \
+  --delay-open 0 \
+  --connect-retry 3 \
+  --keepalive 2
+----
+
+[source,sh,doctest=response]
+----
+----
+
+== Configure BGP Neighbors on Peer Routers for Rack 1
+
+Add a neighbor entry on each peer router pointing to switch0 and switch1 of
+rack 1 (`100.64.2.0:1049` and `100.64.2.1:1049`):
+
+[source,sh,doctest=command]
+----
+PR0_PORT=$(jq -r '.peer_routers[0].mgd_port' jbor.json)
+mgadm -p $PR0_PORT bgp config neighbor create \
+  rack1-switch0 100.64.2.0 default 65100 \
+  --port 1049 \
+  --src-addr 100.64.0.1 \
+  --enable-ipv4
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
+mgadm -p $PR1_PORT bgp config neighbor create \
+  rack1-switch0 100.64.2.0 default 65101 \
+  --port 1049 \
+  --src-addr 100.64.0.2 \
+  --enable-ipv4
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+PR0_PORT=$(jq -r '.peer_routers[0].mgd_port' jbor.json)
+mgadm -p $PR0_PORT bgp config neighbor create \
+  rack1-switch1 100.64.2.1 default 65100 \
+  --port 1049 \
+  --src-addr 100.64.0.1 \
+  --enable-ipv4
+----
+
+[source,sh,doctest=response]
+----
+----
+
+[source,sh,doctest=command]
+----
+PR1_PORT=$(jq -r '.peer_routers[1].mgd_port' jbor.json)
+mgadm -p $PR1_PORT bgp config neighbor create \
+  rack1-switch1 100.64.2.1 default 65101 \
+  --port 1049 \
+  --src-addr 100.64.0.2 \
+  --enable-ipv4
+----
+
+[source,sh,doctest=response]
+----
+----
+
+== Verify BGP Sessions on Rack 1
+
+[source,sh,doctest=command]
+----
+OXIDE_HOST=$(jq -r '.racks[1].nexus_host' jbor.json)
+OXIDE_TOKEN=$(jq -r '.racks[1].oxide_token' jbor.json)
+oxide system networking bgp status | sed '/duration/d' | jq 'sort_by([.addr, .switch])'
+----
+
+[source,json,doctest=response]
+----
+[
+  {
+    "addr": "100.64.0.1",
+    "local_asn": 65001,
+    "peer_id": "100.64.0.1",
+    "remote_asn": 65100,
+    "state": "established",
+    "switch": "switch0"
+  },
+  {
+    "addr": "100.64.0.1",
+    "local_asn": 65001,
+    "peer_id": "100.64.0.1",
+    "remote_asn": 65100,
+    "state": "established",
+    "switch": "switch1"
+  },
+  {
+    "addr": "100.64.0.2",
+    "local_asn": 65001,
+    "peer_id": "100.64.0.2",
+    "remote_asn": 65101,
+    "state": "established",
+    "switch": "switch0"
+  },
+  {
+    "addr": "100.64.0.2",
+    "local_asn": 65001,
+    "peer_id": "100.64.0.2",
+    "remote_asn": 65101,
+    "state": "established",
+    "switch": "switch1"
+  }
+]
+----
+
+Both racks are now fully configured and exchanging routes with both peer routers on both switches.
 
 == Tear Down
 
