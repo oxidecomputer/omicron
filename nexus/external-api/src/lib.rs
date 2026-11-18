@@ -51,7 +51,6 @@ use omicron_common::api::external::{
     },
     *,
 };
-use omicron_uuid_kinds::RackUuid;
 use openapiv3::OpenAPI;
 use slog_error_chain::InlineErrorChain;
 
@@ -7871,7 +7870,7 @@ pub trait NexusExternalApi {
     }]
     async fn rack_adopt(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<RackUuid>,
+        req: TypedBody<latest::rack::RackAdoptRequest>,
     ) -> Result<HttpResponseCreated<latest::rack::Rack>, HttpError>;
 
     /// Fetch rack

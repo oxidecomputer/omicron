@@ -18,7 +18,6 @@ itertools.workspace = true
 nexus-types.workspace = true
 nexus-types-versions.workspace = true
 omicron-common.workspace = true
-omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 openapiv3.workspace = true
 oximeter-types-versions.workspace = true

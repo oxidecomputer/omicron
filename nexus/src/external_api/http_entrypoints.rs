@@ -6726,12 +6726,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn rack_adopt(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<RackUuid>,
+        req: TypedBody<rack::RackAdoptRequest>,
     ) -> Result<HttpResponseCreated<Rack>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let rack_id = query_params.into_inner();
+            let rack_id = req.into_inner().rack_id;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
