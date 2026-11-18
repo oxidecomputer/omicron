@@ -9,7 +9,9 @@ use crate::DbTypedGeneration;
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::{wicket_ssh_auth, wicket_ssh_auth_key};
+use omicron_common::now_db_precision;
 use omicron_generation_kinds::WicketSshAuthGenerationKind;
+use sled_agent_types::inventory::WicketSshAuthKind;
 use std::collections::BTreeSet;
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
@@ -29,6 +31,25 @@ pub struct WicketSshAuth {
 }
 
 impl WicketSshAuth {
+    pub fn new(
+        wicket_ssh_auth: &sled_agent_types::inventory::WicketSshAuth,
+        description: String,
+    ) -> Self {
+        let allow_support_keys = match &wicket_ssh_auth.kind {
+            WicketSshAuthKind::Unauthenticated => None,
+            WicketSshAuthKind::PublicKeys {
+                authorized_keys: _,
+                allow_support_keys,
+            } => Some(*allow_support_keys),
+        };
+        Self {
+            generation: wicket_ssh_auth.generation.into(),
+            time_created: now_db_precision(),
+            description,
+            allow_support_keys,
+        }
+    }
+
     /// Converts this database [`WicketSshAuth`] row into the
     /// sled-agent-API-shaped `WicketSshAuth`, but without any
     /// operator-specified keys.
@@ -41,8 +62,6 @@ impl WicketSshAuth {
     pub fn to_wicket_ssh_auth_without_operator_keys(
         &self,
     ) -> sled_agent_types::inventory::WicketSshAuth {
-        use sled_agent_types::inventory::WicketSshAuthKind;
-
         let kind = match self.allow_support_keys {
             None => WicketSshAuthKind::Unauthenticated,
             Some(allow_support_keys) => WicketSshAuthKind::PublicKeys {

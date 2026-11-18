@@ -393,6 +393,7 @@ async fn datastore_test(
         .await
         .unwrap();
     datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
+    datastore.load_builtin_wicket_ssh_auth(&opctx).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general
     // testing.
