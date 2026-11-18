@@ -12,7 +12,7 @@ use std::ops::Deref;
 use chrono::{DateTime, Utc};
 
 /// The whole simulated world, as an immutable value.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SimState {
     now: DateTime<Utc>,
     // TODO(#10209): Add more state here to support the full set of things the

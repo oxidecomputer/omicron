@@ -67,13 +67,14 @@ mod tests {
 
     use super::*;
 
-    /// We use simulated time (how many minutes past the epoch) as a sort of
-    /// proxy in the tests below for observing state changes, although nothing
-    /// in the tests is really about simulated time. The `time` noun just
-    /// happens to be minimal and convenient, with one query and one mutation
-    /// that can fail.
-    fn minutes(sim: &Simulator) -> i64 {
-        (sim.current().now() - SimState::EPOCH).num_minutes()
+    // Note, we use `time` commands in these tests as our canonical example for
+    // testing the simulator's behavior, although nothing in the tests is really
+    // about simulated time per se. The `time` noun just happens to be minimal
+    // and convenient, with one query and one mutation that can fail.
+
+    #[test]
+    fn new_simulator_starts_from_initial_state() {
+        assert_eq!(Simulator::new().current(), &SimState::new());
     }
 
     #[test]
@@ -91,10 +92,8 @@ mod tests {
     #[test]
     fn mutate_replaces_current_state() {
         let mut sim = Simulator::new();
-        assert_eq!(minutes(&sim), 0);
-
         sim.run("time advance 1m").unwrap();
-        assert_eq!(minutes(&sim), 1);
+        assert_ne!(sim.current(), &SimState::new());
     }
 
     #[test]
@@ -104,7 +103,7 @@ mod tests {
             .run("time advance 1000000years")
             .expect_err("a million years is past the end of the clock");
         assert_matches!(error, Error::Sim(SimError::TimeOutOfRange));
-        assert_eq!(minutes(&sim), 0);
+        assert_eq!(sim.current(), &SimState::new());
     }
 
     #[test]
@@ -114,6 +113,6 @@ mod tests {
         assert_matches!(sim.run("   "), Err(Error::Parse(_)));
         assert_matches!(sim.run("time advance soon"), Err(Error::Parse(_)));
         assert_matches!(sim.run("time advance '1h"), Err(Error::Split(_)));
-        assert_eq!(minutes(&sim), 0);
+        assert_eq!(sim.current(), &SimState::new());
     }
 }
