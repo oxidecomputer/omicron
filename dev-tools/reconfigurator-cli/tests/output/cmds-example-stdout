@@ -1633,6 +1633,7 @@ sled 2eb69596-f081-4e2d-9425-9994926e0832 (role = Gimlet, serial serial1)
     CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
+    wicket SSH auth status: n/a (no switch zone)
     physical disks:
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-64ea76fb-6673-4810-8e53-c2458b75eb01" } in 0
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-6d012675-6f54-4b6a-8658-ab0076237569" } in 1
@@ -1790,6 +1791,7 @@ sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
     CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
+    wicket SSH auth status: n/a (no switch zone)
     physical disks:
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-2db3c119-38fa-41c0-8dbe-89689b84d655" } in 0
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-687e054b-a9b5-4404-8b3f-0ea119c44a6a" } in 1
@@ -1947,6 +1949,7 @@ sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
     CPU family:          amd_milan
     usable memory (GiB): 0
     reservoir (GiB):     0
+    wicket SSH auth status: n/a (no switch zone)
     physical disks:
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0477165a-a72e-4814-b8d6-74aa02cb2040" } in 0
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ab94a812-86ce-428c-bbbb-6ce1ab0b071b" } in 1
