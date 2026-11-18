@@ -375,16 +375,16 @@ fn poll_bay(
         }) => match nvme_facts(nvme, *instance) {
             Ok(facts) => Some(facts),
             Err(err) => {
+                let err = InlineErrorChain::new(&err);
                 warn!(
                     log,
                     "Failed to query NVMe controller";
                     "location" => %bay.location,
                     "nvme_instance" => %instance,
-                    InlineErrorChain::new(&err),
+                    &err,
                 );
                 return unreadable(format!(
-                    "failed to query NVMe controller {instance}: {}",
-                    InlineErrorChain::new(&err),
+                    "failed to query NVMe controller {instance}: {err}"
                 ));
             }
         },
@@ -398,13 +398,14 @@ fn poll_bay(
             PolledBay::Described { bay, disk: disk.map(Box::new) }
         }
         Err(err) => {
+            let err = InlineErrorChain::new(&err);
             warn!(
                 log,
                 "Could not describe disk bay";
                 "location" => %bay.location,
-                InlineErrorChain::new(&err),
+                &err,
             );
-            unreadable(InlineErrorChain::new(&err).to_string())
+            unreadable(err.to_string())
         }
     }
 }
