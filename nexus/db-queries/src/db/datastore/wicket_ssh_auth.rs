@@ -258,13 +258,13 @@ impl DataStore {
             else {
                 return Err(WicketSshAuthValidateError::Missing {
                     generation,
-                    referenced_by: expected.referenced_by.clone(),
+                    referenced_by: expected.referenced_by,
                 });
             };
             if stored != expected.auth {
                 return Err(WicketSshAuthValidateError::ContentsDiffer {
                     generation,
-                    referenced_by: expected.referenced_by.clone(),
+                    referenced_by: expected.referenced_by,
                 });
             }
         }

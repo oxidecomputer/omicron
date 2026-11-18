@@ -3136,6 +3136,7 @@ pub struct InvOmicronSledConfig {
 }
 
 impl InvOmicronSledConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: OmicronSledConfigUuid,
