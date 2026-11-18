@@ -1255,7 +1255,10 @@ impl BackgroundTasksInitializer {
             name: "fm_sitrep_gc",
             description: "garbage collects fault management situation reports",
             period: config.fm.sitrep_gc_period_secs,
-            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
+            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(
+                datastore.clone(),
+                config.fm.sitrep_gc_disable,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher)],
             activator: task_fm_sitrep_gc,
