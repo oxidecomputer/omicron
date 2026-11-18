@@ -4988,7 +4988,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
 
     -- generation of wicket SSH auth settings recorded by this sled-config
     --
-    -- to rehyrdate this to the full settings, look up this generation in the
+    -- to rehydrate this to the full settings, look up this generation in the
     -- relevant `wicket_ssh_auth*` tables.
     wicket_ssh_auth_generation INT8 NOT NULL,
 
@@ -10018,7 +10018,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
 -- (enforced at runtime; there's no conceivable reason this check should fail).
 CREATE TABLE IF NOT EXISTS omicron.public.wicket_ssh_auth (
     -- Monotonically increasing generation
-    generation INT8 PRIMARY KEY,
+    generation INT8 PRIMARY KEY CHECK (generation >= 1),
 
     -- Time at which this generation was inserted.
     time_created TIMESTAMPTZ NOT NULL,

@@ -7,8 +7,8 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::datastore::wicket_ssh_auth::WicketSshAuthRefError;
 use crate::db::datastore::wicket_ssh_auth::WicketSshAuthRefs;
-use crate::db::datastore::wicket_ssh_auth::WicketSshAuthValidateError;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -2789,14 +2789,14 @@ enum InsertTxnError {
     },
 
     #[error("invalid wicket SSH auth reference")]
-    WicketSshAuth(WicketSshAuthValidateError),
+    WicketSshAuth(#[from] WicketSshAuthRefError),
 }
 
-impl From<WicketSshAuthValidateError> for InsertTxnError {
-    fn from(err: WicketSshAuthValidateError) -> Self {
+impl From<TransactionError<WicketSshAuthRefError>> for InsertTxnError {
+    fn from(err: TransactionError<WicketSshAuthRefError>) -> Self {
         match err {
-            WicketSshAuthValidateError::Diesel(e) => Self::Diesel(e),
-            other => Self::WicketSshAuth(other),
+            TransactionError::Database(err) => Self::Diesel(err),
+            TransactionError::CustomError(err) => Self::WicketSshAuth(err),
         }
     }
 }

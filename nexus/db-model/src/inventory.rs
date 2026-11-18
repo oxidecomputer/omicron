@@ -984,13 +984,13 @@ pub struct InvSledAgent {
 
 /// Helper for breaking a [`WicketSshAuthStatus`] up into its DB columns.
 #[derive(Debug, Clone)]
-pub struct InvWicketSshAuthStatusStatusCols {
+pub struct InvWicketSshAuthStatusCols {
     pub wicket_ssh_auth_effective_gen:
         Option<DbTypedGeneration<WicketSshAuthGenerationKind>>,
     pub wicket_ssh_auth_last_error: Option<String>,
 }
 
-impl From<WicketSshAuthStatus> for InvWicketSshAuthStatusStatusCols {
+impl From<WicketSshAuthStatus> for InvWicketSshAuthStatusCols {
     fn from(status: WicketSshAuthStatus) -> Self {
         match status {
             WicketSshAuthStatus::NoSwitchZone => Self {
@@ -1463,7 +1463,7 @@ impl InvSledAgent {
                 num_registered_vmms: instance_manager_num_registered_vmms,
             } = sled_agent.instance_manager_status.try_into()?;
 
-            let InvWicketSshAuthStatusStatusCols {
+            let InvWicketSshAuthStatusCols {
                 wicket_ssh_auth_effective_gen,
                 wicket_ssh_auth_last_error,
             } = sled_agent.wicket_ssh_auth_status.clone().into();

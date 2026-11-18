@@ -17,6 +17,7 @@ use diesel::QueryDsl;
 use diesel::expression::SelectableHelper;
 use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::WicketSshAuth as DbWicketSshAuth;
@@ -57,7 +58,7 @@ impl WicketSshAuthRefs {
     /// be impossible.
     pub(crate) fn from_blueprint(
         blueprint: &Blueprint,
-    ) -> Result<Self, WicketSshAuthValidateError> {
+    ) -> Result<Self, WicketSshAuthRefError> {
         let mut by_generation = BTreeMap::new();
         for (sled_id, sled) in &blueprint.sleds {
             Self::insert(&mut by_generation, &sled.wicket_ssh_auth, *sled_id)?;
@@ -70,12 +71,12 @@ impl WicketSshAuthRefs {
     ///
     /// # Errors
     ///
-    /// Fails if `collection` is self-inconsistent (i.e., contains two sleds
-    /// with the same wicket SSH auth generation but different contents). This
-    /// should be impossible.
+    /// Fails if `collection` is self-inconsistent (i.e., contains two sled
+    /// configs with the same wicket SSH auth generation but different
+    /// contents). This should be impossible.
     pub(crate) fn from_inventory_collection(
         collection: &Collection,
-    ) -> Result<Self, WicketSshAuthValidateError> {
+    ) -> Result<Self, WicketSshAuthRefError> {
         let mut by_generation = BTreeMap::new();
         for sled in &collection.sled_agents {
             // Each sled-agent can report up to three `OmicronSledConfig`s;
@@ -124,7 +125,7 @@ impl WicketSshAuthRefs {
         by_generation: &mut BTreeMap<WicketSshAuthGeneration, WicketSshAuthRef>,
         auth: &WicketSshAuth,
         referenced_by: SledUuid,
-    ) -> Result<(), WicketSshAuthValidateError> {
+    ) -> Result<(), WicketSshAuthRefError> {
         match by_generation.entry(auth.generation) {
             btree_map::Entry::Vacant(entry) => {
                 entry.insert(WicketSshAuthRef {
@@ -137,7 +138,7 @@ impl WicketSshAuthRefs {
                 if entry.get().auth == *auth {
                     Ok(())
                 } else {
-                    Err(WicketSshAuthValidateError::Inconsistent {
+                    Err(WicketSshAuthRefError::Inconsistent {
                         generation: auth.generation,
                         first: entry.get().referenced_by,
                         second: referenced_by,
@@ -148,11 +149,13 @@ impl WicketSshAuthRefs {
     }
 }
 
+// None of these errors should be reachable in practice, unless something has
+// gone very far off the rails: wicket SSH auth generations are immutable (which
+// should eliminate `ContentsDiffer` and `Inconsistent`), and
+// blueprints/inventory collections can only report generations they've been
+// told about (which should eliminate `Missing`).
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum WicketSshAuthValidateError {
-    #[error("database error")]
-    Diesel(#[from] DieselError),
-
+pub(crate) enum WicketSshAuthRefError {
     #[error(
         "wicket SSH auth generation {generation} (referenced by sled \
          {referenced_by}) does not exist"
@@ -180,24 +183,9 @@ pub(crate) enum WicketSshAuthValidateError {
     },
 }
 
-impl From<WicketSshAuthValidateError> for Error {
-    fn from(err: WicketSshAuthValidateError) -> Self {
-        match err {
-            WicketSshAuthValidateError::Diesel(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-            // None of these errors should be reachable in practice, unless
-            // something has gone very far off the rails: wicket SSH auth
-            // generations are immutable (which should eliminate
-            // `ContentsDiffer` and `Inconsistent`), and blueprints/inventory
-            // collections can only report generations they've been told about
-            // (which should eliminate `Missing`).
-            e @ (WicketSshAuthValidateError::Missing { .. }
-            | WicketSshAuthValidateError::ContentsDiffer { .. }
-            | WicketSshAuthValidateError::Inconsistent { .. }) => {
-                Error::internal_error(InlineErrorChain::new(&e).to_string())
-            }
-        }
+impl From<WicketSshAuthRefError> for Error {
+    fn from(err: WicketSshAuthRefError) -> Self {
+        Error::internal_error(InlineErrorChain::new(&err).to_string())
     }
 }
 
@@ -207,10 +195,8 @@ impl DataStore {
     ///
     /// RSS initializes every sled to "generation 1, unauthenticated", and the
     /// db migration to the version that added this feature backfilled the same
-    /// setting for all existing systems.
-    //
-    // TODO omicron#11821 Add note here about subsequent generations only being
-    // created on operator requests, once that work is implemented.
+    /// setting for all existing systems. Subsequent generations are written in
+    /// response to operator requests to apply new settings.
     pub async fn load_builtin_wicket_ssh_auth(
         &self,
         opctx: &OpContext,
@@ -248,7 +234,7 @@ impl DataStore {
     pub(crate) async fn wicket_ssh_auth_validate_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         refs: &WicketSshAuthRefs,
-    ) -> Result<(), WicketSshAuthValidateError> {
+    ) -> Result<(), TransactionError<WicketSshAuthRefError>> {
         for (&generation, expected) in &refs.by_generation {
             let Some(stored) =
                 Self::wicket_ssh_auth_read_optional_on_connection(
@@ -256,16 +242,20 @@ impl DataStore {
                 )
                 .await?
             else {
-                return Err(WicketSshAuthValidateError::Missing {
-                    generation,
-                    referenced_by: expected.referenced_by,
-                });
+                return Err(TransactionError::CustomError(
+                    WicketSshAuthRefError::Missing {
+                        generation,
+                        referenced_by: expected.referenced_by,
+                    },
+                ));
             };
             if stored != expected.auth {
-                return Err(WicketSshAuthValidateError::ContentsDiffer {
-                    generation,
-                    referenced_by: expected.referenced_by,
-                });
+                return Err(TransactionError::CustomError(
+                    WicketSshAuthRefError::ContentsDiffer {
+                        generation,
+                        referenced_by: expected.referenced_by,
+                    },
+                ));
             }
         }
         Ok(())
