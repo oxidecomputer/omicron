@@ -338,7 +338,7 @@ impl fmt::Display for DisplayFact<'_> {
         let payload =
             serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
         display::fmt_json_value(f, "payload", &payload, indent, styles)?;
-        writeln!(f)
+        Ok(())
     }
 }
 
@@ -431,20 +431,13 @@ impl fmt::Display for DisplayCase<'_> {
             if indent > 0 { BULLET } else { "" },
             heading.style(format_args!("case {id}")),
         )?;
-        writeln!(
-            f,
-            "{:>indent$}{}",
-            "",
-            heading.style("=========================================")
-        )?;
         metadata
             .display_multiline(indent, sitrep_id)
             .colored(colored)
             .fmt(f)?;
 
         if !ereports.is_empty() {
-            writeln!(f, "\n{:>indent$}{}:", "", heading.style("ereports"))?;
-            writeln!(f, "{:>indent$}{}", "", heading.style("---------"))?;
+            writeln!(f, "{:>indent$}{}:", "", heading.style("ereports"))?;
 
             let indent = indent + 2;
             for CaseEreport { id, ereport, assigned_sitrep_id, comment } in
@@ -502,13 +495,11 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     styles.label(ASSIGNMENT_ID, WIDTH)
                 )?;
-                writeln!(f)?;
             }
         }
 
         if !facts.is_empty() {
-            writeln!(f, "\n{:>indent$}{}:", "", heading.style("facts"))?;
-            writeln!(f, "{:>indent$}{}", "", heading.style("------"))?;
+            writeln!(f, "{:>indent$}{}:", "", heading.style("facts"))?;
 
             let indent = indent + 2;
             for fact in facts.iter() {
@@ -521,15 +512,9 @@ impl fmt::Display for DisplayCase<'_> {
         if !alerts_requested.is_empty() {
             writeln!(
                 f,
-                "\n{:>indent$}{}:",
+                "{:>indent$}{}:",
                 "",
                 heading.style("alerts requested")
-            )?;
-            writeln!(
-                f,
-                "{:>indent$}{}",
-                "",
-                heading.style("-----------------")
             )?;
 
             let indent = indent + 2;
@@ -569,22 +554,15 @@ impl fmt::Display for DisplayCase<'_> {
                     styles.label(REQUESTED_IN, WIDTH),
                     this_sitrep(*requested_sitrep_id)
                 )?;
-                writeln!(f)?;
             }
         }
 
         if !support_bundles_requested.is_empty() {
             writeln!(
                 f,
-                "\n{:>indent$}{}:",
+                "{:>indent$}{}:",
                 "",
                 heading.style("support bundles requested")
-            )?;
-            writeln!(
-                f,
-                "{:>indent$}{}",
-                "",
-                heading.style("-------------------------")
             )?;
 
             let indent = indent + 2;
@@ -617,11 +595,8 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{}", "", styles.label(DATA, 0))?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
-                writeln!(f)?;
             }
         }
-
-        writeln!(f)?;
 
         Ok(())
     }
