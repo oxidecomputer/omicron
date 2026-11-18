@@ -19,7 +19,6 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::SlogInlineError;
-use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use tokio::select;
@@ -49,12 +48,10 @@ pub(crate) async fn run(
     log: Logger,
 ) -> WebsocketChannelResult {
     let upgraded = conn.into_inner();
-    let config = WebSocketConfig {
-        // Maintain a max write buffer size of 2 MB (this is only relevant if
-        // writes are failing).
-        max_write_buffer_size: 2 * 1024 * 1024,
-        ..Default::default()
-    };
+    // Maintain a max write buffer size of 2 MB (this is only relevant if
+    // writes are failing).
+    let config =
+        WebSocketConfig::default().max_write_buffer_size(2 * 1024 * 1024);
     let ws_stream =
         WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config))
             .await;
@@ -109,7 +106,8 @@ pub(crate) async fn run(
                             log, "received serial console data from SP";
                             "length" => data.len(),
                         );
-                        match ws_sink_tx.try_send(Message::Binary(data)) {
+                        match ws_sink_tx.try_send(Message::Binary(data.into()))
+                        {
                             Ok(()) => (),
                             Err(TrySendError::Full(data)) => {
                                 warn!(
@@ -132,7 +130,7 @@ pub(crate) async fn run(
                         info!(log, "detaching from serial console");
                         let close = CloseFrame {
                             code: CloseCode::Policy,
-                            reason: Cow::Borrowed("serial console was detached"),
+                            reason: "serial console was detached".into(),
                         };
                         // Unlike above where we use `ws_sink_tx.try_send()` (to
                         // discard data if our client is behind), we do _not_
@@ -177,7 +175,7 @@ async fn ws_recv_task(
                 match maybe_message {
                     Some(Ok(Message::Binary(data))) => {
                         console_tx
-                            .write(data)
+                            .write(data.into())
                             .await
                             .map_err(|err| SpCommsError::SpCommunicationFailed { sp, err })?;
                         keepalive.reset();
