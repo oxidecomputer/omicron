@@ -7940,7 +7940,6 @@ dependencies = [
  "nexus-types",
  "nexus-types-versions",
  "omicron-common",
- "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openapiv3",
  "oximeter-types-versions",
