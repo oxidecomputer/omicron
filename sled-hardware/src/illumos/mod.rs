@@ -410,9 +410,9 @@ fn poll_bay(
     }
 }
 
-/// Asks libnvme for what the topology does not record about a controller:
-/// its PCI vendor id, how many namespaces it has that the nvme driver does not
-/// ignore, and its firmware slots.
+/// Asks libnvme for the controller details that the topology does not report:
+/// its PCI vendor id, how many namespaces it has that are not ignored by the
+/// nvme driver, and its firmware slots.
 fn nvme_facts(nvme: &Nvme, instance: NvmeInstance) -> Result<NvmeFacts, Error> {
     let controller = Controller::init_by_instance(nvme, instance.as_i32())?;
     let pci_vid = controller.get_info()?.pci_vid()?;
