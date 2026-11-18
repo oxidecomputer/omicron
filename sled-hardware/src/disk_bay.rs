@@ -4,8 +4,8 @@
 
 //! The U.2 bays and M.2 sockets of a sled's chassis, and what occupies each.
 //!
-//! On an Oxide sled the hardware topology (libtopo) is the source of truth
-//! for which bays exist and what sits behind each one.
+//! On an Oxide sled, the hardware topology (libtopo) is the source of truth
+//! for which bays exist, and for what is in each bay.
 //!
 //! Each hardware poll becomes the reported bays in two steps:
 //!
@@ -111,7 +111,7 @@ pub(crate) struct ObservedBay {
     /// to the device behind the bay. oxhc records it before it tries to
     /// enumerate the device, so it is present even when enumeration failed.
     pub binding_driver: Option<String>,
-    /// What is behind the bay, or why the topology could not say.
+    /// What is in the bay, or why the topology could not say.
     pub contents: Result<BayContents, BayProblem>,
 }
 
