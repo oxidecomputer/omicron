@@ -2175,7 +2175,7 @@ planner config:
 * 1 blocked MGS update:
   * 913-0000019:serial0: failed to plan an SP update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3"
 * 1 sled changed update disposition:
-  * 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: evacuating (terminate)
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1: evacuating (terminate)
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -2533,7 +2533,7 @@ planner config:
   * 913-0000019:serial0: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/3 internal DNS zones are synchronized; require at least 3"
   * 913-0000019:serial2: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/3 internal DNS zones are synchronized; require at least 3"
 * 1 sled changed update disposition:
-  * 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: available
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1: available
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
