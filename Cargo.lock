@@ -1628,7 +1628,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 
 [[package]]
 name = "clipboard-win"
@@ -1798,7 +1798,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd#279b991fd300c86d279d88c1240a238f85fba0dd"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597#28789d607071cc52a60304f5e6bce52fec3d5597"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2713,7 +2713,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "ddm-api-types",
  "ddm-api-types-versions",
@@ -2729,7 +2729,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "ddm-api-types-versions",
 ]
@@ -2737,7 +2737,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "ddm-protocol",
  "dpd-types-versions",
@@ -2750,7 +2750,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "dpd-types-versions",
  "oxnet",
@@ -3405,11 +3405,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd#279b991fd300c86d279d88c1240a238f85fba0dd"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597#28789d607071cc52a60304f5e6bce52fec3d5597"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597)",
  "dpd-types-versions",
  "futures",
  "http",
@@ -3430,7 +3430,7 @@ dependencies = [
 [[package]]
 name = "dpd-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd#279b991fd300c86d279d88c1240a238f85fba0dd"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597#28789d607071cc52a60304f5e6bce52fec3d5597"
 dependencies = [
  "dpd-types-versions",
 ]
@@ -3438,7 +3438,7 @@ dependencies = [
 [[package]]
 name = "dpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd#279b991fd300c86d279d88c1240a238f85fba0dd"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597#28789d607071cc52a60304f5e6bce52fec3d5597"
 dependencies = [
  "chrono",
  "oxnet",
@@ -5818,7 +5818,7 @@ checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=faeeb220dec166f117396f94b91b7d8dbd5895cc#faeeb220dec166f117396f94b91b7d8dbd5895cc"
+source = "git+https://github.com/oxidecomputer/opte?rev=104a684534c928cb6af6c0845640ba31b239885f#104a684534c928cb6af6c0845640ba31b239885f"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -5951,9 +5951,9 @@ dependencies = [
 
 [[package]]
 name = "ingot"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20eae0b62f8c5e0215c7b3a00fe75566615ed7f2c96752ef8cd9e335a8922299"
+checksum = "96db79d8528c67f0474c415e774775365601aee31ed3f80efdacd8e047842cae"
 dependencies = [
  "bitflags 2.11.0",
  "ingot-macros",
@@ -5965,23 +5965,23 @@ dependencies = [
 
 [[package]]
 name = "ingot-macros"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d8c6b68cf2c0e9c6c385c8655cd390d861d6fba0e30493ad7e0ab6013a46f61"
+checksum = "01af367878e423f67f1e644c03d3db608f5db46984d73c4e25f19b25f490fc91"
 dependencies = [
- "darling 0.23.0",
+ "darling 0.24.1",
  "itertools 0.15.0",
  "proc-macro2",
  "quote",
  "regex",
- "syn 2.0.117",
+ "syn 3.0.3",
 ]
 
 [[package]]
 name = "ingot-types"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c38331af4cff022b2ea46b220467d5962973853a47bd6851c54c111b71baa42"
+checksum = "42f48a225fc298f8e1fb4b26de157a05d74f35f138f3e207ac104a88ac57fe7c"
 dependencies = [
  "ingot-macros",
  "macaddr",
@@ -6635,10 +6635,10 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=faeeb220dec166f117396f94b91b7d8dbd5895cc#faeeb220dec166f117396f94b91b7d8dbd5895cc"
+source = "git+https://github.com/oxidecomputer/opte?rev=104a684534c928cb6af6c0845640ba31b239885f#104a684534c928cb6af6c0845640ba31b239885f"
 dependencies = [
  "quote",
- "syn 2.0.117",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -7215,7 +7215,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "chrono",
  "client-common",
@@ -7236,7 +7236,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -7244,7 +7244,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=031e9684070e34bb57efc6671632e939e8d5f3c9#031e9684070e34bb57efc6671632e939e8d5f3c9"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=c02f16749b8d29ff749fa745d4118577cddc44c6#c02f16749b8d29ff749fa745d4118577cddc44c6"
 dependencies = [
  "chrono",
  "dpd-types-versions",
@@ -8575,7 +8575,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597)",
  "dropshot 0.18.0",
  "fmd-adm-sys",
  "futures",
@@ -9630,7 +9630,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597)",
  "dpd-types",
  "dropshot 0.18.0",
  "ereport-types",
@@ -10671,7 +10671,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=faeeb220dec166f117396f94b91b7d8dbd5895cc#faeeb220dec166f117396f94b91b7d8dbd5895cc"
+source = "git+https://github.com/oxidecomputer/opte?rev=104a684534c928cb6af6c0845640ba31b239885f#104a684534c928cb6af6c0845640ba31b239885f"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -10690,7 +10690,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=faeeb220dec166f117396f94b91b7d8dbd5895cc#faeeb220dec166f117396f94b91b7d8dbd5895cc"
+source = "git+https://github.com/oxidecomputer/opte?rev=104a684534c928cb6af6c0845640ba31b239885f#104a684534c928cb6af6c0845640ba31b239885f"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -10703,7 +10703,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=faeeb220dec166f117396f94b91b7d8dbd5895cc#faeeb220dec166f117396f94b91b7d8dbd5895cc"
+source = "git+https://github.com/oxidecomputer/opte?rev=104a684534c928cb6af6c0845640ba31b239885f#104a684534c928cb6af6c0845640ba31b239885f"
 dependencies = [
  "libc",
  "libnet",
@@ -10914,7 +10914,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=faeeb220dec166f117396f94b91b7d8dbd5895cc#faeeb220dec166f117396f94b91b7d8dbd5895cc"
+source = "git+https://github.com/oxidecomputer/opte?rev=104a684534c928cb6af6c0845640ba31b239885f#104a684534c928cb6af6c0845640ba31b239885f"
 dependencies = [
  "c8str",
  "cfg-if",
@@ -15159,7 +15159,7 @@ dependencies = [
  "daft",
  "ddm-admin-client",
  "ddm-api-types",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597)",
  "dropshot 0.18.0",
  "either",
  "futures",
@@ -18472,7 +18472,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597)",
  "dropshot 0.18.0",
  "gateway-client",
  "gateway-types",
@@ -18539,7 +18539,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=279b991fd300c86d279d88c1240a238f85fba0dd)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=28789d607071cc52a60304f5e6bce52fec3d5597)",
  "dropshot 0.18.0",
  "either",
  "expectorate",

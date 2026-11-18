@@ -530,9 +530,9 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "279b991fd300c86d279d88c1240a238f85fba0dd" }
-dpd-types = { git = "https://github.com/oxidecomputer/dendrite", rev = "279b991fd300c86d279d88c1240a238f85fba0dd" }
-dpd-types-versions = { git = "https://github.com/oxidecomputer/dendrite", rev = "279b991fd300c86d279d88c1240a238f85fba0dd" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "28789d607071cc52a60304f5e6bce52fec3d5597" }
+dpd-types = { git = "https://github.com/oxidecomputer/dendrite", rev = "28789d607071cc52a60304f5e6bce52fec3d5597" }
+dpd-types-versions = { git = "https://github.com/oxidecomputer/dendrite", rev = "28789d607071cc52a60304f5e6bce52fec3d5597" }
 dropshot = { version = "0.18.0", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.9.1"
 dropshot-api-manager-types = "0.9.1"
@@ -645,10 +645,10 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "031e9684070e34bb57efc6671632e939e8d5f3c9" }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "031e9684070e34bb57efc6671632e939e8d5f3c9" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "031e9684070e34bb57efc6671632e939e8d5f3c9" }
-ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "031e9684070e34bb57efc6671632e939e8d5f3c9" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "c02f16749b8d29ff749fa745d4118577cddc44c6" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "c02f16749b8d29ff749fa745d4118577cddc44c6" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "c02f16749b8d29ff749fa745d4118577cddc44c6" }
+ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "c02f16749b8d29ff749fa745d4118577cddc44c6" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -722,7 +722,7 @@ oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-versioned-envelope = { version = "0.1.1", features = ["schemars08"] }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "faeeb220dec166f117396f94b91b7d8dbd5895cc", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "104a684534c928cb6af6c0845640ba31b239885f", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.7"
 once_cell = "1.21.3"
@@ -731,7 +731,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "faeeb220dec166f117396f94b91b7d8dbd5895cc" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "104a684534c928cb6af6c0845640ba31b239885f" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
