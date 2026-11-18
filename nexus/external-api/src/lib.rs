@@ -89,7 +89,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    //
+    (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
@@ -7744,6 +7744,26 @@ pub trait NexusExternalApi {
         .await
     }
 
+    /// Abort rack membership change
+    ///
+    /// This operation is synchronous. Upon returning from the API call, a
+    /// success response indicates that the prior membership change was aborted.
+    /// An error response indicates that there is no active membership change in
+    /// progress (previous changes have completed), that the specified
+    /// membership change could not be aborted, or that (if a version is
+    /// specified) configuration has moved past it.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
+        tags = ["experimental"],
+        versions = VERSION_RACK_MEMBERSHIP_ABORT_BY_VERSION..
+    }]
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+        query_params: Query<latest::rack::RackMembershipVersionParam>,
+    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
     /// Abort the latest rack membership change
     ///
     /// This operation is synchronous. Upon returning from the API call, a
@@ -7752,15 +7772,28 @@ pub trait NexusExternalApi {
     /// in progress (previous changes have completed) or that the current
     /// membership change could not be aborted.
     #[endpoint {
+        operation_id = "rack_membership_abort",
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
         tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..
+        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..VERSION_RACK_MEMBERSHIP_ABORT_BY_VERSION,
     }]
-    async fn rack_membership_abort(
+    async fn rack_membership_abort_v2026_02_02_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::RackPath>,
-    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+        path_params: Path<v2025_11_20_00::path_params::RackPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_21_00::rack::RackMembershipStatus>,
+        HttpError,
+    > {
+        Self::rack_membership_abort(
+            rqctx,
+            path_params,
+            Query::from(latest::rack::RackMembershipVersionParam {
+                version: None,
+            }),
+        )
+        .await
+    }
 
     /// Fetch rack cluster membership status
     ///

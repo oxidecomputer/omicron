@@ -1083,6 +1083,8 @@ mod tests {
     use diesel::query_builder::AstPass;
     use diesel::query_builder::QueryFragment;
     use diesel::query_builder::QueryId;
+    use diesel::query_builder::returning::InsertStmtKind;
+    use diesel::query_builder::returning::InsertStmtWithoutOnConflictDoUpdate;
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
@@ -1155,6 +1157,11 @@ mod tests {
         const HAS_STATIC_QUERY_ID: bool = false;
     }
 
+    // Required to add a `RETURNING` clause to an insert of these values.
+    impl InsertStmtKind for NextItemQueryValues {
+        type StmtKind = InsertStmtWithoutOnConflictDoUpdate;
+    }
+
     impl diesel::insertable::CanInsertInSingleQuery<Pg> for NextItemQueryValues {
         fn rows_to_insert(&self) -> Option<usize> {
             Some(1)
@@ -1213,6 +1220,11 @@ mod tests {
     impl QueryId for NextItemQuerySelfJoinedValues {
         type QueryId = ();
         const HAS_STATIC_QUERY_ID: bool = false;
+    }
+
+    // Required to add a `RETURNING` clause to an insert of these values.
+    impl InsertStmtKind for NextItemQuerySelfJoinedValues {
+        type StmtKind = InsertStmtWithoutOnConflictDoUpdate;
     }
 
     impl diesel::insertable::CanInsertInSingleQuery<Pg>

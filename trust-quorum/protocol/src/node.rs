@@ -1131,6 +1131,7 @@ mod tests {
     use omicron_uuid_kinds::RackUuid;
     use proptest::prelude::*;
     use test_strategy::{Arbitrary, proptest};
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use trust_quorum_types::types::Threshold;
 
     fn arb_member() -> impl Strategy<Value = BaseboardId> {
@@ -1150,7 +1151,8 @@ mod tests {
                 rack_id: RackUuid::new_v4(),
                 epoch: Epoch(1),
                 last_committed_epoch: None,
-                members: members.clone(),
+                members: TrustQuorumMembers::new(members.clone())
+                    .expect("test membership is within the size bounds"),
                 threshold: Threshold(members.len() as u8 - 1),
             },
         )
@@ -1167,7 +1169,7 @@ mod tests {
     fn initial_configuration(input: InitialReconfigurationInput) {
         let logctx = test_setup_log("initial_configuration");
         let my_platform_id =
-            input.reconfigure_msg.members.first().unwrap().clone();
+            input.reconfigure_msg.members.iter().next().unwrap().clone();
         let mut ctx = NodeCtx::new(my_platform_id.clone());
         let mut node = Node::new(&logctx.log, &mut ctx);
 
@@ -1203,7 +1205,10 @@ mod tests {
 
         assert_eq!(config.epoch, input.reconfigure_msg.epoch);
         assert_eq!(config.coordinator, *ctx.platform_id());
-        assert_eq!(config.members.len(), input.reconfigure_msg.members.len());
+        assert_eq!(
+            config.members.len(),
+            usize::from(input.reconfigure_msg.members.num_members())
+        );
         assert_eq!(config.threshold, input.reconfigure_msg.threshold);
         assert!(config.encrypted_rack_secrets.is_none());
 
