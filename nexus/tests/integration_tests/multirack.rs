@@ -87,8 +87,17 @@ async fn test_rack_list_unadopted_empty(cptestctx: &ControlPlaneTestContext) {
     assert!(racks.is_empty(), "unexpected unadopted racks: {racks:#?}");
 }
 
-#[nexus_test]
-async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
+#[tokio::test]
+async fn test_rack_list_unadopted() {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_rack_list_unadopted")
+            .customize_nexus_config(&|config| {
+                // Disable the inventory collection background task to avoid a
+                // race.
+                config.pkg.background_tasks.inventory.disable_collect = true;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -142,7 +151,7 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
     // Regardless of page size, we should see exactly the unadopted racks, in
     // order of rack ID:
     for page_size in [1, 2, 3, 10] {
-        let racks = list_unadopted_racks(cptestctx, page_size).await;
+        let racks = list_unadopted_racks(&cptestctx, page_size).await;
         assert_eq!(
             racks.len(),
             expected.len(),
@@ -187,4 +196,6 @@ async fn test_rack_list_unadopted(cptestctx: &ControlPlaneTestContext) {
             "adopted rack should not be listed: {racks:#?}"
         );
     }
+
+    cptestctx.teardown().await;
 }

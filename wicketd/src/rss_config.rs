@@ -40,6 +40,7 @@ use slog::warn;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
@@ -187,9 +188,8 @@ impl CurrentRssConfig {
         // TODO: Warn users in the wicket UI if they are configuring
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
-        const TRUST_QUORUM_MIN_SIZE: usize = 3;
         let trust_quorum_peers: Option<Vec<BaseboardId>> =
-            if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+            if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_MEMBERS {
                 Some(
                     self.common
                         .bootstrap_sleds
@@ -201,7 +201,7 @@ impl CurrentRssConfig {
                 warn!(
                     log,
                     "Trust quorum disabled: requires at least {} sleds",
-                    TRUST_QUORUM_MIN_SIZE
+                    TRUST_QUORUM_MIN_MEMBERS
                 );
                 None
             };

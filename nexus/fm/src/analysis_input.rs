@@ -14,6 +14,7 @@ use nexus_types::inventory;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
 use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -62,6 +63,7 @@ pub struct Input {
     /// new sitrep's `support_bundle_generation`.
     support_bundles_changed: bool,
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+    in_service_sleds: Arc<BTreeSet<SledUuid>>,
     /// All non-terminal (running, unwinding, or abandoned) sagas, annotated
     /// with their latest node-event time and owning-Nexus state.
     observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
@@ -123,6 +125,11 @@ impl Input {
         &self.in_service_disks
     }
 
+    /// All in-service sleds (`SledFilter::InService` in the DB).
+    pub fn in_service_sleds(&self) -> &BTreeSet<SledUuid> {
+        &self.in_service_sleds
+    }
+
     /// All non-terminal sagas observed in the database, indexed by `saga_id`.
     /// See the saga diagnosis engine for how absence (a saga that has reached
     /// a terminal state) drives case closure.
@@ -151,10 +158,10 @@ impl Input {
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
     /// `parent_sitrep` and inventory collection.
     ///
-    /// The queried input collections (in-service disks, observed sagas,
-    /// observed silo certificates) and the FM configuration are provided via
-    /// the builder's setters; [`Builder::build`] fails if any was never
-    /// provided.
+    /// The queried input collections (in-service disks and sleds, observed
+    /// sagas, observed silo certificates) and the FM configuration are
+    /// provided via the builder's setters; [`Builder::build`] fails if any was
+    /// never provided.
     ///
     /// # Errors
     ///
@@ -189,6 +196,7 @@ impl Input {
             parent_sitrep,
             inv,
             in_service_disks: None,
+            in_service_sleds: None,
             observed_sagas: None,
             observed_silo_certificates: None,
             config: None,
@@ -217,6 +225,7 @@ pub struct Builder {
     // run analysis against an empty collection (which has active semantics,
     // e.g. an empty `observed_sagas` reads as "every saga case may close").
     in_service_disks: Option<Arc<IdOrdMap<InServiceDisk>>>,
+    in_service_sleds: Option<Arc<BTreeSet<SledUuid>>>,
     observed_sagas: Option<Arc<IdOrdMap<ObservedSaga>>>,
     observed_silo_certificates: Option<Arc<IdOrdMap<ObservedSiloCertificates>>>,
     /// The FM configuration. Required for the same reason as the queried
@@ -354,6 +363,13 @@ impl Builder {
         self
     }
 
+    /// Provides the in-service sleds queried from the database.
+    /// Required; [`Builder::build`] fails without it.
+    pub fn in_service_sleds(mut self, sleds: Arc<BTreeSet<SledUuid>>) -> Self {
+        self.in_service_sleds = Some(sleds);
+        self
+    }
+
     /// Provides the non-terminal sagas queried from the database.
     /// Required; [`Builder::build`] fails without it.
     pub fn observed_sagas(
@@ -390,6 +406,7 @@ impl Builder {
     #[cfg(any(test, feature = "testing"))]
     pub fn with_empty_defaults(mut self) -> Self {
         self.in_service_disks.get_or_insert_with(Default::default);
+        self.in_service_sleds.get_or_insert_with(Default::default);
         self.observed_sagas.get_or_insert_with(Default::default);
         self.observed_silo_certificates.get_or_insert_with(Default::default);
         self.config.get_or_insert_with(Default::default);
@@ -400,6 +417,9 @@ impl Builder {
         let in_service_disks = self
             .in_service_disks
             .ok_or(MissingInput { name: "in_service_disks" })?;
+        let in_service_sleds = self
+            .in_service_sleds
+            .ok_or(MissingInput { name: "in_service_sleds" })?;
         let observed_sagas = self
             .observed_sagas
             .ok_or(MissingInput { name: "observed_sagas" })?;
@@ -443,6 +463,7 @@ impl Builder {
                 .iter()
                 .map(|d| d.physical_disk_id)
                 .collect(),
+            in_service_sleds: (*in_service_sleds).clone(),
             observed_sagas: observed_sagas
                 .iter()
                 .map(|s| {
@@ -580,6 +601,7 @@ impl Builder {
             alerts_changed,
             support_bundles_changed,
             in_service_disks,
+            in_service_sleds,
             observed_sagas,
             observed_silo_certificates,
             config,

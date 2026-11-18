@@ -38,6 +38,8 @@ mod fact_physical_disk;
 pub use fact_physical_disk::*;
 mod fact_saga;
 pub use fact_saga::*;
+mod fact_smf_service;
+pub use fact_smf_service::*;
 mod rendezvous_created;
 pub use rendezvous_created::*;
 mod support_bundle_request;

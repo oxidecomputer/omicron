@@ -16,6 +16,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use sled_hardware_types::BaseboardId;
+use trust_quorum_types::membership::TRUST_QUORUM_MAX_MEMBERS;
+use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
 use trust_quorum_types::{
     crypto::EncryptedRackSecrets, crypto::Sha3_256Digest, types::Epoch,
     types::Threshold,
@@ -149,8 +151,8 @@ impl TrustQuorumConfig {
         } else {
             TrustQuorumConfigState::Preparing
         };
-        assert!(num_members >= 3);
-        assert!(num_members <= 32);
+        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
+        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
         TrustQuorumConfig {
             rack_id: proposed.rack_id,
             epoch: proposed.epoch,
@@ -189,8 +191,8 @@ impl TrustQuorumConfig {
         coordinator: BaseboardId,
     ) -> TrustQuorumConfig {
         let num_members = u8::try_from(initial_members.len()).unwrap();
-        assert!(num_members >= 3);
-        assert!(num_members <= 32);
+        assert!(usize::from(num_members) >= TRUST_QUORUM_MIN_MEMBERS);
+        assert!(usize::from(num_members) <= TRUST_QUORUM_MAX_MEMBERS);
         let now = now_db_precision();
         TrustQuorumConfig {
             rack_id,

@@ -51,6 +51,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -238,6 +239,34 @@ pub async fn sled_upsert_expect_written(
         .sled_upsert(sled_update)
         .await
         .unwrap_or_else(|e| panic!("upserted sled {sled_id}: {e}"))
+}
+
+/// Insert a commissioned, in-service sled whose baseboard matches `baseboard_id`.
+///
+/// This lets tests create sleds in the `sled` table corresponding to a trust
+/// quorum member.
+///
+/// `SledUpdateBuilder` always uses `sled_baseboard_for_test()`, so build the
+/// `SledUpdate` directly to control the part number and serial.
+pub async fn sled_upsert_for_baseboard(
+    datastore: &DataStore,
+    rack_id: RackUuid,
+    baseboard_id: &BaseboardId,
+) -> Sled {
+    let sled_update = SledUpdate::new(
+        SledUuid::new_v4(),
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+        0,
+        SledBaseboard {
+            serial_number: baseboard_id.serial_number.clone(),
+            part_number: baseboard_id.part_number.clone(),
+            revision: 1,
+        },
+        SledSystemHardwareBuilder::new().build(),
+        rack_id,
+        SledRegistrationGeneration::new(),
+    );
+    sled_upsert_expect_written(datastore, sled_update).await
 }
 
 /// Asserts that a sled upsert was rejected by one or more of the ON

@@ -39,6 +39,7 @@ use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 use typed_rng::TypedUuidRng;
@@ -81,17 +82,20 @@ impl FmTest {
     // TODO(eliza): eventually it would be nice if the inventory collection and
     // in-service-disks were generated from the `ExampleSystemBuilder`
     // somehow...
+    #[allow(clippy::too_many_arguments)]
     pub fn input_builder(
         &self,
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+        in_service_sleds: Arc<BTreeSet<SledUuid>>,
         observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
         observed_silo_certificates: Arc<IdOrdMap<ObservedSiloCertificates>>,
         config: FmConfig,
     ) -> Result<Builder, InventoryStale> {
         let mut builder = Input::builder(parent_sitrep, inv)?
             .in_service_disks(in_service_disks)
+            .in_service_sleds(in_service_sleds)
             .observed_sagas(observed_sagas)
             .observed_silo_certificates(observed_silo_certificates)
             .config(config);

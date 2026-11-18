@@ -53,6 +53,9 @@ use tokio::{
     task::{JoinError, JoinSet},
 };
 use trust_quorum::{NodeApiError, ProxyError};
+use trust_quorum_types::membership::{
+    TRUST_QUORUM_MAX_MEMBERS, TRUST_QUORUM_MIN_MEMBERS,
+};
 use trust_quorum_types::{
     messages::ReconfigureMsg as TqReconfigureMsg, types::Epoch,
 };
@@ -637,10 +640,13 @@ impl MultirackJoinServiceTask {
             // We put the check inside this loop, rather than in
             // `init_trust_quorum` because the operator can change the
             // membership at any time.
-            if members.len() < 3 || members.len() > 32 {
+            if members.len() < TRUST_QUORUM_MIN_MEMBERS
+                || members.len() > TRUST_QUORUM_MAX_MEMBERS
+            {
                 let msg = format!(
-                    "Rack membership must be between 3 and 32 sleds \
-                    (inclusive). Received {} sleds.",
+                    "Rack membership must be between \
+                    {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} \
+                    sleds (inclusive). Received {} sleds.",
                     members.len()
                 );
                 error!(self.log, "{msg}");

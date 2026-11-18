@@ -793,7 +793,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -841,6 +842,7 @@ task: "fm_analysis"
       ereporter_restarts:     <REDACTED DURATION>ms
       ereports:               <REDACTED DURATION>ms
       in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
       observed_sagas:         <REDACTED DURATION>ms
       silo_certificates:      <REDACTED DURATION>ms
       support_bundle_markers: <REDACTED DURATION>ms
@@ -916,6 +918,8 @@ task: "fm_sitrep_gc"
     orphaned fm_fact_physical_disk rows deleted:                                  0
       batches:                                                                    1
     orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_fact_smf_service rows deleted:                                    0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1
@@ -1557,7 +1561,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1605,6 +1610,7 @@ task: "fm_analysis"
       ereporter_restarts:     <REDACTED DURATION>ms
       ereports:               <REDACTED DURATION>ms
       in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
       observed_sagas:         <REDACTED DURATION>ms
       silo_certificates:      <REDACTED DURATION>ms
       support_bundle_markers: <REDACTED DURATION>ms
@@ -1680,6 +1686,8 @@ task: "fm_sitrep_gc"
     orphaned fm_fact_physical_disk rows deleted:                                  0
       batches:                                                                    1
     orphaned fm_fact_saga rows deleted:                                           0
+      batches:                                                                    1
+    orphaned fm_fact_smf_service rows deleted:                                    0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1

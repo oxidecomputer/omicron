@@ -1365,8 +1365,10 @@ impl BackgroundTasksInitializer {
             activator: task_populate_switch_ports,
         });
 
-        let vmm_mark_stop_for_update =
-            VmmMarkStopForUpdate::new(datastore.clone());
+        let vmm_mark_stop_for_update = VmmMarkStopForUpdate::new(
+            datastore.clone(),
+            config.vmm_mark_stop_for_update.disable,
+        );
         let vmm_mark_stop_for_update_watcher =
             vmm_mark_stop_for_update.watcher();
         driver.register(TaskDefinition {
@@ -1392,6 +1394,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
                 datastore,
                 sagas.clone(),
+                config.vmm_stop_for_update.disable,
             )),
             opctx: opctx.child(BTreeMap::new()),
             // Like the vmm_mark_stop_for_update task, this task will be

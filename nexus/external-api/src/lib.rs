@@ -89,6 +89,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    //
+    (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
@@ -342,6 +344,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/problems" = {
+                description = "Problems detected by the fault management \
+                 subsystem.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/problems"
                 }
             },
             "system/alerts" = {
@@ -9470,29 +9479,10 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = GET,
-        path = "/access",
+        path = "/access/{path:.*}",
         unpublished = true,
     }]
     async fn console_silo_access(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/users/{path:.*}",
-        unpublished = true,
-    }]
-    async fn console_silo_users(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::console::RestPathParam>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/groups/{path:.*}",
-        unpublished = true,
-    }]
-    async fn console_silo_groups(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError>;
@@ -9586,6 +9576,130 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::device_params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Problems
+
+    /// List problems
+    ///
+    /// Problems are sorted by the time at which they were detected, and may be
+    /// filtered by state.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<latest::problem::ProblemListParams>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::problem::Problem>>, HttpError>;
+
+    /// Fetch problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+    ) -> Result<HttpResponseOk<latest::problem::Problem>, HttpError>;
+
+    /// List causes of problem
+    ///
+    /// Returns any other problems which are the causes of the specified
+    /// problem. If the specified problem has no causes, this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/causes",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List consequences of problem
+    ///
+    /// Returns any other problems which are caused by the specified problem. If
+    /// no other problem is caused by the specified problem, then this list may
+    /// be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/consequences",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List resources impacted by problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/impacts",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ImpactListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::ProblemImpact>>,
+        HttpError,
+    >;
+
+    /// List support bundles attached to problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/support-bundles",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/support-bundles` tag, but only one tag is allowed per
+        // endpoint (why is it an array, then?)...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
+    /// List alerts for problem
+    ///
+    /// Lists alerts associated with the requested problem. Alerts may be
+    /// filtered by alert class or alert class glob and by an inclusive creation
+    /// time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/alerts",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/alerts` tag, but only one tag is allowed per endpoint...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
     // Alerts
 
