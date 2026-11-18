@@ -67,25 +67,25 @@ enum Error {
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
 
-    #[error("Failed to read disk bays from the hardware topology")]
+    #[error(transparent)]
     Topology(#[from] topo::TopoError),
 
-    #[error("Failed to init nvme handle: {0}")]
+    #[error("Failed to init nvme handle")]
     NvmeHandleInit(#[from] libnvme::NvmeInitError),
 
-    #[error("libnvme error: {0}")]
+    #[error("libnvme error")]
     Nvme(#[from] libnvme::NvmeError),
 
-    #[error("libnvme controller error: {0}")]
+    #[error("libnvme controller error")]
     NvmeController(#[from] libnvme::controller::NvmeControllerError),
 
-    #[error("libnvme controller info error: {0}")]
+    #[error("libnvme controller info error")]
     NvmeInfo(#[from] libnvme::controller_info::NvmeInfoError),
 
     #[error("Unable to grab NVMe Controller lock")]
     NvmeControllerLocked,
 
-    #[error("Failed to get NVMe Controller's firmware log page: {0}")]
+    #[error("Failed to get NVMe Controller's firmware log page")]
     FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
