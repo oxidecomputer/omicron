@@ -1111,6 +1111,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             let disks = from_clone!(sled_configs[&sled_id].disks);
             let datasets = from_clone!(sled_configs[&sled_id].datasets);
             let zones = from_clone!(sled_zones);
+            let wicket_ssh_auth =
+                sled_configs[&sled_id].wicket_ssh_auth.clone();
             client
                 .omicron_config_put(&OmicronSledConfig {
                     generation,
@@ -1121,7 +1123,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: BTreeSet::new(),
                     update_disposition: OmicronSledUpdateDisposition::Available,
-                    wicket_ssh_auth: WicketSshAuth::initial(),
+                    wicket_ssh_auth,
                 })
                 .await
                 .unwrap_or_else(|err| {
@@ -1632,6 +1634,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
                     measurements: BlueprintMeasurements::InstallDataset,
+                    wicket_ssh_auth: WicketSshAuth::initial(),
                 },
             );
         }

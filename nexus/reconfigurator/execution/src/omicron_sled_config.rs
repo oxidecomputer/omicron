@@ -114,6 +114,7 @@ mod tests {
     use sled_agent_types::disk::CompressionAlgorithm;
     use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::WicketSshAuth;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
 
@@ -282,6 +283,7 @@ mod tests {
             remove_mupdate_override: None,
             host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
             measurements: BlueprintMeasurements::InstallDataset,
+            wicket_ssh_auth: WicketSshAuth::initial(),
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();

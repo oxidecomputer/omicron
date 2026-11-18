@@ -375,6 +375,7 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::SledRole;
+    use sled_agent_types::inventory::WicketSshAuth;
     use sled_agent_types::inventory::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -720,6 +721,7 @@ mod test {
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
                     measurements: BlueprintMeasurements::InstallDataset,
+                    wicket_ssh_auth: WicketSshAuth::initial(),
                 },
             );
         }

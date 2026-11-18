@@ -17,7 +17,6 @@ use crate::planner::NoopConvertSledInfoMut;
 use crate::planner::NoopConvertSledStatus;
 use crate::planner::SledPlannerRng;
 use anyhow::anyhow;
-use host_phase_2::HostPhase2Editor;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use illumos_utils::zpool::ZpoolName;
@@ -55,6 +54,7 @@ use scalar::ScalarEditor;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::ZoneKind;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -67,16 +67,20 @@ mod host_phase_2;
 mod measurements;
 mod scalar;
 mod underlay_ip_allocator;
+mod wicket_ssh_auth;
 mod zones;
 
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
+pub use self::wicket_ssh_auth::WicketSshAuthEditError;
 pub use self::zones::ZonesEditError;
 
 use self::datasets::DatasetsEditor;
 use self::datasets::PartialDatasetConfig;
 use self::disks::DisksEditor;
+use self::host_phase_2::HostPhase2Editor;
+use self::wicket_ssh_auth::WicketSshAuthEditor;
 use self::zones::ZonesEditor;
 
 #[derive(Debug, thiserror::Error)]
@@ -127,6 +131,8 @@ pub enum SledEditError {
     EditDisks(#[from] DisksEditError),
     #[error("failed to edit datasets")]
     EditDatasetsError(#[from] DatasetsEditError),
+    #[error("failed to edit wicket ssh auth")]
+    EditWicketSshAuth(#[from] WicketSshAuthEditError),
     #[error("failed to edit zones")]
     EditZones(#[from] ZonesEditError),
     #[error(
@@ -180,6 +186,7 @@ pub struct SledEditor {
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
     host_phase_2: HostPhase2Editor,
     measurements: MeasurementEditor,
+    wicket_ssh_auth: WicketSshAuthEditor,
     debug_force_generation_bump: bool,
 }
 
@@ -235,6 +242,7 @@ impl SledEditor {
             ),
             host_phase_2: HostPhase2Editor::new(config.host_phase_2),
             measurements: MeasurementEditor::new(config.measurements),
+            wicket_ssh_auth: WicketSshAuthEditor::new(config.wicket_ssh_auth),
             debug_force_generation_bump: false,
         })
     }
@@ -261,6 +269,10 @@ impl SledEditor {
             measurements: MeasurementEditor::new(
                 BlueprintMeasurements::Unknown,
             ),
+            // TODO omicron#11821 Can we fill this in with the current wicket
+            // ssh auth? Or are we relying on the planner overwriting it with
+            // the correct value later?
+            wicket_ssh_auth: WicketSshAuthEditor::new(WicketSshAuth::initial()),
             debug_force_generation_bump: false,
         }
     }
@@ -286,9 +298,13 @@ impl SledEditor {
             kind: self.update_disposition_kind.finalize(),
         };
 
+        let wicket_ssh_auth_is_modified = self.wicket_ssh_auth.is_modified();
+        let wicket_ssh_auth = self.wicket_ssh_auth.finalize();
+
         let scalar_edits = EditedSledScalarEdits {
             debug_force_generation_bump: self.debug_force_generation_bump,
             remove_mupdate_override: remove_mupdate_override_is_modified,
+            wicket_ssh_auth: wicket_ssh_auth_is_modified,
             update_disposition: update_disposition_is_modified,
         };
 
@@ -301,6 +317,7 @@ impl SledEditor {
             || changed_host_phase_2
             || measurement_counts.has_nonzero_counts()
             || update_disposition_is_modified
+            || wicket_ssh_auth_is_modified
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -322,6 +339,7 @@ impl SledEditor {
                 host_phase_2: self.host_phase_2.finalize(),
                 measurements,
                 update_disposition,
+                wicket_ssh_auth,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,

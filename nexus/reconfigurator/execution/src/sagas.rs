@@ -242,6 +242,7 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::WicketSshAuth;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
@@ -327,6 +328,7 @@ mod test {
                 ),
                 measurements: BlueprintMeasurements::InstallDataset,
                 update_disposition: BlueprintSledUpdateDisposition::initial(),
+                wicket_ssh_auth: WicketSshAuth::initial(),
             },
         );
 

@@ -58,7 +58,16 @@ use std::time::Duration;
 
 /// Describes the authentication requirements for accessing the `wicket` captive
 /// shell over SSH.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    daft::Diffable,
+)]
 pub struct WicketSshAuth {
     pub generation: WicketSshAuthGeneration,
     pub kind: WicketSshAuthKind,
@@ -77,7 +86,16 @@ impl WicketSshAuth {
 
 /// Particular kind of authentication requirement for accessing the `wicket`
 /// captive shell over SSH.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    daft::Diffable,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WicketSshAuthKind {
     /// `wicket` is publicly accessible to any client.

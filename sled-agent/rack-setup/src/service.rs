@@ -114,7 +114,6 @@ use sled_agent_client::{
 };
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
-use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
@@ -588,7 +587,7 @@ impl ServiceInner {
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                     measurements: Default::default(),
                     update_disposition: OmicronSledUpdateDisposition::Available,
-                    wicket_ssh_auth: WicketSshAuth::initial(),
+                    wicket_ssh_auth: config.wicket_ssh_auth.clone(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
