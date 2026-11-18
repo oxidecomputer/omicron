@@ -2412,6 +2412,7 @@ table! {
         update_disposition_generation -> Int8,
         update_availability -> crate::enums::SledUpdateAvailabilityEnum,
         update_disruption_policy -> Nullable<crate::enums::ReconfiguratorDisruptionPolicyEnum>,
+        wicket_ssh_auth_generation -> Int8,
     }
 }
 
