@@ -956,3 +956,84 @@ async fn test_group_project_selector<T: AffinityGroupish>(
         .await;
     no_project_api.group_delete(&group_id).await;
 }
+
+#[nexus_test]
+async fn test_affinity_group_member_must_share_project(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+    test_group_member_must_share_project::<AffinityType>(external_client).await;
+}
+
+#[nexus_test]
+async fn test_anti_affinity_group_member_must_share_project(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+    test_group_member_must_share_project::<AntiAffinityType>(external_client)
+        .await;
+}
+
+async fn test_group_member_must_share_project<T: AffinityGroupish>(
+    client: &ClientTestContext,
+) {
+    const GROUP_PROJECT: &'static str = "group-project";
+    const OTHER_PROJECT: &'static str = "other-project";
+    const GROUP_NAME: &'static str = "group";
+
+    let api = ApiHelper::new(client);
+
+    create_default_ip_pools(&client).await;
+    api.create_project(GROUP_PROJECT).await;
+    api.create_project(OTHER_PROJECT).await;
+
+    let group_project_api = api.use_project::<T>(GROUP_PROJECT);
+    let other_project_api = api.use_project::<T>(OTHER_PROJECT);
+    let no_project_api = api.no_project::<T>();
+
+    let group = group_project_api.group_create(GROUP_NAME).await;
+    let group_id = group.identity().id.to_string();
+
+    let local_instance =
+        group_project_api.create_stopped_instance("local-instance").await;
+    let local_instance_id = local_instance.identity.id.to_string();
+    let other_instance =
+        other_project_api.create_stopped_instance("other-instance").await;
+    let other_instance_id = other_instance.identity.id.to_string();
+
+    // The group and the instance are both visible to the caller, but they
+    // live in different projects. Selecting both by ID is the only way to
+    // name objects from two projects in a single request.
+    let error = no_project_api
+        .group_member_add_expect_error(
+            &group_id,
+            &other_instance_id,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    assert!(
+        error.message.contains("must be in the same project"),
+        "unexpected error message: {}",
+        error.message,
+    );
+
+    // The failed request must not leave a membership behind.
+    assert!(group_project_api.group_members_list(GROUP_NAME).await.is_empty());
+    assert!(
+        other_project_api
+            .instance_groups_list("other-instance")
+            .await
+            .is_empty()
+    );
+    no_project_api
+        .group_member_get_expect_error(
+            &group_id,
+            &other_instance_id,
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+
+    // Adding by ID still works when both objects share a project.
+    no_project_api.group_member_add(&group_id, &local_instance_id).await;
+    assert_eq!(group_project_api.group_members_list(GROUP_NAME).await.len(), 1);
+}
