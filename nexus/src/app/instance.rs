@@ -1674,6 +1674,14 @@ impl super::Nexus {
             vec![]
         };
 
+        // TODO: Here, a single page of MAX_SSH_KEYS_PER_INSTANCE is treated as
+        // the complete result (see "Treating one page as the complete result"
+        // in docs/db-pagination.adoc). This means that if a user with more than
+        // MAX_SSH_KEYS_PER_INSTANCE keys creates an instance without
+        // `ssh_public_keys` specified, the instance would get only the first
+        // 100 by name. See oxidecomputer/omicron#4918; the fix depends on #4918
+        // (per-account limit) and #4919 (what an omitted
+        // ssh_public_keys means).
         let ssh_keys = self
             .db_datastore
             .instance_ssh_keys_list(
