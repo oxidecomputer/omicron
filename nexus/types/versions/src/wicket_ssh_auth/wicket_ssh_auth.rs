@@ -327,9 +327,9 @@ mod tests {
             let mut i = lines
                 .iter()
                 .position(|line| {
-                    line.starts_with("pub struct WicketSshKeyValidator(")
+                    line.starts_with("pub struct WicketSshAuthorizedKey(")
                 })
-                .expect("found WicketSshKeyValidator struct");
+                .expect("found WicketSshAuthorizedKey struct");
             let mut algorithms = BTreeSet::new();
             while i > 0 {
                 let line = lines[i];
