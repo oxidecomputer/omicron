@@ -10050,17 +10050,6 @@ pub trait NexusExternalApi {
     /// TODO-john docs
     #[endpoint {
         method = GET,
-        path = "/v1/system/wicket-ssh-auth/generation/latest",
-        tags = ["system/update"], // right tag? wicket is kinda for updates...
-        versions = VERSION_WICKET_SSH_AUTH..,
-    }]
-    async fn wicket_ssh_auth_view_latest(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::wicket_ssh_auth::WicketSshAuth>, HttpError>;
-
-    /// TODO-john docs
-    #[endpoint {
-        method = GET,
         path = "/v1/system/wicket-ssh-auth/generation/{generation}",
         tags = ["system/update"], // right tag? wicket is kinda for updates...
         versions = VERSION_WICKET_SSH_AUTH..,

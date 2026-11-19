@@ -19,8 +19,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-pub use sled_agent_types_versions::v65::inventory::WicketSshAuthStatus as WicketSshAuthSwitchZoneStatus;
-
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
 )]
@@ -273,11 +271,30 @@ pub struct WicketSshAuthStatusSled {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum WicketSshAuthStatusSledLatest {
     Unknown,
     Known {
         persisted_generation: Option<WicketSshAuthGeneration>,
         switch_zone_status: WicketSshAuthSwitchZoneStatus,
+    },
+}
+
+/// Status of wicket's SSH auth settings in a sled's switch zone, if it has one.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum WicketSshAuthSwitchZoneStatus {
+    /// This sled has no active switch zone.
+    NoSwitchZone,
+
+    /// This sled has an active switch zone.
+    SwitchZone {
+        /// The current auth generation setting in effect in our switch zone.
+        effective_auth_gen: WicketSshAuthGeneration,
+
+        /// If the most recent attempt to set a new auth generation failed,
+        /// contains the error.
+        last_error: Option<String>,
     },
 }
 

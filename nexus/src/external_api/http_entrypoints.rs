@@ -36,7 +36,6 @@ use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::WicketSshAuthGenerationDescription;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
@@ -9667,30 +9666,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn wicket_ssh_auth_view_latest(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<wicket_ssh_auth::WicketSshAuth>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            let wicket_ssh_auth = nexus
-                .wicket_ssh_auth_view(
-                    &opctx,
-                    WicketSshAuthGenerationDescription::Latest,
-                )
-                .await?;
-            Ok(HttpResponseOk(wicket_ssh_auth))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn wicket_ssh_auth_view_generation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<wicket_ssh_auth::WicketSshAuthPath>,
@@ -9703,12 +9678,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let path_params = path_params.into_inner();
             let wicket_ssh_auth = nexus
-                .wicket_ssh_auth_view(
-                    &opctx,
-                    WicketSshAuthGenerationDescription::Specific(
-                        path_params.generation,
-                    ),
-                )
+                .wicket_ssh_auth_view(&opctx, path_params.generation)
                 .await?;
             Ok(HttpResponseOk(wicket_ssh_auth))
         };

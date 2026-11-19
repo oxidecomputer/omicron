@@ -15,6 +15,7 @@ use nexus_types::external_api::wicket_ssh_auth::WicketSshAuthStatusTimeCollected
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_uuid_kinds::GenericUuid;
 
 impl super::Nexus {
@@ -29,9 +30,14 @@ impl super::Nexus {
     pub async fn wicket_ssh_auth_view(
         &self,
         opctx: &OpContext,
-        generation: WicketSshAuthGenerationDescription,
+        generation: WicketSshAuthGeneration,
     ) -> LookupResult<WicketSshAuth> {
-        self.datastore().wicket_ssh_auth_read(opctx, generation).await
+        self.datastore()
+            .wicket_ssh_auth_read(
+                opctx,
+                WicketSshAuthGenerationDescription::Specific(generation),
+            )
+            .await
     }
 
     pub async fn wicket_ssh_auth_status(
@@ -74,7 +80,8 @@ impl super::Nexus {
                                 }),
                             switch_zone_status: inv_sled_agent
                                 .wicket_ssh_auth_status
-                                .clone(),
+                                .clone()
+                                .into(),
                         }
                     }
                 };

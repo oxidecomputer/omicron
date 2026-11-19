@@ -7,6 +7,7 @@
 use crate::latest::wicket_ssh_auth::WicketSshAuth;
 use crate::latest::wicket_ssh_auth::WicketSshAuthKind;
 use crate::latest::wicket_ssh_auth::WicketSshAuthKindCreate;
+use crate::latest::wicket_ssh_auth::WicketSshAuthSwitchZoneStatus;
 use crate::latest::wicket_ssh_auth::WicketSshKey;
 use sled_agent_types_versions::latest::inventory as sled_agent_types;
 
@@ -63,6 +64,22 @@ impl From<WicketSshAuthKindCreate> for WicketSshAuthKind {
                     .collect(),
                 allow_support_keys,
             },
+        }
+    }
+}
+
+impl From<sled_agent_types::WicketSshAuthStatus>
+    for WicketSshAuthSwitchZoneStatus
+{
+    fn from(value: sled_agent_types::WicketSshAuthStatus) -> Self {
+        match value {
+            sled_agent_types::WicketSshAuthStatus::NoSwitchZone => {
+                Self::NoSwitchZone
+            }
+            sled_agent_types::WicketSshAuthStatus::SwitchZone {
+                effective_auth_gen,
+                last_error,
+            } => Self::SwitchZone { effective_auth_gen, last_error },
         }
     }
 }
