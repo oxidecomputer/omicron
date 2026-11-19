@@ -134,13 +134,17 @@ pub(crate) struct BayContents {
 pub(crate) enum ObservedOccupant {
     /// The bay node has no children.
     Empty,
-    /// An `nvme` node with a driver instance. `namespaces` has one entry per
-    /// `disk` child, which the topology creates per namespace the nvme driver
-    /// does not ignore.
+    /// An `nvme` node with a driver instance.
     Nvme {
         instance: NvmeInstance,
         driver: Option<String>,
         devfs_path: Option<String>,
+        /// The usable NVMe namespaces reported by the topology for this
+        /// device.
+        ///
+        /// These are reported as `disk` nodes nested under the `nvme` node.
+        /// Namespaces ignored by the nvme driver are not included in this
+        /// list.
         namespaces: Vec<ObservedNamespace>,
     },
     /// The topology's placeholder for a device it does not enumerate.
