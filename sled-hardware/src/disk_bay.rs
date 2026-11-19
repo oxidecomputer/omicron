@@ -194,8 +194,8 @@ pub(crate) struct ObservedNamespace {
     /// `io/devfs-path`: the `blkdev` node's path, without the `/devices`
     /// prefix.
     pub devfs_path: String,
-    /// `storage/logical-disk`: the name under `/dev/dsk`, such as
-    /// `c1t00A0750130D5B4C7d0`, when the topology found the link.
+    /// `storage/logical-disk`: the name under `/dev/dsk` (such as
+    /// `c1t00A0750130D5B4C7d0`), if the topology found the link.
     pub logical_disk: Option<String>,
 }
 
