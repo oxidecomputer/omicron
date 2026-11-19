@@ -1133,21 +1133,29 @@ impl DataStore {
         authz_pool: &authz::IpPool,
     ) -> Result<Vec<(IpNetwork, IpNetwork)>, DieselError> {
         use nexus_db_schema::schema::ip_pool_range;
-        ip_pool_range::table
+        // Here, the lookup_pool_range_by_first_address index ensures that
+        // first_address is unique for non-soft-deleted ranges, so it is a valid
+        // paging key.
+        let mut ranges = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                ip_pool_range::table,
+                ip_pool_range::first_address,
+                &p.current_pagparams(),
+            )
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
             .select((ip_pool_range::first_address, ip_pool_range::last_address))
-            // This is a rare unpaginated DB query, which means we are
-            // vulnerable to a resource exhaustion attack in which someone
-            // creates a very large number of ranges in order to make this
-            // query slow. In order to mitigate that, we limit the query to the
-            // (current) max allowed page size, effectively making this query
-            // exactly as vulnerable as if it were paginated. If there are more
-            // than 10,000 ranges in a pool, we will undercount, but I have a
-            // hard time seeing that as a practical problem.
-            .limit(10000)
             .get_results_async::<(IpNetwork, IpNetwork)>(conn)
-            .await
+            .await?;
+            paginator = p.found_batch(&batch, &|(first, _last)| *first);
+            ranges.extend(batch);
+        }
+        Ok(ranges)
     }
 
     fn accumulate_ip_range_sizes(
@@ -1730,10 +1738,7 @@ impl DataStore {
             let batch = self
                 .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
                 .await?;
-            // The use of `last_address` here assumes `paginator` is sorting
-            // in Ascending order (which it does - see the implementation of
-            // `current_pagparams()`).
-            paginator = p.found_batch(&batch, &|r| r.last_address);
+            paginator = p.found_batch(&batch, &|r| r.first_address);
             ip_ranges.extend(batch);
         }
         Ok(ip_ranges)

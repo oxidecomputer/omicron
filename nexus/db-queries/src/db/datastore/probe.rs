@@ -354,6 +354,12 @@ impl super::DataStore {
         // In that case, we'd get rows like:
         //
         // probe_id, vpc stuff, vpc_subnet stuff, [eip0, eip1, ...]
+        //
+        // Until this is fixed, the paging key (probe.id) is unique in the
+        // joined result only because of these application-level invariants (one
+        // external IP and one NIC per probe), which violates
+        // docs/db-pagination.adoc's key invariant (see "Paging on a non-unique
+        // key").
         paginated(probe::dsl::probe, probe::dsl::id, pagparams)
             .inner_join(
                 external_ip::dsl::external_ip

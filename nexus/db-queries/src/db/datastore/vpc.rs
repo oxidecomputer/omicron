@@ -1323,6 +1323,10 @@ impl DataStore {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::instance_network_interface, dsl::id, &pagparams)
             }
+            // TODO: NIC names are unique per parent_id, not per subnet (every
+            // default primary NIC is net0), so pagination by name can skip
+            // rows. Fixing this needs a new API version that pages on (name,
+            // id) or id only.
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::instance_network_interface,
                 dsl::name,
@@ -1454,6 +1458,12 @@ impl DataStore {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::internet_gateway_ip_pool, dsl::id, pagparams)
             }
+            // TODO: internet_gateway_ip_pool names are not unique per gateway!
+            // There is no unique index in the DB, and this isn't checked at the
+            // application layer either. Pagination by name can skip rows. This
+            // probably needs a migration adding a UNIQUE INDEX on
+            // (internet_gateway_id, name) WHERE time_deleted IS NULL, after
+            // deduplicating existing rows.
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::internet_gateway_ip_pool,
                 dsl::name,
