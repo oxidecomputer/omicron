@@ -22,7 +22,7 @@ pub struct InstanceCreateBuilder {
     interim_body: instance::InstanceCreate,
 }
 impl InstanceCreateBuilder {
-    fn new(instance_name: &str) -> Self {
+    pub fn new(instance_name: &str) -> Self {
         let interim_body = instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
@@ -51,7 +51,7 @@ impl InstanceCreateBuilder {
         Self { interim_body }
     }
 
-    fn with_nics(
+    pub fn with_nics(
         mut self,
         nics: instance::InstanceNetworkInterfaceAttachment,
     ) -> Self {
@@ -59,7 +59,7 @@ impl InstanceCreateBuilder {
         self
     }
 
-    fn with_disks(
+    pub fn with_disks(
         mut self,
         disks: Vec<instance::InstanceDiskAttachment>,
     ) -> Self {
@@ -67,7 +67,7 @@ impl InstanceCreateBuilder {
         self
     }
 
-    fn with_external_ips(
+    pub fn with_external_ips(
         mut self,
         external_ips: Vec<instance::ExternalIpCreate>,
     ) -> Self {
@@ -75,12 +75,12 @@ impl InstanceCreateBuilder {
         self
     }
 
-    fn with_start(mut self, start: bool) -> Self {
+    pub fn with_start(mut self, start: bool) -> Self {
         self.interim_body.start = start;
         self
     }
 
-    fn with_auto_restart_policy(
+    pub fn with_auto_restart_policy(
         mut self,
         auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     ) -> Self {
@@ -88,7 +88,7 @@ impl InstanceCreateBuilder {
         self
     }
 
-    fn with_cpu_platform(
+    pub fn with_cpu_platform(
         mut self,
         cpu_platform: Option<InstanceCpuPlatform>,
     ) -> Self {
@@ -96,7 +96,7 @@ impl InstanceCreateBuilder {
         self
     }
 
-    fn with_multicast_groups(
+    pub fn with_multicast_groups(
         mut self,
         multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
     ) -> Self {
@@ -104,7 +104,7 @@ impl InstanceCreateBuilder {
         self
     }
 
-    fn finish(self) -> instance::InstanceCreate {
+    pub fn finish(self) -> instance::InstanceCreate {
         self.interim_body
     }
 }
