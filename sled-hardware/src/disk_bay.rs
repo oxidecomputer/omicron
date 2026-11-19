@@ -78,7 +78,7 @@ pub enum DiskBayOccupant {
         devfs_path: Option<String>,
     },
     /// The topology or libnvme could not describe the bay on the latest
-    /// poll. A disk last seen in this bay stays in the sled's disk list.
+    /// poll.
     Unreadable {
         /// The driver the topology found bound to the device, if any.
         driver: Option<String>,
