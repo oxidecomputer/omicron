@@ -17,6 +17,7 @@ use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Nullable;
 
 pub struct InstanceCreateBuilder {
     interim_body: instance::InstanceCreate,
@@ -226,4 +227,29 @@ where
 {
     let url = format!("/v1/instances?project={project_name}");
     object_create_error(client, &url, body, status).await
+}
+
+/// Helper to compute and modifiy a no-op update on the provided `instance`.
+pub fn instance_compute_update(
+    instance: &Instance,
+    edit_update: impl Fn(&mut instance::InstanceUpdate),
+) -> instance::InstanceUpdate {
+    // Construct an update which, if used to reconfigure `Instance`, would result
+    // in no changes.
+    let unchanged_boot_disk = instance.boot_disk_id.map(|id| NameOrId::Id(id));
+    let mut update = instance::InstanceUpdate {
+        boot_disk: Nullable(unchanged_boot_disk),
+        auto_restart_policy: Nullable(instance.auto_restart_status.policy),
+        cpu_platform: Nullable(instance.cpu_platform),
+        ncpus: instance.ncpus,
+        memory: instance.memory,
+        // "If not provided, the instance's multicast group membership will not
+        // be changed."
+        multicast_groups: None,
+        enable_jumbo_frames: instance.enable_jumbo_frames,
+    };
+
+    edit_update(&mut update);
+
+    update
 }

@@ -99,6 +99,7 @@ mod instance;
 pub use instance::{
     InstanceCreateBuilder, create_instance, create_instance_from_body,
     create_instance_stopped, create_instance_with_error,
+    instance_compute_update,
 };
 
 pub async fn objects_list_page_authz<ItemType>(

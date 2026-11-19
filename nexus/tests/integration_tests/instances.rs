@@ -118,7 +118,7 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     InstanceCreateBuilder, create_instance, create_instance_from_body,
     create_instance_stopped, create_instance_with_error, create_project,
-    create_vpc, create_vpc_subnet,
+    create_vpc, create_vpc_subnet, instance_compute_update,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy::{ProjectRole, SiloRole};
@@ -5822,30 +5822,6 @@ async fn test_updating_missing_instance_is_not_found(
         error.message,
         format!("not found: instance with id \"{}\"", UUID_THAT_DOESNT_EXIST)
     );
-}
-
-fn instance_compute_update(
-    instance: &Instance,
-    edit_update: impl Fn(&mut instance::InstanceUpdate),
-) -> instance::InstanceUpdate {
-    // Construct an update which, if used to reconfigure `Instance`, would result
-    // in no changes.
-    let unchanged_boot_disk = instance.boot_disk_id.map(|id| NameOrId::Id(id));
-    let mut update = instance::InstanceUpdate {
-        boot_disk: Nullable(unchanged_boot_disk),
-        auto_restart_policy: Nullable(instance.auto_restart_status.policy),
-        cpu_platform: Nullable(instance.cpu_platform),
-        ncpus: instance.ncpus,
-        memory: instance.memory,
-        // "If not provided, the instance's multicast group membership will not
-        // be changed."
-        multicast_groups: None,
-        enable_jumbo_frames: instance.enable_jumbo_frames,
-    };
-
-    edit_update(&mut update);
-
-    update
 }
 
 async fn expect_instance_reconfigure_ok(

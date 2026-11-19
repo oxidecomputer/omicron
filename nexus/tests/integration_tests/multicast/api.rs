@@ -28,21 +28,19 @@ use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
 };
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pools, create_instance, create_project, object_create,
-    object_create_error,
+    InstanceCreateBuilder, create_default_ip_pools, create_instance,
+    create_instance_from_body, create_instance_with_error, create_project,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceCpuCount, InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use omicron_common::address::is_ssm_address;
-use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-};
+use omicron_common::api::external::ByteCount;
 
 use super::*;
 
@@ -64,30 +62,22 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     // Case: Stopped instances (all APIs should handle stopped instances identically)
 
     // API Path: Instance created stopped, then added to group
-    let instance1_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "edge-case-1".parse().unwrap(),
-            description: "Stopped instance with multicast group".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "edge-case-1".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![], // No groups at creation
-        disks: vec![],
-        boot_disk: None,
-        start: false, // Create stopped
-        cpu_platform: None,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance1_params = InstanceCreateBuilder::new("edge-case-1")
+        .with_description("Stopped instance with multicast group")
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("edge-case-1")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+        // No groups at creation
+        .with_multicast_groups(vec![])
+        // Create stopped
+        .with_start(false)
+        .finish();
 
-    let instance_url = format!("/v1/instances?project={project_name}");
-    let instance1: Instance =
-        object_create(client, &instance_url, &instance1_params).await;
+    let instance1 =
+        create_instance_from_body(client, project_name, instance1_params).await;
 
     // Add instance1 to group using instance-centric API
     multicast_group_attach(cptestctx, project_name, "edge-case-1", group_name)
@@ -95,28 +85,22 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     wait_for_group_active(client, group_name).await;
 
     // API Path: Second instance created stopped, then added to existing group
-    let instance2_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "edge-case-2".parse().unwrap(),
-            description: "Stopped instance, group added later".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "edge-case-2".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![], // No groups at creation
-        disks: vec![],
-        boot_disk: None,
-        start: false, // Create stopped
-        cpu_platform: None,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
-    let instance2: Instance =
-        object_create(client, &instance_url, &instance2_params).await;
+    let instance2_params = InstanceCreateBuilder::new("edge-case-2")
+        .with_description("Stopped instance, group added later")
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("edge-case-2")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+        // No groups at creation
+        .with_multicast_groups(vec![])
+        // Create stopped
+        .with_start(false)
+        .finish();
+
+    let instance2 =
+        create_instance_from_body(client, project_name, instance2_params).await;
 
     // Add to existing group using instance-centric API
     multicast_group_attach(cptestctx, project_name, "edge-case-2", group_name)
@@ -177,29 +161,21 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     // Since multicast groups are fleet-scoped, UUID-based operations should work
     // without requiring project parameter
 
-    let instance3_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "edge-case-3".parse().unwrap(),
-            description: "Instance for UUID-based access".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "edge-case-3".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        start: false, // Create stopped to test UUID operations on non-running instances
-        cpu_platform: None,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance3_params = InstanceCreateBuilder::new("edge-case-3")
+        .with_description("Instance for UUID-based access")
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("edge-case-3")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+        .with_multicast_groups(vec![])
+        // Create stopped to test UUID operations on non-running instances
+        .with_start(false)
+        .finish();
 
     let (instance3, group) = ops::join2(
-        object_create::<_, Instance>(client, &instance_url, &instance3_params),
+        create_instance_from_body(client, project_name, instance3_params),
         get_multicast_group(client, group_name),
     )
     .await;
@@ -304,37 +280,31 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
 
     // Attempt create an instance with more than 32 group memberships.
     // We expect this to fail.
-    let instance4_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "too-many-multis".parse().unwrap(),
-            description: "This instance is just too popular!".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "too-many-multis".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: (0..33)
-            .map(|i| MulticastGroupJoinSpec {
-                group: MulticastGroupIdentifier::Ip(
-                    Ipv4Addr::from_octets([224, 2, 10, 1 + i]).into(),
-                ),
-                source_ips: None,
-                ip_version: None,
-            })
-            .collect(),
-        disks: vec![],
-        boot_disk: None,
-        start: false, // Create stopped to test UUID operations on non-running instances
-        cpu_platform: None,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
-    let err = object_create_error(
+    let instance4_params = InstanceCreateBuilder::new("too-many-multis")
+        .with_description("This instance is just too popular!")
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("too-many-multis")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+        .with_multicast_groups(
+            (0..33)
+                .map(|i| MulticastGroupJoinSpec {
+                    group: MulticastGroupIdentifier::Ip(
+                        Ipv4Addr::from_octets([224, 2, 10, 1 + i]).into(),
+                    ),
+                    source_ips: None,
+                    ip_version: None,
+                })
+                .collect(),
+        )
+        // Create stopped to test UUID operations on non-running instances
+        .with_start(false)
+        .finish();
+    let err = create_instance_with_error(
         client,
-        &instance_url,
+        &project_name,
         &instance4_params,
         StatusCode::BAD_REQUEST,
     )
