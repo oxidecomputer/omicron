@@ -75,6 +75,7 @@ progenitor::generate_api!(
         RouterPeerType = sled_agent_types::early_networking::RouterPeerType,
         ServiceIpPoolConfig = nexus_types::internal_api::params::ServiceIpPoolConfig,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
+        SledUpdateDispositionChange = nexus_types::deployment::planning_report::SledUpdateDispositionChange,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
         TrustQuorumMembers = trust_quorum_types::membership::TrustQuorumMembers,
