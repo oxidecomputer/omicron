@@ -485,6 +485,26 @@ pub(crate) fn resolve_bays(
         }
     }
 
+    // A bay and the disk contained within it.
+    struct ResolvedBay {
+        bay: DiskBay,
+        disk: Option<UnparsedDisk>,
+        disk_source: DiskSource,
+    }
+
+    // Where the disk attributed to a `ResolvedBay` comes from.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum DiskSource {
+        // The bay was read on this poll, and held this disk.
+        ThisPoll,
+        // The bay was unreadable on this poll.
+        // We're using the result from a prior poll which was successful.
+        PreviousPoll,
+    }
+
+    // For all bays we have seen, in this poll or a previous one:
+    // - If the bay was read on this poll, use what it held (a disk or none)
+    // - If it was unreadable, use the disk it held previously, if one exists
     let mut resolved: Vec<ResolvedBay> = polled
         .into_iter()
         .map(|polled_bay| match polled_bay {
@@ -545,24 +565,6 @@ pub(crate) fn resolve_bays(
     // `polled` had one bay per location, so no bay overwrites another.
     let bays = resolved.into_iter().map(|resolved| resolved.bay).collect();
     (disks, bays)
-}
-
-/// A bay and the disk attributed to it, while [`resolve_bays`] settles which
-/// bay keeps each disk.
-struct ResolvedBay {
-    bay: DiskBay,
-    disk: Option<UnparsedDisk>,
-    disk_source: DiskSource,
-}
-
-/// Where the disk attributed to a [`ResolvedBay`] comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum DiskSource {
-    /// The bay was read on this poll, and held this disk.
-    ThisPoll,
-    /// The bay was unreadable on this poll. This is the disk it held on the
-    /// previous poll.
-    PreviousPoll,
 }
 
 /// The model string of a disk, from the `inquiry-vendor-id` and
