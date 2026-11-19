@@ -34,27 +34,30 @@ pub enum InstanceShutdownPolicy {
 }
 
 /// ACPI power button timeout in seconds.
-// RFD 622: "A user-configurable timeout for the instance to finish stopping
-// itself should be present, bounded between 1 and 3600 seconds, inclusive."
-// This is enforced at the API level (by this type and its `Deserialize` impl)
-// and as a crdb constraint.
+// NOTE: RFD 622 originally specified an upper bound of 1 hour (3600 seconds),
+// but during code review the decision was made to tighten until such time
+// that a specific request comes in from someone actually wanting a timeout
+// that long, as concerns were raised that an hour would be an excessive delay
+// to e.g. perform a sled update with an instance that's hanging.
+// This range bound is enforced at the API level (by this type and its
+// `Deserialize` impl) and as a crdb constraint.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]
 #[serde(try_from = "u64", into = "u64")]
-pub struct AcpiTimeoutSecs(#[schemars(range(min = 1, max = 3600))] u64);
+pub struct AcpiTimeoutSecs(#[schemars(range(min = 1, max = 900))] u64);
 
 // schemars(range(max)) above is required to be a *literal*. if the constant
 // changes, and you're here because of the assertion, change it accordingly.
 const _: () = const { assert!(AcpiTimeoutSecs::MIN == 1) };
-const _: () = const { assert!(AcpiTimeoutSecs::MAX == 3600) };
+const _: () = const { assert!(AcpiTimeoutSecs::MAX == 900) };
 
 // All the impls on `AcpiTimeoutSecs` live here instead of `crate::impls`
 // because they're required as a part of implementing `Deserialize`.
 
 impl AcpiTimeoutSecs {
     const MIN: u64 = 1;
-    const MAX: u64 = 3600;
+    const MAX: u64 = 900;
 }
 
 impl From<AcpiTimeoutSecs> for u64 {
