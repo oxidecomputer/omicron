@@ -175,7 +175,7 @@ impl super::Nexus {
             .silo_required()
             .internal_context("listing Certificates")?;
         self.db_datastore
-            .certificate_list_for_silo(opctx, pagparams, &authz_silo)
+            .silo_certificate_list(opctx, pagparams, &authz_silo)
             .await
     }
 
@@ -187,7 +187,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Certificate> {
         let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
         self.db_datastore
-            .certificate_list_for_silo(opctx, pagparams, &authz_silo)
+            .silo_certificate_list(opctx, pagparams, &authz_silo)
             .await
     }
 

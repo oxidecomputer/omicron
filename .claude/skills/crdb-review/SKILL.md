@@ -1,5 +1,5 @@
 ---
-name: db-review
+name: crdb-review
 description: Review database code for known schema and pagination mistakes. Use when the user asks to review database queries, schema changes, or migrations, or when reviewing a diff that touches nexus/db-queries, nexus/db-model, nexus/db-schema, or schema/crdb.
 ---
 

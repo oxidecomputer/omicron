@@ -73,7 +73,7 @@ impl DataStore {
     ///
     /// Certificate names are unique only per silo, not globally, so paging by
     /// name is offered only here and not in [`Self::certificate_list_all`].
-    pub async fn certificate_list_for_silo(
+    pub async fn silo_certificate_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -105,7 +105,7 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Returns all certificates across the fleeet.
+    /// Returns all certificates across the fleet.
     ///
     /// This only offers ID-based paging because names can repeat across silos.
     pub async fn certificate_list_all(

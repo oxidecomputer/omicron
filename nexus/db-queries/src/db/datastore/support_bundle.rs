@@ -8,7 +8,6 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::model::DbTypedUuid;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
@@ -18,6 +17,8 @@ use crate::db::sitrep_guard::SitrepGuardedInsert;
 use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DbError;
 use futures::FutureExt;
@@ -42,7 +43,6 @@ use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -445,7 +445,7 @@ impl DataStore {
     pub async fn support_bundle_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::support_bundle::dsl;
@@ -462,57 +462,67 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Lists one page of support bundles in a particular state, assigned to
-    /// a particular Nexus.
-    pub async fn support_bundle_list_assigned_to_nexus(
+    /// Returns the oldest support bundle in the `Collecting` state assigned to
+    /// a particular Nexus, along with the number of bundles in that state
+    /// assigned to the Nexus.
+    ///
+    /// Returns `None` if no bundles are waiting to be collected.
+    pub async fn support_bundle_next_to_collect(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<
-            '_,
-            (chrono::DateTime<chrono::Utc>, DbTypedUuid<SupportBundleKind>),
-        >,
         nexus_id: OmicronZoneUuid,
-        states: Vec<SupportBundleState>,
-    ) -> ListResultVec<SupportBundle> {
+    ) -> Result<Option<(SupportBundle, i64)>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated_multicolumn(
-            dsl::support_bundle,
-            (dsl::time_created, dsl::id),
-            pagparams,
-        )
-        .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
-        .filter(dsl::state.eq_any(states))
-        .select(SupportBundle::as_select())
-        .load_async(&*conn)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        dsl::support_bundle
+            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+            .filter(dsl::state.eq(SupportBundleState::Collecting))
+            .order_by((dsl::time_created, dsl::id))
+            .select((
+                SupportBundle::as_select(),
+                // COUNT(id) OVER applies before LIMIT, so this returns the
+                // correct number of waiting bundles.
+                diesel::dsl::count(dsl::id).over(),
+            ))
+            .first_async::<(SupportBundle, i64)>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Lists all support bundles in a particular state, assigned to a
-    /// particular Nexus.
+    /// Lists all support bundles assigned to a particular Nexus that are in
+    /// any of the given states.
     pub async fn support_bundle_list_assigned_to_nexus_batched(
         &self,
         opctx: &OpContext,
         nexus_id: OmicronZoneUuid,
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.check_complex_operations_allowed()?;
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         let mut bundles = Vec::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
         );
         while let Some(p) = paginator.next() {
-            let batch = self
-                .support_bundle_list_assigned_to_nexus(
-                    opctx,
-                    &p.current_pagparams(),
-                    nexus_id,
-                    states.clone(),
-                )
-                .await?;
+            let batch = paginated_multicolumn(
+                dsl::support_bundle,
+                (dsl::time_created, dsl::id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+            .filter(dsl::state.eq_any(states.clone()))
+            .select(SupportBundle::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
             paginator = p.found_batch(&batch, &|bundle: &SupportBundle| {
                 (bundle.time_created, bundle.id)
             });
@@ -824,7 +834,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         bundle_id: SupportBundleUuid,
         data_selection: BundleDataSelection,
-        start: chrono::DateTime<chrono::Utc>,
+        start: DateTime<Utc>,
     ) -> Result<(), DbError> {
         use crate::db::model::{
             DataSelectionFlags, Ereports, HostInfo, TimeRange,
@@ -1031,6 +1041,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::model::DbTypedUuid;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
@@ -1060,6 +1071,7 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::SupportBundleKind;
     use omicron_uuid_kinds::ZpoolUuid;
     use rand::Rng;
 
@@ -1221,6 +1233,18 @@ mod test {
         );
     }
 
+    async fn next_to_collect(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+    ) -> Option<(DbTypedUuid<SupportBundleKind>, i64)> {
+        datastore
+            .support_bundle_next_to_collect(opctx, nexus_id)
+            .await
+            .expect("found the next bundle to collect, if any")
+            .map(|(bundle, bundles_in_queue)| (bundle.id, bundles_in_queue))
+    }
+
     #[tokio::test]
     async fn test_bundle_list_filtering() {
         let logctx = dev::test_setup_log("test_bundle_create_capacity_limits");
@@ -1232,15 +1256,12 @@ mod test {
 
         let _test_sled = create_sled_and_zpools(&datastore, &opctx, 5).await;
 
-        let pagparams = DataPageParams::max_page();
-
         // No bundles exist yet, so the list should be empty
 
         assert_eq!(
             datastore
-                .support_bundle_list_assigned_to_nexus(
+                .support_bundle_list_assigned_to_nexus_batched(
                     &opctx,
-                    &pagparams,
                     nexus_a,
                     vec![SupportBundleState::Collecting]
                 )
@@ -1248,6 +1269,8 @@ mod test {
                 .expect("Should always be able to list bundles"),
             vec![]
         );
+
+        assert_eq!(next_to_collect(&datastore, &opctx, nexus_a).await, None,);
 
         // Create two bundles on "nexus A", one bundle on "nexus B"
 
@@ -1290,9 +1313,8 @@ mod test {
 
         assert_eq!(
             datastore
-                .support_bundle_list_assigned_to_nexus(
+                .support_bundle_list_assigned_to_nexus_batched(
                     &opctx,
-                    &pagparams,
                     nexus_a,
                     vec![SupportBundleState::Collecting]
                 )
@@ -1305,9 +1327,8 @@ mod test {
         );
         assert_eq!(
             datastore
-                .support_bundle_list_assigned_to_nexus(
+                .support_bundle_list_assigned_to_nexus_batched(
                     &opctx,
-                    &pagparams,
                     nexus_b,
                     vec![SupportBundleState::Collecting]
                 )
@@ -1317,6 +1338,15 @@ mod test {
                 .map(|b| b.id)
                 .collect::<Vec<_>>(),
             vec![bundle_b1.id,]
+        );
+
+        assert_eq!(
+            next_to_collect(&datastore, &opctx, nexus_a).await,
+            Some((bundle_a1.id, 2)),
+        );
+        assert_eq!(
+            next_to_collect(&datastore, &opctx, nexus_b).await,
+            Some((bundle_b1.id, 1)),
         );
 
         // When we update the state of the bundles, the list results
@@ -1334,9 +1364,8 @@ mod test {
         // "bundle_a1" is no longer collecting, so it won't appear here.
         assert_eq!(
             datastore
-                .support_bundle_list_assigned_to_nexus(
+                .support_bundle_list_assigned_to_nexus_batched(
                     &opctx,
-                    &pagparams,
                     nexus_a,
                     vec![SupportBundleState::Collecting]
                 )
@@ -1348,12 +1377,16 @@ mod test {
             vec![bundle_a2.id,]
         );
 
+        assert_eq!(
+            next_to_collect(&datastore, &opctx, nexus_a).await,
+            Some((bundle_a2.id, 1)),
+        );
+
         // ... but if we ask for enough states, it'll show up
         assert_eq!(
             datastore
-                .support_bundle_list_assigned_to_nexus(
+                .support_bundle_list_assigned_to_nexus_batched(
                     &opctx,
-                    &pagparams,
                     nexus_a,
                     vec![
                         SupportBundleState::Active,
@@ -2384,9 +2417,9 @@ mod test {
                 inv_collection_id: CollectionUuid::new_v4(),
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: String::new(),
-                time_created: chrono::Utc::now(),
+                time_created: Utc::now(),
                 parent_sitrep_id: None,
-                next_inv_min_time_started: chrono::Utc::now(),
+                next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation,
             },
