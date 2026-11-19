@@ -456,9 +456,10 @@ pub(crate) fn collect_polled_bays(
 /// The disk previously seen at its location stays in the disk list, so a fault
 /// in one bay neither drops its disk nor holds up the others.
 ///
-/// If two bays claim the same disk identity, a bay that saw the disk on this
-/// poll wins over one carrying it over from the previous disks (the disk may
-/// have moved), and otherwise the bay whose location sorts first wins.
+/// If two bays have a disk with the same identity, a bay that saw the disk on
+/// this poll keeps it over a bay whose disk is from the previous poll (the
+/// disk may have moved). Otherwise the bay whose location sorts first keeps
+/// it.
 pub(crate) fn resolve_bays(
     log: &Logger,
     polled: Result<IdOrdMap<PolledBay>, String>,
@@ -484,62 +485,84 @@ pub(crate) fn resolve_bays(
         }
     }
 
-    // Each bay, the disk it claims, and whether that claim is carried over.
-    let mut claims: Vec<(DiskBay, Option<UnparsedDisk>, bool)> = polled
+    let mut resolved: Vec<ResolvedBay> = polled
         .into_iter()
         .map(|polled_bay| match polled_bay {
-            PolledBay::Described { bay, disk } => {
-                (bay, disk.map(|d| *d), false)
-            }
+            PolledBay::Described { bay, disk } => ResolvedBay {
+                bay,
+                disk: disk.map(|d| *d),
+                disk_source: DiskSource::ThisPoll,
+            },
             PolledBay::Unreadable { location, kind, driver, error } => {
                 let disk = previous_disks
                     .values()
                     .find(|d| d.location() == &location)
                     .cloned();
                 let occupant = DiskBayOccupant::Unreadable { driver, error };
-                (DiskBay { location, kind, occupant }, disk, true)
+                ResolvedBay {
+                    bay: DiskBay { location, kind, occupant },
+                    disk,
+                    disk_source: DiskSource::PreviousPoll,
+                }
             }
         })
         .collect();
 
+    // Disks seen on this poll go first, so they win over a disk from the
+    // previous poll with the same identity: the disk may have moved.
+    resolved.sort_by_key(|bay| bay.disk_source);
+
     let mut disks = HashMap::new();
     let mut bay_of_disk: HashMap<DiskIdentity, DiskLocation> = HashMap::new();
-    for carried_pass in [false, true] {
-        for (bay, disk, carried) in &mut claims {
-            if *carried != carried_pass {
-                continue;
+    for ResolvedBay { bay, disk, disk_source } in &mut resolved {
+        let Some(disk) = disk.take() else {
+            continue;
+        };
+        let identity = disk.identity().clone();
+        if let Some(winner) = bay_of_disk.get(&identity) {
+            warn!(
+                log,
+                "disk appears in more than one bay";
+                "identity" => ?identity,
+                "kept" => %winner,
+                "ignored" => %bay.location,
+            );
+            // An unreadable bay already reports that it is unreadable.
+            if *disk_source == DiskSource::ThisPoll {
+                bay.occupant = DiskBayOccupant::UnusableDevice {
+                    reason: UnusableReason::DuplicateIdentity {
+                        identity,
+                        kept_in: winner.clone(),
+                    },
+                    devfs_path: None,
+                };
             }
-            let Some(disk) = disk.take() else {
-                continue;
-            };
-            let identity = disk.identity().clone();
-            if let Some(winner) = bay_of_disk.get(&identity) {
-                warn!(
-                    log,
-                    "disk appears in more than one bay";
-                    "identity" => ?identity,
-                    "kept" => %winner,
-                    "ignored" => %bay.location,
-                );
-                // An unreadable bay already reports that it is unreadable.
-                if !*carried {
-                    bay.occupant = DiskBayOccupant::UnusableDevice {
-                        reason: UnusableReason::DuplicateIdentity {
-                            identity,
-                            kept_in: winner.clone(),
-                        },
-                        devfs_path: None,
-                    };
-                }
-            } else {
-                bay_of_disk.insert(identity.clone(), bay.location.clone());
-                disks.insert(identity, disk);
-            }
+        } else {
+            bay_of_disk.insert(identity.clone(), bay.location.clone());
+            disks.insert(identity, disk);
         }
     }
     // `polled` had one bay per location, so no bay overwrites another.
-    let bays = claims.into_iter().map(|(bay, _, _)| bay).collect();
+    let bays = resolved.into_iter().map(|resolved| resolved.bay).collect();
     (disks, bays)
+}
+
+/// A bay and the disk attributed to it, while [`resolve_bays`] settles which
+/// bay keeps each disk.
+struct ResolvedBay {
+    bay: DiskBay,
+    disk: Option<UnparsedDisk>,
+    disk_source: DiskSource,
+}
+
+/// Where the disk attributed to a [`ResolvedBay`] comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DiskSource {
+    /// The bay was read on this poll, and held this disk.
+    ThisPoll,
+    /// The bay was unreadable on this poll. This is the disk it held on the
+    /// previous poll.
+    PreviousPoll,
 }
 
 /// The model string of a disk, from the `inquiry-vendor-id` and
