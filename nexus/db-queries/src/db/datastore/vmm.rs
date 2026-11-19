@@ -1460,7 +1460,7 @@ mod tests {
         let mut shutdown_policy_iter = iter::once(
             InstanceShutdownPolicy::HardOff,
         )
-        .chain((1000_u64..).step_by(100).map(|n| {
+        .chain((100_u64..).step_by(100).map(|n| {
             let timeout_secs = n.try_into().expect("these are valid timeouts");
             InstanceShutdownPolicy::PowerButton { timeout_secs }
         }));

@@ -1620,7 +1620,7 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 1,
-        "maximum": 3600
+        "maximum": 900
       },
       "ActivationReason": {
         "description": "Describes why a background task was activated\n\nThis is only used for debugging.  This is deliberately not made available to the background task itself.  See \"Design notes\" in the module-level documentation for details.",
