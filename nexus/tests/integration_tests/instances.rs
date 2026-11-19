@@ -6471,6 +6471,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         .with_ncpus(InstanceCpuCount(1))
         .with_memory(ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE / 2))
         .with_hostname("inst")
+        .with_ssh_public_keys(None)
         .finish();
 
     let error = NexusRequest::new(
@@ -6509,6 +6510,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         .with_ncpus(InstanceCpuCount(1))
         .with_memory(ByteCount::from(1024 * 1024 * 1024 + 300))
         .with_hostname("inst")
+        .with_ssh_public_keys(None)
         .finish();
 
     let error = NexusRequest::new(
@@ -7148,6 +7150,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
         let params = InstanceCreateBuilder::new(name.as_str())
             .with_description("probably serving data")
             .with_hostname(config.0)
+            .with_user_data(&[])
             .with_ssh_public_keys(None)
             .with_ncpus(InstanceCpuCount::try_from(i64::from(1)).unwrap())
             .with_memory(ByteCount::try_from(config.1).unwrap())
@@ -7976,6 +7979,7 @@ async fn test_instance_rejects_three_ephemeral_ips(
         pool_selector: PoolSelector::Auto { ip_version: None },
     };
     let create_params = InstanceCreateBuilder::new("default-pool-inst")
+        .with_ssh_public_keys(None)
         .with_external_ips(vec![
             ephemeral_create.clone(),
             ephemeral_create.clone(),
@@ -9403,6 +9407,7 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
 
     let create_params = InstanceCreateBuilder::new("lots-of-disks")
         .with_description("alan hates descriptions")
+        .with_ssh_public_keys(None)
         .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
         .with_disks(
             (0..MAX_DISKS_PER_INSTANCE)
