@@ -1,0 +1,39 @@
+CASE: groups with and without members
+---------------------------------------------
+stdout:
+ID                                   NAME    STATE    MULTICAST_IP RANGE UNDERLAY_IP    SOURCES  MEMBERS                    VNI CREATED                  
+1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1 group-a Active   232.1.2.3    SSM   ff04::e801:203 10.0.0.1 web-0@BRM42220001, web-1@- 77  2026-01-02T03:04:05.000Z 
+2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f group-b Creating 232.1.2.3    SSM   ff04::e801:203 10.0.0.1 -                          77  2026-01-02T03:04:05.000Z 
+---------------------------------------------
+stderr:
+=============================================
+CASE: member fetch hit --fetch-limit
+---------------------------------------------
+stdout:
+ID                                   NAME    STATE  MULTICAST_IP RANGE UNDERLAY_IP    SOURCES  MEMBERS                         VNI CREATED                  
+1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1 group-a Active 232.1.2.3    SSM   ff04::e801:203 10.0.0.1 web-0@BRM42220001, web-1@-, ... 77  2026-01-02T03:04:05.000Z 
+2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f group-b Active 232.1.2.3    SSM   ff04::e801:203 10.0.0.1 ...                             77  2026-01-02T03:04:05.000Z 
+---------------------------------------------
+stderr:
+=============================================
+CASE: deleted group and member with --include-deleted
+---------------------------------------------
+stdout:
+ID                                   NAME    STATE    MULTICAST_IP RANGE UNDERLAY_IP    SOURCES  MEMBERS                                VNI CREATED                  TIME_DELETED             
+1b2b4c4f-42a5-4e3c-8b28-a1c1f2f3a0b1 group-a Active   232.1.2.3    SSM   ff04::e801:203 10.0.0.1 probe-0@- (deleted), web-0@BRM42220001 77  2026-01-02T03:04:05.000Z -                        
+2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f group-b Deleting 232.1.2.3    SSM   ff04::e801:203 10.0.0.1 -                                      77  2026-01-02T03:04:05.000Z 2026-01-03T00:00:00.000Z 
+---------------------------------------------
+stderr:
+=============================================
+CASE: ASM and SSM source summaries
+---------------------------------------------
+stdout:
+ID                                   NAME        STATE  MULTICAST_IP RANGE UNDERLAY_IP SOURCES           MEMBERS VNI CREATED                  
+3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d ssm-sources Active 232.1.2.3    SSM               10.0.0.1,10.0.0.2 -       77  2026-01-02T03:04:05.000Z 
+4b5c6d7e-8f9a-4b1c-8d2e-3f4a5b6c7d8e asm-any     Active 224.1.2.3    ASM               -                 -       77  2026-01-02T03:04:05.000Z 
+5c6d7e8f-9a0b-4c2d-9e3f-4a5b6c7d8e9f asm-sources Active 224.1.2.4    ASM               10.1.0.1,10.1.0.2 -       77  2026-01-02T03:04:05.000Z 
+6d7e8f9a-0b1c-4d3e-8f4a-5b6c7d8e9fa0 asm-mixed   Active 224.1.2.5    ASM               -                 -       77  2026-01-02T03:04:05.000Z 
+7e8f9a0b-1c2d-4e4f-9a5b-6c7d8e9fa0b1 asm-v6      Active ff0e::1:2    ASM               fd00::1           -       77  2026-01-02T03:04:05.000Z 
+---------------------------------------------
+stderr:
+=============================================

@@ -195,6 +195,7 @@ mod alert;
 mod blueprints;
 mod db_metadata;
 mod ereport;
+mod multicast;
 mod saga;
 mod sitrep;
 mod target_release;
@@ -428,6 +429,8 @@ enum DbCommands {
     /// Print information about migrations
     #[clap(alias = "migration")]
     Migrations(MigrationsArgs),
+    /// Print information about multicast groups
+    Multicast(multicast::MulticastArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
@@ -1519,6 +1522,12 @@ impl DbArgs {
                         command: MigrationsCommands::List(args),
                     }) => {
                         cmd_db_migrations_list(&datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Multicast(args) => {
+                        multicast::cmd_db_multicast(
+                            &opctx, &datastore, &fetch_opts, args,
+                        )
+                        .await
                     }
                     DbCommands::Snapshots(SnapshotArgs {
                         command: SnapshotCommands::Info(uuid),

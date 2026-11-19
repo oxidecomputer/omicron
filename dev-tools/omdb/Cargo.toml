@@ -31,6 +31,7 @@ csv.workspace = true
 daft.workspace = true
 diesel.workspace = true
 display-error-chain.workspace = true
+dpd-types.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
 erebor = { workspace = true, features = ["pmbus"] }
@@ -117,6 +118,7 @@ fmd-adm-sys.workspace = true
 camino-tempfile.workspace = true
 expectorate.workspace = true
 http.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-test-utils.workspace = true
