@@ -50,6 +50,7 @@ use nexus_types::external_api::system_networking;
 use nexus_types::external_api::timeseries;
 use nexus_types::external_api::update;
 use nexus_types::external_api::vpc;
+use nexus_types::external_api::wicket_ssh_auth;
 use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
@@ -1648,6 +1649,14 @@ pub static DEMO_UPDATE_TRUST_ROOT_CREATE: LazyLock<serde_json::Value> =
         serde_json::from_str(include_str!("data/tuf-expired-root.json"))
             .unwrap()
     });
+
+// wicket SSH auth
+pub static DEMO_WICKET_SSH_AUTH: LazyLock<
+    wicket_ssh_auth::WicketSshAuthCreate,
+> = LazyLock::new(|| wicket_ssh_auth::WicketSshAuthCreate {
+    description: "".to_string(),
+    kind: wicket_ssh_auth::WicketSshAuthKindCreate::Unauthenticated,
+});
 
 pub static AUDIT_LOG_URL: LazyLock<String> = LazyLock::new(|| {
     String::from("/v1/system/audit-log?start_time=2025-01-01T00:00:00Z")
@@ -3966,6 +3975,24 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Delete],
+            },
+            // wicket SSH auth configuration
+            VerifyEndpoint {
+                url: "/v1/system/wicket-ssh-auth",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_WICKET_SSH_AUTH).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/wicket-ssh-auth/generation/1",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
             },
         ]
     },
