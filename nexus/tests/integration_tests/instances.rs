@@ -116,8 +116,8 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_instance, create_instance_with, create_instance_with_error,
-    create_project, create_vpc, create_vpc_subnet,
+    InstanceCreateBuilder, create_instance, create_instance_from_body,
+    create_instance_with_error, create_project, create_vpc, create_vpc_subnet,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy::{ProjectRole, SiloRole};
@@ -181,6 +181,21 @@ pub async fn create_project_and_pool(
 ) -> project::Project {
     create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await
+}
+
+// Prepare an instance creation payload which will create an instance that is
+// suitable for migration.
+//
+// Theoretically any instance should be migratable, barring local volumes,
+// (anti-)affinity rules, etc. Simulated sled agent assumes that disks are
+// co-located with their instances, though, so this InstanceCreate payload
+// threads between instance defaults and test infrastructure constraints.
+fn migratable_instance_settings(instance_name: &str) -> InstanceCreateBuilder {
+    // ... now, it happens to be "no disks" is the existing default for
+    // `InstanceCreateBuilder`. Even so, reiterate the setting here because we
+    // could reasonably change that independently from sled-agent-sim
+    // improvements.
+    InstanceCreateBuilder::new(instance_name).with_disks(Vec::new())
 }
 
 #[nexus_test]
@@ -819,19 +834,10 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1111,19 +1117,10 @@ async fn test_instance_migrate_target_finishes_first(
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1415,19 +1412,10 @@ async fn test_instance_migrate_v2p_and_routes(
     // Set up the project and test instance.
     create_project_and_pool(client).await;
 
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        // Omit disks: simulated sled agent assumes that disks are always co-
-        // located with their instances.
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1596,19 +1584,12 @@ async fn test_instance_migration_compatible_cpu_platforms(
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        Some(InstanceCpuPlatform::AmdMilan),
-        Vec::new(),
+        migratable_instance_settings(instance_name)
+            .with_cpu_platform(Some(InstanceCpuPlatform::AmdMilan))
+            .finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1780,19 +1761,12 @@ async fn test_instance_migration_incompatible_cpu_platforms(
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        Some(InstanceCpuPlatform::AmdTurin),
-        Vec::new(),
+        migratable_instance_settings(instance_name)
+            .with_cpu_platform(Some(InstanceCpuPlatform::AmdTurin))
+            .finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1869,19 +1843,10 @@ async fn test_instance_migration_unknown_sled_type(
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1958,19 +1923,10 @@ async fn test_instance_migrate_autoselect_no_other_sled(
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2034,19 +1990,10 @@ async fn test_instance_migrate_autoselect_skips_non_provisionable_sled(
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2423,19 +2370,12 @@ async fn test_instance_failed_when_on_expunged_sled(
     let mk_instance =
         |name: &'static str, auto_restart: InstanceAutoRestartPolicy| async move {
             let instance_url = get_instance_url(name);
-            let instance = create_instance_with(
+            let instance = create_instance_from_body(
                 client,
                 PROJECT_NAME,
-                name,
-                &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-                // Disks=
-                Vec::<instance::InstanceDiskAttachment>::new(),
-                // External IPs=
-                Vec::<ExternalIpCreate>::new(),
-                true,
-                Some(auto_restart),
-                None,
-                Vec::new(),
+                InstanceCreateBuilder::new(name)
+                    .with_auto_restart_policy(Some(auto_restart))
+                    .finish(),
             )
             .await;
             let instance_id =
@@ -2778,19 +2718,12 @@ async fn make_forgotten_instance(
     // Create and start the test instance.
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
-    let instance = create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        // Disks=
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        // External IPs=
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Some(auto_restart),
-        None,
-        Vec::new(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_auto_restart_policy(Some(auto_restart))
+            .finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -3025,19 +2958,10 @@ async fn test_instance_metrics_with_migration(
     let project_id = project.identity.id;
     let instance_url = get_instance_url(instance_name);
 
-    // Explicitly create an instance with no disks. Simulated sled agent assumes
-    // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        migratable_instance_settings(instance_name).finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -4724,17 +4648,15 @@ async fn test_instance_update_network_interface_transit_ips(
     create_project_and_pool(&client).await;
 
     // Create a stopped instance with a single network interface.
-    let instance = create_instance_with(
-        &client,
+    let instance = create_instance_from_body(
+        client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![],
-        vec![],
-        false,
-        Default::default(),
-        None,
-        Vec::new(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .finish(),
     )
     .await;
 
@@ -8661,17 +8583,15 @@ async fn test_instance_attach_several_external_ips(
 
     // Create an instance with pool name blank, expect IP from default pool
     let instance_name = "many-fips";
-    let instance = create_instance_with(
+    let instance = create_instance_from_body(
         &client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![],
-        external_ip_create,
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .with_external_ips(external_ip_create)
+            .finish(),
     )
     .await;
 
@@ -8941,24 +8861,22 @@ async fn create_instance_with_pool(
     instance_name: &str,
     pool_name: Option<&str>,
 ) -> Instance {
-    create_instance_with(
-        client,
+    create_instance_from_body(
+        &client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![],
-        vec![ExternalIpCreate::Ephemeral {
-            pool_selector: match pool_name {
-                Some(name) => PoolSelector::Explicit {
-                    pool: name.parse::<Name>().unwrap().into(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .with_external_ips(vec![ExternalIpCreate::Ephemeral {
+                pool_selector: match pool_name {
+                    Some(name) => PoolSelector::Explicit {
+                        pool: name.parse::<Name>().unwrap().into(),
+                    },
+                    None => PoolSelector::Auto { ip_version: None },
                 },
-                None => PoolSelector::Auto { ip_version: None },
-            },
-        }],
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+            }])
+            .finish(),
     )
     .await
 }
@@ -10389,17 +10307,14 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
     let external_ips = vec![ExternalIpCreate::Ephemeral {
         pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
     }];
-    let _ = create_instance_with(
+    let _ = create_instance_from_body(
         client,
         PROJECT_NAME,
-        "multi-niccy",
-        &nics,
-        vec![],
-        external_ips,
-        false,
-        None,
-        None,
-        vec![],
+        InstanceCreateBuilder::new("multi-niccy")
+            .with_nics(nics)
+            .with_external_ips(external_ips)
+            .with_start(false)
+            .finish(),
     )
     .await;
 }
