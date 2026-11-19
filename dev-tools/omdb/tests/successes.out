@@ -2755,7 +2755,7 @@ ID:                          00000000-0000-0000-0000-000000000001
 parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
-comment:                    
+comment:
   an example sitrep with cases
 status:                      not committed to the sitrep history
 
@@ -2800,7 +2800,7 @@ ID:                          00000000-0000-0000-0000-000000000001
 parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
-comment:                    
+comment:
   an example sitrep with cases
 status:                      not committed to the sitrep history
 
