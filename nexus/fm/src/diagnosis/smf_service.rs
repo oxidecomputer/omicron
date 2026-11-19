@@ -392,7 +392,7 @@ mod tests {
         fmri: &str,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
                 comment: String::new(),

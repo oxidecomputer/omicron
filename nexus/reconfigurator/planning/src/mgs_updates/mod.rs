@@ -406,6 +406,7 @@ impl<'a> MgsUpdatePlanner<'a> {
                     );
                     pending_update_disposition_changes.insert(
                         sled_id,
+                        Arc::clone(board.baseboard_id()),
                         BlueprintSledUpdateDispositionKind::Evacuating {
                             policy: planner_config.disruption_policy,
                         },
@@ -422,6 +423,7 @@ impl<'a> MgsUpdatePlanner<'a> {
                     );
                     pending_update_disposition_changes.insert(
                         sled_id,
+                        Arc::clone(board.baseboard_id()),
                         BlueprintSledUpdateDispositionKind::Available,
                     );
                     boards_being_updated.remove(board.baseboard_id());
@@ -920,6 +922,7 @@ fn schedule_update_if_allowed_by_reboot_policy(
             TryMakeUpdateResult::Blocked(BlockedMgsUpdate {
                 baseboard_id: Arc::clone(board.baseboard_id()),
                 reason: FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                    sled_id,
                     component,
                     details,
                 },
@@ -1608,10 +1611,8 @@ mod test {
                 "unexpected blocked updates: {blocked_mgs_updates:?}"
             );
 
-            let disposition_changes = pending_update_disposition_changes
-                .iter()
-                .map(|(sled_id, kind)| (*sled_id, *kind))
-                .collect::<BTreeMap<_, _>>();
+            let disposition_changes =
+                pending_update_disposition_changes.kinds_by_sled();
 
             // A pass may make up to two kinds of progress: disposition changes
             // (restoring a sled whose updates are done and/or marking the next
@@ -1746,6 +1747,7 @@ mod test {
                 );
                 match &blocked.reason {
                     FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                        sled_id: blocked_sled_id,
                         component,
                         details:
                             WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
@@ -1753,6 +1755,7 @@ mod test {
                                 current,
                             },
                     } => {
+                        assert_eq!(*blocked_sled_id, sled_id);
                         assert!(component.update_requires_sled_reboot());
                         assert_eq!(*desired, new_generation);
                         assert_eq!(*current, old_generation);
@@ -2086,7 +2089,7 @@ mod test {
         assert!(
             pending_update_disposition_changes
                 .iter()
-                .all(|(_, &kind)| !kind.is_available_for_provisioning())
+                .all(|change| !change.kind.is_available_for_provisioning())
         );
 
         // Update the whole system at once again, but note the RoT bootloaders
@@ -2223,10 +2226,7 @@ mod test {
         // ... and, with nothing left to do, every sled's disposition should be
         // set back to `Available`.
         assert_eq!(
-            pending_update_disposition_changes
-                .iter()
-                .map(|(sled_id, kind)| (*sled_id, *kind))
-                .collect::<BTreeMap<_, _>>(),
+            pending_update_disposition_changes.kinds_by_sled(),
             test_boards
                 .sled_ids()
                 .map(|sled_id| (
@@ -2378,6 +2378,7 @@ mod test {
         assert_eq!(
             blocked.reason,
             FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                sled_id: sled_0_id,
                 component: MgsUpdateComponent::Sp,
                 details:
                     WaitingOnSledEvacuationDetails::InstanceManagerAvailable,
@@ -2465,17 +2466,17 @@ mod test {
         assert!(planned.pending_updates.is_empty());
         assert!(planned.blocked_mgs_updates.is_empty());
         assert_eq!(planned.pending_update_disposition_changes.len(), 1);
-        let (sled_id, kind) =
+        let change =
             planned.pending_update_disposition_changes.iter().next().unwrap();
-        assert!(*sled_id == sled_0_id || *sled_id == sled_1_id);
-        assert_eq!(*kind, expected_kind);
+        assert!(change.sled_id == sled_0_id || change.sled_id == sled_1_id);
+        assert_eq!(change.kind, expected_kind);
 
         // With two slots, both are.
         let planned = plan(2);
         assert!(planned.pending_updates.is_empty());
         assert!(planned.blocked_mgs_updates.is_empty());
         assert_eq!(
-            planned.pending_update_disposition_changes.clone().into_map(),
+            planned.pending_update_disposition_changes.kinds_by_sled(),
             BTreeMap::from([
                 (sled_0_id, expected_kind),
                 (sled_1_id, expected_kind)
@@ -2666,7 +2667,7 @@ mod test {
             assert!(planned.blocked_mgs_updates.is_empty());
             assert!(planned.pending_updates.is_empty());
             assert_eq!(
-                planned.pending_update_disposition_changes.clone().into_map(),
+                planned.pending_update_disposition_changes.kinds_by_sled(),
                 BTreeMap::from([(
                     sled_0_id,
                     BlueprintSledUpdateDispositionKind::Available
