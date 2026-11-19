@@ -171,7 +171,7 @@ pub(crate) enum BayProblem {
     #[error("the topology's nvme node has no usable driver instance")]
     NvmeWithoutInstance,
 
-    #[error("the topology has no binding/slot for the bay")]
+    #[error("the topology has no PCIe slot (binding/slot) for the bay")]
     NoPcieSlot,
 
     #[error("could not read topology node {node}: {error}")]
