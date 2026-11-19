@@ -3,6 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Interface for paginating database queries.
+//!
+//! For more information about pagination, see [Database Pagination] (also
+//! available as `docs/db-pagination.adoc` at the root of the repository.)
+//!
+//! [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 
 use crate::db::raw_query_builder::QueryBuilder;
 
@@ -24,6 +29,11 @@ use ref_cast::RefCast;
 use std::num::NonZeroU32;
 
 /// Uses `pagparams` to list a subset of rows in `query`, ordered by `column`.
+///
+/// For more information about pagination, see [Database Pagination] (also
+/// available as `docs/db-pagination.adoc` at the root of the repository.)
+///
+/// [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 pub fn paginated<T, C, M>(
     query: T,
     column: C,
@@ -102,6 +112,11 @@ where
 /// then by `c2`.
 ///
 /// This is a two-column variation of the [`paginated`] function.
+///
+/// For more information about pagination, see [Database Pagination] (also
+/// available as `docs/db-pagination.adoc` at the root of the repository.)
+///
+/// [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 // NOTE: This function could probably be made generic over an arbitrary number
 // of columns, but that'll either require modifying Diesel (to make "tuples of
 // columns" implement a subset of ExpressionMethods) or making a macro to generate
@@ -230,6 +245,11 @@ where
 /// `c2`, `c3`).
 ///
 /// This is a three-column variation of the [`paginated`] function.
+///
+/// For more information about pagination, see [Database Pagination] (also
+/// available as `docs/db-pagination.adoc` at the root of the repository.)
+///
+/// [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 pub fn paginated_multicolumn3<T, C1, C2, C3, M1, M2, M3>(
     query: T,
     (c1, c2, c3): (C1, C2, C3),
