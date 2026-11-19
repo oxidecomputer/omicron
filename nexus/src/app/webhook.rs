@@ -205,7 +205,9 @@ impl Nexus {
         rx: lookup::AlertReceiver<'_>,
         params: alert::AlertReceiverProbe,
     ) -> Result<alert::AlertProbeResult, Error> {
-        let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
+        // Probing requires `Modify` rather than `ListChildren` because it sends
+        // an HTTP request to the receiver's URL and can queue delivery resends.
+        let (authz_rx, rx) = rx.fetch_for(authz::Action::Modify).await?;
         let rx_id = authz_rx.id();
         let datastore = self.datastore();
         let secrets =
