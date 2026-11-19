@@ -719,13 +719,12 @@ mod tests {
         for number in 1..=revisions {
             revs.insert_unique(SitrepRevision {
                 number: ProblemRevNum::from_u32(number),
-                created_sitrep_id: sitrep_id,
+                requested_sitrep_id: sitrep_id,
                 time_resolved: None,
                 code: ProblemCode::UnhealthyZpool,
                 summary: format!("revision {number}"),
                 description: format!("description of revision {number}"),
                 action_required: "none, it's not a real problem".to_string(),
-                comment: format!("revision {number} comment"),
             })
             .expect("revision numbers are distinct");
         }
@@ -749,7 +748,7 @@ mod tests {
             .expect("map is empty");
         SitrepProblem {
             id: ProblemUuid::new_v4(),
-            created_sitrep_id: sitrep_id,
+            requested_sitrep_id: sitrep_id,
             comment: "test problem".to_string(),
             revisions: revs,
             alerts,
