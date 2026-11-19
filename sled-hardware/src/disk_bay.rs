@@ -180,9 +180,9 @@ pub(crate) enum BayProblem {
 
 /// A `disk` node under an `nvme` node: one NVMe namespace.
 ///
-/// The three identity strings are the ones the topology copies from the
-/// `blkdev` device node's `inquiry-*` properties, so they equal what devinfo
-/// reports for the same namespace.
+/// The three identity strings reported by the topology are copied from
+/// the `blkdev` device node's `inquiry-*` properties. Therefore, they are
+/// identical to the identity reported by devinfo for this NVMe namespace.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ObservedNamespace {
     /// `storage/manufacturer`, from `inquiry-vendor-id`.
