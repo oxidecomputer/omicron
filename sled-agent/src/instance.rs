@@ -13,7 +13,7 @@ use crate::instance_manager::{
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
-use crate::zone_bundle::ZoneBundler;
+
 use omicron_common::http_client::internal_http_client_builder;
 
 use chrono::Utc;
@@ -752,9 +752,6 @@ struct InstanceRunner {
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
 
-    // Object used to collect zone bundles from this instance when terminated.
-    zone_bundler: ZoneBundler,
-
     // Queue to notify the sled agent's metrics task about our VNICs.
     metrics_queue: MetricsRequestQueue,
 
@@ -845,7 +842,6 @@ impl InstanceRunner {
             nexus_client,
             vnic_allocator,
             port_manager,
-            zone_bundler,
             zone_builder_factory,
             metrics_queue,
             available_datasets_rx,
@@ -930,7 +926,6 @@ impl InstanceRunner {
             nexus_client,
             available_datasets_rx,
             zone_builder_factory,
-            zone_bundler,
             metrics_queue,
             delegated_zvols,
             attached_subnets,
@@ -3071,6 +3066,7 @@ mod tests {
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use assert_matches::assert_matches;
+    use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
@@ -3082,18 +3078,14 @@ mod tests {
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-    use omicron_uuid_kinds::{ExternalZpoolUuid, InternalZpoolUuid};
+    use omicron_uuid_kinds::ExternalZpoolUuid;
     use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
+    use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
     use sled_agent_config_reconciler::UpdateDispositionReceiver;
-    use sled_agent_config_reconciler::{
-        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
-        InternalDisksReceiver,
-    };
     use sled_agent_types::attached_subnet::AttachedSubnetKind;
-    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
@@ -3103,9 +3095,7 @@ mod tests {
     use sled_agent_types::inventory::{
         CurrentUpdateDisposition, NetworkInterfaceKind,
     };
-    use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
-    use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
@@ -3416,28 +3406,6 @@ mod tests {
         let fake_zpool = ZpoolName::External(ExternalZpoolUuid::new_v4());
         let available_datasets_rx =
             AvailableDatasetsReceiver::fake_in_tempdir_for_tests(fake_zpool);
-        let cleanup_context = CleanupContext::default();
-        let zone_bundler = ZoneBundler::new(
-            log.new(o!("component" => "ZoneBundler")),
-            InternalDisksReceiver::fake_static(
-                Arc::new(MountConfig::default()),
-                [InternalDiskDetails::fake_details(
-                    DiskIdentity {
-                        vendor: "test-vendor".to_string(),
-                        model: "test-model".to_string(),
-                        serial: "test-serial".to_string(),
-                    },
-                    InternalZpoolUuid::new_v4(),
-                    true, // is_boot_disk
-                    None,
-                    None,
-                )]
-                .into_iter(),
-            ),
-            available_datasets_rx.clone(),
-            cleanup_context,
-        )
-        .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
         let (former_zone_root_archiver, archived_zone_roots) =
@@ -3447,7 +3415,6 @@ mod tests {
             vnic_allocator,
             port_manager,
             available_datasets_rx,
-            zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(
                 Some(temp_dir),
                 zones,
@@ -3459,7 +3426,7 @@ mod tests {
                 )),
             former_zone_root_archiver,
         };
-        (services, rx)
+        (services, rx, archived_zone_roots)
     }
 
     /// Holds assorted objects that are needed to test an Instance and its
@@ -3503,7 +3470,6 @@ mod tests {
                 vnic_allocator,
                 port_manager,
                 available_datasets_rx,
-                zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
                 currently_managed_zpools_rx,
@@ -3520,7 +3486,6 @@ mod tests {
                     port_manager,
                     currently_managed_zpools_rx,
                     available_datasets_rx,
-                    zone_bundler,
                     zone_builder_factory,
                     vmm_reservoir_manager,
                     metrics_queue,

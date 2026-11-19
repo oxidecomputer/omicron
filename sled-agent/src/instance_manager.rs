@@ -10,7 +10,6 @@ use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
-use crate::zone_bundle::ZoneBundler;
 
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -115,7 +114,6 @@ pub(crate) struct InstanceManagerServices {
     pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
-    pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
     pub metrics_queue: MetricsRequestQueue,
     pub available_datasets_rx: AvailableDatasetsReceiver,
@@ -156,7 +154,6 @@ impl InstanceManager {
         port_manager: PortManager,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         available_datasets_rx: AvailableDatasetsReceiver,
-        zone_bundler: ZoneBundler,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
         update_disposition_rx: UpdateDispositionReceiver,
@@ -169,7 +166,6 @@ impl InstanceManager {
             port_manager,
             currently_managed_zpools_rx,
             available_datasets_rx,
-            zone_bundler,
             ZoneBuilderFactory::new(),
             vmm_reservoir_manager,
             metrics_queue,
@@ -190,7 +186,6 @@ impl InstanceManager {
         port_manager: PortManager,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         available_datasets_rx: AvailableDatasetsReceiver,
-        zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
@@ -214,7 +209,6 @@ impl InstanceManager {
             port_manager,
             currently_managed_zpools_rx,
             available_datasets_rx,
-            zone_bundler,
             zone_builder_factory,
             metrics_queue,
             update_disposition_rx,
@@ -638,7 +632,6 @@ struct InstanceManagerRunner {
     port_manager: PortManager,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     available_datasets_rx: AvailableDatasetsReceiver,
-    zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
     metrics_queue: MetricsRequestQueue,
 
@@ -860,7 +853,7 @@ impl InstanceManagerRunner {
                     nexus_client: self.nexus_client.clone(),
                     vnic_allocator: self.vnic_allocator.clone(),
                     port_manager: self.port_manager.clone(),
-                    zone_bundler: self.zone_bundler.clone(),
+
                     zone_builder_factory: self.zone_builder_factory.clone(),
                     metrics_queue: self.metrics_queue.clone(),
                     available_datasets_rx: self.available_datasets_rx.clone(),
