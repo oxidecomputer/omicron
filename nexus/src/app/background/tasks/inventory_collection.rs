@@ -10,6 +10,7 @@ use anyhow::ensure;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_types::names::ServiceName;
+use ipnetwork::IpNetwork;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
@@ -19,8 +20,10 @@ use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::CollectionUuid;
+use oxnet::Ipv6Net;
 use serde_json::json;
 use slog::{debug, o, warn};
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -204,6 +207,19 @@ async fn inventory_activate(
 
     cockroach_admin_client.update_backends(admin_addresses.as_slice()).await;
 
+    let known_rack_subnets = datastore
+        .rack_list_all_batched(opctx)
+        .await
+        .context("listing known racks")?
+        .into_iter()
+        .filter_map(|rack| match rack.rack_subnet {
+            Some(IpNetwork::V6(subnet)) => {
+                Ipv6Net::new(subnet.ip(), subnet.prefix()).ok()
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+
     // Create an enumerator to find sled agents.
     let sled_enum = DbSledAgentEnumerator { opctx, datastore };
 
@@ -214,6 +230,7 @@ async fn inventory_activate(
         keeper_admin_clients,
         cockroach_admin_client,
         &sled_enum,
+        known_rack_subnets,
         opctx.log.clone(),
     );
     let collection =

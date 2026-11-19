@@ -712,7 +712,7 @@ impl CollectionBuilder {
     }
 
     /// Record information about another rack (and the sleds in it) that we've
-    /// discovered, but which may not be part of the cluster yet
+    /// discovered, but which may not be part of the cluster yet.
     pub fn found_discovered_rack(
         &mut self,
         rack: DiscoveredRack,

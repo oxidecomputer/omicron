@@ -165,4 +165,6 @@ power shelves found:
             VPD: mfr_model "MWOCP68-3600-D-RM" mfr_serial "LL2216RB000F" mfr_revision "0762-0701-0000" mfr_id "Murata-PS" mfr_location "China" mfr_date "2216"
             firmware: primary "0762" secondary "0701"
 
+discovered racks:
+
 errors:

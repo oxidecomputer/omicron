@@ -83,6 +83,7 @@ progenitor::generate_api!(
         MeasurementLog = sled_agent_types_versions::latest::rot::MeasurementLog,
         MigrationRuntimeState = sled_agent_types_versions::latest::instance::MigrationRuntimeState,
         MigrationState = sled_agent_types_versions::latest::instance::MigrationState,
+        MultirackJoinServiceStatus = sled_agent_types_versions::latest::multirack::MultirackJoinServiceStatus,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
         MupdateOverrideInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideInventory,
         MupdateOverrideNonBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideNonBootInventory,

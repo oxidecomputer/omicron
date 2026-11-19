@@ -69,12 +69,13 @@ use sled_agent_types::inventory::{
     OmicronSledUpdateDisposition, SingleMeasurementInventory,
     SledRegistrationInfo, ZpoolHealth,
 };
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -166,6 +167,9 @@ pub struct SledAgent {
     network_config_tx: watch::Sender<SystemNetworkingConfig>,
     /// Keeps the scrimlet reconcilers alive.
     scrimlet_reconcilers: ScrimletReconcilers,
+    pub peer_rack_prefixes: Mutex<BTreeSet<Ipv6Net>>,
+    pub multirack_join_service_status:
+        Mutex<Option<MultirackJoinServiceStatus>>,
 }
 
 /// A queue of pending pauses for one of the simulated sled-agent's VMM
@@ -489,7 +493,20 @@ impl SledAgent {
             support_logs: Mutex::new(HashMap::new()),
             network_config_tx,
             scrimlet_reconcilers,
+            peer_rack_prefixes: Mutex::new(BTreeSet::new()),
+            multirack_join_service_status: Mutex::new(None),
         })
+    }
+
+    pub fn set_peer_rack_prefixes(&self, prefixes: BTreeSet<Ipv6Net>) {
+        *self.peer_rack_prefixes.lock().unwrap() = prefixes;
+    }
+
+    pub fn set_multirack_join_service_status(
+        &self,
+        status: Option<MultirackJoinServiceStatus>,
+    ) {
+        *self.multirack_join_service_status.lock().unwrap() = status;
     }
 
     /// Injects a synthetic zone log file to be served by the support-logs
