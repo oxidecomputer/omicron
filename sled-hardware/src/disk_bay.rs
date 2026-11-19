@@ -9,8 +9,8 @@
 //!
 //! Each hardware poll becomes the reported bays in two steps:
 //!
-//! 1. The topology is read into `ObservedBay`s, and `describe_bay`
-//!    combines each one with what libnvme says about its controller, giving a
+//! 1. The topology is read into `ObservedBay`s, and each one is described,
+//!    using what libnvme says about its controller if it holds one, giving a
 //!    `PolledBay`. A bay that cannot be described is `PolledBay::Unreadable`.
 //!    The goal for this step is to describe "what can we see from the
 //!    hardware, right now?"
@@ -224,33 +224,37 @@ pub(crate) enum DescribeError {
     )]
     MissingNamespace { nvme_instance: NvmeInstance, usable_namespaces: usize },
 
-    #[error(
-        "{nvme_instance} is an NVMe controller but libnvme was not consulted \
-         about it"
-    )]
-    MissingNvmeFacts { nvme_instance: NvmeInstance },
-
     #[error("topology devfs path {path:?} is not absolute")]
     RelativeDevfsPath { path: String },
 }
 
-/// Combines what the topology and libnvme said about a bay into the bay as
-/// sled-agent reports it and, for an NVMe disk with a namespace, the disk to
-/// manage.
+/// What the topology alone can say about a bay.
+#[derive(Debug)]
+pub(crate) enum Described<'a> {
+    /// The bay is empty, or holds a device that is not an NVMe controller.
+    Bay(DiskBay),
+    /// The bay holds an NVMe controller, which needs libnvme's facts to
+    /// finish describing.
+    Nvme(ObservedNvme<'a>),
+}
+
+/// An NVMe controller the topology found in a bay.
+#[derive(Debug)]
+pub(crate) struct ObservedNvme<'a> {
+    bay: &'a ObservedBay,
+    pcie_slot: i64,
+    instance: NvmeInstance,
+    devfs_path: &'a Option<String>,
+    namespaces: &'a [ObservedNamespace],
+}
+
+/// Describes a bay from what the topology says about it.
 ///
-/// `nvme` must be `Some` when the observed occupant is an NVMe controller.
-/// `is_boot_disk` is the caller's answer for this bay's PCIe slot.
+/// A bay holding an NVMe controller comes back as [`Described::Nvme`], to be
+/// finished with [`ObservedNvme::describe`].
 pub(crate) fn describe_bay(
     bay: &ObservedBay,
-    nvme: Option<&NvmeFacts>,
-    is_boot_disk: bool,
-) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
-    let describe = |occupant| DiskBay {
-        location: bay.location.clone(),
-        kind: bay.kind,
-        occupant,
-    };
-
+) -> Result<Described<'_>, DescribeError> {
     let contents = match &bay.contents {
         Ok(contents) => contents,
         Err(problem) => {
@@ -258,10 +262,8 @@ pub(crate) fn describe_bay(
         }
     };
 
-    let (instance, devfs_path, namespaces) = match &contents.occupant {
-        ObservedOccupant::Empty => {
-            return Ok((describe(DiskBayOccupant::Empty), None));
-        }
+    let occupant = match &contents.occupant {
+        ObservedOccupant::Empty => DiskBayOccupant::Empty,
         ObservedOccupant::Other { driver, devfs_path } => {
             let reason = match driver {
                 Some(driver) => {
@@ -269,85 +271,121 @@ pub(crate) fn describe_bay(
                 }
                 None => UnusableReason::NoDriver,
             };
-            let device = DiskBayOccupant::UnusableDevice {
+            DiskBayOccupant::UnusableDevice {
                 reason,
                 devfs_path: devfs_path.clone(),
-            };
-            return Ok((describe(device), None));
+            }
         }
         ObservedOccupant::Nvme { instance, devfs_path, namespaces, .. } => {
-            (*instance, devfs_path, namespaces)
+            return Ok(Described::Nvme(ObservedNvme {
+                bay,
+                pcie_slot: contents.pcie_slot,
+                instance: *instance,
+                devfs_path,
+                namespaces,
+            }));
         }
     };
+    Ok(Described::Bay(DiskBay {
+        location: bay.location.clone(),
+        kind: bay.kind,
+        occupant,
+    }))
+}
 
-    let Some(nvme) = nvme else {
-        return Err(DescribeError::MissingNvmeFacts {
-            nvme_instance: instance,
-        });
-    };
+impl ObservedNvme<'_> {
+    pub(crate) fn instance(&self) -> NvmeInstance {
+        self.instance
+    }
 
-    // The topology creates one `disk` node per usable namespace. If it has
-    // none but the controller says it has some, the topology's namespace
-    // enumeration failed silently.
-    let namespace = match namespaces.as_slice() {
-        [] if nvme.usable_namespaces == 0 => {
-            let device = DiskBayOccupant::UnusableDevice {
-                reason: UnusableReason::NoUsableNamespace,
-                devfs_path: devfs_path.clone(),
-            };
-            return Ok((describe(device), None));
-        }
-        [] => {
-            return Err(DescribeError::MissingNamespace {
-                nvme_instance: instance,
-                usable_namespaces: nvme.usable_namespaces,
+    /// The PCIe physical slot number of the bridge behind the bay.
+    pub(crate) fn pcie_slot(&self) -> i64 {
+        self.pcie_slot
+    }
+
+    /// Combines the controller with what libnvme said about it.
+    ///
+    /// Returns the bay and, if the controller has exactly one usable
+    /// namespace, the disk in it. A controller with any other number of
+    /// namespaces is a [`DiskBayOccupant::UnusableDevice`] with no disk.
+    ///
+    /// `is_boot_disk` is the caller's answer for this bay's PCIe slot.
+    pub(crate) fn describe(
+        self,
+        nvme: &NvmeFacts,
+        is_boot_disk: bool,
+    ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
+        let ObservedNvme { bay, pcie_slot, instance, devfs_path, namespaces } =
+            self;
+        let describe = |occupant| DiskBay {
+            location: bay.location.clone(),
+            kind: bay.kind,
+            occupant,
+        };
+
+        // The topology creates one `disk` node per usable namespace. If it
+        // has none but the controller says it has some, the topology's
+        // namespace enumeration failed silently.
+        let namespace = match namespaces {
+            [] if nvme.usable_namespaces == 0 => {
+                let device = DiskBayOccupant::UnusableDevice {
+                    reason: UnusableReason::NoUsableNamespace,
+                    devfs_path: devfs_path.clone(),
+                };
+                return Ok((describe(device), None));
+            }
+            [] => {
+                return Err(DescribeError::MissingNamespace {
+                    nvme_instance: instance,
+                    usable_namespaces: nvme.usable_namespaces,
+                });
+            }
+            [namespace] => namespace,
+            // Every namespace on a controller shares its DiskIdentity. See
+            // https://github.com/oxidecomputer/omicron/issues/5241.
+            _ => {
+                let device = DiskBayOccupant::UnusableDevice {
+                    reason: UnusableReason::MultipleNamespaces {
+                        count: namespaces.len(),
+                    },
+                    devfs_path: devfs_path.clone(),
+                };
+                return Ok((describe(device), None));
+            }
+        };
+
+        // libdevinfo reports this path as absolute from the kernel's point
+        // of view; userspace sees it under "/devices".
+        if !namespace.devfs_path.starts_with('/') {
+            return Err(DescribeError::RelativeDevfsPath {
+                path: namespace.devfs_path.clone(),
             });
         }
-        [namespace] => namespace,
-        // Every namespace on a controller shares its DiskIdentity. See
-        // https://github.com/oxidecomputer/omicron/issues/5241.
-        _ => {
-            let device = DiskBayOccupant::UnusableDevice {
-                reason: UnusableReason::MultipleNamespaces {
-                    count: namespaces.len(),
-                },
-                devfs_path: devfs_path.clone(),
-            };
-            return Ok((describe(device), None));
-        }
-    };
+        let devfs_path =
+            Utf8PathBuf::from(format!("/devices{}", namespace.devfs_path));
+        let dev_path = namespace
+            .logical_disk
+            .as_ref()
+            .map(|name| Utf8PathBuf::from(format!("/dev/dsk/{name}")));
 
-    // libdevinfo reports this path as absolute from the kernel's point of
-    // view; userspace sees it under "/devices".
-    if !namespace.devfs_path.starts_with('/') {
-        return Err(DescribeError::RelativeDevfsPath {
-            path: namespace.devfs_path.clone(),
-        });
+        let identity = DiskIdentity {
+            vendor: format!("{:x}", nvme.pci_vid),
+            serial: namespace.serial.clone(),
+            model: disk_model(&namespace.manufacturer, &namespace.model),
+        };
+
+        let disk = UnparsedDisk::new(
+            devfs_path,
+            dev_path,
+            pcie_slot,
+            bay.kind,
+            identity.clone(),
+            is_boot_disk,
+            nvme.firmware.clone(),
+            bay.location.clone(),
+        );
+        Ok((describe(DiskBayOccupant::Disk { identity }), Some(disk)))
     }
-    let devfs_path =
-        Utf8PathBuf::from(format!("/devices{}", namespace.devfs_path));
-    let dev_path = namespace
-        .logical_disk
-        .as_ref()
-        .map(|name| Utf8PathBuf::from(format!("/dev/dsk/{name}")));
-
-    let identity = DiskIdentity {
-        vendor: format!("{:x}", nvme.pci_vid),
-        serial: namespace.serial.clone(),
-        model: disk_model(&namespace.manufacturer, &namespace.model),
-    };
-
-    let disk = UnparsedDisk::new(
-        devfs_path,
-        dev_path,
-        contents.pcie_slot,
-        bay.kind,
-        identity.clone(),
-        is_boot_disk,
-        nvme.firmware.clone(),
-        bay.location.clone(),
-    );
-    Ok((describe(DiskBayOccupant::Disk { identity }), Some(disk)))
 }
 
 /// One bay from a single hardware poll.
@@ -550,14 +588,36 @@ mod tests {
         })
     }
 
+    /// Describes a bay that needs nothing from libnvme.
+    fn describe_without_nvme(observed: &ObservedBay) -> DiskBay {
+        match describe_bay(observed).unwrap() {
+            Described::Bay(bay) => bay,
+            Described::Nvme(nvme) => {
+                panic!("expected no NVMe controller, got {nvme:?}")
+            }
+        }
+    }
+
+    /// Describes a bay holding an NVMe controller, given libnvme's facts.
+    fn describe_nvme(
+        observed: &ObservedBay,
+        facts: NvmeFacts,
+        is_boot_disk: bool,
+    ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
+        match describe_bay(observed).unwrap() {
+            Described::Nvme(nvme) => nvme.describe(&facts, is_boot_disk),
+            Described::Bay(bay) => {
+                panic!("expected an NVMe controller, got {bay:?}")
+            }
+        }
+    }
+
     #[test]
     fn empty_bay() {
-        let (described, disk) =
-            describe_bay(&bay(ObservedOccupant::Empty), None, false).unwrap();
+        let described = describe_without_nvme(&bay(ObservedOccupant::Empty));
         assert_eq!(described.location.as_str(), "N3");
         assert_eq!(described.kind, DiskVariant::U2);
         assert_eq!(described.occupant, DiskBayOccupant::Empty);
-        assert!(disk.is_none());
     }
 
     #[test]
@@ -568,7 +628,7 @@ mod tests {
                 "/pci@0,0/pci1de,fff9@1,1/pci8086,1234@0".to_string(),
             ),
         });
-        let (described, disk) = describe_bay(&observed, None, false).unwrap();
+        let described = describe_without_nvme(&observed);
         assert_eq!(
             described.occupant,
             DiskBayOccupant::UnusableDevice {
@@ -580,14 +640,13 @@ mod tests {
                 ),
             }
         );
-        assert!(disk.is_none());
     }
 
     #[test]
     fn device_without_driver() {
         let observed =
             bay(ObservedOccupant::Other { driver: None, devfs_path: None });
-        let (described, disk) = describe_bay(&observed, None, false).unwrap();
+        let described = describe_without_nvme(&observed);
         assert_eq!(
             described.occupant,
             DiskBayOccupant::UnusableDevice {
@@ -595,7 +654,6 @@ mod tests {
                 devfs_path: None,
             }
         );
-        assert!(disk.is_none());
     }
 
     #[test]
@@ -605,8 +663,13 @@ mod tests {
         observed.kind = DiskVariant::M2;
         observed.contents.as_mut().unwrap().pcie_slot = 18;
 
-        let (described, disk) =
-            describe_bay(&observed, Some(&facts(1)), true).unwrap();
+        let Described::Nvme(nvme) = describe_bay(&observed).unwrap() else {
+            panic!("expected an NVMe controller");
+        };
+        assert_eq!(nvme.instance(), instance());
+        assert_eq!(nvme.pcie_slot(), 18);
+
+        let (described, disk) = nvme.describe(&facts(1), true).unwrap();
         let disk = disk.expect("an NVMe disk with a namespace is a disk");
 
         let identity = DiskIdentity {
@@ -640,7 +703,7 @@ mod tests {
         ns.manufacturer = "Samsung".to_string();
         ns.model = "MZWLR3T8HBLS-00007".to_string();
         let (_, disk) =
-            describe_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
+            describe_nvme(&nvme_bay(vec![ns]), facts(1), false).unwrap();
         assert_eq!(
             disk.unwrap().identity().model,
             "Samsung MZWLR3T8HBLS-00007"
@@ -653,7 +716,7 @@ mod tests {
     #[test]
     fn controller_without_namespace_is_unusable() {
         let (described, disk) =
-            describe_bay(&nvme_bay(vec![]), Some(&facts(0)), false).unwrap();
+            describe_nvme(&nvme_bay(vec![]), facts(0), false).unwrap();
         assert_eq!(
             described.occupant,
             DiskBayOccupant::UnusableDevice {
@@ -668,8 +731,8 @@ mod tests {
 
     #[test]
     fn namespace_missing_from_topology_is_an_error() {
-        let err = describe_bay(&nvme_bay(vec![]), Some(&facts(1)), false)
-            .unwrap_err();
+        let err =
+            describe_nvme(&nvme_bay(vec![]), facts(1), false).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -680,17 +743,10 @@ mod tests {
     }
 
     #[test]
-    fn nvme_needs_libnvme_facts() {
-        let err = describe_bay(&nvme_bay(vec![namespace()]), None, false)
-            .unwrap_err();
-        assert!(matches!(err, DescribeError::MissingNvmeFacts { .. }), "{err}");
-    }
-
-    #[test]
     fn multiple_namespaces_are_unusable() {
-        let (described, disk) = describe_bay(
+        let (described, disk) = describe_nvme(
             &nvme_bay(vec![namespace(), namespace()]),
-            Some(&facts(2)),
+            facts(2),
             false,
         )
         .unwrap();
@@ -710,8 +766,8 @@ mod tests {
     fn relative_devfs_path_is_rejected() {
         let mut ns = namespace();
         ns.devfs_path = "pci@0,0/oops".to_string();
-        let err = describe_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false)
-            .unwrap_err();
+        let err =
+            describe_nvme(&nvme_bay(vec![ns]), facts(1), false).unwrap_err();
         assert!(
             matches!(err, DescribeError::RelativeDevfsPath { .. }),
             "{err}"
@@ -723,7 +779,7 @@ mod tests {
         let mut ns = namespace();
         ns.logical_disk = None;
         let (_, disk) =
-            describe_bay(&nvme_bay(vec![ns]), Some(&facts(1)), false).unwrap();
+            describe_nvme(&nvme_bay(vec![ns]), facts(1), false).unwrap();
         assert_eq!(disk.unwrap().paths().dev_path, None);
     }
 
@@ -739,7 +795,7 @@ mod tests {
         ];
         for problem in problems {
             let observed = unreadable_bay(problem.clone());
-            let err = describe_bay(&observed, None, false).unwrap_err();
+            let err = describe_bay(&observed).unwrap_err();
             assert!(
                 matches!(
                     &err,
@@ -766,7 +822,13 @@ mod tests {
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
-        let (bay, disk) = describe_bay(observed, facts, false).unwrap();
+        let (bay, disk) = match describe_bay(observed).unwrap() {
+            Described::Bay(bay) => (bay, None),
+            Described::Nvme(nvme) => {
+                let facts = facts.expect("an NVMe bay needs libnvme facts");
+                nvme.describe(facts, false).unwrap()
+            }
+        };
         PolledBay::Described { bay, disk: disk.map(Box::new) }
     }
 

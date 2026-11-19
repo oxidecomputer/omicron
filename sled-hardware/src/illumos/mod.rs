@@ -8,8 +8,8 @@ use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
-    BayContents, NvmeFacts, ObservedBay, ObservedOccupant, PolledBay,
-    describe_bay, resolve_bays,
+    DescribeError, Described, NvmeFacts, ObservedBay, PolledBay, describe_bay,
+    resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -368,45 +368,49 @@ fn poll_bay(
         driver: bay.binding_driver.clone(),
         error,
     };
-    let facts = match &bay.contents {
-        Ok(BayContents {
-            occupant: ObservedOccupant::Nvme { instance, .. },
-            ..
-        }) => match nvme_facts(nvme, *instance) {
-            Ok(facts) => Some(facts),
-            Err(err) => {
-                let err = InlineErrorChain::new(&err);
-                warn!(
-                    log,
-                    "Failed to query NVMe controller";
-                    "location" => %bay.location,
-                    "nvme_instance" => %instance,
-                    &err,
-                );
-                return unreadable(format!(
-                    "failed to query NVMe controller {instance}: {err}"
-                ));
-            }
-        },
-        _ => None,
+    let could_not_describe = |err: DescribeError| {
+        let err = InlineErrorChain::new(&err);
+        warn!(
+            log,
+            "Could not describe disk bay";
+            "location" => %bay.location,
+            &err,
+        );
+        unreadable(err.to_string())
     };
-    let is_boot_disk = bay.contents.as_ref().is_ok_and(|contents| {
-        pcie_slot_is_boot_disk(sled, contents.pcie_slot, boot_storage_unit)
-    });
-    match describe_bay(bay, facts.as_ref(), is_boot_disk) {
-        Ok((bay, disk)) => {
-            PolledBay::Described { bay, disk: disk.map(Box::new) }
+
+    let nvme_bay = match describe_bay(bay) {
+        Ok(Described::Bay(bay)) => {
+            return PolledBay::Described { bay, disk: None };
         }
+        Ok(Described::Nvme(nvme_bay)) => nvme_bay,
+        Err(err) => return could_not_describe(err),
+    };
+
+    let instance = nvme_bay.instance();
+    let facts = match nvme_facts(nvme, instance) {
+        Ok(facts) => facts,
         Err(err) => {
             let err = InlineErrorChain::new(&err);
             warn!(
                 log,
-                "Could not describe disk bay";
+                "Failed to query NVMe controller";
                 "location" => %bay.location,
+                "nvme_instance" => %instance,
                 &err,
             );
-            unreadable(err.to_string())
+            return unreadable(format!(
+                "failed to query NVMe controller {instance}: {err}"
+            ));
         }
+    };
+    let is_boot_disk =
+        pcie_slot_is_boot_disk(sled, nvme_bay.pcie_slot(), boot_storage_unit);
+    match nvme_bay.describe(&facts, is_boot_disk) {
+        Ok((bay, disk)) => {
+            PolledBay::Described { bay, disk: disk.map(Box::new) }
+        }
+        Err(err) => could_not_describe(err),
     }
 }
 
