@@ -76,8 +76,8 @@ impl InstanceCreateBuilder {
         self
     }
 
-    pub fn with_ssh_keys(mut self, ssh_keys: Option<Vec<NameOrId>>) -> Self {
-        self.interim_body.ssh_public_keys = ssh_keys;
+    pub fn with_ssh_public_keys(mut self, ssh_public_keys: Option<Vec<NameOrId>>) -> Self {
+        self.interim_body.ssh_public_keys = ssh_public_keys;
         self
     }
 

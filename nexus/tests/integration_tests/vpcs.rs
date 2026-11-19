@@ -506,6 +506,8 @@ async fn test_limited_collaborator_can_create_instance(
             omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
         )
         .with_hostname("test-instance")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .finish();
     let instance: Instance =
         NexusRequest::objects_post(client, &instances_url, &instance_params)

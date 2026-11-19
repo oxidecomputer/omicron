@@ -232,6 +232,8 @@ async fn create_resources_in_test_suite_silo(
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("test-inst")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .finish();
 
     NexusRequest::objects_post(

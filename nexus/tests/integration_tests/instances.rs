@@ -280,6 +280,9 @@ async fn test_create_instance_with_bad_hostname_impl(
     let instance_name = "happy-accident";
     let params = InstanceCreateBuilder::new(instance_name)
         .with_hostname("the-host")
+        .with_nics(Default::default())
+        .with_ssh_public_keys(None)
+        .with_start(false)
         .finish();
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -2053,6 +2056,7 @@ async fn test_instance_migrate_autoselect_anti_affinity(
     let mut instance_ids = Vec::new();
     for instance_name in ["bird-ecology", "desert-locust"] {
         let instance_settings = migratable_instance_settings(instance_name)
+            .user_data(b"#cloud-config")
             .with_anti_affinity_groups(vec![NameOrId::Name(
                 group_name.parse().unwrap(),
             )])
@@ -3159,6 +3163,8 @@ async fn test_instance_using_image_from_other_project_fails(
         format!("/v1/instances?project={}", project.identity.name);
     let instance_create = InstanceCreateBuilder::new("stolen")
         .with_description("i stole an image")
+        .with_hostname("stolen")
+        .with_ssh_public_keys(None)
         .with_disks(vec![instance::InstanceDiskAttachment::Create(
             disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
@@ -4840,7 +4846,7 @@ async fn test_instance_create_attach_disks(
     let instance_params = InstanceCreateBuilder::new("nfs")
         .with_description("probably serving data")
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
-        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_memory(ByteCount::from_gibibytes_u32(3))
         .with_hostname("nfs")
         .with_user_data(&[])
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Create(
@@ -6515,7 +6521,7 @@ async fn test_instances_memory_greater_than_max_size(
                 .unwrap(),
         )
         .with_hostname("inst")
-        .with_start(false)
+        .with_ssh_public_keys(None)
         .finish();
 
     let error = NexusRequest::new(
@@ -6803,10 +6809,11 @@ async fn test_instance_create_with_ssh_keys(
         .with_description("probably serving data")
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
         .with_memory(ByteCount::from_gibibytes_u32(4))
-        .with_hostname(instance_name)
-        .with_user_data(&[])
         // By default should transfer all profile keys
         .with_ssh_keys(None)
+        .with_start(false)
+        .with_hostname(instance_name)
+        .with_user_data(&[])
         .finish();
 
     let builder =
@@ -6842,11 +6849,11 @@ async fn test_instance_create_with_ssh_keys(
         .with_description("probably serving data")
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
         .with_memory(ByteCount::from_gibibytes_u32(4))
+        // Should only transfer the first key
+        .with_ssh_public_keys(Some(vec![user_keys[0].identity.name.clone().into()]))
+        .with_start(false)
         .with_hostname(instance_name)
         .with_user_data(&[])
-        .with_start(false)
-        // By default should transfer all profile keys
-        .with_ssh_keys(Some(vec![user_keys[0].identity.name.clone().into()]))
         .finish();
 
     let builder =
@@ -6881,11 +6888,11 @@ async fn test_instance_create_with_ssh_keys(
         .with_description("probably serving data")
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
         .with_memory(ByteCount::from_gibibytes_u32(4))
+        // Should transfer no keys
+        .with_ssh_public_keys(Some(vec![]))
         .with_hostname(instance_name)
         .with_user_data(&[])
         .with_start(false)
-        // Should transfer no keys
-        .with_ssh_keys(Some(vec![]))
         .finish();
 
     let builder =
@@ -7016,6 +7023,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             .with_memory(ByteCount::from_gibibytes_u32(1))
             .with_hostname(config.0)
             .with_user_data(&[])
+            .with_ssh_public_keys(Some(Vec::new()))
             .with_start(false)
             .finish();
 
@@ -7795,11 +7803,13 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         .with_ncpus(InstanceCpuCount(4))
         .with_memory(ByteCount::from_gibibytes_u32(1))
         .with_user_data(&[])
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
         .with_external_ips(vec![ExternalIpCreate::Ephemeral {
             pool_selector: PoolSelector::Explicit {
                 pool: "nonexistent-pool".parse::<Name>().unwrap().into(),
             },
         }])
+        .with_ssh_public_keys(None)
         .finish();
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
@@ -8003,6 +8013,8 @@ async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
     let create_params =
         InstanceCreateBuilder::new("explicit-plus-auto-ephemeral")
             .with_user_data(&[])
+            .with_ssh_public_keys(None)
+            .with_nics(instance::InstanceNetworkInterfaceAttachment::DefaultDualStack)
             .with_external_ips(external_ips)
             .finish();
     let error = object_create_error(

@@ -64,6 +64,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             &self.client,
             &self.project.as_ref().expect("Need to specify project name"),
             InstanceCreateBuilder::new(instance_name)
+                .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
                 .with_start(false)
                 .finish(),
         )

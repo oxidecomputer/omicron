@@ -121,6 +121,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         .with_ncpus(instance::InstanceCpuCount(2))
         .with_memory(ByteCount::from_gibibytes_u32(1))
         .with_hostname(instance_name)
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach { name: base_disk_name.clone() },
         )))
@@ -285,6 +286,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
         .with_ncpus(instance::InstanceCpuCount(2))
         .with_memory(ByteCount::from_gibibytes_u32(1))
         .with_hostname(instance_name)
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach { name: base_disk_name.clone() },
         )))

@@ -102,7 +102,7 @@ impl ResourceAllocator {
     ) -> Result<TestResponse, Error> {
         let instance_params = InstanceCreateBuilder::new(name)
             .with_description("")
-            .with_ncpus(InstanceCpuCount::try_from(i64::from(cpus)).unwrap())
+            .with_ncpus(InstanceCpuCount(cpus))
             .with_memory(ByteCount::from_gibibytes_u32(memory))
             .with_hostname("host")
             .with_start(false)
