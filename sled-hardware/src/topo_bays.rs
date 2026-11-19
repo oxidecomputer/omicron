@@ -18,10 +18,9 @@
 //! - A device bound to `nvme`: the bay gets `binding/driver = "nvme"` and,
 //!   if the disk enumerator succeeds, an `nvme` child with one `disk` child
 //!   per namespace the nvme driver does not ignore.
-//! - Any other device, including an NVMe controller the driver failed to
-//!   attach to: a `board` child with an `ic` under it as a placeholder,
-//!   carrying the device's driver, if any, and path. `binding/driver` is
-//!   not set.
+//! - Any other device: a `board` child with an `ic` under it as a
+//!   placeholder, carrying the device's driver, if any, and path.
+//!   `binding/driver` is not set.
 //!
 //! The illumos module reads the topology into [`TopoNode`]s; everything
 //! here is plain data manipulation so it can be tested anywhere.
