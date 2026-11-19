@@ -11,6 +11,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::grant_iam;
@@ -20,7 +21,6 @@ use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
-use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
@@ -100,31 +100,17 @@ impl ResourceAllocator {
         cpus: u16,
         memory: u32,
     ) -> Result<TestResponse, Error> {
+        let instance_params = InstanceCreateBuilder::new(name)
+            .with_description("")
+            .with_ncpus(InstanceCpuCount::try_from(i64::from(cpus)).unwrap())
+            .with_memory(ByteCount::from_gibibytes_u32(memory))
+            .with_hostname("host")
+            .with_start(false)
+            .finish();
         NexusRequest::objects_post(
             client,
             "/v1/instances?project=project",
-            &instance::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: name.parse().unwrap(),
-                    description: "".into(),
-                },
-                ncpus: InstanceCpuCount(cpus),
-                memory: ByteCount::from_gibibytes_u32(memory),
-                hostname: "host".parse().unwrap(),
-                user_data: b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-                ssh_public_keys:  Some(Vec::new()),
-                network_interfaces: instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-                external_ips: Vec::<instance::ExternalIpCreate>::new(),
-                disks: Vec::<instance::InstanceDiskAttachment>::new(),
-                boot_disk: None,
-                cpu_platform: None,
-                start: false,
-                auto_restart_policy: Default::default(),
-                anti_affinity_groups: Vec::new(),
-                multicast_groups: Vec::new(),
-                enable_jumbo_frames: false,
-            },
+            &instance_params,
         )
         .authn_as(self.auth.clone())
         .execute()

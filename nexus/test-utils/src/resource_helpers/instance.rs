@@ -6,7 +6,6 @@ use crate::resource_helpers::{object_create, object_create_error};
 
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
-
 use http::StatusCode;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::{
@@ -17,6 +16,7 @@ use nexus_types_versions::latest::instance::Instance;
 use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::NameOrId;
 
 pub struct InstanceCreateBuilder {
     interim_body: instance::InstanceCreate,
@@ -51,6 +51,36 @@ impl InstanceCreateBuilder {
         Self { interim_body }
     }
 
+    pub fn with_description(mut self, description: &str) -> Self {
+        self.interim_body.identity.description = description.to_string();
+        self
+    }
+
+    pub fn with_ncpus(mut self, ncpus: InstanceCpuCount) -> Self {
+        self.interim_body.ncpus = ncpus;
+        self
+    }
+
+    pub fn with_memory(mut self, memory: ByteCount) -> Self {
+        self.interim_body.memory = memory;
+        self
+    }
+
+    pub fn with_hostname(mut self, hostname: &str) -> Self {
+        self.interim_body.hostname = hostname.parse().unwrap();
+        self
+    }
+
+    pub fn with_user_data(mut self, user_data: &[u8]) -> Self {
+        self.interim_body.user_data = user_data.to_vec();
+        self
+    }
+
+    pub fn with_ssh_keys(mut self, ssh_keys: Option<Vec<NameOrId>>) -> Self {
+        self.interim_body.ssh_public_keys = ssh_keys;
+        self
+    }
+
     pub fn with_nics(
         mut self,
         nics: instance::InstanceNetworkInterfaceAttachment,
@@ -64,6 +94,14 @@ impl InstanceCreateBuilder {
         disks: Vec<instance::InstanceDiskAttachment>,
     ) -> Self {
         self.interim_body.disks = disks;
+        self
+    }
+
+    pub fn with_boot_disk(
+        mut self,
+        maybe_disk: Option<instance::InstanceDiskAttachment>,
+    ) -> Self {
+        self.interim_body.boot_disk = maybe_disk;
         self
     }
 
@@ -96,11 +134,27 @@ impl InstanceCreateBuilder {
         self
     }
 
+    pub fn with_anti_affinity_groups(
+        mut self,
+        anti_affinity_groups: Vec<NameOrId>,
+    ) -> Self {
+        self.interim_body.anti_affinity_groups = anti_affinity_groups;
+        self
+    }
+
     pub fn with_multicast_groups(
         mut self,
         multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
     ) -> Self {
         self.interim_body.multicast_groups = multicast_groups;
+        self
+    }
+
+    pub fn with_enable_jumbo_frames(
+        mut self,
+        enable_jumbo_frames: bool,
+    ) -> Self {
+        self.interim_body.enable_jumbo_frames = enable_jumbo_frames;
         self
     }
 

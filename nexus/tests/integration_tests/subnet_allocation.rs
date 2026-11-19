@@ -54,27 +54,15 @@ async fn create_instance_expect_failure(
                 ip_config: PrivateIpStackCreate::auto_ipv4(),
             },
         ]);
-    let new_instance = instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: name.parse().unwrap(),
-            description: "".to_string(),
-        },
-        ncpus: InstanceCpuCount(1),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: Some(Vec::new()),
-        network_interfaces,
-        external_ips: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
-    };
+    let new_instance = InstanceCreateBuilder::new(name)
+        .with_description("")
+        .with_hostname(name)
+        .with_user_data(&[])
+        .with_ncpus(InstanceCpuCount(1))
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("test-instance")
+        .with_nics(network_interfaces)
+        .finish();
 
     NexusRequest::new(
         RequestBuilder::new(&client, Method::POST, &url_instances)
