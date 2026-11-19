@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, warn};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// One U.2 bay or M.2 socket of the chassis, as the hardware topology
 /// describes it.
@@ -420,6 +420,35 @@ impl PolledBay {
     }
 }
 
+impl IdOrdItem for PolledBay {
+    type Key<'a> = &'a DiskLocation;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.location()
+    }
+
+    id_upcast!();
+}
+
+/// Collects one poll's bays by location. If more than one bay has the same
+/// location, the first is kept.
+pub(crate) fn collect_polled_bays(
+    log: &Logger,
+    bays: impl IntoIterator<Item = PolledBay>,
+) -> IdOrdMap<PolledBay> {
+    let mut polled = IdOrdMap::new();
+    for bay in bays {
+        if let Err(duplicate) = polled.insert_unique(bay) {
+            warn!(
+                log,
+                "more than one bay has the same location; keeping the first";
+                "location" => %duplicate.new_item().location(),
+            );
+        }
+    }
+    polled
+}
+
 /// Combines one poll's bays, or the error that kept the poll from reading
 /// any, with the previous view into the disks and bays to report.
 ///
@@ -429,35 +458,22 @@ impl PolledBay {
 ///
 /// If two bays claim the same disk identity, a bay that saw the disk on this
 /// poll wins over one carrying it over from the previous disks (the disk may
-/// have moved), and otherwise the first bay wins.
+/// have moved), and otherwise the bay whose location sorts first wins.
 pub(crate) fn resolve_bays(
     log: &Logger,
-    polled: Result<Vec<PolledBay>, String>,
+    polled: Result<IdOrdMap<PolledBay>, String>,
     previous_bays: &IdOrdMap<DiskBay>,
     previous_disks: &HashMap<DiskIdentity, UnparsedDisk>,
 ) -> (HashMap<DiskIdentity, UnparsedDisk>, IdOrdMap<DiskBay>) {
     let (mut polled, missing_error) = match polled {
         Ok(polled) => (polled, "not in the hardware topology".to_string()),
         Err(error) => {
-            (Vec::new(), format!("could not read the disk bays: {error}"))
+            (IdOrdMap::new(), format!("could not read the disk bays: {error}"))
         }
     };
-
-    let mut seen = HashSet::new();
-    polled.retain(|bay| {
-        let first = seen.insert(bay.location().clone());
-        if !first {
-            warn!(
-                log,
-                "more than one bay has the same location; keeping the first";
-                "location" => %bay.location(),
-            );
-        }
-        first
-    });
     for previous in previous_bays {
-        if !seen.contains(&previous.location) {
-            polled.push(PolledBay::Unreadable {
+        if !polled.contains_key(&previous.location) {
+            polled.insert_overwrite(PolledBay::Unreadable {
                 location: previous.location.clone(),
                 kind: previous.kind,
                 driver: None,
@@ -519,7 +535,7 @@ pub(crate) fn resolve_bays(
             }
         }
     }
-    // Locations were deduplicated above, so no bay overwrites another.
+    // `polled` had one bay per location, so no bay overwrites another.
     let bays = claims.into_iter().map(|(bay, _, _)| bay).collect();
     (disks, bays)
 }
@@ -866,6 +882,7 @@ mod tests {
         polled: Result<Vec<PolledBay>, String>,
         (previous_disks, previous_bays): &View,
     ) -> View {
+        let polled = polled.map(|bays| collect_polled_bays(&log(), bays));
         resolve_bays(&log(), polled, previous_bays, previous_disks)
     }
 
@@ -983,7 +1000,7 @@ mod tests {
     #[test]
     fn fresh_disk_beats_carried_over_disk() {
         // The disk was in N3; it has moved to N4, and N3 now holds something
-        // unreadable that is walked first.
+        // unreadable that sorts first.
         let mut moved = nvme_bay(vec![namespace()]);
         moved.location = loc("N4");
 

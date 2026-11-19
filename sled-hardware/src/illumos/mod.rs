@@ -9,7 +9,7 @@ use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
     BayDescription, DescribeError, NvmeFacts, ObservedBay, PolledBay,
-    describe_bay_from_topology, resolve_bays,
+    collect_polled_bays, describe_bay_from_topology, resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -136,7 +136,7 @@ struct HardwareSnapshot {
     /// See the `disk_bay` module docs for more details.
     ///
     /// `Err` only if disk bays could not be read at all this time.
-    bays: Result<Vec<PolledBay>, Error>,
+    bays: Result<IdOrdMap<PolledBay>, Error>,
 }
 
 impl HardwareSnapshot {
@@ -195,9 +195,8 @@ impl HardwareSnapshot {
             },
 
             // These stand in for real hardware, so give each one a bay.
-            ExternalDisks::Hardcoded { vdevs: _, disks } => Ok(disks
-                .iter()
-                .map(|disk| PolledBay::Described {
+            ExternalDisks::Hardcoded { vdevs: _, disks } => {
+                let bays = disks.iter().map(|disk| PolledBay::Described {
                     bay: DiskBay {
                         location: disk.location().clone(),
                         kind: disk.variant(),
@@ -206,8 +205,9 @@ impl HardwareSnapshot {
                         },
                     },
                     disk: Some(Box::new(disk.clone())),
-                })
-                .collect()),
+                });
+                Ok(collect_polled_bays(log, bays))
+            }
         };
 
         Ok(Self { tofino, bays })
@@ -341,13 +341,13 @@ fn poll_bays(
     snap: &Snapshot<'_>,
     sled: OxideSled,
     boot_storage_unit: BootStorageUnit,
-) -> Result<Vec<PolledBay>, Error> {
+) -> Result<IdOrdMap<PolledBay>, Error> {
     let observed = topo::read_disk_bays(log, snap)?;
     let nvme = Nvme::new()?;
-    Ok(observed
+    let bays = observed
         .iter()
-        .map(|bay| poll_bay(log, &nvme, sled, boot_storage_unit, bay))
-        .collect())
+        .map(|bay| poll_bay(log, &nvme, sled, boot_storage_unit, bay));
+    Ok(collect_polled_bays(log, bays))
 }
 
 /// Describes one bay reported by the topology snapshot, and the NVMe disk
