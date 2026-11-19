@@ -21,4 +21,4 @@
 # with a matching Cargo bump.
 #
 # To deactivate (once the new version is published): set OPTE_COMMIT to "".
-OPTE_COMMIT="104a684534c928cb6af6c0845640ba31b239885f"
+OPTE_COMMIT="ec15113af6b8b8b04a25ffc30940abbdc0ea7f88"
