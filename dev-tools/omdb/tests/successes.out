@@ -2761,7 +2761,7 @@ status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
 inventory collection ID:     00000000-0000-0000-0000-00000000001e
-(i) note: this collection no longer exists (perhaps it has been pruned?)
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
   next inv must start after: <REDACTED_TIMESTAMP>
 rendezvous resource generation numbers:
   alert generation:          1
@@ -2806,7 +2806,7 @@ status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
 inventory collection ID:     00000000-0000-0000-0000-00000000001e
-(i) note: this collection no longer exists (perhaps it has been pruned?)
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
   next inv must start after: <REDACTED_TIMESTAMP>
 rendezvous resource generation numbers:
   alert generation:          1

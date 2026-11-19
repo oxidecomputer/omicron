@@ -506,13 +506,13 @@ async fn cmd_db_sitrep_show(
                 Some(v) if v.id == id => {}
                 Some(fm::SitrepVersion { version, id, .. }) => {
                     println!(
-                        "(i) note: the current sitrep is {id} \
+                        "  (i) note: the current sitrep is {id} \
                          (at v{version})",
                     );
                 }
                 None => {
                     eprintln!(
-                        "/!\\ WEIRD: this sitrep is in the sitrep history, \
+                        "  /!\\ WEIRD: this sitrep is in the sitrep history, \
                          but there is no current sitrep. this should not \
                          happen!"
                     );
@@ -534,7 +534,7 @@ async fn cmd_db_sitrep_show(
     match inv_collection {
         Err(err) => {
             eprintln!(
-                "/!\\ failed to fetch inventory collection details: {err}"
+                "  /!\\ failed to fetch inventory collection details: {err}"
             );
         }
         Ok(Some(model::InvCollection { time_started, time_done, .. })) => {
@@ -543,7 +543,7 @@ async fn cmd_db_sitrep_show(
         }
         Ok(None) => {
             println!(
-                "(i) note: this collection no longer exists (perhaps it has \
+                "  (i) note: this collection no longer exists (perhaps it has \
                  been pruned?)"
             )
         }
