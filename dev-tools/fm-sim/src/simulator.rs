@@ -11,6 +11,7 @@ use std::str::FromStr;
 
 use clap::Subcommand;
 use nexus_fm_simulation::{SimState, SimStateBuilder};
+use nonempty::NonEmpty;
 
 use crate::command::{Mutate, Query, SimCommand, Verb};
 use crate::session::{SessionCommand, state};
@@ -77,7 +78,7 @@ pub enum SimStateOrigin {
 pub struct Simulator {
     /// Every state the session has produced, in creation order; the first is
     /// the root.
-    states: Vec<SimStateNode>,
+    states: NonEmpty<SimStateNode>,
     /// The current state that all commands run against. This isn't necessarily
     /// the last entry in `states`, since we can navigate history with
     /// `state switch`.
@@ -95,7 +96,7 @@ impl Simulator {
             origin: SimStateOrigin::Root,
             queries: Vec::new(),
         };
-        Self { states: vec![root], current: SimStateId(0) }
+        Self { states: NonEmpty::new(root), current: SimStateId(0) }
     }
 
     /// The id of the current state.

@@ -14,6 +14,7 @@ chrono.workspace = true
 clap.workspace = true
 humantime.workspace = true
 nexus-fm-simulation.workspace = true
+nonempty.workspace = true
 omicron-repl-utils.workspace = true
 omicron-workspace-hack.workspace = true
 sapling-renderdag.workspace = true

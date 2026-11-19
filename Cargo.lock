@@ -4145,6 +4145,7 @@ dependencies = [
  "expectorate",
  "humantime",
  "nexus-fm-simulation",
+ "nonempty",
  "omicron-repl-utils",
  "omicron-test-utils",
  "omicron-workspace-hack",
