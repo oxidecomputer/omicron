@@ -126,6 +126,7 @@ use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
+use nexus_db_queries::db::datastore::dns_names_decode_skipping_invalid;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::model::InstanceStateComputer;
@@ -5748,11 +5749,17 @@ async fn cmd_db_dns_names(
         println!("{:?} zone: {}", args.group, zone.zone_name);
         println!("  {:50} {}", "NAME", "RECORDS");
         let ctx = || format!("listing names for zone {:?}", zone.zone_name);
-        let mut names = datastore
-            .dns_names_list(opctx, zone.id, version.version, &first_page(limit))
+        let rows = datastore
+            .dns_names_list_raw(
+                opctx,
+                zone.id,
+                version.version,
+                &first_page(limit),
+            )
             .await
             .with_context(ctx)?;
-        check_limit(&names, limit, ctx);
+        check_limit(&rows, limit, ctx);
+        let mut names = dns_names_decode_skipping_invalid(&opctx.log, rows);
         names.sort_by(|(n1, _), (n2, _)| {
             // A natural sort by name puts records starting with numbers first
             // (which will be some of the uuids), then underscores (the SRV
