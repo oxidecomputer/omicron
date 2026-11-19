@@ -486,7 +486,7 @@ async fn cmd_db_sitrep_show(
     if comment.is_empty() {
         println!("{COMMENT:<WIDTH$} N/A\n");
     } else {
-        println!("{COMMENT:<WIDTH$}");
+        println!("{COMMENT}");
         println!("{}", textwrap::indent(&comment, "  "));
     }
 
