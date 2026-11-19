@@ -19,12 +19,14 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 impl DataStore {
     /// Stores a new certificate in the database.
@@ -67,52 +69,59 @@ impl DataStore {
             })
     }
 
-    pub async fn certificate_list_for(
+    /// Returns all certificates for a silo.
+    ///
+    /// Certificate names are unique only per silo, not globally, so paging by
+    /// name is offered only here and not in [`Self::certificate_list_all`].
+    pub async fn certificate_list_for_silo(
         &self,
         opctx: &OpContext,
-        kind: Option<ServiceKind>,
         pagparams: &PaginatedBy<'_>,
-        authz_silo: Option<&authz::Silo>,
+        authz_silo: &authz::Silo,
     ) -> ListResultVec<Certificate> {
         use nexus_db_schema::schema::certificate::dsl;
 
-        let silo = if let Some(authz_silo) = authz_silo {
-            let silo_id = authz_silo.id();
-            let authz_cert_list =
-                authz::SiloCertificateList::new(authz_silo.clone());
-            opctx
-                .authorize(authz::Action::ListChildren, &authz_cert_list)
-                .await?;
-            Some(silo_id)
-        } else {
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-            None
-        };
+        let authz_cert_list =
+            authz::SiloCertificateList::new(authz_silo.clone());
+        opctx.authorize(authz::Action::ListChildren, &authz_cert_list).await?;
 
-        let query;
         match pagparams {
             PaginatedBy::Id(params) => {
-                query = paginated(dsl::certificate, dsl::id, &params)
-                    .filter(dsl::time_deleted.is_null());
+                paginated(dsl::certificate, dsl::id, &params)
             }
-            PaginatedBy::Name(params) => {
-                query = paginated(
-                    dsl::certificate,
-                    dsl::name,
-                    &params.map_name(|n| Name::ref_cast(n)),
-                )
-                .filter(dsl::time_deleted.is_null())
-            }
+            PaginatedBy::Name(params) => paginated(
+                dsl::certificate,
+                dsl::name,
+                &params.map_name(|n| Name::ref_cast(n)),
+            ),
         }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_silo.id())))
+        .select(Certificate::as_select())
+        .load_async::<Certificate>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 
+    /// Returns all certificates across the fleeet.
+    ///
+    /// This only offers ID-based paging because names can repeat across silos.
+    pub async fn certificate_list_all(
+        &self,
+        opctx: &OpContext,
+        kind: Option<ServiceKind>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Certificate> {
+        use nexus_db_schema::schema::certificate::dsl;
+
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let query = paginated(dsl::certificate, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null());
         let query = if let Some(kind) = kind {
             query.filter(dsl::service.eq(kind))
-        } else {
-            query
-        };
-
-        let query = if let Some(silo_id) = silo {
-            query.filter(dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
         } else {
             query
         };
