@@ -110,9 +110,13 @@ pub enum UnusableReason {
 pub(crate) struct ObservedBay {
     pub location: DiskLocation,
     pub kind: DiskVariant,
-    /// `binding/driver` on the bay node: the driver the topology found bound
-    /// to the device behind the bay. oxhc records it before it tries to
-    /// enumerate the device, so it is present even when enumeration failed.
+    /// The `driver` property in the `binding` property group of the bay's
+    /// topology node.
+    ///
+    /// oxhc, the Oxide hardware chassis enumerator in illumos, sets this to
+    /// `nvme` when the device in the bay is bound to that driver. It does so
+    /// before enumerating the device, so the value is present even if
+    /// enumeration fails. It is not set for other devices.
     pub binding_driver: Option<String>,
     /// What is in the bay, or why the topology could not say.
     pub contents: Result<BayContents, BayProblem>,
