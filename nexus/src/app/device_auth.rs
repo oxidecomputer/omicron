@@ -67,6 +67,7 @@ use uuid::Uuid;
 pub enum DeviceAccessTokenResponse {
     Granted(DeviceAccessToken),
     Pending,
+    Expired,
     #[allow(dead_code)]
     Denied,
 }
@@ -194,7 +195,7 @@ impl super::Nexus {
 
         if db_request.time_expires < Utc::now() {
             // Store the expired token anyway so that the client
-            // can get a proper "denied" message on its next poll.
+            // gets an `expired_token` error on its next poll.
             let token = token.expires(db_request.time_expires);
             self.db_datastore
                 .device_access_token_create(
@@ -231,6 +232,9 @@ impl super::Nexus {
             .device_access_token_fetch(opctx, client_id, device_code)
             .await
         {
+            Ok(token) if token.is_device_code_expired(Utc::now()) => {
+                Ok(Expired)
+            }
             Ok(token) => Ok(Granted(token)),
             Err(_) => Ok(Pending),
             // TODO: TokenResponse::Denied
@@ -323,6 +327,12 @@ impl super::Nexus {
                     StatusCode::BAD_REQUEST,
                     &serde_json::json!({
                         "error": "authorization_pending"
+                    }),
+                ),
+                Expired => self.build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "expired_token"
                     }),
                 ),
                 Denied => self.build_oauth_response(
