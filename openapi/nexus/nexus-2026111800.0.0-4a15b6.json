@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111000.0.0"
+    "version": "2026111800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -14530,6 +14530,105 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/wicket-ssh-auth": {
+      "get": {
+        "tags": [
+          "system/update"
+        ],
+        "summary": "TODO-john docs",
+        "operationId": "wicket_ssh_auth_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WicketSshAuthStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/update"
+        ],
+        "summary": "TODO-john docs",
+        "operationId": "wicket_ssh_auth_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WicketSshAuthCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WicketSshAuth"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/wicket-ssh-auth/generation/{generation}": {
+      "get": {
+        "tags": [
+          "system/update"
+        ],
+        "summary": "TODO-john docs",
+        "operationId": "wicket_ssh_auth_view_generation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WicketSshAuthGeneration"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WicketSshAuth"
                 }
               }
             }
@@ -33546,6 +33645,333 @@
         },
         "required": [
           "secrets"
+        ]
+      },
+      "WicketSshAuth": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "generation": {
+            "$ref": "#/components/schemas/WicketSshAuthGeneration"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WicketSshAuthKind"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "generation",
+          "kind",
+          "time_created"
+        ]
+      },
+      "WicketSshAuthCreate": {
+        "description": "Specification of how SSH access to `wicket` on the rack tech port is authenticated.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WicketSshAuthKindCreate"
+          }
+        },
+        "required": [
+          "description",
+          "kind"
+        ]
+      },
+      "WicketSshAuthGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::WicketSshAuthGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "WicketSshAuthKind": {
+        "oneOf": [
+          {
+            "description": "`wicket` is publicly accessible to any client.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "`wicket` is only accessible to clients supplying one of the specified SSH keys.",
+            "type": "object",
+            "properties": {
+              "allow_support_keys": {
+                "description": "Whether to allow the built-in support keys shipped with the release access to `wicket`.\n\nThis setting only controls the support keys' access to `wicket`; even if this is false, the support keys can still be used for general support operations (support access is strictly more powerful than access to `wicket`; we recommend leaving this set to `true`).",
+                "type": "boolean"
+              },
+              "authorized_keys": {
+                "description": "Set of operator-specified keys allowed to access wicket.\n\nThis set may be empty. If it is empty and `allow_support_keys` is `false`, no SSH connections to `wicket` will succeed.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WicketSshKey"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "public_keys"
+                ]
+              }
+            },
+            "required": [
+              "allow_support_keys",
+              "authorized_keys",
+              "type"
+            ]
+          }
+        ]
+      },
+      "WicketSshAuthKindCreate": {
+        "oneOf": [
+          {
+            "description": "`wicket` is publicly accessible to any client.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "`wicket` is only accessible to clients supplying one of the specified SSH keys.",
+            "type": "object",
+            "properties": {
+              "allow_support_keys": {
+                "description": "Whether to allow the built-in support keys shipped with the release access to `wicket`.\n\nThis setting only controls the support keys' access to `wicket`; even if this is false, the support keys can still be used for general support operations (support access is strictly more powerful than access to `wicket`; we recommend leaving this set to `true`).",
+                "type": "boolean"
+              },
+              "authorized_keys": {
+                "description": "Set of operator-specified keys allowed to access wicket.\n\nThis set may be empty. If it is empty and `allow_support_keys` is `false`, no SSH connections to `wicket` will succeed.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WicketSshKeyCreate"
+                },
+                "maxItems": 32
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "public_keys"
+                ]
+              }
+            },
+            "required": [
+              "allow_support_keys",
+              "authorized_keys",
+              "type"
+            ]
+          }
+        ]
+      },
+      "WicketSshAuthStatus": {
+        "type": "object",
+        "properties": {
+          "current_generation": {
+            "$ref": "#/components/schemas/WicketSshAuthGeneration"
+          },
+          "sleds": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WicketSshAuthStatusSled"
+            }
+          },
+          "status_time_collected": {
+            "$ref": "#/components/schemas/WicketSshAuthStatusTimeCollected"
+          }
+        },
+        "required": [
+          "current_generation",
+          "sleds",
+          "status_time_collected"
+        ]
+      },
+      "WicketSshAuthStatusSled": {
+        "type": "object",
+        "properties": {
+          "configured_generation": {
+            "$ref": "#/components/schemas/WicketSshAuthGeneration"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/WicketSshAuthStatusSledLatest"
+          }
+        },
+        "required": [
+          "configured_generation",
+          "latest"
+        ]
+      },
+      "WicketSshAuthStatusSledLatest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "persisted_generation": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WicketSshAuthGeneration"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "known"
+                ]
+              },
+              "switch_zone_status": {
+                "$ref": "#/components/schemas/WicketSshAuthSwitchZoneStatus"
+              }
+            },
+            "required": [
+              "status",
+              "switch_zone_status"
+            ]
+          }
+        ]
+      },
+      "WicketSshAuthStatusTimeCollected": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "done",
+          "started"
+        ]
+      },
+      "WicketSshAuthSwitchZoneStatus": {
+        "description": "Status of wicket's SSH auth settings in a sled's switch zone, if it has one.",
+        "oneOf": [
+          {
+            "description": "This sled has no active switch zone.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "no_switch_zone"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "This sled has an active switch zone.",
+            "type": "object",
+            "properties": {
+              "effective_auth_gen": {
+                "description": "The current auth generation setting in effect in our switch zone.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WicketSshAuthGeneration"
+                  }
+                ]
+              },
+              "last_error": {
+                "nullable": true,
+                "description": "If the most recent attempt to set a new auth generation failed, contains the error.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "switch_zone"
+                ]
+              }
+            },
+            "required": [
+              "effective_auth_gen",
+              "state"
+            ]
+          }
+        ]
+      },
+      "WicketSshAuthorizedKey": {
+        "description": "SSH key eligible to access `wicket`.\n\nThis is a single line of an OpenSSH `authorized_keys` file. Options are not allowed. Supported key algorithms are:\n\n* `ecdsa-sha2-nistp256` * `ecdsa-sha2-nistp384` * `ecdsa-sha2-nistp521` * `sk-ssh-ed25519@openssh.com` * `sk-ecdsa-sha2-nistp256@openssh.com` * `ssh-ed25519` * `ssh-rsa`",
+        "type": "string"
+      },
+      "WicketSshKey": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "key"
+        ]
+      },
+      "WicketSshKeyCreate": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/WicketSshAuthorizedKey"
+          }
+        },
+        "required": [
+          "description",
+          "key"
         ]
       },
       "NameOrIdSortMode": {
