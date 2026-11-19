@@ -2780,13 +2780,13 @@ stdout:
 
 (i) activity in this sitrep: + opened, * changed, - closed
 
-*  case 00000000-0000-0000-0000-000000000032: open   certificate   // opened earlier, alert requested in this sitrep
-+  case 00000000-0000-0000-0000-00000000000a: open   physical_disk // zpool is degraded
- - case 00000000-0000-0000-0000-000000000046: closed physical_disk // opened earlier, closed in this sitrep
-*- case 00000000-0000-0000-0000-000000000014: closed power_shelf   // PSU was reseated
-   case 00000000-0000-0000-0000-000000000050: closed power_shelf   // closed in an earlier sitrep
-   case 00000000-0000-0000-0000-000000000028: open   saga          // opened earlier, no changes in this sitrep
-+- case 00000000-0000-0000-0000-00000000003c: closed smf_service   // opened and closed in this sitrep
+*  case 00000000-0000-0000-0000-000000000032 open   certificate   // opened earlier, alert requested in this sitrep
++  case 00000000-0000-0000-0000-00000000000a open   physical_disk // zpool is degraded
+ - case 00000000-0000-0000-0000-000000000046 closed physical_disk // opened earlier, closed in this sitrep
+*- case 00000000-0000-0000-0000-000000000014 closed power_shelf   // PSU was reseated
+   case 00000000-0000-0000-0000-000000000050 closed power_shelf   // closed in an earlier sitrep
+   case 00000000-0000-0000-0000-000000000028 open   saga          // opened earlier, no changes in this sitrep
++- case 00000000-0000-0000-0000-00000000003c closed smf_service   // opened and closed in this sitrep
 
 (i) to view details for a single case, use:
     $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --case <CASE_ID>
@@ -2913,7 +2913,8 @@ stdout:
 
   * case 00000000-0000-0000-0000-000000000032
     =========================================
-    // opened earlier, alert requested in this sitrep
+    // opened earlier,
+    // alert requested in this sitrep
     diagnosis engine: certificate
     opened in sitrep: 00000000-0000-0000-0000-000000000002
 

@@ -639,7 +639,9 @@ impl fmt::Display for DisplayCase<'_> {
 ///   [added](Case::additions_in_sitrep) in the current sitrep, and blank
 ///   otherwise;
 /// - column 2 is `-` if the case was closed in this sitrep, and blank
-///   otherwise.
+///   otherwise. If a case opened in this sitrep was closed in some earlier
+///   sitrep, the record is inconsistent (how could the case close before it
+///   opened?), and column 2 is `!`.
 ///
 /// Alongside the `open`/`closed` state that follows, the gutter allows the
 /// reader to determine whether these states are the result of changes in the
@@ -745,10 +747,10 @@ impl fmt::Display for DisplayCaseSummary<'_> {
             .colored(colored);
         write!(
             f,
-            "{:>indent$}{opened}{closed} case {}: {state:<STATE_WIDTH$} \
-             {de:<de_width$} {comment}",
+            "{:>indent$}{opened}{closed} {} \
+             {state:<STATE_WIDTH$} {de:<de_width$} {comment}",
             "",
-            styles.heading().style(format_args!("{id}")),
+            styles.heading().style(format_args!("case {id}")),
         )?;
         Ok(())
     }
