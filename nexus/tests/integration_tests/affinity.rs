@@ -29,6 +29,7 @@ use nexus_types::external_api::affinity::AffinityGroup;
 use nexus_types::external_api::affinity::AffinityGroupMember;
 use nexus_types::external_api::affinity::AntiAffinityGroup;
 use nexus_types::external_api::affinity::AntiAffinityGroupMember;
+use nexus_types::external_api::instance;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
 use nexus_types_versions::latest;

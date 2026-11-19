@@ -370,6 +370,8 @@ async fn test_instances_create_reboot_halt(
     let duplicate_instance_create =
         InstanceCreateBuilder::new(instance.identity.name.as_str())
             .with_hostname(&instance.hostname)
+            .with_user_data(&[])
+            .with_ssh_public_keys(None)
             .finish();
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &get_instances_url())
@@ -2056,7 +2058,7 @@ async fn test_instance_migrate_autoselect_anti_affinity(
     let mut instance_ids = Vec::new();
     for instance_name in ["bird-ecology", "desert-locust"] {
         let instance_settings = migratable_instance_settings(instance_name)
-            .user_data(b"#cloud-config")
+            .with_user_data(b"#cloud-config")
             .with_anti_affinity_groups(vec![NameOrId::Name(
                 group_name.parse().unwrap(),
             )])
@@ -3024,8 +3026,7 @@ async fn test_instances_create_stopped_start(
 
     // Create an instance in a stopped state.
     let instance: Instance =
-        create_instance_stopped(client, PROJECT_NAME, instance_name)
-            .await;
+        create_instance_stopped(client, PROJECT_NAME, instance_name).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
     // Start the instance.
@@ -3164,6 +3165,7 @@ async fn test_instance_using_image_from_other_project_fails(
     let instance_create = InstanceCreateBuilder::new("stolen")
         .with_description("i stole an image")
         .with_hostname("stolen")
+        .with_user_data(&[])
         .with_ssh_public_keys(None)
         .with_disks(vec![instance::InstanceDiskAttachment::Create(
             disk::DiskCreate {
@@ -3239,6 +3241,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("inst")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(interface_params.clone())
         .finish();
     let response = NexusRequest::objects_post(
@@ -3260,6 +3263,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("inst2")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(interface_params.clone())
         .finish();
     let _ = NexusRequest::objects_post(
@@ -3403,6 +3407,7 @@ async fn test_instance_with_single_explicit_ip_address_impl(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nic-test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(interface_params)
         .finish();
     let response = NexusRequest::objects_post(
@@ -3571,6 +3576,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nic-test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(interface_params)
         .finish();
     let response = NexusRequest::objects_post(
@@ -3691,6 +3697,7 @@ async fn test_instance_create_delete_network_interface(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nic-test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
         .finish();
     let response = NexusRequest::objects_post(
@@ -3957,6 +3964,7 @@ async fn test_instance_update_network_interfaces(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nic-test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
         .finish();
     let response = NexusRequest::objects_post(
@@ -4364,6 +4372,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nic-test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(instance::InstanceNetworkInterfaceAttachment::DefaultIpv4)
         .with_external_ips(vec![ExternalIpCreate::Ephemeral {
             pool_selector: PoolSelector::Explicit {
@@ -4737,6 +4746,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nic-test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(interface_params)
         .finish();
     let builder =
@@ -4798,6 +4808,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach { name: disk_name.clone() },
         )))
@@ -4849,6 +4860,7 @@ async fn test_instance_create_attach_disks(
         .with_memory(ByteCount::from_gibibytes_u32(3))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Create(
             disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
@@ -4957,6 +4969,7 @@ async fn test_instance_create_attach_disks_undo(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_disks(vec![
             instance::InstanceDiskAttachment::Create(disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
@@ -5041,6 +5054,7 @@ async fn test_attach_eight_disks_to_instance(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
@@ -5155,6 +5169,7 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
@@ -5250,6 +5265,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
@@ -5334,6 +5350,7 @@ async fn test_disks_detached_when_instance_destroyed(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
@@ -5422,6 +5439,7 @@ async fn test_disks_detached_when_instance_destroyed(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfsv2")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from("probablydata0".to_string()).unwrap(),
@@ -5501,6 +5519,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_disks(vec![
             instance::InstanceDiskAttachment::Attach(
                 instance::InstanceDiskAttach {
@@ -5538,6 +5557,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs2")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("alsodata")).unwrap(),
@@ -5590,6 +5610,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
@@ -5707,6 +5728,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("inst")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach { name: probablydata.clone() },
         )))
@@ -5896,6 +5918,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .with_memory(initial_memory)
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .finish();
 
     let builder =
@@ -6066,6 +6089,7 @@ async fn test_auto_restart_policy_can_be_changed(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         // Start out with None
         .with_auto_restart_policy(None)
         .finish();
@@ -6125,6 +6149,7 @@ async fn test_cpu_platform_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_start(false)
         .finish();
 
@@ -6184,6 +6209,7 @@ async fn test_enable_jumbo_frames_can_be_changed(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_start(false)
         // Start out opted out.
         .with_enable_jumbo_frames(false)
@@ -6304,6 +6330,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
             instance::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
@@ -6371,6 +6398,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("nfs")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_start(false)
         .finish();
 
@@ -6617,6 +6645,7 @@ async fn test_instance_create_with_anti_affinity_groups(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_anti_affinity_groups(anti_affinity_groups_param)
         .with_start(false)
         .finish();
@@ -6677,6 +6706,7 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_start(false)
         .with_anti_affinity_groups(anti_affinity_groups_param)
         .finish();
@@ -6738,6 +6768,7 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_anti_affinity_groups(anti_affinity_groups_param)
         .with_start(false)
         .finish();
@@ -6810,7 +6841,7 @@ async fn test_instance_create_with_ssh_keys(
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
         .with_memory(ByteCount::from_gibibytes_u32(4))
         // By default should transfer all profile keys
-        .with_ssh_keys(None)
+        .with_ssh_public_keys(None)
         .with_start(false)
         .with_hostname(instance_name)
         .with_user_data(&[])
@@ -6850,7 +6881,9 @@ async fn test_instance_create_with_ssh_keys(
         .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
         .with_memory(ByteCount::from_gibibytes_u32(4))
         // Should only transfer the first key
-        .with_ssh_public_keys(Some(vec![user_keys[0].identity.name.clone().into()]))
+        .with_ssh_public_keys(Some(vec![
+            user_keys[0].identity.name.clone().into(),
+        ]))
         .with_start(false)
         .with_hostname(instance_name)
         .with_user_data(&[])
@@ -7023,7 +7056,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             .with_memory(ByteCount::from_gibibytes_u32(1))
             .with_hostname(config.0)
             .with_user_data(&[])
-            .with_ssh_public_keys(Some(Vec::new()))
+            .with_ssh_public_keys(None)
             .with_start(false)
             .finish();
 
@@ -7072,6 +7105,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_start(false)
         .finish();
     let url_instances = get_instances_url();
@@ -7113,6 +7147,8 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
         let name = Name::try_from(config.0.to_string()).unwrap();
         let params = InstanceCreateBuilder::new(name.as_str())
             .with_description("probably serving data")
+            .with_hostname(config.0)
+            .with_ssh_public_keys(None)
             .with_ncpus(InstanceCpuCount::try_from(i64::from(1)).unwrap())
             .with_memory(ByteCount::try_from(config.1).unwrap())
             .with_start(false)
@@ -7158,6 +7194,7 @@ async fn test_can_start_instance_with_cpu_platform(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_cpu_platform(Some(InstanceCpuPlatform::AmdMilan))
         .with_start(false)
         .finish();
@@ -7261,6 +7298,7 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_cpu_platform(Some(InstanceCpuPlatform::AmdMilan))
         .with_start(false)
         .finish();
@@ -7369,6 +7407,7 @@ async fn test_cannot_start_instance_with_unsatisfiable_cpu_platform(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("test")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_start(false)
         .with_cpu_platform(Some(InstanceCpuPlatform::AmdTurin))
         .finish();
@@ -7662,6 +7701,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
     let instance_params = InstanceCreateBuilder::new(instance_name)
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_external_ips(vec![ExternalIpCreate::Ephemeral {
             pool_selector: PoolSelector::Explicit {
                 pool: "pool1".parse::<Name>().unwrap().into(),
@@ -7728,6 +7768,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         .with_ncpus(InstanceCpuCount(4))
         .with_memory(ByteCount::from_gibibytes_u32(1))
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_external_ips(vec![ExternalIpCreate::Ephemeral {
             pool_selector: PoolSelector::Explicit {
                 pool: "orphan-pool".parse::<Name>().unwrap().into(),
@@ -7786,6 +7827,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         .with_external_ips(vec![ExternalIpCreate::Ephemeral {
             pool_selector: PoolSelector::Auto { ip_version: None },
         }])
+        .with_ssh_public_keys(None)
         .finish();
 
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -7972,6 +8014,7 @@ async fn test_instance_rejects_two_ephemeral_auto_without_version(
     ];
     let create_params = InstanceCreateBuilder::new("two-auto-ephemeral")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_external_ips(external_ips)
         .finish();
     let error = object_create_error(
@@ -8014,7 +8057,9 @@ async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
         InstanceCreateBuilder::new("explicit-plus-auto-ephemeral")
             .with_user_data(&[])
             .with_ssh_public_keys(None)
-            .with_nics(instance::InstanceNetworkInterfaceAttachment::DefaultDualStack)
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+            )
             .with_external_ips(external_ips)
             .finish();
     let error = object_create_error(
@@ -8056,6 +8101,7 @@ async fn test_instance_rejects_two_ephemeral_same_pool(
     let create_params = InstanceCreateBuilder::new("same-pool-ephemeral")
         .with_description("instance same-pool-ephemeral")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_external_ips(external_ips)
         .finish();
     let error = object_create_error(
@@ -8202,6 +8248,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("inst")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .finish();
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -8368,6 +8415,7 @@ async fn test_instance_create_with_cross_project_subnet(
         .with_memory(ByteCount::from_gibibytes_u32(4))
         .with_hostname("inst-cross")
         .with_user_data(&[])
+        .with_ssh_public_keys(None)
         .with_nics(instance::InstanceNetworkInterfaceAttachment::Create(vec![
             if0_params,
         ]))
@@ -8485,6 +8533,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
             .with_memory(ByteCount::from_gibibytes_u32(4))
             .with_hostname("inst-same")
             .with_user_data(&[])
+            .with_ssh_public_keys(None)
             .with_nics(instance::InstanceNetworkInterfaceAttachment::Create(
                 vec![if_same_project],
             ))
@@ -8538,6 +8587,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
             .with_memory(ByteCount::from_gibibytes_u32(4))
             .with_hostname("inst-cross")
             .with_user_data(&[])
+            .with_ssh_public_keys(None)
             .with_nics(instance::InstanceNetworkInterfaceAttachment::Create(
                 vec![if_cross_project],
             ))

@@ -56,11 +56,10 @@ async fn create_instance_expect_failure(
         ]);
     let new_instance = InstanceCreateBuilder::new(name)
         .with_description("")
-        .with_hostname(name)
-        .with_user_data(&[])
         .with_ncpus(InstanceCpuCount(1))
         .with_memory(ByteCount::from_gibibytes_u32(1))
-        .with_hostname("test-instance")
+        .with_hostname(name)
+        .with_user_data(&[])
         .with_nics(network_interfaces)
         .finish();
 
