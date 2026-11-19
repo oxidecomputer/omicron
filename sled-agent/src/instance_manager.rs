@@ -22,6 +22,7 @@ use omicron_uuid_kinds::PropolisUuid;
 use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::FormerZoneRootArchiver;
 use sled_agent_config_reconciler::UpdateDispositionReceiver;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
@@ -119,6 +120,7 @@ pub(crate) struct InstanceManagerServices {
     pub metrics_queue: MetricsRequestQueue,
     pub available_datasets_rx: AvailableDatasetsReceiver,
     pub currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    pub former_zone_root_archiver: FormerZoneRootArchiver,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -158,6 +160,7 @@ impl InstanceManager {
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
         update_disposition_rx: UpdateDispositionReceiver,
+        former_zone_root_archiver: FormerZoneRootArchiver,
     ) -> Result<InstanceManager, Error> {
         Self::new_inner(
             log,
@@ -171,6 +174,7 @@ impl InstanceManager {
             vmm_reservoir_manager,
             metrics_queue,
             update_disposition_rx,
+            former_zone_root_archiver,
         )
     }
 
@@ -191,6 +195,7 @@ impl InstanceManager {
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
         mut update_disposition_rx: UpdateDispositionReceiver,
+        former_zone_root_archiver: FormerZoneRootArchiver,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
@@ -213,6 +218,7 @@ impl InstanceManager {
             zone_builder_factory,
             metrics_queue,
             update_disposition_rx,
+            former_zone_root_archiver,
         };
 
         let runner_handle =
@@ -641,6 +647,9 @@ struct InstanceManagerRunner {
     // If it is evacuating, we should reject new VMM registrations while
     // continuing to allow operations on existing VMMs.
     update_disposition_rx: UpdateDispositionReceiver,
+
+    // Used to archive zone root directories when shutting down Propolis zones.
+    former_zone_root_archiver: FormerZoneRootArchiver,
 }
 
 impl InstanceManagerRunner {
@@ -857,6 +866,9 @@ impl InstanceManagerRunner {
                     available_datasets_rx: self.available_datasets_rx.clone(),
                     currently_managed_zpools_rx: self
                         .currently_managed_zpools_rx
+                        .clone(),
+                    former_zone_root_archiver: self
+                        .former_zone_root_archiver
                         .clone(),
                 };
 

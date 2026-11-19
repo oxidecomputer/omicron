@@ -737,6 +737,7 @@ impl SledAgent {
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
             config_reconciler_spawn_token.subscribe_update_disposition(),
+            config_reconciler_spawn_token.former_zone_root_archiver(),
         )?;
 
         let svc_config = services::Config::new(

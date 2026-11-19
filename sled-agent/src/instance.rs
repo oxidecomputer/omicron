@@ -44,11 +44,11 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::FormerZoneRootArchiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::inventory::NetworkInterface;
-use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
@@ -766,6 +766,10 @@ struct InstanceRunner {
 
     // Requests that the VMM terminate and publishes the result.
     terminator: Arc<Terminator>,
+
+    // Used to archive the Propolis zone's root dataset when the VMM is
+    // terminated.
+    former_zone_root_archiver: FormerZoneRootArchiver,
 }
 
 fn classify_vmm_state_publish_error(
@@ -846,6 +850,7 @@ impl InstanceRunner {
             metrics_queue,
             available_datasets_rx,
             currently_managed_zpools_rx,
+            former_zone_root_archiver,
         } = services;
 
         let InstanceSledLocalConfig {
@@ -931,6 +936,7 @@ impl InstanceRunner {
             attached_subnets,
             terminator,
             currently_managed_zpools_rx,
+            former_zone_root_archiver,
         })
     }
 
@@ -1636,20 +1642,20 @@ impl InstanceRunner {
             ),
         }
 
-        // Take a zone bundle whenever this instance stops.
-        if let Err(e) = self
-            .zone_bundler
-            .create(
-                &running_state.running_zone,
-                ZoneBundleCause::TerminatedInstance,
-            )
-            .await
+        // Make a best-effort attempt to archive the former zone's root dataset.
+        if let Some(zone_dataset_root) =
+            running_state.running_zone.root().parent()
         {
-            error!(
+            self.former_zone_root_archiver
+                .archive_former_zone_root(zone_dataset_root.to_owned())
+                .await
+        } else {
+            // This should be impossible.
+            warn!(
                 self.log,
-                "Failed to take zone bundle for terminated instance";
+                "Failed to archive zone root for terminated instance: \
+                 non-existent parent (this should be impossible)";
                 "zone_name" => &zname,
-                "reason" => ?e,
             );
         }
 
@@ -3447,6 +3453,7 @@ mod tests {
                 CurrentlyManagedZpoolsReceiver::fake_static(std::iter::once(
                     fake_zpool,
                 )),
+            former_zone_root_archiver: FormerZoneRootArchiver::noop(log), // todo eliza replace with recording
         };
         (services, rx)
     }
@@ -3495,6 +3502,7 @@ mod tests {
                 zone_builder_factory,
                 metrics_queue,
                 currently_managed_zpools_rx,
+                former_zone_root_archiver,
             } = services;
 
             let vmm_reservoir_manager =
@@ -3512,6 +3520,7 @@ mod tests {
                     vmm_reservoir_manager,
                     metrics_queue,
                     update_disposition_rx,
+                    former_zone_root_archiver,
                 )
                 .unwrap();
 
