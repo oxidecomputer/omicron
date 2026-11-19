@@ -157,7 +157,7 @@ pub async fn create_instance_from_body(
 /// Creates an instance, asserting a status code and returning the error.
 ///
 /// Note that this accepts any serializable body, which allows users to create
-
+/// invalid inputs to test our parameter validation.
 pub async fn create_instance_with_error<T>(
     client: &ClientTestContext,
     project_name: &str,
