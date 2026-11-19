@@ -253,8 +253,8 @@ pub(crate) struct ObservedNvmeBay<'a> {
 ///
 /// A bay holding an NVMe controller comes back as
 /// [`BayDescription::NeedsNvmeFacts`], to be finished with
-/// [`ObservedNvmeBay::describe`].
-pub(crate) fn describe_bay(
+/// [`ObservedNvmeBay::combine_with_nvme_facts`].
+pub(crate) fn describe_bay_from_topology(
     bay: &ObservedBay,
 ) -> Result<BayDescription<'_>, DescribeError> {
     let contents = match &bay.contents {
@@ -312,9 +312,9 @@ impl ObservedNvmeBay<'_> {
     /// namespaces is a [`DiskBayOccupant::UnusableDevice`] with no disk.
     ///
     /// `is_boot_disk` is the caller's answer for this bay's PCIe slot.
-    pub(crate) fn describe(
+    pub(crate) fn combine_with_nvme_facts(
         self,
-        nvme: &NvmeFacts,
+        nvme_facts: &NvmeFacts,
         is_boot_disk: bool,
     ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
         let ObservedNvmeBay {
@@ -334,7 +334,7 @@ impl ObservedNvmeBay<'_> {
         // has none but the controller says it has some, the topology's
         // namespace enumeration failed silently.
         let namespace = match namespaces {
-            [] if nvme.usable_namespaces == 0 => {
+            [] if nvme_facts.usable_namespaces == 0 => {
                 let device = DiskBayOccupant::UnusableDevice {
                     reason: UnusableReason::NoUsableNamespace,
                     devfs_path: devfs_path.clone(),
@@ -344,7 +344,7 @@ impl ObservedNvmeBay<'_> {
             [] => {
                 return Err(DescribeError::MissingNamespace {
                     nvme_instance: instance,
-                    usable_namespaces: nvme.usable_namespaces,
+                    usable_namespaces: nvme_facts.usable_namespaces,
                 });
             }
             [namespace] => namespace,
@@ -376,7 +376,7 @@ impl ObservedNvmeBay<'_> {
             .map(|name| Utf8PathBuf::from(format!("/dev/dsk/{name}")));
 
         let identity = DiskIdentity {
-            vendor: format!("{:x}", nvme.pci_vid),
+            vendor: format!("{:x}", nvme_facts.pci_vid),
             serial: namespace.serial.clone(),
             model: disk_model(&namespace.manufacturer, &namespace.model),
         };
@@ -388,7 +388,7 @@ impl ObservedNvmeBay<'_> {
             bay.kind,
             identity.clone(),
             is_boot_disk,
-            nvme.firmware.clone(),
+            nvme_facts.firmware.clone(),
             bay.location.clone(),
         );
         Ok((describe(DiskBayOccupant::Disk { identity }), Some(disk)))
@@ -597,7 +597,7 @@ mod tests {
 
     /// Describes a bay that needs nothing from libnvme.
     fn describe_without_nvme(observed: &ObservedBay) -> DiskBay {
-        match describe_bay(observed).unwrap() {
+        match describe_bay_from_topology(observed).unwrap() {
             BayDescription::Complete(bay) => bay,
             BayDescription::NeedsNvmeFacts(nvme) => {
                 panic!("expected no NVMe controller, got {nvme:?}")
@@ -611,9 +611,9 @@ mod tests {
         facts: NvmeFacts,
         is_boot_disk: bool,
     ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
-        match describe_bay(observed).unwrap() {
+        match describe_bay_from_topology(observed).unwrap() {
             BayDescription::NeedsNvmeFacts(nvme) => {
-                nvme.describe(&facts, is_boot_disk)
+                nvme.combine_with_nvme_facts(&facts, is_boot_disk)
             }
             BayDescription::Complete(bay) => {
                 panic!("expected an NVMe controller, got {bay:?}")
@@ -673,14 +673,15 @@ mod tests {
         observed.contents.as_mut().unwrap().pcie_slot = 18;
 
         let BayDescription::NeedsNvmeFacts(nvme) =
-            describe_bay(&observed).unwrap()
+            describe_bay_from_topology(&observed).unwrap()
         else {
             panic!("expected an NVMe controller");
         };
         assert_eq!(nvme.instance(), instance());
         assert_eq!(nvme.pcie_slot(), 18);
 
-        let (described, disk) = nvme.describe(&facts(1), true).unwrap();
+        let (described, disk) =
+            nvme.combine_with_nvme_facts(&facts(1), true).unwrap();
         let disk = disk.expect("an NVMe disk with a namespace is a disk");
 
         let identity = DiskIdentity {
@@ -806,7 +807,7 @@ mod tests {
         ];
         for problem in problems {
             let observed = unreadable_bay(problem.clone());
-            let err = describe_bay(&observed).unwrap_err();
+            let err = describe_bay_from_topology(&observed).unwrap_err();
             assert!(
                 matches!(
                     &err,
@@ -833,11 +834,11 @@ mod tests {
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
-        let (bay, disk) = match describe_bay(observed).unwrap() {
+        let (bay, disk) = match describe_bay_from_topology(observed).unwrap() {
             BayDescription::Complete(bay) => (bay, None),
             BayDescription::NeedsNvmeFacts(nvme) => {
                 let facts = facts.expect("an NVMe bay needs libnvme facts");
-                nvme.describe(facts, false).unwrap()
+                nvme.combine_with_nvme_facts(facts, false).unwrap()
             }
         };
         PolledBay::Described { bay, disk: disk.map(Box::new) }

@@ -9,7 +9,7 @@ use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
     BayDescription, DescribeError, NvmeFacts, ObservedBay, PolledBay,
-    describe_bay, resolve_bays,
+    describe_bay_from_topology, resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -379,7 +379,7 @@ fn poll_bay(
         unreadable(err.to_string())
     };
 
-    let nvme_bay = match describe_bay(bay) {
+    let nvme_bay = match describe_bay_from_topology(bay) {
         Ok(BayDescription::Complete(bay)) => {
             return PolledBay::Described { bay, disk: None };
         }
@@ -406,7 +406,7 @@ fn poll_bay(
     };
     let is_boot_disk =
         pcie_slot_is_boot_disk(sled, nvme_bay.pcie_slot(), boot_storage_unit);
-    match nvme_bay.describe(&facts, is_boot_disk) {
+    match nvme_bay.combine_with_nvme_facts(&facts, is_boot_disk) {
         Ok((bay, disk)) => {
             PolledBay::Described { bay, disk: disk.map(Box::new) }
         }
