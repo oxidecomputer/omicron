@@ -1,0 +1,581 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Database Pagination
+
+This document describes how database pagination works in Omicron and how to use it correctly.
+
+== About pagination [[about]]
+
+When loading data in bulk from the database, loading too many rows in one go can be very expensive. To avoid such situations, we use _pagination_ to only load a subset of rows at a time.
+
+Pagination depends on a unique key in the database. **Using pagination incorrectly can cause data to be skipped or duplicated.**
+
+Pagination on a single column works by:
+
+* Defining a _page size_, called `SQL_BATCH_SIZE`, in the code base (currently set to 1000).
+* Defining the order of pagination: ascending or descending. In this document, we'll describe pagination in ascending order without loss of generality.
+* For the first page, issuing a `SELECT` statement with `ORDER BY <column> ASC LIMIT <page_size>`. This returns the first `page_size` rows, ordered by the specified column.
+* For subsequent pages, determining the last value read so far, which we call the _marker_, then issuing a `SELECT` statement with `WHERE <column> > <marker> ORDER BY <column> ASC LIMIT <page_size>`. This returns the next `page_size` rows, ordered by the specified column.
+* Terminating the loop if fewer rows are returned than the page size.
+
+Paginating based on multiple columns is also supported. For example, for pagination based on two columns, if the marker is `(marker1, marker2)`, then the `WHERE` clause for subsequent pages is of the form `WHERE (<column1> = <marker1> AND <column2> > <marker2>) OR (<column1> > <marker1>)`.
+
+Concretely, a paginated query in Rust looks something like this:
+
+[source,rust]
+----
+// This example shows single-column pagination on the `bp_pending_mgs_update_sp`
+// table.
+use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
+
+// Collects the rows returned from the database. One could also use an iddqd
+// data structure like `IdOrdMap` to index the rows by a unique key.
+let mut rows = Vec::new();
+
+// Define the paginator. This tracks state about the last value read so far.
+let mut paginator =
+    Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+
+// This loop terminates if fewer than `SQL_BATCH_SIZE` rows are returned.
+while let Some(p) = paginator.next() {
+    // Read the next batch of rows from the database.
+    //
+    // In the bp_pending_mgs_update_sp table, the primary key is (blueprint_id,
+    // hw_baseboard_id). We filter on the first column and paginate on the
+    // second.
+    let batch = paginated(
+        dsl::bp_pending_mgs_update_sp,
+        // Paginate on the hw_baseboard_id column.
+        dsl::hw_baseboard_id,
+        &p.current_pagparams(),
+    )
+    // Filter on the blueprint_id column.
+    .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+    .select(BpPendingMgsUpdateSp::as_select())
+    // Load this batch.
+    .load_async(&*conn)
+    .await
+    .map_err(|e| {
+        public_error_from_diesel(e, ErrorHandler::Server)
+    })?;
+
+    // Update the paginator with the batch we just loaded.
+    paginator = p.found_batch(&batch, &|sp_update| sp_update.hw_baseboard_id);
+    // Add the rows to the result list.
+    rows.extend(batch);
+}
+----
+
+== Mistakes while paginating [[mistakes]]
+
+For pagination to work correctly, there are two invariants that callers must uphold.
+
+**Key invariant:** all of the following must consistently use the same _unique, immutable key_ in the same direction:
+
+. The `ORDER BY` clause.
+. The `> <marker>` comparison.
+. The marker extracted in `found_batch`.
+
+**Row invariant:** `found_batch` must be called with exactly the rows the query returned, in the order the database returned them. `found_batch` relies on those rows in two ways:
+
+. It takes the marker from the last row.
+. It ends pagination when the page has fewer rows than the page size.
+
+Getting either of these invariants wrong can lead to dropped or duplicated rows.
+
+The rest of this section describes some mistakes we've seen in practice.
+
+=== Paging on a non-unique key [[non-unique-key]]
+
+**What this is:** Pagination on a column (or set of columns) that is not unique among the rows the query returns, after any other filters have been applied.
+
+**Why this is bad:** For subsequent pages, pagination uses `WHERE <column> > <marker>`. If, after other filters are applied, there are two rows that both have `<column>` set to `<marker>`, and the rows are on either side of a page boundary, then the second row will fail the `>` comparison and be skipped. This violates the key invariant.
+
+**How to fix this:** **Always** page on a key that is unique within the filtered rows. Usually, this is the table's primary key minus any columns filtered out by equality filters. For example, when reading data from a table with primary key `(blueprint_id, sled_id, image_artifact_sha256)`, filtered on `blueprint_id = X`, always page on `(sled_id, image_artifact_sha256)`.
+
+Uniqueness must always be enforced by the database through a primary key or a unique index. An application-level invariant is insufficient to meet this requirement: if it is ever violated, pagination will silently drop rows.
+
+Look for these cases in particular:
+
+* **Scoped and partial unique indexes:** Some tables have a unique index like `(project_id, name) WHERE time_deleted IS NULL`. For such tables, `name` is only unique if the query filters on `project_id` and `time_deleted IS NULL`.
+* **Joins:** If the query performs a one-to-many join with many rows per paging key, the paging key is no longer unique in the result. Either page on the joined table's key as well, or make sure the join is not one-to-many.
+
+**Example bug:** The `bp_single_measurements` table has primary key `(blueprint_id, sled_id, image_artifact_sha256)`. Since all sleds get the same set of measurements, the `image_artifact_sha256` values are shared across sleds. This code is buggy:
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated(
+        dsl::bp_single_measurements,
+        // BUG: Paginating only on image_artifact_sha256, which is non-unique
+        // across sleds.
+        dsl::image_artifact_sha256,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+    .select(BpSingleMeasurement::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|measurement| {
+        measurement.image_artifact_sha256
+    });
+    rows.extend(batch);
+}
+----
+
+**Fixed code:** Paginate on `(sled_id, image_artifact_sha256)`, which is unique after filtering to a single blueprint:
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated_multicolumn(
+        dsl::bp_single_measurements,
+        // Corrected: paginated on both sled_id and image_artifact_sha256.
+        (dsl::sled_id, dsl::image_artifact_sha256),
+        &p.current_pagparams(),
+    )
+    .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+    .select(BpSingleMeasurement::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|measurement| {
+        (measurement.sled_id, measurement.image_artifact_sha256)
+    });
+    rows.extend(batch);
+}
+----
+
+=== Overriding the ORDER BY after `paginated()` [[overriding-order-by]]
+
+**What this is:** A call to `paginated()`, then `order_by()` or `order()` before execution.
+
+**Why this is bad:** Diesel's `order_by` overrides the existing `ORDER BY` rather than appending to it. So, within `found_batch`, the marker detection (which uses the last row returned from the database) is no longer in sync with the `WHERE <column> > <marker>` clause. This violates the key invariant.
+
+The override also hardcodes the sort direction, which might not match the direction the `WHERE` clause uses.
+
+**How to fix this:** Don't call `order_by` or `order` for paginated queries. If you need a particular order, make that order the paging key.
+
+**Example bug:**
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated(
+        dsl::metric_producer,
+        dsl::id,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::time_modified.lt(expiration))
+    // BUG: The pagination occurs by `id` but the `order_by` is by
+    // `oximeter_id`, then `id`.
+    .order_by((dsl::oximeter_id, dsl::id))
+    .select(ProducerEndpoint::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|producer| producer.id());
+    producers.extend(batch);
+}
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated(
+        dsl::metric_producer,
+        dsl::id,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::time_modified.lt(expiration))
+    // Corrected: No `order_by`.
+    .select(ProducerEndpoint::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|producer| producer.id());
+    producers.extend(batch);
+}
+----
+
+**Fixed code, if the order matters:**
+
+(Note that if `oximeter_id` is mutable, this example has a different bug: see <<mutable-paging-key>> below.)
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated_multicolumn(
+        dsl::metric_producer,
+        // Corrected: Use the oximeter_id and id columns as the paging key.
+        (dsl::oximeter_id, dsl::id),
+        &p.current_pagparams(),
+    )
+    .filter(dsl::time_modified.lt(expiration))
+    .select(ProducerEndpoint::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|producer| {
+        (producer.oximeter_id, producer.id())
+    });
+    producers.extend(batch);
+}
+----
+
+=== Taking the marker from a different column [[marker-from-different-column]]
+
+**What this is:** The query is paginated on one column, but the closure passed to `found_batch` returns a different column.
+
+**Why this is bad:** The next page uses `WHERE <paging column> > <marker>` as its filter, so the marker has to be a value of the paging column. A marker from another column might be completely unrelated to the first column. This violates the key invariant.
+
+There might be an application-level invariant expressing a relationship between the columns, but such invariants should not be relied on in pagination code. (Nor is there any need to rely on them!)
+
+**How to fix this:** Return the marker from exactly the column (or columns) passed to `paginated()`, in the correct order.
+
+**Example bug:**
+
+In this example, there is an application-level invariant that `last_address >= first_address` and that address ranges don't overlap, so this code works okay in practice. But this requires extra unnecessary reasoning and is fragile to things like the pagination order changing.
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated(
+        dsl::ip_pool_range,
+        dsl::first_address,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::ip_pool_id.eq(authz_pool.id()))
+    .filter(dsl::time_deleted.is_null())
+    .select(IpPoolRange::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    // BUG: Paging is on `first_address`, but the marker is `last_address`.
+    paginator = p.found_batch(&batch, &|range| range.last_address);
+    ip_ranges.extend(batch);
+}
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated(
+        dsl::ip_pool_range,
+        dsl::first_address,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::ip_pool_id.eq(authz_pool.id()))
+    .filter(dsl::time_deleted.is_null())
+    .select(IpPoolRange::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    // Corrected: The marker comes from the paging column.
+    paginator = p.found_batch(&batch, &|range| range.first_address);
+    ip_ranges.extend(batch);
+}
+----
+
+=== Passing the wrong rows to `found_batch` [[wrong-rows-to-found-batch]]
+
+**What this is:** After executing the query, the wrong set of rows is passed into `found_batch`. This can show up in several different ways:
+
+* Filtering out some rows before `found_batch`.
+* Re-sorting rows before `found_batch`.
+* Passing in the accumulated results rather than the current batch to `found_batch`.
+
+**Why this is bad:** The pagination infrastructure decides whether to terminate a loop based on whether the number of rows provided to `found_batch` is less than the page size.
+
+* If any rows are filtered out before `found_batch`, the pagination infrastructure will terminate the loop prematurely.
+* If the results are re-sorted before `found_batch`, the marker (the physically last element in the result `Vec`) might not be the correct place to resume pagination from.
+* If accumulated results are passed in, the loop will terminate early because the first page will pass in 0 rows.
+
+All of these violate the row invariant.
+
+**How to fix this:** Perform filtering and re-sorting after `found_batch`, not before it.
+
+==== Filtering before `found_batch` [[filtering-before-found-batch]]
+
+**Example bug:**
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let names_batch: Vec<(String, Vec<DnsRecord>)> = paginated(
+        dsl::dns_name,
+        dsl::name,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::dns_zone_id.eq(zone.id))
+    .filter(dsl::version_added.le(version.version))
+    .select(DnsName::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+    .into_iter()
+    // BUG: if dns_name.records() returns an error, that row will be filtered
+    // out and names_batch will have fewer rows than the page size.
+    .filter_map(|dns_name| {
+        dns_name.records().ok().map(|records| (dns_name.name, records))
+    })
+    .collect();
+    paginator = p.found_batch(&names_batch, &|(name, _)| name.clone());
+    zone_records.extend(names_batch);
+}
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let names_batch: Vec<DnsName> = paginated(
+        dsl::dns_name,
+        dsl::name,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::dns_zone_id.eq(zone.id))
+    .filter(dsl::version_added.le(version.version))
+    .select(DnsName::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&names_batch, &|dns_name| dns_name.name.clone());
+    zone_records.extend(
+        names_batch
+            .into_iter()
+            // Corrected: filtering happens after `found_batch`.
+            .filter_map(|dns_name| {
+                dns_name
+                    .records()
+                    .ok()
+                    .map(|records| (dns_name.name, records))
+            }),
+    );
+}
+----
+
+==== Passing in accumulated rows to `found_batch` [[accumulated-rows-to-found-batch]]
+
+**Example bug:**
+
+[source,rust]
+----
+let mut blueprint_ids = Vec::new();
+while let Some(p) = paginator.next() {
+    let batch = datastore
+        .blueprints_list(opctx, &p.current_pagparams())
+        .await?;
+    // BUG: `blueprint_ids` is the accumulated set of rows, and is always empty
+    // in the first iteration.
+    paginator = p.found_batch(&blueprint_ids, &|b| b.id.into_untyped_uuid());
+    blueprint_ids.extend(batch);
+}
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+let mut blueprint_ids = Vec::new();
+while let Some(p) = paginator.next() {
+    let batch = datastore
+        .blueprints_list(opctx, &p.current_pagparams())
+        .await?;
+    // Corrected: the current batch is passed into `found_batch`.
+    paginator = p.found_batch(&batch, &|b| b.id.into_untyped_uuid());
+    blueprint_ids.extend(batch);
+}
+----
+
+=== Paging on a column that changes concurrently [[mutable-paging-key]]
+
+**What this is:** Paging on a column whose value can change while the scan is running outside of a serializable transaction.
+
+**Why this is bad:** Outside of a serializable transaction, pagination queries do not use a consistent snapshot shared across pages. This means that a row's key can change out from underneath between pages.
+
+* If a row is moved from ahead of the marker to behind it, it is skipped.
+* If a row is moved from behind the marker to ahead of it, it is duplicated.
+
+This violates the key invariant.
+
+(Note that rows can be inserted or deleted concurrently, and that is a separate concern that isn't a bug. For example, a new row concurrently added behind a marker is generally missed, and this is usually acceptable. The concern here is with rows being _mutated_ concurrently.)
+
+NOTE: External API endpoints that paginate by `name` are subject to this problem, since a resource renamed in the middle of a scan can cause rows to be skipped or duplicated. We accept this for external APIs since clients can paginate by `id` for a stable scan. Internal code must always paginate on immutable columns.
+
+**How to fix this:** Only paginate on immutable columns. (Another alternative is to use a serializable transaction, but that is quite expensive so we only do this rarely.)
+
+**Example bug:**
+
+In this example, `oximeter_id` is mutable. `id` is immutable.
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated_multicolumn(
+        dsl::metric_producer,
+        // BUG: `oximeter_id` is mutable, so this is not a stable pagination
+        // key.
+        (dsl::oximeter_id, dsl::id),
+        &p.current_pagparams(),
+    )
+    .filter(dsl::time_modified.lt(expiration))
+    .select(ProducerEndpoint::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|producer| {
+        (producer.oximeter_id, producer.id())
+    });
+    producers.extend(batch);
+}
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    let batch = paginated(
+        dsl::metric_producer,
+        // Corrected: `id` is immutable.
+        dsl::id,
+        &p.current_pagparams(),
+    )
+    .filter(dsl::time_modified.lt(expiration))
+    .select(ProducerEndpoint::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|producer| producer.id());
+    producers.extend(batch);
+}
+----
+
+=== Not paging at all [[not-paging]]
+
+**What this is:** A bulk read that loads every matching row in one query, with no `LIMIT` clause.
+
+A variant of this is setting a page size of `DataPageParams::max_page()`, which is `u32::MAX`.
+
+**Why this is bad:** Even if the number of rows is small and the code is okay at that moment in time, if the table does become large (over time, or due to an application bug), the query's memory use and latency can grow without limit.
+
+**How to fix this:** Use the pagination infrastructure with `SQL_BATCH_SIZE` for _all_ bulk reads, using the rules above. The primary key, minus any columns that have equality filters on them, is always suitable as a paging key.
+
+**Example bug:**
+
+Here, the `inv_single_measurements` table's primary key is `(inv_collection_id, sled_id, path)`. The lack of pagination was justified by the fact that at the time, there wasn't a three-column paginated helper.
+
+[source,rust]
+----
+// BUG: No pagination.
+let rows = dsl::inv_single_measurements
+    .filter(dsl::inv_collection_id.eq(db_id))
+    .select(InvSingleMeasurements::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+----
+
+**Fixed code:**
+
+In this case, because we're only loading data for a single `inv_collection_id`, paginating on the latter two columns is sufficient. (Separately, we added a `paginated_multicolumn3` for three-column pagination.)
+
+[source,rust]
+----
+while let Some(p) = paginator.next() {
+    // Corrected: pagination on sled_id and path, after filtering on
+    // inv_collection_id.
+    let batch = paginated_multicolumn(
+        dsl::inv_single_measurements,
+        (dsl::sled_id, dsl::path),
+        &p.current_pagparams(),
+    )
+    .filter(dsl::inv_collection_id.eq(db_id))
+    .select(InvSingleMeasurements::as_select())
+    .load_async(&*conn)
+    .await
+    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    paginator = p.found_batch(&batch, &|measurement| {
+        (measurement.sled_id, measurement.path.clone())
+    });
+    rows.extend(batch);
+}
+----
+
+=== Treating one page as the complete result [[single-page]]
+
+**What this is:** A query with a `LIMIT` clause (often a manually built `DataPageParams` with `marker: None`) not run in a loop.
+
+**Why this is bad:** If more rows need to be returned than the limit, the query will discard excess rows. The limit is often chosen to match a product limit (e.g., sleds per rack), but such limits might only be enforced on some write paths, and they can change over time (for sleds per rack, this can occur due to multirack).
+
+NOTE: Debugging tools like omdb intentionally read a single page bounded by `--fetch-limit`. That is fine as long as the tool produces a warning if the limit is reached. Within omdb, call `check_limit` on the rows returned by the query (before performing any filtering).
+
+**How to fix this:** Use a `Paginator` loop. If the result really is bounded, fetch `limit + 1` rows and return an error if the database returns that many rows.
+
+**Example bug:**
+
+Here, the query is capped at 10,000 rows. Any code that treats the result as the complete set of ranges (for example, IP pool utilization, which adds up the range sizes) will silently miss any rows past the first 10,000.
+
+[source,rust]
+----
+let ranges = ip_pool_range::table
+    .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
+    .filter(ip_pool_range::time_deleted.is_null())
+    .select((ip_pool_range::first_address, ip_pool_range::last_address))
+    // BUG: rows past the first 10,000 are silently dropped.
+    .limit(10000)
+    .get_results_async::<(IpNetwork, IpNetwork)>(conn)
+    .await?;
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+let mut ranges = Vec::new();
+let mut paginator =
+    Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+while let Some(p) = paginator.next() {
+    // Corrected: page on first_address, which is unique among live ranges.
+    let batch = paginated(
+        ip_pool_range::table,
+        ip_pool_range::first_address,
+        &p.current_pagparams(),
+    )
+    .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
+    .filter(ip_pool_range::time_deleted.is_null())
+    .select((ip_pool_range::first_address, ip_pool_range::last_address))
+    .get_results_async::<(IpNetwork, IpNetwork)>(conn)
+    .await?;
+    paginator = p.found_batch(&batch, &|(first, _last)| *first);
+    ranges.extend(batch);
+}
+----
+
+Alternatively, if the aggregation is decomposable (such as a sum or a count)footnote:[This is sometimes referred to as a _distributive aggregate_. In algebraic terms, the aggregation is a _monoid homomorphism_.], instead of buffering up all the ranges in memory and then computing the desired aggregation in one go, the loop could compute the desired aggregation for each page and then combine the results.
+
+== Testing pagination [[testing]]
+
+Pagination-related bugs only show up once the number of rows returned exceeds the page size. In some cases, particularly when the invariants are delicate, testing pagination can be helpful. A general guide to testing pagination:
+
+* Split out a helper which receives the page size as a parameter, e.g. `blueprint_read_batched`. Production code should use the default `SQL_BATCH_SIZE`.
+* Insert data that, if paginated incorrectly, would violate the key or row invariants.
+* Read data at small batch sizes (1-3) and ensure that every inserted row is returned exactly once.
+* Include rows that share every column except one of the paging key's columns, so a paging key missing that column is caught.
+
+This approach can detect many kinds of pagination bugs, though not key mutation bugs which require analyzing all writers to those rows.
+
+== LLM review of pagination code [[llm-review]]
+
+There is a Claude skill available to review pagination and other database-related code, called `db-review`. The skill can be invoked with `/db-review`, and Claude has been instructed to load it automatically during database-related code review. The skill loads this document before performing its review.
+
+The skill has been helpful at detecting pagination bugs in the codebase, but (like all LLM-based review) is not perfect, and should only be relied on in conjunction with human review.

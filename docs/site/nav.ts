@@ -60,6 +60,7 @@ export const site: Site = {
         'docs/demo-saga.adoc',
         'docs/authz-dev-guide.adoc',
         'schema/crdb/README.adoc',
+        'docs/db-pagination.adoc',
         'oximeter/db/schema/README.md',
         'uuid-kinds/README.adoc',
         'generation-kinds/README.adoc',
