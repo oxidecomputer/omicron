@@ -3253,7 +3253,7 @@ mod tests {
         nexus_client: NexusClient,
         zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
-    ) -> (Instance, MetricsRx) {
+    ) -> (Instance, MetricsRx, ArchivedZoneRoots) {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
 
@@ -3261,7 +3261,7 @@ mod tests {
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let (services, rx) =
+        let (services, rx, archived_zone_roots) =
             fake_instance_manager_services(log, nexus_client, zones, temp_dir)
                 .await;
 
@@ -3288,7 +3288,7 @@ mod tests {
             metadata,
         )
         .unwrap();
-        (instance, rx)
+        (instance, rx, archived_zone_roots)
     }
 
     fn fake_instance_initial_state(
@@ -3395,12 +3395,14 @@ mod tests {
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
+    type ArchivedZoneRoots = Arc<std::sync::Mutex<Vec<Utf8PathBuf>>>;
+
     async fn fake_instance_manager_services(
         log: &Logger,
         nexus_client: NexusClient,
         zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
-    ) -> (InstanceManagerServices, MetricsRx) {
+    ) -> (InstanceManagerServices, MetricsRx, ArchivedZoneRoots) {
         let vnic_allocator = VnicAllocator::new(
             "Instance",
             Etherstub("mystub".to_string()),
@@ -3438,6 +3440,8 @@ mod tests {
         .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
+        let (former_zone_root_archiver, archived_zone_roots) =
+            FormerZoneRootArchiver::recording(log);
         let services = InstanceManagerServices {
             nexus_client,
             vnic_allocator,
@@ -3453,7 +3457,7 @@ mod tests {
                 CurrentlyManagedZpoolsReceiver::fake_static(std::iter::once(
                     fake_zpool,
                 )),
-            former_zone_root_archiver: FormerZoneRootArchiver::noop(log), // todo eliza replace with recording
+            former_zone_root_archiver,
         };
         (services, rx)
     }
@@ -3485,13 +3489,14 @@ mod tests {
         ) -> Self {
             let nexus = FakeNexusParts::new(&log).await;
             let temp_guard = Utf8TempDir::new().unwrap();
-            let (services, metrics_rx) = fake_instance_manager_services(
-                log,
-                nexus.nexus_client.clone(),
-                illumos_utils::fakes::zone::Zones::new(),
-                temp_guard.path().as_str(),
-            )
-            .await;
+            let (services, metrics_rx, _archived_zone_roots) =
+                fake_instance_manager_services(
+                    log,
+                    nexus.nexus_client.clone(),
+                    illumos_utils::fakes::zone::Zones::new(),
+                    temp_guard.path().as_str(),
+                )
+                .await;
 
             let InstanceManagerServices {
                 nexus_client,
@@ -3552,7 +3557,7 @@ mod tests {
 
         let temp_guard = Utf8TempDir::new().unwrap();
 
-        let (inst, mut metrics_rx) = timeout(
+        let (inst, mut metrics_rx, _archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -3651,7 +3656,7 @@ mod tests {
                 _nexus_server,
             } = FakeNexusParts::new(&log).await;
 
-            let (inst, _) = timeout(
+            let (inst, _, _) = timeout(
                 TIMEOUT_DURATION,
                 instance_struct(
                     &log,
@@ -4279,13 +4284,14 @@ mod tests {
             } = FakeNexusParts::new(&log).await;
 
             let temp_guard = Utf8TempDir::new().unwrap();
-            let (services, _metrics_rx) = fake_instance_manager_services(
-                &log,
-                nexus_client,
-                illumos_utils::fakes::zone::Zones::new(),
-                temp_guard.path().as_str(),
-            )
-            .await;
+            let (services, _metrics_rx, _archived_zone_roots) =
+                fake_instance_manager_services(
+                    &log,
+                    nexus_client,
+                    illumos_utils::fakes::zone::Zones::new(),
+                    temp_guard.path().as_str(),
+                )
+                .await;
             let propolis_id = PropolisUuid::new_v4();
             let instance_id = InstanceUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
@@ -4492,7 +4498,7 @@ mod tests {
             illumos_utils::fakes::zone::Zones::new_with_halt_control();
 
         // Create an instance but don't start it.
-        let (inst, _metrics_rx) = timeout(
+        let (inst, _metrics_rx, archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -4556,6 +4562,16 @@ mod tests {
             .expect("zone did not start halting");
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         assert_eq!(zname, propolis_zone_name(&propolis_id));
+
+        // The zone's logs must have been archived *before* the zone began
+        // halting, since uninstalling the zone removes its root filesystem.
+        let archived = archived_zone_roots.lock().unwrap().clone();
+        assert_eq!(
+            archived.iter().map(|path| path.file_name()).collect::<Vec<_>>(),
+            [Some(zname.as_str())],
+            "expected the Propolis zone's dataset root to be archived exactly \
+             once before the zone is halted. instead, we archived: {archived:?}",
+        );
 
         // We should still have no response on the instance state channel.
         match put_rx.try_recv() {
@@ -4640,7 +4656,7 @@ mod tests {
             illumos_utils::fakes::zone::Zones::new_with_halt_control();
 
         // Create an instance but don't start it.
-        let (inst, _metrics_rx) = timeout(
+        let (inst, _metrics_rx, _archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
