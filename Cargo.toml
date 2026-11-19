@@ -174,6 +174,7 @@ members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -375,6 +376,7 @@ default-members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -545,8 +547,8 @@ filetime = "0.2.26"
 flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
-fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
-fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
+fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "5b57d8dd36f96778d0c067ec9647ddde9b58ace7" }
+fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "5b57d8dd36f96778d0c067ec9647ddde9b58ace7" }
 foreign-types = "0.3.2"
 fs-err = "3.1.1"
 futures = "0.3.31"
@@ -601,7 +603,7 @@ hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
 iddqd = { version = "0.5.0", features = ["daft", "serde", "schemars08"] }
-illumos-nvpair = "0.3.0"
+illumos-nvpair = "0.4.0"
 illumos-nvpair-sys = "0.2.0"
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -631,6 +633,7 @@ libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
+libtopo = "0.2.0"
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
@@ -711,6 +714,7 @@ omicron-pins = { path = "dev-tools/pins" }
 omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
+omicron-sush-proxy = { path = "sush-proxy" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
@@ -864,7 +868,7 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e", default-features = false }
 sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
@@ -879,6 +883,10 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a" }
+sush-proxy = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
@@ -896,7 +904,7 @@ tokio = "1.52.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-test = "0.4.5"
-tokio-tungstenite = "0.23.1"
+tokio-tungstenite = "0.28.0"
 tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
 toml_edit = "0.22.27"
@@ -1180,20 +1188,25 @@ branch = "oxide/omicron"
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
 
-# Several crates such as crucible and propolis have have a Git dependency on
+# Several crates such as crucible and propolis have a Git dependency on
 # this repo. Omicron itself depends on these crates, which can lead to two
-# copies of these crates in the dependency graph. (As a Git dependency, and as
-# a path dependency.) The goal of omicron-uuid-kinds and
+# copies of these crates in the dependency graph. (As a Git dependency,
+# and as a path dependency.) The goal of omicron-uuid-kinds and
 # omicron-generation-kinds is to provide unified registries of UUID and
 # generation kinds. Two copies of the same kinds floating around is unnecessary
 # and painful.
 #
-# These directives ensure that whenever we see omicron-uuid-kinds or
-# omicron-generation-kinds as a Git dependency, we'll use the path dependency
-# version of the crate instead.
+# Similarly, sush has a Git dependency on this repo's sled-hardware-types,
+# and the BaseboardId in its API must be the same type sled-agent derives
+# from HardwareManager::baseboard().
+#
+# These directives ensure that whenever we see omicron-uuid-kinds,
+# omicron-generation-kinds, or sled-hardware-types as a Git dependency,
+# we'll use the path dependency version of the crate instead.
 #
 # See also: uuid-kinds/README.adoc and generation-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-common = { path = "common" }
 omicron-generation-kinds = { path = "generation-kinds" }
 omicron-uuid-kinds = { path = "uuid-kinds" }
+sled-hardware-types = { path = "sled-hardware/types" }
