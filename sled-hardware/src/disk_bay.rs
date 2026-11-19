@@ -203,9 +203,12 @@ pub(crate) struct ObservedNamespace {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct NvmeFacts {
     pub pci_vid: u16,
-    /// Namespaces the nvme driver does not ignore. It ignores those it
-    /// cannot attach `blkdev` to, such as ones formatted with protection
-    /// information, and the topology describes none of those.
+    /// The number of namespaces considered usable by the nvme driver.
+    ///
+    /// This count ignores any namespaces to which the nvme driver cannot
+    /// attach a `blkdev` node, such as those formatted with protection
+    /// information. Any such namespaces are not included in the hardware
+    /// topology.
     pub usable_namespaces: usize,
     pub firmware: DiskFirmware,
 }
