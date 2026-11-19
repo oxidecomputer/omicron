@@ -161,7 +161,8 @@ impl<'a> SitrepBuilder<'a> {
         mut self,
         creator_id: OmicronZoneUuid,
         time_created: chrono::DateTime<chrono::Utc>,
-    ) -> (fm::Sitrep, fm::analysis_reports::AnalysisReport) {
+    ) -> anyhow::Result<(fm::Sitrep, fm::analysis_reports::AnalysisReport)>
+    {
         let parent = self.parent_generations();
         let alert_generation = if self.cases.alert_set_changed()
             || self.alerts_changed
@@ -183,9 +184,21 @@ impl<'a> SitrepBuilder<'a> {
             } else {
                 parent.support_bundle_generation
             };
-        // TODO(eliza): once the sitrep builder lets you request problem
-        // creation, bump the generation here!
-        let problem_generation = parent.problem_generation;
+
+        let new_active_problems =
+            self.active_problems.new_active_problems_requested();
+
+        // TODO(eliza): we will also need to track when resolved problems are no
+        // longer carried forward here!
+        let problem_generation = if new_active_problems > 0 {
+            let new_gen = parent.problem_generation.next();
+            self.log_event("active problems changed")
+                .kv("generation", new_gen.as_u64())
+                .kv("new_active_problems", new_active_problems);
+            new_gen
+        } else {
+            parent.problem_generation
+        };
 
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         let mut report_cases = IdOrdMap::new();
@@ -214,11 +227,13 @@ impl<'a> SitrepBuilder<'a> {
                     .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
             })
             .collect();
+        let (problems, problem_report) = self.active_problems.build()?;
         let report = fm::analysis_reports::AnalysisReport {
             log: self.debug_log,
             sitrep_id: self.sitrep_id,
             comment: self.comment.clone(),
             cases: report_cases,
+            active_problems: problem_report,
         };
         let sitrep = fm::Sitrep {
             metadata: fm::SitrepMetadata {
@@ -239,11 +254,11 @@ impl<'a> SitrepBuilder<'a> {
             },
             cases,
             ereports_by_id,
-            // TODO(eliza): add builder APIs for creating and updating
-            // problems and copying forward parent ones
+            // TODO(eliza): figure out what resolved problems need no longer be
+            // carried forward!
             problems: Default::default(),
         };
-        (sitrep, report)
+        Ok((sitrep, report))
     }
 }
 
@@ -278,8 +293,9 @@ mod tests {
     #[track_caller]
     fn build_sitrep(builder: SitrepBuilder<'_>) -> fm::Sitrep {
         let parent = builder.input().parent_sitrep().cloned();
-        let (sitrep, _) =
-            builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now());
+        let (sitrep, _) = builder
+            .build(OmicronZoneUuid::new_v4(), chrono::Utc::now())
+            .expect("sitrep should build");
         crate::test_util::assert_analysis_preserves_slippy_clean(
             &sitrep,
             parent.as_ref(),

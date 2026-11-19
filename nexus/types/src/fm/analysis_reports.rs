@@ -32,6 +32,8 @@ pub struct AnalysisReport {
     pub cases: IdOrdMap<CaseReport>,
     #[serde(default)]
     pub log: DebugLog,
+    #[serde(default)]
+    pub active_problems: IdOrdMap<ActiveProblemReport>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -204,7 +206,8 @@ impl AnalysisReportDisplayer<'_> {
 impl fmt::Display for AnalysisReportDisplayer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let &Self {
-            report: AnalysisReport { cases, sitrep_id, comment, log },
+            report:
+                AnalysisReport { cases, sitrep_id, comment, log, active_problems },
             indent,
             colored,
         } = self;
@@ -243,6 +246,30 @@ impl fmt::Display for AnalysisReportDisplayer<'_> {
             )?;
             for case in cases {
                 case.display_multiline(indent + 2, Some(*sitrep_id))
+                    .colored(colored)
+                    .fmt(f)?;
+            }
+        }
+        if active_problems.is_empty() {
+            writeln!(
+                f,
+                "{:indent$}{}",
+                "",
+                styles
+                    .heading()
+                    .style("no active problems changed in this analysis step")
+            )?;
+        } else {
+            writeln!(
+                f,
+                "{:indent$}{} ({} with activity):",
+                "",
+                styles.heading().style("active problems"),
+                active_problems.len(),
+            )?;
+            for problem in active_problems {
+                problem
+                    .display_multiline(indent + 2, Some(*sitrep_id))
                     .colored(colored)
                     .fmt(f)?;
             }
@@ -533,7 +560,7 @@ impl DebugLog {
         }
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
