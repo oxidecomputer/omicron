@@ -76,12 +76,13 @@
 //! The RPW ensures eventual consistency between database state and dataplane
 //! configuration (applied via DPD to switches).
 //!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`UNDERLAY_MULTICAST_SUBNET`]: dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
 use diesel::{AsExpression, FromSqlRow, Insertable, Queryable, Selectable};
+use dpd_types::mcast;
 use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -93,7 +94,7 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::multicast as multicast_types;
 use omicron_common::api::external::{self, IdentityMetadata};
-use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, ProbeUuid, SledKind};
 
 use crate::typed_uuid::DbTypedUuid;
 use crate::{Generation, Name, SqlU8, Vni, impl_enum_type};
@@ -118,6 +119,16 @@ impl_enum_type!(
     Joining => b"joining"
     Joined => b"joined"
     Left => b"left"
+);
+
+impl_enum_type!(
+    MulticastGroupMemberParentKindEnum:
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, JsonSchema)]
+    pub enum MulticastGroupMemberParentKind;
+
+    Instance => b"instance"
+    Probe => b"probe"
 );
 
 impl std::fmt::Display for MulticastGroupState {
@@ -228,6 +239,7 @@ pub struct MulticastGroupMemberValues {
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    pub parent_kind: MulticastGroupMemberParentKind,
     // version_added and version_removed are omitted - database assigns these
     // via DEFAULT nextval()
 }
@@ -271,6 +283,8 @@ pub struct MulticastGroupMember {
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    /// Discriminator for `parent_id`.
+    pub parent_kind: MulticastGroupMemberParentKind,
 }
 
 // Conversions to external API views
@@ -279,6 +293,16 @@ impl TryFrom<MulticastGroupMember> for multicast_types::MulticastGroupMember {
     type Error = external::Error;
 
     fn try_from(member: MulticastGroupMember) -> Result<Self, Self::Error> {
+        let instance_id = match member.parent_ref() {
+            MemberParentRef::Instance(id) => id.into_untyped_uuid(),
+            MemberParentRef::Probe(id) => {
+                return Err(external::Error::internal_error(&format!(
+                    "multicast group member {} has probe parent {id}, \
+                     which has no instance view",
+                    member.id
+                )));
+            }
+        };
         Ok(multicast_types::MulticastGroupMember {
             identity: IdentityMetadata {
                 id: member.id,
@@ -293,7 +317,7 @@ impl TryFrom<MulticastGroupMember> for multicast_types::MulticastGroupMember {
             },
             multicast_group_id: member.external_group_id,
             multicast_ip: member.multicast_ip.ip(),
-            instance_id: member.parent_id,
+            instance_id,
             source_ips: member
                 .source_ips
                 .into_iter()
@@ -353,7 +377,7 @@ impl MulticastGroupMember {
         id: Uuid,
         external_group_id: Uuid,
         multicast_ip: IpNetwork,
-        parent_id: Uuid,
+        parent: MemberParentRef,
         sled_id: Option<DbTypedUuid<SledKind>>,
         source_ips: Vec<IpNetwork>,
     ) -> Self {
@@ -364,7 +388,8 @@ impl MulticastGroupMember {
             time_deleted: None,
             external_group_id,
             multicast_ip,
-            parent_id,
+            parent_id: parent.as_uuid(),
+            parent_kind: parent.kind(),
             sled_id,
             state: MulticastGroupMemberState::Joining,
             source_ips,
@@ -373,16 +398,77 @@ impl MulticastGroupMember {
             version_removed: None,
         }
     }
+
+    /// Reconstruct the typed [`MemberParentRef`] from the persisted
+    /// `(parent_id, parent_kind)` tuple.
+    ///
+    /// Note: This is the inverse of the split performed in
+    /// [`MulticastGroupMember::new`].
+    pub fn parent_ref(&self) -> MemberParentRef {
+        match self.parent_kind {
+            MulticastGroupMemberParentKind::Instance => {
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    self.parent_id,
+                ))
+            }
+            MulticastGroupMemberParentKind::Probe => MemberParentRef::Probe(
+                ProbeUuid::from_untyped_uuid(self.parent_id),
+            ),
+        }
+    }
+}
+
+/// Typed parent of a multicast group member.
+///
+/// Multicast group members' parent resource can either be an instance or a
+/// probe (used for testing and debugging network connectivity). This
+/// discriminator is persisted on the member row as `parent_kind` (see
+/// [`MulticastGroupMemberParentKind`]). This follows the pattern from
+/// [`NetworkInterfaceKind`].
+///
+/// [`NetworkInterfaceKind`]: crate::NetworkInterfaceKind
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MemberParentRef {
+    /// Member is owned by an instance.
+    Instance(InstanceUuid),
+    /// Member is owned by a probe.
+    Probe(ProbeUuid),
+}
+
+impl MemberParentRef {
+    /// Extract the untyped parent UUID.
+    pub fn as_uuid(&self) -> Uuid {
+        match self {
+            MemberParentRef::Instance(id) => id.into_untyped_uuid(),
+            MemberParentRef::Probe(id) => id.into_untyped_uuid(),
+        }
+    }
+
+    /// Map this parent resource to its persisted
+    /// [`MulticastGroupMemberParentKind`] discriminator.
+    pub fn kind(&self) -> MulticastGroupMemberParentKind {
+        match self {
+            MemberParentRef::Instance(_) => {
+                MulticastGroupMemberParentKind::Instance
+            }
+            MemberParentRef::Probe(_) => MulticastGroupMemberParentKind::Probe,
+        }
+    }
 }
 
 /// Database representation of an underlay multicast group.
 ///
-/// Underlay groups are system-generated admin-local IPv6 multicast addresses
-/// used as a NAT target for internal multicast traffic. Underlay groups are
-/// VNI-agnostic; the VNI is an overlay identifier carried by [ExternalMulticastGroup].
+/// Oxide-policy allocates underlay NAT targets from the admin-locally scoped
+/// ff04::/64 subnet. Dendrite's [`UnderlayMulticastIpv6`] enforces this
+/// allocation.
+///
+/// Underlay groups are VNI-agnostic: the VNI is an overlay identifier carried
+/// by [ExternalMulticastGroup].
 ///
 /// These are distinct from [ExternalMulticastGroup] which are external-facing
 /// addresses allocated from IP pools, specified by users or applications.
+///
+/// [`UnderlayMulticastIpv6`]: mcast::UnderlayMulticastIpv6
 #[derive(
     Queryable,
     Insertable,
@@ -418,4 +504,41 @@ pub struct UnderlayMulticastGroup {
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
+}
+
+impl ExternalMulticastGroup {
+    /// Validate the stored address using `dpd-types`.
+    ///
+    /// The `INET` column is read as `IpNetwork` without `dpd-types` address
+    /// validation. This method validates the stored address before use by DPD.
+    pub fn dpd_multicast_ip(
+        &self,
+    ) -> Result<mcast::ExternalMulticastIp, mcast::ExternalMulticastIpError>
+    {
+        mcast::ExternalMulticastIp::new(self.multicast_ip.ip())
+    }
+}
+
+impl UnderlayMulticastGroup {
+    /// Validate the stored underlay address using `dpd-types`.
+    pub fn dpd_multicast_ip(
+        &self,
+    ) -> Result<mcast::UnderlayMulticastIpv6, UnderlayMulticastIpError> {
+        match self.multicast_ip.ip() {
+            IpAddr::V6(ip) => Ok(mcast::UnderlayMulticastIpv6::new(ip)?),
+            IpAddr::V4(ip) => Err(UnderlayMulticastIpError::NotIpv6(ip)),
+        }
+    }
+}
+
+/// Failure to convert a stored underlay address into Dendrite's
+/// `UnderlayMulticastIpv6`.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum UnderlayMulticastIpError {
+    /// The stored address is IPv4.
+    #[error("underlay multicast address {0} is not IPv6")]
+    NotIpv6(std::net::Ipv4Addr),
+    /// Dendrite rejected the stored IPv6 address.
+    #[error(transparent)]
+    Underlay(#[from] mcast::UnderlayMulticastError),
 }

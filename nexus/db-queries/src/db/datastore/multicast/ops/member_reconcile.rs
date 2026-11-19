@@ -41,7 +41,8 @@ use uuid::Uuid;
 
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    DbTypedUuid, MulticastGroupMember, MulticastGroupMemberState,
+    DbTypedUuid, MulticastGroupMember, MulticastGroupMemberParentKind,
+    MulticastGroupMemberState,
 };
 use nexus_db_schema::schema::multicast_group_member::dsl;
 use omicron_common::api::external::Error as ExternalError;
@@ -121,6 +122,7 @@ pub async fn reconcile_joining_member(
     let member_opt: Option<MulticastGroupMember> = dsl::multicast_group_member
         .filter(dsl::external_group_id.eq(group_id))
         .filter(dsl::parent_id.eq(instance_id))
+        .filter(dsl::parent_kind.eq(MulticastGroupMemberParentKind::Instance))
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::state.eq(MulticastGroupMemberState::Joining))
         .select(MulticastGroupMember::as_select())

@@ -480,7 +480,7 @@ mod test {
     use diesel::ExpressionMethods as _;
     use diesel::QueryDsl as _;
     use dpd_client::types::MacAddr;
-    use dpd_client::types::Vni;
+    use dpd_types::network::Vni;
     use iddqd::id_ord_map;
     use nexus_db_model::IpAttachState;
     use nexus_db_schema::schema::external_subnet::dsl;
@@ -517,7 +517,7 @@ mod test {
             InstanceTarget {
                 inner_mac: MacAddr { a: [0xa8, 0x40, 0x25, 0x00, 0x00, 0x00] },
                 internal_ip: "fd00::1".parse().unwrap(),
-                vni: Vni(100),
+                vni: Vni::new(100).unwrap(),
             },
         )]);
         let desired = HashMap::new();
@@ -534,7 +534,7 @@ mod test {
             InstanceTarget {
                 inner_mac: MacAddr { a: [0xa8, 0x40, 0x25, 0x00, 0x00, 0x00] },
                 internal_ip: "fd00::1".parse().unwrap(),
-                vni: Vni(100),
+                vni: Vni::new(100).unwrap(),
             },
         )]);
         let existing = HashMap::new();
@@ -551,7 +551,7 @@ mod test {
             InstanceTarget {
                 inner_mac: MacAddr { a: [0xa8, 0x40, 0x25, 0x00, 0x00, 0x00] },
                 internal_ip: "fd00::1".parse().unwrap(),
-                vni: Vni(100),
+                vni: Vni::new(100).unwrap(),
             },
         )]);
         let existing = desired.clone();
@@ -568,7 +568,7 @@ mod test {
             InstanceTarget {
                 inner_mac: MacAddr { a: [0xa8, 0x40, 0x25, 0xff, 0xff, 0xff] },
                 internal_ip: "fd00::1".parse().unwrap(),
-                vni: Vni(100),
+                vni: Vni::new(100).unwrap(),
             },
         )]);
         let desired = HashMap::from([(
@@ -576,7 +576,7 @@ mod test {
             InstanceTarget {
                 inner_mac: MacAddr { a: [0xa8, 0x40, 0x25, 0x00, 0x00, 0x00] },
                 internal_ip: "fd00::1".parse().unwrap(),
-                vni: Vni(100),
+                vni: Vni::new(100).unwrap(),
             },
         )]);
         let AttachedSubnetDiff { to_add, to_remove } =

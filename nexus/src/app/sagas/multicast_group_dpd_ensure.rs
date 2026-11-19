@@ -169,7 +169,7 @@ async fn mgde_fetch_group_data(
     }
 
     // Fetch member source filter state for DPD.
-    // SSM addresses (232.x.x.x, ff3x::/32) require at least one source.
+    // SSM addresses (see `is_ssm_address`) require at least one source.
     // ASM addresses can have empty sources (any source allowed).
     let group_id =
         MulticastGroupUuid::from_untyped_uuid(params.external_group_id);

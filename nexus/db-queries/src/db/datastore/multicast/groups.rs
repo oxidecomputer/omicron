@@ -11,7 +11,7 @@
 //! - Underlay groups: system-generated admin-local IPv6 multicast groups within
 //!   [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64)
 //!
-//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`UNDERLAY_MULTICAST_SUBNET`]: dpd_types::mcast::UNDERLAY_MULTICAST_SUBNET
 
 use std::net::IpAddr;
 
@@ -399,6 +399,11 @@ impl DataStore {
     /// - `Ok(true)` if the group was marked for deletion (no members existed)
     /// - `Ok(false)` if the group still has members (not marked)
     /// - `Err` on database errors
+    ///
+    /// # Parent Kinds
+    ///
+    /// A non-deleted member of any parent kind preserves the group as active
+    /// (see [`nexus_db_model::MulticastGroupMemberParentKind`]).
     pub async fn mark_multicast_group_for_removal_if_no_members(
         &self,
         opctx: &OpContext,
@@ -520,7 +525,7 @@ impl DataStore {
             // message about pool setup.
             match &e {
                 external::Error::ObjectNotFound { .. } => {
-                    // SSM = 232/8 or ff3x::/32, ASM = 224/8 or ff0x::/16
+                    // SSM per `is_ssm_address`, ASM = the rest
                     let pool_type =
                         if has_sources { "SSM or ASM" } else { "ASM" };
                     let prefix = match ip_version {
@@ -544,8 +549,9 @@ impl DataStore {
     /// # Pool Selection
     ///
     /// - **With explicit IP**: Pool is resolved from the IP address.
-    /// - **Without explicit IP + `source_ips`**: Auto-select SSM pool (232/8,
-    ///   ff3x::/32). If no SSM pool is linked, we fall back to an ASM pool.
+    /// - **Without explicit IP + `source_ips`**: Auto-select SSM pool
+    ///   ([`dpd_types::mcast::is_ssm_address`]). If no SSM pool is linked, we
+    ///   fall back to an ASM pool.
     /// - **Without explicit IP + no `source_ips`**: Auto-select an ASM pool.
     ///
     /// ## ASM Fallback for Join-by-Name
@@ -572,8 +578,9 @@ impl DataStore {
         // - Auto: use default multicast pool based on has_sources preference
         //
         // Note: Source IPs are per-member, not per-group. SSM validation
-        // (sources required for 232/8 or ff3x::/32 addresses) is enforced
-        // at member join time in `resolve_multicast_group_identifier_with_sources`.
+        // (sources required for `is_ssm_address` addresses) is enforced at
+        // member join time in
+        // `resolve_multicast_group_identifier_with_sources`.
         let (authz_pool, explicit_ip) = match &params.ip_allocation {
             MulticastIpAllocation::Explicit { ip } => {
                 let pool = self
@@ -645,8 +652,10 @@ impl DataStore {
         let name = data.name.to_string();
         let explicit_ip = data.explicit_address.is_some();
 
-        NextExternalMulticastGroup::new(data).get_result_async(conn).await.map_err(|e| {
-            match e {
+        NextExternalMulticastGroup::new(data)
+            .get_result_async(conn)
+            .await
+            .map_err(|e| match e {
                 NotFound => {
                     if explicit_ip {
                         external::Error::invalid_request(
@@ -672,8 +681,7 @@ impl DataStore {
                 _ => {
                     crate::db::queries::external_multicast_group::from_diesel(e)
                 }
-            }
-        })
+            })
     }
 
     /// Deallocate an external multicast group address for IP pool cleanup.
@@ -739,13 +747,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         external_group: MulticastGroup,
-        multicast_ip: IpNetwork,
+        underlay_ip: dpd_types::mcast::UnderlayMulticastIpv6,
     ) -> Result<EnsureUnderlayResult, external::Error> {
         use nexus_db_schema::schema::multicast_group::dsl as external_dsl;
         use nexus_db_schema::schema::underlay_multicast_group::dsl as underlay_dsl;
 
         let external_group_id = external_group.id();
         let tag = external_group.tag;
+        let multicast_ip = IpNetwork::from(IpAddr::V6(underlay_ip.ip()));
 
         // Try to create new underlay multicast group
         let result =
@@ -768,7 +777,7 @@ impl DataStore {
                         opctx.log,
                         "Created new underlay multicast group";
                         "group_id" => %created_group.id,
-                        "multicast_ip" => %multicast_ip
+                        "multicast_ip" => %underlay_ip
                     );
                     EnsureUnderlayResult::Created(created_group)
                 }
@@ -790,14 +799,14 @@ impl DataStore {
                         info!(
                             opctx.log,
                             "Underlay multicast group exists (idempotent)";
-                            "multicast_ip" => %multicast_ip,
+                            "multicast_ip" => %underlay_ip,
                         );
                         EnsureUnderlayResult::Existing(existing)
                     } else {
                         // Collision means different external group
                         info!(
                             opctx.log,
-                            "Underlay IP {multicast_ip} collision";
+                            "Underlay IP {underlay_ip} collision";
                             "our_tag" => ?tag,
                             "existing_tag" => ?existing.tag,
                         );
@@ -809,7 +818,7 @@ impl DataStore {
                         opctx.log,
                         "Failed to create underlay multicast group";
                         "error" => ?e,
-                        "multicast_ip" => %multicast_ip,
+                        "multicast_ip" => %underlay_ip,
                         "tag" => ?tag
                     );
                     return Err(public_error_from_diesel(
@@ -920,11 +929,11 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
-    use omicron_common::address::{IpRange, Ipv4Range};
+    use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
@@ -1573,6 +1582,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_multicast_group_create_and_fetch() {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
         let logctx =
             dev::test_setup_log("test_multicast_group_create_and_fetch");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -1679,6 +1690,44 @@ mod tests {
             }
             other => panic!("Expected ObjectNotFound, got: {other:?}"),
         }
+
+        assert!(group.dpd_multicast_ip().is_ok());
+
+        let rejected: IpNetwork = "232.0.0.0".parse().unwrap();
+        let conn = datastore
+            .pool_connection_authorized(opctx)
+            .await
+            .expect("Should get database connection");
+        diesel::update(dsl::multicast_group.filter(dsl::id.eq(group.id())))
+            .set(dsl::multicast_ip.eq(rejected))
+            .execute_async(&*conn)
+            .await
+            .expect("Should store a dpd-rejected address");
+        drop(conn);
+
+        let fetched = datastore
+            .multicast_group_fetch(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .expect("fetch should decode a dpd-rejected address");
+        assert_eq!(fetched.multicast_ip, rejected);
+        assert!(fetched.dpd_multicast_ip().is_err());
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: std::num::NonZeroU32::new(10).unwrap(),
+        };
+        let listed = datastore
+            .multicast_groups_list(
+                opctx,
+                &external::http_pagination::PaginatedBy::Id(pagparams),
+            )
+            .await
+            .expect("list should decode a dpd-rejected address");
+        assert!(listed.iter().any(|g| g.id() == group.id()));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2529,7 +2578,8 @@ mod tests {
         );
 
         // Ensure underlay for first group with specific IP
-        let underlay_ip: IpNetwork = "ff04::dead:beef".parse().unwrap();
+        let underlay_ip: dpd_types::mcast::UnderlayMulticastIpv6 =
+            "ff04::dead:beef".parse().unwrap();
         let res1 = datastore
             .ensure_underlay_multicast_group(
                 &opctx,
@@ -2572,6 +2622,91 @@ mod tests {
             matches!(res3, EnsureUnderlayResult::Existing(_)),
             "Re-ensure same group should return Existing, got {res3:?}"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_tag_fits_uncompressed_ipv6() {
+        let logctx = dev::test_setup_log(
+            "test_multicast_group_tag_fits_uncompressed_ipv6",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let pool_identity = IdentityMetadataCreateParams {
+            name: "long-tag-pool".parse().unwrap(),
+            description: "Pool for the longest tag".to_string(),
+        };
+        let ip_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V6,
+                    IpPoolAssignment::Silos,
+                ),
+            )
+            .await
+            .expect("Should create IPv6 multicast IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            ip_pool.id(),
+            external::LookupType::ById(ip_pool.id()),
+        );
+        // This IP address's canonical form (RFC 5952) is the full 39
+        // characters, without leading zeros or a `::` to shorten it. The tag
+        // is 76 characters: UUID (36) + ':' (1) + IPv6 address (39).
+        let group_ip: Ipv6Addr =
+            "ff0e:1234:5678:9abc:def0:1234:5678:9abc".parse().unwrap();
+        let range = IpRange::V6(Ipv6Range::new(group_ip, group_ip).unwrap());
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
+            .await
+            .expect("Should add multicast range");
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IncompleteIpPoolResource {
+            ip_pool_id: ip_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id.into_untyped_uuid(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Should link pool to silo");
+
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "long-tag-group".parse().unwrap(),
+                description: "Group with the longest tag".to_string(),
+            },
+            multicast_ip: Some(IpAddr::V6(group_ip)),
+            has_sources: false,
+            ip_version: None,
+        };
+        let group = datastore
+            .multicast_group_create(&opctx, &params)
+            .await
+            .expect("Should create group with an uncompressed IPv6 address");
+
+        let expected_tag = format!("{}:{group_ip}", group.id());
+        assert_eq!(expected_tag.len(), 76);
+        assert_eq!(group.tag.as_deref(), Some(expected_tag.as_str()));
+
+        let underlay_ip: dpd_types::mcast::UnderlayMulticastIpv6 =
+            "ff04::dead:beef".parse().unwrap();
+        let res = datastore
+            .ensure_underlay_multicast_group(&opctx, group, underlay_ip)
+            .await
+            .expect("Should create underlay group");
+        let EnsureUnderlayResult::Created(underlay) = res else {
+            panic!("expected a new underlay group, got {res:?}");
+        };
+        assert_eq!(underlay.tag.as_deref(), Some(expected_tag.as_str()));
 
         db.terminate().await;
         logctx.cleanup_successful();

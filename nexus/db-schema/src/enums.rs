@@ -89,6 +89,7 @@ define_enums! {
     IpVersionEnum => "ip_version",
     MigrationStateEnum => "migration_state",
     MulticastGroupStateEnum => "multicast_group_state",
+    MulticastGroupMemberParentKindEnum => "multicast_group_member_parent_kind",
     MulticastGroupMemberStateEnum => "multicast_group_member_state",
     NetworkInterfaceKindEnum => "network_interface_kind",
     OximeterReadModeEnum => "oximeter_read_mode",

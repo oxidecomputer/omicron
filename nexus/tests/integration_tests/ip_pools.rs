@@ -1181,14 +1181,18 @@ async fn test_ip_pool_multicast_rejects_reserved_ranges(
         )
         .unwrap(),
     );
-    let error = object_create_error(
+    let err = object_create_error(
         client,
         add_url,
         &link_local_range,
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert!(error.message.contains("link-local multicast"));
+    assert!(
+        err.message.contains("link-local IPv4 multicast"),
+        "Received: {}",
+        err.message
+    );
 
     // IPv4 GLOP multicast (233.0.0.0/8) is allowed (customer may have use case)
     let glop_range = IpRange::V4(
@@ -1221,7 +1225,6 @@ async fn test_ip_pool_multicast_rejects_reserved_ranges(
     object_create::<_, IpPoolRange>(client, add_url, &valid_asm_range).await;
 
     // Ranges that touch reserved boundaries should be rejected
-    // Range starting in valid space but ending in link-local
     let boundary_range_low = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(224, 0, 0, 0),
@@ -1229,14 +1232,18 @@ async fn test_ip_pool_multicast_rejects_reserved_ranges(
         )
         .unwrap(),
     );
-    let error = object_create_error(
+    let err = object_create_error(
         client,
         add_url,
         &boundary_range_low,
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert!(error.message.contains("link-local multicast"));
+    assert!(
+        err.message.contains("Address 224.0.0.0 is reserved"),
+        "Received: {}",
+        err.message
+    );
 }
 
 #[nexus_test]

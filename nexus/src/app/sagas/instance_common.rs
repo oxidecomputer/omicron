@@ -10,6 +10,7 @@ use super::NexusActionContext;
 use super::sled_out_of_service_gone_check;
 use crate::Nexus;
 use crate::app::instance_network::InstanceNetworkFilters;
+use crate::app::instance_network::to_dpd_vni;
 use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
@@ -382,7 +383,7 @@ pub(super) async fn send_subnet_attachment_to_dpd(
             a: primary_nic.mac.into_array(),
         },
         internal_ip: sled.ip.into(),
-        vni: dpd_client::types::Vni(primary_nic.vni.into()),
+        vni: to_dpd_vni(primary_nic.vni),
     };
     osagactx
         .nexus()

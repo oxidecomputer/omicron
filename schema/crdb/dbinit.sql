@@ -9281,6 +9281,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_state AS ENUM (
     'left'
 );
 
+-- Kind of parent referenced by a multicast group member's parent_id
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_parent_kind AS ENUM (
+    /* A guest instance. */
+    'instance',
+    /* A probe (network connectivity diagnostic). */
+    'probe'
+);
+
 /*
  * External multicast groups (customer-facing, allocated from IP pools)
  * Following the bifurcated design from RFD 488
@@ -9307,7 +9315,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     underlay_group_id UUID,
 
     /* DPD tag to couple external/underlay state for this group */
-    tag STRING(63),
+    tag STRING(80),
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
@@ -9321,12 +9329,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
 
     /* Constraints */
-    -- External groups: IPv4 multicast or non-admin-local IPv6
-    -- ff04::/16 (admin-local) is reserved for underlay multicast groups
+    -- Match Dendrite's ff04::/64 underlay reservation and external exclusion.
+    -- RFC 7346 section 2 defines admin-local scope 4, while the narrower /64 is
+    -- an Oxide policy.
     CONSTRAINT external_multicast_ip_valid CHECK (
         (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
         (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
-         NOT multicast_ip << 'ff04::/16')
+         NOT multicast_ip << 'ff04::/64')
     ),
 
     -- Reserved range validation for IPv4 (only link-local is blocked)
@@ -9360,16 +9369,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     multicast_ip INET NOT NULL,
 
     /* DPD tag to couple external/underlay state for this group */
-    tag STRING(63),
+    tag STRING(80),
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
     /* Constraints */
-    -- Underlay groups: admin-local scoped IPv6 only (ff04::/16)
+    -- Match Dendrite's ff04::/64 underlay allocation.
     CONSTRAINT underlay_ipv6_admin_scoped CHECK (
-        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/16'
+        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/64'
     )
 );
 
@@ -9408,7 +9417,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* Empty array means any source is allowed (ASM) */
     /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
     /* The group's source_ips in API views is the union of all active members */
-    source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[]
+    source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[],
+
+    /* Discriminator for parent_id (instance or probe) */
+    parent_kind omicron.public.multicast_group_member_parent_kind NOT NULL
 );
 
 /* External Multicast Group Indexes */
@@ -9559,7 +9571,8 @@ CREATE INDEX IF NOT EXISTS multicast_member_by_parent_and_group ON omicron.publi
     external_group_id
 ) WHERE time_deleted IS NULL;
 
--- Business logic constraint: one instance per group (also serves queries)
+-- Parent UUIDs are expected to be unique across resource kinds.
+-- Only one non-deleted membership is allowed per group and parent UUID.
 -- Supports: SELECT ... WHERE external_group_id = ? AND parent_id = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_unique_parent_per_group ON omicron.public.multicast_group_member (
     external_group_id,
@@ -9991,7 +10004,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '321.0.0', NULL)
+    (TRUE, NOW(), NOW(), '324.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

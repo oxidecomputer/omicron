@@ -5,6 +5,7 @@
 //! Routines that manage instance-related networking state.
 
 use crate::app::switch_port;
+use dpd_types::network;
 use nexus_background_task_interface::BackgroundTasks;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::ExternalIp;
@@ -28,6 +29,17 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use super::Nexus;
+
+const _: () = assert!(
+    omicron_common::api::external::Vni::MAX_VNI == network::Vni::MAX_VNI
+);
+
+pub(crate) fn to_dpd_vni(
+    vni: omicron_common::api::external::Vni,
+) -> network::Vni {
+    network::Vni::try_from(vni.as_u32())
+        .expect("omicron and dpd VNIs share the same 24-bit bound")
+}
 
 /// Filter external IP addresses when modifying instance networking state.
 #[derive(Clone, Copy, Debug)]
@@ -496,7 +508,7 @@ pub(crate) async fn instance_ensure_dpd_config(
                     a: network_interface.mac.into_array(),
                 },
                 internal_ip: *sled_ip_address.ip(),
-                vni: dpd_client::types::Vni(network_interface.vni.into()),
+                vni: to_dpd_vni(network_interface.vni),
             };
             let _ = instance_send_attached_subnets_to_dendrite(
                 datastore,
