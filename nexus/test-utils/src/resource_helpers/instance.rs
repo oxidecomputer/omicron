@@ -109,16 +109,32 @@ impl InstanceCreateBuilder {
     }
 }
 
-/// Creates an instance with an IPv4 NIC, no disks, and other settings at
-/// defaults that most tests won't be concerned about.
+/// Creates an instance with all the settings set to "reasonable defaults". This
+/// is mostly useful when a test needs an instance to exist for a test, but is
+/// not opinionated about the properties of that specific instance.
 ///
-/// Wrapper around [`create_instance`].
+/// The one instance setting which is well-defined by this helper is that the
+/// instance is created with `start: true`.
 pub async fn create_instance(
     client: &ClientTestContext,
     project_name: &str,
     instance_name: &str,
 ) -> Instance {
-    let builder = InstanceCreateBuilder::new(instance_name);
+    let builder = InstanceCreateBuilder::new(instance_name).with_start(true);
+
+    create_instance_from_body(client, project_name, builder.finish()).await
+}
+
+/// The same as [`create_instance()`], but with `start: false`.
+///
+/// This may be preferable when a test involves post-creation modification to an
+/// instance, which would otherwise have to stop an instance to operate on it.
+pub async fn create_instance_stopped(
+    client: &ClientTestContext,
+    project_name: &str,
+    instance_name: &str,
+) -> Instance {
+    let builder = InstanceCreateBuilder::new(instance_name).with_start(false);
 
     create_instance_from_body(client, project_name, builder.finish()).await
 }
@@ -155,8 +171,9 @@ pub async fn create_instance_with(
 
 /// Creates an instance with provided `InstanceCreate` payload.
 ///
-/// See also [`InstanceCreateBuilder`] which can help construct test instance
-/// settings.
+/// Callers are expected to use [`InstanceCreateBuilder`] to specify what
+/// properties of an instance are relevant to their tests, and leave unrelated
+/// properties up to the default test instance settings.
 pub async fn create_instance_from_body(
     client: &ClientTestContext,
     project_name: &str,
@@ -170,7 +187,7 @@ pub async fn create_instance_from_body(
 /// Creates an instance, asserting a status code and returning the error.
 ///
 /// Note that this accepts any serializable body, which allows users to create
-/// invalid inputs to test our parameter validation.
+
 pub async fn create_instance_with_error<T>(
     client: &ClientTestContext,
     project_name: &str,

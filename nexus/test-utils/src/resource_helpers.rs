@@ -98,7 +98,7 @@ use uuid::Uuid;
 mod instance;
 pub use instance::{
     InstanceCreateBuilder, create_instance, create_instance_from_body,
-    create_instance_with, create_instance_with_error,
+    create_instance_stopped, create_instance_with, create_instance_with_error,
 };
 
 pub async fn objects_list_page_authz<ItemType>(
