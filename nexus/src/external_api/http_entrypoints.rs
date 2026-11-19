@@ -9647,13 +9647,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn wicket_ssh_auth_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<wicket_ssh_auth::WicketSshAuthStatus>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let wicket_ssh_auth = nexus.wicket_ssh_auth_status(&opctx).await?;
+            Ok(HttpResponseOk(wicket_ssh_auth))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn wicket_ssh_auth_view_latest(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<wicket_ssh_auth::WicketSshAuth>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
@@ -9679,7 +9698,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 

@@ -595,6 +595,19 @@ impl super::Nexus {
             .map_err(HttpError::from)
     }
 
+    /// Get the currently-loaded blueprint.
+    ///
+    /// This is a cached value, and may be behind the current target blueprint.
+    pub(crate) fn blueprint_current_loaded(
+        &self,
+    ) -> Result<LoadedTargetBlueprint, Error> {
+        self.update_status
+            .latest_blueprint
+            .borrow()
+            .clone()
+            .ok_or_else(|| Error::unavail("Target blueprint not yet loaded"))
+    }
+
     /// Get external update status with aggregated component counts
     pub async fn update_status_external(
         &self,
@@ -636,17 +649,7 @@ impl super::Nexus {
         let components_by_release_version =
             component_version_counts(&internal_status).await?;
 
-        let blueprint_target = self
-            .update_status
-            .latest_blueprint
-            .borrow()
-            .clone() // drop read lock held by outstanding borrow
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "Tried to get update status before \
-                     target blueprint is loaded",
-                )
-            })?;
+        let blueprint_target = self.blueprint_current_loaded()?;
 
         let time_last_step_planned = blueprint_target.target.time_made_target;
 

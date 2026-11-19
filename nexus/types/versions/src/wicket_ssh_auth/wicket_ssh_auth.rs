@@ -15,7 +15,11 @@ use serde::de::Error;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
 use ssh_key::AuthorizedKeys;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use uuid::Uuid;
+
+pub use sled_agent_types_versions::v65::inventory::WicketSshAuthStatus as WicketSshAuthSwitchZoneStatus;
 
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
@@ -247,6 +251,34 @@ impl TryFrom<String> for WicketSshAuthorizedKey {
 
         real_impl(value).map_err(|e| InlineErrorChain::new(&*e).to_string())
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct WicketSshAuthStatus {
+    pub current_generation: WicketSshAuthGeneration,
+    pub status_time_collected: WicketSshAuthStatusTimeCollected,
+    pub sleds: BTreeMap<Uuid, WicketSshAuthStatusSled>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct WicketSshAuthStatusTimeCollected {
+    pub started: DateTime<Utc>,
+    pub done: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct WicketSshAuthStatusSled {
+    pub configured_generation: WicketSshAuthGeneration,
+    pub latest: WicketSshAuthStatusSledLatest,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub enum WicketSshAuthStatusSledLatest {
+    Unknown,
+    Known {
+        persisted_generation: Option<WicketSshAuthGeneration>,
+        switch_zone_status: WicketSshAuthSwitchZoneStatus,
+    },
 }
 
 #[cfg(test)]
