@@ -635,9 +635,8 @@ impl fmt::Display for DisplayCase<'_> {
 /// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
 ///
 /// - column 1 is `+` if the case was opened in the current sitrep, `*` if it
-///   was opened in an earlier sitrep and data was
-///   [added](Case::additions_in_sitrep) in the current sitrep, and blank
-///   otherwise;
+///   was opened in an earlier sitrep and data was added in the current sitrep,
+///   and blank otherwise,
 /// - column 2 is `-` if the case was closed in this sitrep, and blank
 ///   otherwise. If a case opened in this sitrep was closed in some earlier
 ///   sitrep, the record is inconsistent (how could the case close before it
