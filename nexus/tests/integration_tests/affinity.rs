@@ -7,12 +7,15 @@
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
@@ -22,6 +25,7 @@ use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::affinity::AffinityGroup;
@@ -29,11 +33,15 @@ use nexus_types::external_api::affinity::AffinityGroupMember;
 use nexus_types::external_api::affinity::AntiAffinityGroup;
 use nexus_types::external_api::affinity::AntiAffinityGroupMember;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::policy::ProjectRole;
+use nexus_types::external_api::silo::Silo;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
+use nexus_types::identity::Resource;
 use nexus_types_versions::latest;
 use omicron_common::api::external;
 use omicron_common::api::external::ObjectIdentity;
+use omicron_uuid_kinds::SiloUserUuid;
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
@@ -1035,5 +1043,130 @@ async fn test_group_member_must_share_project<T: AffinityGroupish>(
 
     // Adding by ID still works when both objects share a project.
     no_project_api.group_member_add(&group_id, &local_instance_id).await;
+    assert_eq!(group_project_api.group_members_list(GROUP_NAME).await.len(), 1);
+}
+
+#[nexus_test]
+async fn test_affinity_group_member_add_requires_instance_modify(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+    test_group_member_add_requires_instance_modify::<AffinityType>(
+        external_client,
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_anti_affinity_group_member_add_requires_instance_modify(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+    test_group_member_add_requires_instance_modify::<AntiAffinityType>(
+        external_client,
+    )
+    .await;
+}
+
+async fn group_member_add_as(
+    client: &ClientTestContext,
+    user: SiloUserUuid,
+    url: &str,
+    status: StatusCode,
+) {
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, url)
+            .body(Some(&()))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::SiloUser(user))
+    .execute()
+    .await
+    .unwrap_or_else(|err| panic!("Error adding member with {url}: {err}"));
+}
+
+async fn test_group_member_add_requires_instance_modify<T: AffinityGroupish>(
+    client: &ClientTestContext,
+) {
+    const GROUP_PROJECT: &'static str = "group-project";
+    const OTHER_PROJECT: &'static str = "other-project";
+    const GROUP_NAME: &'static str = "group";
+
+    let api = ApiHelper::new(client);
+
+    create_default_ip_pools(&client).await;
+    api.create_project(GROUP_PROJECT).await;
+    api.create_project(OTHER_PROJECT).await;
+
+    let group_project_api = api.use_project::<T>(GROUP_PROJECT);
+    let other_project_api = api.use_project::<T>(OTHER_PROJECT);
+
+    let group = group_project_api.group_create(GROUP_NAME).await;
+    let group_id = group.identity().id.to_string();
+
+    let local_instance =
+        group_project_api.create_stopped_instance("local-instance").await;
+    let other_instance =
+        other_project_api.create_stopped_instance("other-instance").await;
+
+    // This user can modify the group's project, but can only read the other
+    // project.
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+    let user = create_local_user(
+        client,
+        &silo,
+        &"group-owner".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    grant_iam(
+        client,
+        &format!("/v1/projects/{GROUP_PROJECT}"),
+        ProjectRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    grant_iam(
+        client,
+        &format!("/v1/projects/{OTHER_PROJECT}"),
+        ProjectRole::Viewer,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Reading an instance is not enough to change its group memberships.
+    // (A 403, rather than a 404, shows the user can see the instance.)
+    let url = group_member_instance_url(
+        T::URL_COMPONENT,
+        None,
+        &group_id,
+        &other_instance.identity.id.to_string(),
+    );
+    group_member_add_as(client, user.id, &url, StatusCode::FORBIDDEN).await;
+
+    assert!(group_project_api.group_members_list(GROUP_NAME).await.is_empty());
+    assert!(
+        other_project_api
+            .instance_groups_list("other-instance")
+            .await
+            .is_empty()
+    );
+
+    // The same user can add an instance they are able to modify.
+    let url = group_member_instance_url(
+        T::URL_COMPONENT,
+        None,
+        &group_id,
+        &local_instance.identity.id.to_string(),
+    );
+    group_member_add_as(client, user.id, &url, StatusCode::CREATED).await;
     assert_eq!(group_project_api.group_members_list(GROUP_NAME).await.len(), 1);
 }

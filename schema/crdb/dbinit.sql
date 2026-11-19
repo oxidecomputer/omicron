@@ -6752,6 +6752,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_affinity_group_by_project ON omicron.pu
     time_deleted IS NULL;
 
 -- Describes an instance's membership within an affinity group
+--
+-- The instance and the group must be in the same project. This is enforced
+-- when memberships are created, not by this table.
 CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
@@ -6787,6 +6790,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_anti_affinity_group_by_project ON omicr
     time_deleted IS NULL;
 
 -- Describes an instance's membership within an anti-affinity group
+--
+-- The instance and the group must be in the same project. This is enforced
+-- when memberships are created, not by this table.
 CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
