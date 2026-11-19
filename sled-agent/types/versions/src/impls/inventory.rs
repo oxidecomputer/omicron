@@ -35,7 +35,8 @@ use crate::latest::inventory::{
     SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
     SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
     SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline, WicketSshAuth,
-    ZoneArtifactInventory, ZoneKind, ZoneSnatConfig, ZpoolHealth,
+    WicketSshAuthKind, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
+    ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -1373,6 +1374,26 @@ impl InstanceManagerStatus {
                 OmicronSledUpdateDisposition::Available,
             ),
             num_registered_vmms,
+        }
+    }
+}
+
+impl WicketSshAuthKind {
+    /// Stringify this kind suitably for internal debugging output (e.g.,
+    /// inventory collection and blueprint display).
+    pub fn display(&self) -> String {
+        match self {
+            WicketSshAuthKind::Unauthenticated => "unauthenticated".to_string(),
+            WicketSshAuthKind::PublicKeys {
+                authorized_keys,
+                allow_support_keys,
+            } => {
+                format!(
+                    "authenticated, {} operator keys, support {}allowed",
+                    authorized_keys.len(),
+                    if *allow_support_keys { "" } else { "not " }
+                )
+            }
         }
     }
 }

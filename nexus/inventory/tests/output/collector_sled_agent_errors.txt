@@ -108,7 +108,7 @@ sled agents found:
         remove_mupdate_override: None
         update_disposition: Available
         wicket ssh auth generation: 1 (wicket_ssh_auth)
-        wicket ssh auth: unauthenticated
+        wicket ssh auth           : unauthenticated
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
@@ -119,7 +119,7 @@ sled agents found:
         remove_mupdate_override: None
         update_disposition: Available
         wicket ssh auth generation: 1 (wicket_ssh_auth)
-        wicket ssh auth: unauthenticated
+        wicket ssh auth           : unauthenticated
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter

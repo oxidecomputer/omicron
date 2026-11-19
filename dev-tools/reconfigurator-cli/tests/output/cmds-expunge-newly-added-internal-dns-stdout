@@ -454,7 +454,8 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
-    update disposition:   available (generation 1) (unchanged)
+    update disposition:::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:   1 (unchanged)
 
     measurements:
     ---------------------------
@@ -648,7 +649,8 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3):
-    update disposition:   available (generation 1) (unchanged)
+    update disposition:::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:   1 (unchanged)
 
     measurements:
     ---------------------------
@@ -833,7 +835,8 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3 -> 4):
-    update disposition:   available (generation 1) (unchanged)
+    update disposition:::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:   1 (unchanged)
 
     measurements:
     ---------------------------

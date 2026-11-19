@@ -219,8 +219,8 @@ impl<'a> Planner<'a> {
         // changes to `OmicronSledConfig`s even if we would otherwise avoid
         // making most changes (e.g., if we're waiting for mupdate recovery);
         // the wicket SSH auth setting can safely be applied even if a mupdate
-        // has happened, and our job in this case is soley to broadcast whatever
-        // the latest setting from an operator is to all sleds.
+        // has happened, and our job in this case is solely to broadcast
+        // whatever the latest setting from an operator is to all sleds.
         //
         // If `input` has new sleds that weren't in `builder`'s parent
         // blueprint, this will create empty configs for them.

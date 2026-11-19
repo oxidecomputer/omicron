@@ -1078,7 +1078,6 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::WicketSshAuth;
-    use sled_agent_types::inventory::WicketSshAuthKind;
     use slog::o;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
@@ -1111,23 +1110,11 @@ mod test {
         {
             let WicketSshAuth { generation, kind } = wicket_ssh_auth;
             swriteln!(s, "        wicket ssh auth generation: {generation:?}");
-            match kind {
-                WicketSshAuthKind::Unauthenticated => {
-                    swriteln!(s, "        wicket ssh auth: unauthenticated");
-                }
-                WicketSshAuthKind::PublicKeys {
-                    authorized_keys,
-                    allow_support_keys,
-                } => {
-                    swriteln!(
-                        s,
-                        "        wicket ssh auth: authenticated \
-                                 ({} SSH keys allowed; support {}allowed)",
-                        authorized_keys.len(),
-                        if *allow_support_keys { "" } else { "not " },
-                    );
-                }
-            }
+            swriteln!(
+                s,
+                "        wicket ssh auth           : {}",
+                kind.display()
+            );
         }
         {
             let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;

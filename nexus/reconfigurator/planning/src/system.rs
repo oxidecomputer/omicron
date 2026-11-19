@@ -384,6 +384,14 @@ impl SystemDescription {
         self
     }
 
+    pub fn set_wicket_ssh_auth(
+        &mut self,
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> &mut Self {
+        self.wicket_ssh_auth = wicket_ssh_auth;
+        self
+    }
+
     /// Set the clickhouse policy
     pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
         self.clickhouse_policy = Some(policy);

@@ -22,8 +22,7 @@ use omicron_uuid_kinds::{
 };
 use sled_agent_types::inventory::{
     InstanceManagerStatus, SvcEnabledNotOnlineState, SvcsEnabledNotOnline,
-    SvcsEnabledNotOnlineResult, SvcsError, WicketSshAuth, WicketSshAuthKind,
-    WicketSshAuthStatus,
+    SvcsEnabledNotOnlineResult, SvcsError, WicketSshAuth, WicketSshAuthStatus,
 };
 use sled_agent_types::{
     disk::M2Slot,
@@ -1450,23 +1449,7 @@ fn display_sled_config(
 
     {
         let WicketSshAuth { generation, kind } = wicket_ssh_auth;
-        write!(indented, "wicket SSH auth:")?;
-        match kind {
-            WicketSshAuthKind::Unauthenticated => {
-                write!(indented, " unauthenticated")?;
-            }
-            WicketSshAuthKind::PublicKeys {
-                authorized_keys,
-                allow_support_keys,
-            } => {
-                write!(
-                    indented,
-                    " authenticated ({} SSH keys allowed; support {}allowed)",
-                    authorized_keys.len(),
-                    if *allow_support_keys { "" } else { "not " },
-                )?;
-            }
-        }
+        write!(indented, "wicket SSH auth: {}", kind.display())?;
         writeln!(indented, " (generation {generation})")?;
     }
 

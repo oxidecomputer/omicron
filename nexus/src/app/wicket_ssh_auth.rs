@@ -24,7 +24,14 @@ impl super::Nexus {
         opctx: &OpContext,
         params: WicketSshAuthCreate,
     ) -> CreateResult<WicketSshAuth> {
-        self.datastore().wicket_ssh_auth_insert(opctx, params).await
+        let created =
+            self.datastore().wicket_ssh_auth_insert(opctx, params).await?;
+
+        // The blueprint planner is responsible for broadcasting the new wicket
+        // SSH auth to all sleds; activate it now.
+        self.background_tasks.task_blueprint_planner.activate();
+
+        Ok(created)
     }
 
     pub async fn wicket_ssh_auth_view(

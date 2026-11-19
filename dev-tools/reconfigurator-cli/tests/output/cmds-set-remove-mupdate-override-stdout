@@ -522,6 +522,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (was active, config generation 3):
 -   update disposition::::::::::::::::::   available (generation 1)
+-   wicket SSH auth generation::::::::::   1
 -   would have removed mupdate override:   00000000-0000-0000-0000-000000000000
 
     measurements:
@@ -571,6 +572,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
     update disposition:::::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:::   1 (unchanged)
 +   will remove mupdate override:   (none) -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
@@ -631,6 +633,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active, config generation 3 -> 4):
     update disposition:::::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:::   1 (unchanged)
     will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
     measurements:
@@ -688,6 +691,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled b82ede02-399c-48c6-a1de-411df4fa49a7 (active, config generation 3 -> 4):
     update disposition:::::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:::   1 (unchanged)
 *   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
@@ -735,6 +739,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3 -> 4):
     update disposition:::::::::::   available (generation 1) (unchanged)
+    wicket SSH auth generation:::   1 (unchanged)
 -   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> (none)
 
     measurements:
@@ -784,6 +789,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled 00320471-945d-413c-85e7-03e091a70b3c (active, config generation 2):
 +   update disposition:::::::::::   available (generation 1)
++   wicket SSH auth generation:::   1
 +   will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:

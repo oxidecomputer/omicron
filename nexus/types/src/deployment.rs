@@ -61,7 +61,6 @@ use sled_agent_types::disk::OmicronPhysicalDiskConfig;
 use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::WicketSshAuth;
-use sled_agent_types::inventory::WicketSshAuthKind;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -1612,25 +1611,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             {
                 let WicketSshAuth { generation, kind } = wicket_ssh_auth;
                 rows.push((WICKET_SSH_AUTH_GENERATION, generation.to_string()));
-                rows.push((
-                    WICKET_SSH_ACCESS,
-                    match kind {
-                        WicketSshAuthKind::Unauthenticated => {
-                            "unauthenticated".to_string()
-                        }
-                        WicketSshAuthKind::PublicKeys {
-                            authorized_keys,
-                            allow_support_keys,
-                        } => {
-                            format!(
-                                "authenticated ({} operator keys; \
-                                 support {}allowed",
-                                authorized_keys.len(),
-                                if *allow_support_keys { "" } else { "not " }
-                            )
-                        }
-                    },
-                ));
+                rows.push((WICKET_SSH_ACCESS, kind.display()));
             }
 
             if let Some(id) = remove_mupdate_override {
