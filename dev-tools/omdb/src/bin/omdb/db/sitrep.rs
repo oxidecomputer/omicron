@@ -484,10 +484,10 @@ async fn cmd_db_sitrep_show(
     println!("{CREATED_BY:<WIDTH$} {creator_id}");
     println!("{CREATED_AT:<WIDTH$} {time_created}");
     if comment.is_empty() {
-        println!("    {COMMENT:<WIDTH$} N/A\n");
+        println!("{COMMENT:<WIDTH$} N/A\n");
     } else {
         println!("{COMMENT:<WIDTH$}");
-        println!("{}\n", textwrap::indent(&comment, "      "));
+        println!("{}", textwrap::indent(&comment, "  "));
     }
 
     match maybe_version {
@@ -506,13 +506,13 @@ async fn cmd_db_sitrep_show(
                 Some(v) if v.id == id => {}
                 Some(fm::SitrepVersion { version, id, .. }) => {
                     println!(
-                        "  (i) note: the current sitrep is {id} \
+                        "(i) note: the current sitrep is {id} \
                          (at v{version})",
                     );
                 }
                 None => {
                     eprintln!(
-                        "  /!\\ WEIRD: this sitrep is in the sitrep history, \
+                        "/!\\ WEIRD: this sitrep is in the sitrep history, \
                          but there is no current sitrep. this should not \
                          happen!"
                     );
@@ -534,7 +534,7 @@ async fn cmd_db_sitrep_show(
     match inv_collection {
         Err(err) => {
             eprintln!(
-                "  /!\\ failed to fetch inventory collection details: {err}"
+                "/!\\ failed to fetch inventory collection details: {err}"
             );
         }
         Ok(Some(model::InvCollection { time_started, time_done, .. })) => {
@@ -543,17 +543,15 @@ async fn cmd_db_sitrep_show(
         }
         Ok(None) => {
             println!(
-                "  (i) note: this collection no longer exists (perhaps it has \
+                "(i) note: this collection no longer exists (perhaps it has \
                  been pruned?)"
             )
         }
     }
     println!("{NEXT_INV_MIN_START:<WIDTH$} {next_inv_min_time_started}");
-    println!("");
     println!("rendezvous resource generation numbers:");
     println!("{ALERT_GEN:<WIDTH$} {alert_generation}");
     println!("{SUPPORT_BUNDLE_GEN:<WIDTH$} {support_bundle_generation}");
-    println!("");
     println!("{TOTAL_EREPORTS:<WIDTH$} {}", ereports_by_id.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?

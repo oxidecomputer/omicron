@@ -173,7 +173,7 @@ ID:                          ..........<REDACTED_UUID>...........
 parent sitrep ID:            N/A
 created by:                  ..........<REDACTED_UUID>...........
 created at:                  <REDACTED_TIMESTAMP>
-    comment:                     N/A
+comment:                     N/A
 
 status:                      this is the current sitrep!
   version:                   v1
@@ -184,11 +184,9 @@ inventory collection ID:     ..........<REDACTED_UUID>...........
   started at:                <REDACTED_TIMESTAMP>
   finished at:               <REDACTED_TIMESTAMP>
   next inv must start after: <REDACTED_TIMESTAMP>
-
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
-
 ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
@@ -205,7 +203,7 @@ ID:                          ..........<REDACTED_UUID>...........
 parent sitrep ID:            N/A
 created by:                  ..........<REDACTED_UUID>...........
 created at:                  <REDACTED_TIMESTAMP>
-    comment:                     N/A
+comment:                     N/A
 
 status:                      this is the current sitrep!
   version:                   v1
@@ -216,11 +214,9 @@ inventory collection ID:     ..........<REDACTED_UUID>...........
   started at:                <REDACTED_TIMESTAMP>
   finished at:               <REDACTED_TIMESTAMP>
   next inv must start after: <REDACTED_TIMESTAMP>
-
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
-
 ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
@@ -2760,19 +2756,16 @@ parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
 comment:                    
-      an example sitrep with cases
-
+  an example sitrep with cases
 status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
 inventory collection ID:     00000000-0000-0000-0000-00000000001e
-  (i) note: this collection no longer exists (perhaps it has been pruned?)
+(i) note: this collection no longer exists (perhaps it has been pruned?)
   next inv must start after: <REDACTED_TIMESTAMP>
-
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
-
 ereports in this sitrep:     3
 
 == CASES =======================================================================
@@ -2808,19 +2801,16 @@ parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
 comment:                    
-      an example sitrep with cases
-
+  an example sitrep with cases
 status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
 inventory collection ID:     00000000-0000-0000-0000-00000000001e
-  (i) note: this collection no longer exists (perhaps it has been pruned?)
+(i) note: this collection no longer exists (perhaps it has been pruned?)
   next inv must start after: <REDACTED_TIMESTAMP>
-
 rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
-
 ereports in this sitrep:     3
 
 == CASES =======================================================================
