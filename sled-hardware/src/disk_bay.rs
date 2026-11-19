@@ -471,6 +471,8 @@ pub(crate) fn resolve_bays(
             (IdOrdMap::new(), format!("could not read the disk bays: {error}"))
         }
     };
+    // A bay in the previous view that this poll did not report is treated
+    // as unreadable, so that a disk last seen in that bay is not dropped.
     for previous in previous_bays {
         if !polled.contains_key(&previous.location) {
             polled.insert_overwrite(PolledBay::Unreadable {
