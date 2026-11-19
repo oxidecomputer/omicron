@@ -7,10 +7,12 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
-use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::sitrep_guard::SitrepGuardedInsert;
 use crate::db::sitrep_guard::SitrepGuardedInsertOutcome;
@@ -40,6 +42,7 @@ use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -464,7 +467,10 @@ impl DataStore {
     pub async fn support_bundle_list_assigned_to_nexus(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<
+            '_,
+            (chrono::DateTime<chrono::Utc>, DbTypedUuid<SupportBundleKind>),
+        >,
         nexus_id: OmicronZoneUuid,
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
@@ -472,14 +478,47 @@ impl DataStore {
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::support_bundle, dsl::id, pagparams)
-            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
-            .filter(dsl::state.eq_any(states))
-            .order(dsl::time_created.asc())
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated_multicolumn(
+            dsl::support_bundle,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+        .filter(dsl::state.eq_any(states))
+        .select(SupportBundle::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Lists all support bundles in a particular state, assigned to a
+    /// particular Nexus.
+    pub async fn support_bundle_list_assigned_to_nexus_batched(
+        &self,
+        opctx: &OpContext,
+        nexus_id: OmicronZoneUuid,
+        states: Vec<SupportBundleState>,
+    ) -> ListResultVec<SupportBundle> {
+        let mut bundles = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .support_bundle_list_assigned_to_nexus(
+                    opctx,
+                    &p.current_pagparams(),
+                    nexus_id,
+                    states.clone(),
+                )
+                .await?;
+            paginator = p.found_batch(&batch, &|bundle: &SupportBundle| {
+                (bundle.time_created, bundle.id)
+            });
+            bundles.extend(batch);
+        }
+        Ok(bundles)
     }
 
     /// Marks support bundles as failed if their assigned Nexus or backing
