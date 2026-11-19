@@ -160,6 +160,11 @@ pub(crate) enum BayProblem {
     #[error("topology disk node {node} has no {property}")]
     IncompleteDisk { node: String, property: String },
 
+    /// The bay's `binding/driver` is `nvme`, but it has no `nvme` node.
+    ///
+    /// The topology creates that node only after it opens the controller
+    /// and reads its identity, so this means the device is bound to the
+    /// nvme driver but could not be opened or queried.
     #[error("the topology found an NVMe device but did not enumerate it")]
     NvmeNotEnumerated,
 
