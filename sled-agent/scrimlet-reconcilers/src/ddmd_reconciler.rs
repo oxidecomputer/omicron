@@ -14,8 +14,8 @@ use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ddmd::DdmdReconcilerStatus;
 use ddm_admin_client::Client;
+use ddm_api_types::admin::RackPrefix;
 use ddm_api_types::external_peers::ExternalPeers;
-use ddm_api_types::net::RackPrefixInfo;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::ParseError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -24,7 +24,6 @@ use slog::error;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -97,11 +96,11 @@ impl Reconciler for DdmdReconciler {
 
         let rack_prefix =
             system_networking_config.rack_network_config.rack_subnet;
-        let rack_prefixes = HashMap::from([(
-            rack_prefix.to_string(),
-            RackPrefixInfo { multi_rack_join_addr: None },
-        )]);
-        match self.client.advertise_rack_prefixes(&rack_prefixes).await {
+        match self
+            .client
+            .set_rack_prefix(&RackPrefix { prefix: rack_prefix })
+            .await
+        {
             Ok(_) => {
                 info!(
                     log, "advertised rack prefix to ddmd";

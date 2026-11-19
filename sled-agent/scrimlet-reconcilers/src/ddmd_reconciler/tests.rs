@@ -77,7 +77,7 @@ async fn posts_external_peers_and_rack_prefix() {
 
     let server = MockServer::start();
     let external_peers_mock = server.mock(|when, then| {
-        when.method(httpmock::Method::PUT).path("/external_peers").json_body(
+        when.method(httpmock::Method::PUT).path("/external-peers").json_body(
             serde_json::json!({
                 "address_objects": ["tfportqsfp0_0/ll"],
             }),
@@ -85,15 +85,9 @@ async fn posts_external_peers_and_rack_prefix() {
         then.status(204);
     });
     let rack_prefixes_mock = server.mock(|when, then| {
-        when.method(httpmock::Method::PUT)
-            .path("/originated_rack_prefixes")
-            .json_body(
-                serde_json::to_value(HashMap::from([(
-                    rack_subnet.to_string(),
-                    RackPrefixInfo { multi_rack_join_addr: None },
-                )]))
-                .unwrap(),
-            );
+        when.method(httpmock::Method::PUT).path("/rack-prefix").json_body(
+            serde_json::to_value(RackPrefix { prefix: rack_subnet }).unwrap(),
+        );
         then.status(204);
     });
 
@@ -120,7 +114,7 @@ async fn server_error_reports_failed() {
     let logctx = dev::test_setup_log("server_error_reports_failed");
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(httpmock::Method::PUT).path("/external_peers");
+        when.method(httpmock::Method::PUT).path("/external-peers");
         then.status(500).header("content-type", "application/json").body(
             serde_json::json!({
                 "request_id": "test",
@@ -151,11 +145,11 @@ async fn rack_prefix_error_reports_failed() {
     let logctx = dev::test_setup_log("rack_prefix_error_reports_failed");
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(httpmock::Method::PUT).path("/external_peers");
+        when.method(httpmock::Method::PUT).path("/external-peers");
         then.status(204);
     });
     server.mock(|when, then| {
-        when.method(httpmock::Method::PUT).path("/originated_rack_prefixes");
+        when.method(httpmock::Method::PUT).path("/rack-prefix");
         then.status(500).header("content-type", "application/json").body(
             serde_json::json!({
                 "request_id": "test",
