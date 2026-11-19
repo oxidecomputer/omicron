@@ -973,49 +973,7 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-<<<<<<< HEAD
     task explicitly disabled by config!
-=======
-    batch size:                                                                1000
-    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_alert_request rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_case rows deleted:                                                0
-      batches:                                                                    1
-    orphaned fm_case_problem rows deleted:                                        0
-      batches:                                                                    1
-    orphaned fm_ereport_in_case rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_fact_certificate rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_fact_physical_disk rows deleted:                                  0
-      batches:                                                                    1
-    orphaned fm_fact_saga rows deleted:                                           0
-      batches:                                                                    1
-    orphaned fm_fact_smf_service rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_problem_alert rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_problem_request rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_problem_revision_request rows deleted:                            0
-      batches:                                                                    1
-    orphaned fm_problem_support_bundle rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_support_bundle_request rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
-      batches:                                                                    1
->>>>>>> 5e32ad9af1 (expectorize)
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -1760,49 +1718,7 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-<<<<<<< HEAD
     task explicitly disabled by config!
-=======
-    batch size:                                                                1000
-    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_alert_request rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_case rows deleted:                                                0
-      batches:                                                                    1
-    orphaned fm_case_problem rows deleted:                                        0
-      batches:                                                                    1
-    orphaned fm_ereport_in_case rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_fact_certificate rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_fact_physical_disk rows deleted:                                  0
-      batches:                                                                    1
-    orphaned fm_fact_saga rows deleted:                                           0
-      batches:                                                                    1
-    orphaned fm_fact_smf_service rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_problem_alert rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_problem_request rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_problem_revision_request rows deleted:                            0
-      batches:                                                                    1
-    orphaned fm_problem_support_bundle rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_support_bundle_request rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
-      batches:                                                                    1
->>>>>>> 5e32ad9af1 (expectorize)
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
