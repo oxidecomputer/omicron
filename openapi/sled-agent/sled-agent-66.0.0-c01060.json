@@ -7306,6 +7306,7 @@
         ]
       },
       "MultirackJoinServiceStatus": {
+        "description": "The status of a the multirack join service for a new rack that's going to be added to a regional cluster.",
         "type": "object",
         "properties": {
           "rack_id": {
