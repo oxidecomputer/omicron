@@ -313,8 +313,9 @@ impl super::Nexus {
     ) -> Result<affinity::AffinityGroupMember, Error> {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
+        // Membership constrains where the instance can be placed.
         let (.., authz_instance, instance) =
-            instance_lookup.fetch_for(authz::Action::Read).await?;
+            instance_lookup.fetch_for(authz::Action::Modify).await?;
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
@@ -343,8 +344,9 @@ impl super::Nexus {
         let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
             .lookup_for(authz::Action::Modify)
             .await?;
+        // Membership constrains where the instance can be placed.
         let (.., authz_instance, instance) =
-            instance_lookup.fetch_for(authz::Action::Read).await?;
+            instance_lookup.fetch_for(authz::Action::Modify).await?;
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
@@ -373,7 +375,7 @@ impl super::Nexus {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
@@ -395,7 +397,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
         let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
