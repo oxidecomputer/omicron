@@ -116,7 +116,6 @@ use nexus_db_queries::db::datastore::multicast::ops::member_reconcile::{
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::instance::InstanceState;
 use nexus_types::identity::{Asset, Resource};
-use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledKind,
     SledUuid,
@@ -2165,10 +2164,9 @@ impl MulticastGroupReconciler {
         // List all Active groups
         let active_groups = self
             .datastore
-            .multicast_groups_list_by_state(
+            .multicast_groups_list_by_states_batched(
                 opctx,
-                MulticastGroupState::Active,
-                &DataPageParams::max_page(),
+                &[MulticastGroupState::Active],
             )
             .await
             .context("failed to list active groups")?;
@@ -2217,10 +2215,9 @@ impl MulticastGroupReconciler {
         group_id: Uuid,
     ) -> Result<Vec<MulticastGroupMember>, anyhow::Error> {
         self.datastore
-            .multicast_group_members_list_by_id(
+            .multicast_group_members_list_by_id_batched(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group_id),
-                &DataPageParams::max_page(),
             )
             .await
             .context("failed to list group members")
@@ -2629,10 +2626,9 @@ impl MulticastGroupReconciler {
         opctx: &OpContext,
     ) -> Result<Vec<MulticastGroup>, anyhow::Error> {
         self.datastore
-            .multicast_groups_list_by_states(
+            .multicast_groups_list_by_states_batched(
                 opctx,
                 Self::RECONCILABLE_STATES,
-                &DataPageParams::max_page(),
             )
             .await
             .context(

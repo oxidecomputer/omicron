@@ -70,7 +70,7 @@ while let Some(p) = paginator.next() {
 
 == Mistakes while paginating [[mistakes]]
 
-For pagination to work correctly, there are two invariants.
+For pagination to work correctly, there are two invariants that callers must uphold.
 
 **Key invariant:** all of the following must consistently use the same _unique, immutable key_ in the same direction:
 
@@ -95,7 +95,12 @@ The rest of this section describes some mistakes we've seen in practice.
 
 **How to fix this:** **Always** page on a key that is unique within the filtered rows. Usually, this is the table's primary key minus any columns filtered out by equality filters. For example, when reading data from a table with primary key `(blueprint_id, sled_id, image_artifact_sha256)`, filtered on `blueprint_id = X`, always page on `(sled_id, image_artifact_sha256)`.
 
-If the natural sort column is not unique (for example, `time_created`), add a unique column such as `id` as a tie-breaker.
+Uniqueness must always be enforced by the database through a primary key or a unique index. An application-level invariant is insufficient to meet this requirement: if it is ever violated, pagination will silently drop rows.
+
+Look for these cases in particular:
+
+* **Scoped and partial unique indexes:** Some tables have a unique index like `(project_id, name) WHERE time_deleted IS NULL`. For such tables, `name` is only unique if the query filters on `project_id` and `time_deleted IS NULL`.
+* **Joins:** If the query performs a one-to-many join with many rows per paging key, the paging key is no longer unique in the result. Either page on the joined table's key as well, or make sure the join is not one-to-many.
 
 **Example bug:** The `bp_single_measurements` table has primary key `(blueprint_id, sled_id, image_artifact_sha256)`. Since all sleds get the same set of measurements, the `image_artifact_sha256` values are shared across sleds. This code is buggy:
 
@@ -279,18 +284,25 @@ while let Some(p) = paginator.next() {
 }
 ----
 
-=== Filtering or re-sorting rows before `found_batch` [[filtering-before-found-batch]]
+=== Passing the wrong rows to `found_batch` [[wrong-rows-to-found-batch]]
 
-**What this is:** After executing the query but before passing in the results to `found_batch`, some filtering or re-sorting is applied to the result.
+**What this is:** After executing the query, the wrong set of rows is passed into `found_batch`. This can show up in several different ways:
+
+* Filtering out some rows before `found_batch`.
+* Re-sorting rows before `found_batch`.
+* Passing in the accumulated results rather than the current batch to `found_batch`.
 
 **Why this is bad:** The pagination infrastructure decides whether to terminate a loop based on whether the number of rows provided to `found_batch` is less than the page size.
 
 * If any rows are filtered out before `found_batch`, the pagination infrastructure will terminate the loop prematurely.
-* Similarly, if the results are re-sorted before `found_batch`, the marker might not be the correct place to resume pagination from.
+* If the results are re-sorted before `found_batch`, the marker (the physically last element in the result `Vec`) might not be the correct place to resume pagination from.
+* If accumulated results are passed in, the loop will terminate early because the first page will pass in 0 rows.
 
-Both of these violate the row invariant.
+All of these violate the row invariant.
 
 **How to fix this:** Perform filtering and re-sorting after `found_batch`, not before it.
+
+==== Filtering before `found_batch` [[filtering-before-found-batch]]
 
 **Example bug:**
 
@@ -351,6 +363,39 @@ while let Some(p) = paginator.next() {
 }
 ----
 
+==== Passing in accumulated rows to `found_batch` [[accumulated-rows-to-found-batch]]
+
+**Example bug:**
+
+[source,rust]
+----
+let mut blueprint_ids = Vec::new();
+while let Some(p) = paginator.next() {
+    let batch = datastore
+        .blueprints_list(opctx, &p.current_pagparams())
+        .await?;
+    // BUG: `blueprint_ids` is the accumulated set of rows, and is always empty
+    // in the first iteration.
+    paginator = p.found_batch(&blueprint_ids, &|b| b.id.into_untyped_uuid());
+    blueprint_ids.extend(batch);
+}
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+let mut blueprint_ids = Vec::new();
+while let Some(p) = paginator.next() {
+    let batch = datastore
+        .blueprints_list(opctx, &p.current_pagparams())
+        .await?;
+    // Corrected: the current batch is passed into `found_batch`.
+    paginator = p.found_batch(&batch, &|b| b.id.into_untyped_uuid());
+    blueprint_ids.extend(batch);
+}
+----
+
 === Paging on a column that changes concurrently [[mutable-paging-key]]
 
 **What this is:** Paging on a column whose value can change while the scan is running outside of a serializable transaction.
@@ -363,6 +408,8 @@ while let Some(p) = paginator.next() {
 This violates the key invariant.
 
 (Note that rows can be inserted or deleted concurrently, and that is a separate concern that isn't a bug. For example, a new row concurrently added behind a marker is generally missed, and this is usually acceptable. The concern here is with rows being _mutated_ concurrently.)
+
+NOTE: External API endpoints that paginate by `name` are subject to this problem, since a resource renamed in the middle of a scan can cause rows to be skipped or duplicated. We accept this for external APIs since clients can paginate by `id` for a stable scan. Internal code must always paginate on immutable columns.
 
 **How to fix this:** Only paginate on immutable columns. (Another alternative is to use a serializable transaction, but that is quite expensive so we only do this rarely.)
 
@@ -415,11 +462,13 @@ while let Some(p) = paginator.next() {
 
 === Not paging at all [[not-paging]]
 
-**What this is:** A bulk read that loads every matching row in one query, with no `LIMIT` clause. Often justified by the argument that the table is small.
+**What this is:** A bulk read that loads every matching row in one query, with no `LIMIT` clause.
 
-**Why this is bad:** Even if the code is okay at that moment in time, if the table does become large (over time, or due to an application bug), the query's memory use and latency can grow without limit.
+A variant of this is setting a page size of `DataPageParams::max_page()`, which is `u32::MAX`.
 
-**How to fix this:** Use the pagination infrastructure for _all_ bulk reads, using the rules above. The primary key, minus any columns that have equality filters on them, is always suitable as a paging key.
+**Why this is bad:** Even if the number of rows is small and the code is okay at that moment in time, if the table does become large (over time, or due to an application bug), the query's memory use and latency can grow without limit.
+
+**How to fix this:** Use the pagination infrastructure with `SQL_BATCH_SIZE` for _all_ bulk reads, using the rules above. The primary key, minus any columns that have equality filters on them, is always suitable as a paging key.
 
 **Example bug:**
 
@@ -462,6 +511,58 @@ while let Some(p) = paginator.next() {
 }
 ----
 
+=== Treating one page as the complete result [[single-page]]
+
+**What this is:** A query with a `LIMIT` clause (often a manually built `DataPageParams` with `marker: None`) not run in a loop.
+
+**Why this is bad:** If more rows need to be returned than the limit, the query will discard excess rows. The limit is often chosen to match a product limit (e.g., sleds per rack), but such limits might only be enforced on some write paths, and they can change over time (for sleds per rack, this can occur due to multirack).
+
+NOTE: Debugging tools like omdb intentionally read a single page bounded by `--fetch-limit`. That is fine as long as the tool produces a warning if the limit is reached. Within omdb, call `check_limit` on the rows returned by the query (before performing any filtering).
+
+**How to fix this:** Use a `Paginator` loop. If the result really is bounded, fetch `limit + 1` rows and return an error if the database returns that many rows.
+
+**Example bug:**
+
+Here, the query is capped at 10,000 rows. Any code that treats the result as the complete set of ranges (for example, IP pool utilization, which adds up the range sizes) will silently miss any rows past the first 10,000.
+
+[source,rust]
+----
+let ranges = ip_pool_range::table
+    .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
+    .filter(ip_pool_range::time_deleted.is_null())
+    .select((ip_pool_range::first_address, ip_pool_range::last_address))
+    // BUG: rows past the first 10,000 are silently dropped.
+    .limit(10000)
+    .get_results_async::<(IpNetwork, IpNetwork)>(conn)
+    .await?;
+----
+
+**Fixed code:**
+
+[source,rust]
+----
+let mut ranges = Vec::new();
+let mut paginator =
+    Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+while let Some(p) = paginator.next() {
+    // Corrected: page on first_address, which is unique among live ranges.
+    let batch = paginated(
+        ip_pool_range::table,
+        ip_pool_range::first_address,
+        &p.current_pagparams(),
+    )
+    .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
+    .filter(ip_pool_range::time_deleted.is_null())
+    .select((ip_pool_range::first_address, ip_pool_range::last_address))
+    .get_results_async::<(IpNetwork, IpNetwork)>(conn)
+    .await?;
+    paginator = p.found_batch(&batch, &|(first, _last)| *first);
+    ranges.extend(batch);
+}
+----
+
+Alternatively, if the aggregation is decomposable (such as a sum or a count)footnote:[This is sometimes referred to as a _distributive aggregate_. In algebraic terms, the aggregation is a _monoid homomorphism_.], instead of buffering up all the ranges in memory and then computing the desired aggregation in one go, the loop could compute the desired aggregation for each page and then combine the results.
+
 == Testing pagination [[testing]]
 
 Pagination-related bugs only show up once the number of rows returned exceeds the page size. In some cases, particularly when the invariants are delicate, testing pagination can be helpful. A general guide to testing pagination:
@@ -469,6 +570,7 @@ Pagination-related bugs only show up once the number of rows returned exceeds th
 * Split out a helper which receives the page size as a parameter, e.g. `blueprint_read_batched`. Production code should use the default `SQL_BATCH_SIZE`.
 * Insert data that, if paginated incorrectly, would violate the key or row invariants.
 * Read data at small batch sizes (1-3) and ensure that every inserted row is returned exactly once.
+* Include rows that share every column except one of the paging key's columns, so a paging key missing that column is caught.
 
 This approach can detect many kinds of pagination bugs, though not key mutation bugs which require analyzing all writers to those rows.
 

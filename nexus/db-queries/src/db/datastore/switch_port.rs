@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::context::OpContext;
 use crate::db::datastore::UpdatePrecondition;
 use crate::db::datastore::address_lot::{
@@ -15,12 +16,12 @@ use crate::db::model::{
     SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroups,
     SwitchVlanInterfaceConfig, TxEqConfig,
 };
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use diesel::{
-    CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
-    OptionalExtension, PgConnection, PgExpressionMethods, QueryDsl,
-    SelectableHelper,
+    ExpressionMethods, JoinOnDsl, NullableExpressionMethods, OptionalExtension,
+    PgConnection, PgExpressionMethods, QueryDsl, SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
 use iddqd::IdHashItem;
@@ -57,6 +58,7 @@ use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::hash_map;
 use std::net::IpAddr;
@@ -1186,36 +1188,116 @@ impl DataStore {
             switch_port_settings_route_config::dsl as route_config_dsl,
         };
 
-        switch_port_dsl::switch_port
+        // Here, each page runs three queries,:
+        //
+        // 1. A page of switch ports that have settings, via
+        //    `lookup_switch_port_by_port_settings`, paged on `id`.
+        // 2. The subset of that page's `port_settings_id`s that configure
+        //    at least one route, by point lookup on the route config primary
+        //    key.
+        // 3. The same for BGP peer config, via
+        //    `lookup_sps_bgp_peer_config_by_port_settings_id`.
+        //
+        // Ports whose settings don't configure any routes and any BGP peers are
+        // dropped after `found_batch`, so the row invariant in
+        // docs/db-pagination.adoc holds.
+        //
+        // Alternatives considered:
+        //
+        // * The original query: Join the config tables directly, with a LIMIT on
+        //   each half of a UNION:
+        //
+        //       SELECT switch_port.* FROM switch_port
+        //         JOIN switch_port_settings_route_config r
+        //           ON switch_port.port_settings_id = r.port_settings_id
+        //         LIMIT 64
+        //       UNION
+        //       SELECT switch_port.* FROM switch_port
+        //         JOIN switch_port_settings_bgp_peer_config b
+        //           ON switch_port.port_settings_id = b.port_settings_id
+        //         LIMIT 64
+        //
+        //   The join produces one row per route or BGP peer, not per port,
+        //   so the LIMIT applies to total config rows. A port with many
+        //   routes or BGP peers could cause other ports, or a whole switch,
+        //   to be completely dropped.
+        //
+        // * A single paginated query with semi-joins:
+        //
+        //       SELECT * FROM switch_port
+        //       WHERE EXISTS (SELECT 1 FROM switch_port_settings_route_config r
+        //                     WHERE r.port_settings_id =
+        //                           switch_port.port_settings_id)
+        //          OR EXISTS (SELECT 1 FROM switch_port_settings_bgp_peer_config b
+        //                     WHERE b.port_settings_id =
+        //                           switch_port.port_settings_id)
+        //       ORDER BY id LIMIT $1
+        //
+        //   CockroachDB can't turn OR'd EXISTS clauses into lookup joins, so this
+        //   results in a full table scan.
+        //
+        // In practice there is a single page (a rack has at most 64 switch
+        // ports), so this is 3 round trips in total.
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let mut ports = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                switch_port_dsl::switch_port,
+                switch_port_dsl::id,
+                &p.current_pagparams(),
+            )
             .filter(switch_port_dsl::port_settings_id.is_not_null())
-            .inner_join(
-                route_config_dsl::switch_port_settings_route_config
-                    .on(switch_port_dsl::port_settings_id
-                        .eq(route_config_dsl::port_settings_id.nullable())),
-            )
             .select(SwitchPort::as_select())
-        // TODO: #3592 Correctness
-        // In single rack deployments there are only 64 ports. We'll need
-        // pagination in the future, or maybe a way to constrain the query to
-        // a rack?
-            .limit(64)
-            .union(
-                switch_port_dsl::switch_port
-                    .filter(switch_port_dsl::port_settings_id.is_not_null())
-                    .inner_join(
-                        bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
-                            .on(switch_port_dsl::port_settings_id
-                                .eq(bgp_peer_config_dsl::port_settings_id.nullable()),
-                            ),
-                    )
-                    .select(SwitchPort::as_select())
-                    .limit(64),
-            )
-            .load_async::<SwitchPort>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .load_async::<SwitchPort>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            paginator = p.found_batch(&batch, &|port: &SwitchPort| port.id);
+
+            let settings_ids: Vec<DbTypedUuid<SwitchPortSettingsKind>> =
+                batch.iter().filter_map(|port| port.port_settings_id).collect();
+            if settings_ids.is_empty() {
+                continue;
+            }
+
+            let mut uplink_settings_ids: BTreeSet<
+                DbTypedUuid<SwitchPortSettingsKind>,
+            > = route_config_dsl::switch_port_settings_route_config
+                .filter(
+                    route_config_dsl::port_settings_id
+                        .eq_any(settings_ids.clone()),
+                )
+                .select(route_config_dsl::port_settings_id)
+                .distinct()
+                .load_async::<DbTypedUuid<SwitchPortSettingsKind>>(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .collect();
+            uplink_settings_ids.extend(
+                bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
+                    .filter(
+                        bgp_peer_config_dsl::port_settings_id
+                            .eq_any(settings_ids),
+                    )
+                    .select(bgp_peer_config_dsl::port_settings_id)
+                    .distinct()
+                    .load_async::<DbTypedUuid<SwitchPortSettingsKind>>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?,
+            );
+
+            ports.extend(batch.into_iter().filter(|port| {
+                port.port_settings_id
+                    .is_some_and(|id| uplink_settings_ids.contains(&id))
+            }));
+        }
+        Ok(ports)
     }
 }
 

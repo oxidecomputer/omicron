@@ -992,9 +992,9 @@ impl DataStore {
                         dropshot::PaginationOrder::Ascending,
                     );
                     while let Some(p) = paginator.next() {
-                        let batch = paginated(
+                        let batch = paginated_multicolumn(
                             dsl::bp_clickhouse_keeper_zone_id_to_node_id,
-                            dsl::omicron_zone_id,
+                            (dsl::omicron_zone_id, dsl::keeper_id),
                             &p.current_pagparams(),
                         )
                         .filter(
@@ -1008,8 +1008,9 @@ impl DataStore {
                             public_error_from_diesel(e, ErrorHandler::Server)
                         })?;
 
-                        paginator =
-                            p.found_batch(&batch, &|k| k.omicron_zone_id);
+                        paginator = p.found_batch(&batch, &|k| {
+                            (k.omicron_zone_id, k.keeper_id)
+                        });
                         rows.extend(batch);
                     }
                     rows
@@ -1023,9 +1024,9 @@ impl DataStore {
                         dropshot::PaginationOrder::Ascending,
                     );
                     while let Some(p) = paginator.next() {
-                        let batch = paginated(
+                        let batch = paginated_multicolumn(
                             dsl::bp_clickhouse_server_zone_id_to_node_id,
-                            dsl::omicron_zone_id,
+                            (dsl::omicron_zone_id, dsl::server_id),
                             &p.current_pagparams(),
                         )
                         .filter(
@@ -1039,8 +1040,9 @@ impl DataStore {
                             public_error_from_diesel(e, ErrorHandler::Server)
                         })?;
 
-                        paginator =
-                            p.found_batch(&batch, &|s| s.omicron_zone_id);
+                        paginator = p.found_batch(&batch, &|s| {
+                            (s.omicron_zone_id, s.server_id)
+                        });
                         rows.extend(batch);
                     }
                     rows

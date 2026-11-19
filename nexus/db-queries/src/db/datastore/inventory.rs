@@ -3259,13 +3259,15 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
+                // TODO: errors_by_collection is not a UNIQUE INDEX, and idx is
+                // unique per collection only due to an application-level
+                // invariant. This should be a database-level invariant.
                 let batch = paginated(
                     dsl::inv_collection_error,
                     dsl::idx,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
-                .order_by(dsl::idx)
                 .select(InvCollectionError::as_select())
                 .load_async(&*conn)
                 .await

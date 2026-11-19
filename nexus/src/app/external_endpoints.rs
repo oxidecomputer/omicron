@@ -436,11 +436,10 @@ pub(crate) async fn read_all_endpoints(
         Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let batch = datastore
-            .certificate_list_for(
+            .certificate_list_all(
                 opctx,
                 Some(ServiceKind::Nexus),
-                &PaginatedBy::Id(p.current_pagparams()),
-                None,
+                &p.current_pagparams(),
             )
             .await?;
         paginator = p.found_batch(&batch, &|s: &Certificate| s.id());

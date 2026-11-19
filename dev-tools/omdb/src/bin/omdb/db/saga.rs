@@ -33,6 +33,7 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::SagaStateDbFields;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
+use nexus_db_queries::db::pagination::paginated_multicolumn3;
 use owo_colors::OwoColorize;
 use petgraph::Graph;
 use petgraph::graph::NodeIndex;
@@ -761,19 +762,19 @@ async fn cmd_sagas_show(
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::saga_node_event::dsl;
 
-        let batch = paginated(
+        let batch = paginated_multicolumn3(
             dsl::saga_node_event,
-            dsl::event_time,
+            (dsl::event_time, dsl::node_id, dsl::event_type),
             &p.current_pagparams(),
         )
         .filter(dsl::saga_id.eq(to_db_typed_uuid(saga_id)))
-        .order_by(dsl::event_time)
         .select(SagaNodeEvent::as_select())
         .load_async(&*conn)
         .await
         .with_context(|| format!("error fetching saga nodes for {saga_id}"))?;
-        paginator =
-            p.found_batch(&batch, &|node: &SagaNodeEvent| node.event_time);
+        paginator = p.found_batch(&batch, &|node: &SagaNodeEvent| {
+            (node.event_time, node.node_id, node.event_type.clone())
+        });
         nodes.extend(batch);
     }
 

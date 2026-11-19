@@ -251,12 +251,10 @@ impl SupportBundleCollector {
         &self,
         opctx: &OpContext,
     ) -> anyhow::Result<SupportBundleCleanupReport> {
-        let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
-            .support_bundle_list_assigned_to_nexus(
+            .support_bundle_list_assigned_to_nexus_batched(
                 opctx,
-                &pagparams,
                 self.nexus_id,
                 vec![
                     SupportBundleState::Destroying,
@@ -350,7 +348,13 @@ impl SupportBundleCollector {
         &self,
         opctx: &OpContext,
     ) -> anyhow::Result<Option<SupportBundleActivationReport>> {
-        let pagparams = DataPageParams::max_page();
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            // Only the oldest bundle is collected per activation, so one row is
+            // sufficient.
+            limit: std::num::NonZeroU32::MIN,
+        };
         let result = self
             .datastore
             .support_bundle_list_assigned_to_nexus(
@@ -363,14 +367,13 @@ impl SupportBundleCollector {
 
         let bundle = match result {
             Ok(bundles) => {
-                if let Some(bundle) = bundles.get(0) {
+                if let Some(bundle) = bundles.into_iter().next() {
                     info!(
                         &opctx.log,
                         "SupportBundleCollector: Found bundle to collect";
                         "bundle" => %bundle.id,
-                        "bundles_in_queue" => bundles.len()
                     );
-                    bundle.clone()
+                    bundle
                 } else {
                     info!(&opctx.log, "No bundles to collect");
                     return Ok(None);
