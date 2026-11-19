@@ -3211,7 +3211,8 @@ mod tests {
         let client = propolis_client::Client::new(&format!(
             "http://{}",
             srv.local_addr()
-        ));
+        ))
+        .expect("couldn't create propolis-server client");
 
         (srv, client)
     }

@@ -31,6 +31,7 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
+use omicron_common::http_client::internal_http_client;
 use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
@@ -1348,7 +1349,10 @@ impl SledAgent {
                 ))
             })?;
         let addr = srv.local_addr();
-        let client = propolis_client::Client::new(&format!("http://{}", addr));
+        let client = propolis_client::Client::new_with_client(
+            &format!("http://{addr}"),
+            internal_http_client(),
+        );
         *mock_lock = Some((srv, client));
         Ok(addr)
     }
