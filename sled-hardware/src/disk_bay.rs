@@ -219,8 +219,8 @@ pub(crate) enum DescribeError {
     Unreadable { problem: BayProblem },
 
     #[error(
-        "{nvme_instance} has {usable_namespaces} usable namespace(s) but the \
-         hardware topology describes none"
+        "libnvme reports {usable_namespaces} usable namespace(s) on \
+         {nvme_instance}, but the hardware topology describes none"
     )]
     MissingNamespace { nvme_instance: NvmeInstance, usable_namespaces: usize },
 
