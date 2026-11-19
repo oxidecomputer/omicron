@@ -39,6 +39,7 @@ use nexus_types::external_api::physical_disk;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
 use nexus_types::external_api::rack;
+use nexus_types::external_api::service_account;
 use nexus_types::external_api::silo;
 use nexus_types::external_api::sled;
 use nexus_types::external_api::snapshot;
@@ -665,6 +666,58 @@ pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
         name: None,
         description: Some(String::from("an updated description")),
     },
+});
+
+pub static DEMO_SERVICE_ACCOUNT_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-service-account".parse().unwrap());
+pub static DEMO_SERVICE_ACCOUNTS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/service-accounts?{}", *DEMO_PROJECT_SELECTOR)
+});
+pub static DEMO_SERVICE_ACCOUNT_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/service-accounts/{}?{}",
+        *DEMO_SERVICE_ACCOUNT_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_SERVICE_ACCOUNT_CREATE: LazyLock<
+    service_account::ServiceAccountCreate,
+> = LazyLock::new(|| service_account::ServiceAccountCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_SERVICE_ACCOUNT_NAME.clone(),
+        description: String::from(""),
+    },
+});
+pub static DEMO_SERVICE_ACCOUNT_KEY_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-service-account-key".parse().unwrap());
+pub static DEMO_SERVICE_ACCOUNT_KEYS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/service-accounts/{}/keys?{}",
+            *DEMO_SERVICE_ACCOUNT_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_SERVICE_ACCOUNT_KEY_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/service-accounts/{}/keys/{}?{}",
+            *DEMO_SERVICE_ACCOUNT_NAME,
+            *DEMO_SERVICE_ACCOUNT_KEY_NAME,
+            *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_SERVICE_ACCOUNT_KEY_CREATE: LazyLock<
+    service_account::ServiceAccountKeyCreate,
+> = LazyLock::new(|| service_account::ServiceAccountKeyCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_SERVICE_ACCOUNT_KEY_NAME.clone(),
+        description: String::from(""),
+    },
+    public_key: String::from(
+        "-----BEGIN PUBLIC KEY-----\n\
+         MCowBQYDK2VwAyEAJrQLj5P/89iXES9+vFgrIy29clF9CC/oPPsw3c5D0bs=\n\
+         -----END PUBLIC KEY-----\n",
+    ),
+    ttl_seconds: None,
 });
 
 // Instance used for testing
@@ -2688,6 +2741,53 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                     AllowedMethod::Post(serde_json::Value::Null),
+                ],
+            },
+            /* Service accounts */
+            VerifyEndpoint {
+                url: &DEMO_SERVICE_ACCOUNTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SERVICE_ACCOUNT_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SERVICE_ACCOUNT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SERVICE_ACCOUNT_KEYS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SERVICE_ACCOUNT_KEY_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SERVICE_ACCOUNT_KEY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
                 ],
             },
             /* Anti-Affinity Groups */

@@ -297,6 +297,40 @@ resource SiloGroup {
 has_relation(silo: Silo, "parent_silo", group: SiloGroup)
 	if group.silo = silo;
 
+resource ServiceAccount {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+
+	relations = { containing_project: Project };
+	"list_children" if "viewer" on "containing_project";
+	"read" if "viewer" on "containing_project";
+	"modify" if "admin" on "containing_project";
+	"create_child" if "admin" on "containing_project";
+}
+has_relation(project: Project, "containing_project", sa: ServiceAccount)
+	if sa.project = project;
+
+resource ServiceAccountKey {
+	permissions = [ "read", "modify" ];
+
+	relations = { containing_project: Project };
+	"read" if "viewer" on "containing_project";
+	"modify" if "admin" on "containing_project";
+}
+has_relation(project: Project, "containing_project", key: ServiceAccountKey)
+	if has_relation(project, "containing_project", key.service_account);
+
+has_permission(actor: AuthenticatedActor, "read", silo: Silo)
+	if actor.is_service_account and silo in actor.silo;
+
+has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
+	if actor.is_service_account and silo in actor.silo
+	and silo.fleet = ip_pool.fleet;
+
 resource SshKey {
 	permissions = [ "read", "modify" ];
 	relations = { silo_user: SiloUser };
@@ -770,6 +804,8 @@ has_permission(actor: AuthenticatedActor, "read", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
 has_permission(actor: AuthenticatedActor, "modify", user: SiloUser)
 	if has_role(actor, "external-authenticator", user.silo.fleet);
+has_permission(actor: AuthenticatedActor, "read", key: ServiceAccountKey)
+	if has_role(actor, "external-authenticator", key.service_account.project.silo.fleet);
 has_permission(actor: AuthenticatedActor, "read", group: SiloGroup)
 	if has_role(actor, "external-authenticator", group.silo.fleet);
 has_permission(actor: AuthenticatedActor, "modify", group: SiloGroup)

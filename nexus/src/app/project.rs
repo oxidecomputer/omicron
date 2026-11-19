@@ -133,9 +133,24 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         new_policy: &policy::Policy<policy::ProjectRole>,
+        legacy_client: bool,
     ) -> UpdateResult<policy::Policy<policy::ProjectRole>> {
-        let (.., authz_project) =
+        let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
+
+        if legacy_client {
+            let current = self
+                .db_datastore
+                .role_assignment_fetch_visible(opctx, &authz_project)
+                .await?;
+            Self::reject_if_service_accounts_present(&current)?;
+        }
+        self.check_service_account_grants(
+            opctx,
+            Some(authz_silo.id()),
+            &new_policy.role_assignments,
+        )
+        .await?;
 
         let role_assignments = self
             .db_datastore

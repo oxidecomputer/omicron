@@ -44,8 +44,8 @@ use nexus_types::external_api::{
     affinity, alert, audit, certificate, console, device, disk, external_ip,
     external_subnet, floating_ip, hardware, identity_provider, image, instance,
     internet_gateway, ip_pool, metrics, multicast, multirack, networking, oxql,
-    path_params, policy, probe, problem, project, rack, scim, silo, sled,
-    snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
+    path_params, policy, probe, problem, project, rack, scim, service_account,
+    silo, sled, snapshot, ssh_key, subnet_pool, support_bundle, switch, system,
     system_networking, timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
@@ -158,8 +158,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nasgns = new_policy.role_assignments.len();
             // This should have been validated during parsing.
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-            let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
+            let policy =
+                nexus.fleet_update_policy(&opctx, &new_policy, false).await?;
             Ok(HttpResponseOk(policy))
+        })
+        .await
+    }
+
+    async fn system_policy_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::FleetRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::FleetRole>,
+        >,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_policy: policy::Policy<policy::FleetRole> =
+                new_policy.into_inner().into();
+            let policy =
+                nexus.fleet_update_policy(&opctx, &new_policy, true).await?;
+            Ok(HttpResponseOk(legacy_policy(policy)?))
         })
         .await
     }
@@ -237,7 +259,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
             let silo_lookup = nexus.current_silo_lookup(&opctx)?;
             let policy = nexus
-                .silo_update_policy(&opctx, &silo_lookup, &new_policy)
+                .silo_update_policy(&opctx, &silo_lookup, &new_policy, false)
                 .await?;
             Ok(HttpResponseOk(policy))
         })
@@ -588,7 +610,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             bail_unless!(nasgns <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let policy = nexus
-                .silo_update_policy(&opctx, &silo_lookup, &new_policy)
+                .silo_update_policy(&opctx, &silo_lookup, &new_policy, false)
                 .await?;
             Ok(HttpResponseOk(policy))
         })
@@ -1209,6 +1231,87 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn policy_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let new_policy: policy::Policy<policy::SiloRole> =
+                new_policy.into_inner().into();
+            let silo_lookup = nexus.current_silo_lookup(&opctx)?;
+            let policy = nexus
+                .silo_update_policy(&opctx, &silo_lookup, &new_policy, true)
+                .await?;
+            Ok(HttpResponseOk(legacy_policy(policy)?))
+        })
+        .await
+    }
+
+    async fn silo_policy_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SiloPath>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let new_policy: policy::Policy<policy::SiloRole> =
+                new_policy.into_inner().into();
+            let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+            let policy = nexus
+                .silo_update_policy(&opctx, &silo_lookup, &new_policy, true)
+                .await?;
+            Ok(HttpResponseOk(legacy_policy(policy)?))
+        })
+        .await
+    }
+
+    async fn project_policy_update_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::ProjectPath>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::ProjectRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::ProjectRole>,
+        >,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let new_policy: policy::Policy<policy::ProjectRole> =
+                new_policy.into_inner().into();
+            let project_lookup = nexus.project_lookup(
+                &opctx,
+                project::ProjectSelector { project: path.project },
+            )?;
+            let policy = nexus
+                .project_update_policy(
+                    &opctx,
+                    &project_lookup,
+                    &new_policy,
+                    true,
+                )
+                .await?;
+            Ok(HttpResponseOk(legacy_policy(policy)?))
+        })
+        .await
+    }
+
     async fn project_policy_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::ProjectPath>,
@@ -1223,7 +1326,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             let policy = nexus
-                .project_update_policy(&opctx, &project_lookup, &new_policy)
+                .project_update_policy(
+                    &opctx,
+                    &project_lookup,
+                    &new_policy,
+                    false,
+                )
                 .await?;
             Ok(HttpResponseOk(policy))
         })
@@ -3890,6 +3998,225 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
             nexus.anti_affinity_group_delete(&opctx, &group_lookup).await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
+    }
+
+    async fn service_account_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId<project::ProjectSelector>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<service_account::ServiceAccount>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let project_lookup =
+                nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+            let items = nexus
+                .service_account_list(&opctx, &project_lookup, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                items,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_create(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<project::ProjectSelector>,
+        create_params: TypedBody<service_account::ServiceAccountCreate>,
+    ) -> Result<HttpResponseCreated<service_account::ServiceAccount>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let project_lookup = nexus.project_lookup(&opctx, query)?;
+            let service_account = nexus
+                .service_account_create(
+                    &opctx,
+                    &project_lookup,
+                    create_params.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseCreated(service_account))
+        })
+        .await
+    }
+
+    async fn service_account_view(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<project::OptionalProjectSelector>,
+        path_params: Path<path_params::ServiceAccountPath>,
+    ) -> Result<HttpResponseOk<service_account::ServiceAccount>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let lookup = nexus.service_account_lookup(
+                &opctx,
+                path.service_account,
+                query.project,
+            )?;
+            Ok(HttpResponseOk(nexus.service_account_view(&lookup).await?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_delete(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<project::OptionalProjectSelector>,
+        path_params: Path<path_params::ServiceAccountPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let lookup = nexus.service_account_lookup(
+                &opctx,
+                path.service_account,
+                query.project,
+            )?;
+            nexus.service_account_delete(&opctx, &lookup).await?;
+            Ok(HttpResponseDeleted())
+        })
+        .await
+    }
+
+    async fn service_account_key_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<project::OptionalProjectSelector>,
+        >,
+        path_params: Path<path_params::ServiceAccountPath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<service_account::ServiceAccountKey>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let lookup = nexus.service_account_lookup(
+                &opctx,
+                path.service_account,
+                scan_params.selector.project.clone(),
+            )?;
+            let items = nexus
+                .service_account_key_list(&opctx, &lookup, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                items,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_key_create(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<project::OptionalProjectSelector>,
+        path_params: Path<path_params::ServiceAccountPath>,
+        create_params: TypedBody<service_account::ServiceAccountKeyCreate>,
+    ) -> Result<
+        HttpResponseCreated<service_account::ServiceAccountKey>,
+        HttpError,
+    > {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let lookup = nexus.service_account_lookup(
+                &opctx,
+                path.service_account,
+                query.project,
+            )?;
+            let key = nexus
+                .service_account_key_create(
+                    &opctx,
+                    &lookup,
+                    create_params.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseCreated(key))
+        })
+        .await
+    }
+
+    async fn service_account_key_view(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<project::OptionalProjectSelector>,
+        path_params: Path<path_params::ServiceAccountKeyPath>,
+    ) -> Result<HttpResponseOk<service_account::ServiceAccountKey>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let lookup = nexus.service_account_key_lookup(
+                &opctx,
+                path.service_account,
+                path.key,
+                query.project,
+            )?;
+            Ok(HttpResponseOk(nexus.service_account_key_view(&lookup).await?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn service_account_key_delete(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<project::OptionalProjectSelector>,
+        path_params: Path<path_params::ServiceAccountKeyPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let lookup = nexus.service_account_key_lookup(
+                &opctx,
+                path.service_account,
+                path.key,
+                query.project,
+            )?;
+            nexus.service_account_key_delete(&opctx, &lookup).await?;
             Ok(HttpResponseDeleted())
         })
         .await
@@ -9631,4 +9958,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         })
         .await
     }
+}
+
+fn legacy_policy<R>(
+    policy: policy::Policy<R>,
+) -> Result<v2025_11_20_00::policy::Policy<R>, HttpError>
+where
+    R: serde::de::DeserializeOwned,
+{
+    policy.try_into().map_err(|e: policy::ServiceAccountNotRepresentable| {
+        HttpError::for_bad_request(None, e.to_string())
+    })
 }

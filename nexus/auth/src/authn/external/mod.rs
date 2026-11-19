@@ -15,6 +15,7 @@ use omicron_uuid_kinds::SiloUuid;
 use slog::trace;
 use std::borrow::Borrow;
 
+pub mod request_signature;
 pub mod scim;
 pub mod session_cookie;
 pub mod spoof;

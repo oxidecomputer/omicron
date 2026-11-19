@@ -26,6 +26,7 @@ pub enum AuditLogActor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: SiloUuid },
     Scim { silo_id: SiloUuid },
+    ServiceAccount { service_account_id: Uuid, silo_id: SiloUuid },
     Unauthenticated,
 }
 
@@ -66,6 +67,7 @@ impl_enum_type!(
     SiloUser => b"silo_user"
     Unauthenticated => b"unauthenticated"
     Scim => b"scim"
+    ServiceAccount => b"service_account"
 );
 
 impl_enum_type!(
@@ -111,6 +113,7 @@ impl_enum_type!(
     AccessToken => b"access_token"
     ScimToken => b"scim_token"
     Spoof => b"spoof"
+    RequestSignature => b"request_signature"
 );
 
 impl From<AuditLogAuthMethod> for audit::AuthMethod {
@@ -122,6 +125,9 @@ impl From<AuditLogAuthMethod> for audit::AuthMethod {
             AuditLogAuthMethod::AccessToken => audit::AuthMethod::AccessToken,
             AuditLogAuthMethod::ScimToken => audit::AuthMethod::ScimToken,
             AuditLogAuthMethod::Spoof => audit::AuthMethod::Spoof,
+            AuditLogAuthMethod::RequestSignature => {
+                audit::AuthMethod::RequestSignature
+            }
         }
     }
 }
@@ -134,6 +140,9 @@ impl From<&nexus_types::authn::SchemeName> for AuditLogAuthMethod {
             SchemeName::AccessToken => AuditLogAuthMethod::AccessToken,
             SchemeName::ScimToken => AuditLogAuthMethod::ScimToken,
             SchemeName::Spoof => AuditLogAuthMethod::Spoof,
+            SchemeName::RequestSignature => {
+                AuditLogAuthMethod::RequestSignature
+            }
         }
     }
 }
@@ -201,6 +210,11 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             AuditLogActor::Scim { silo_id } => {
                 (None, Some(silo_id.into()), AuditLogActorKind::Scim)
             }
+            AuditLogActor::ServiceAccount { service_account_id, silo_id } => (
+                Some(service_account_id),
+                Some(silo_id.into()),
+                AuditLogActorKind::ServiceAccount,
+            ),
             AuditLogActor::Unauthenticated => {
                 (None, None, AuditLogActorKind::Unauthenticated)
             }
@@ -377,6 +391,23 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
                         )
                     })?;
                     audit::AuditLogEntryActor::Scim {
+                        silo_id: silo_id.into_untyped_uuid(),
+                    }
+                }
+                AuditLogActorKind::ServiceAccount => {
+                    let service_account_id =
+                        entry.actor_id.ok_or_else(|| {
+                            Error::internal_error(
+                                "ServiceAccount actor missing actor_id",
+                            )
+                        })?;
+                    let silo_id = entry.actor_silo_id.ok_or_else(|| {
+                        Error::internal_error(
+                            "ServiceAccount actor missing actor_silo_id",
+                        )
+                    })?;
+                    audit::AuditLogEntryActor::ServiceAccount {
+                        service_account_id,
                         silo_id: silo_id.into_untyped_uuid(),
                     }
                 }

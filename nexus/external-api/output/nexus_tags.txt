@@ -149,6 +149,17 @@ project_policy_view                      GET      /v1/projects/{project}/policy
 project_update                           PUT      /v1/projects/{project}
 project_view                             GET      /v1/projects/{project}
 
+API operations found with tag "service-accounts"
+OPERATION ID                             METHOD   URL PATH
+service_account_create                   POST     /v1/service-accounts
+service_account_delete                   DELETE   /v1/service-accounts/{service_account}
+service_account_key_create               POST     /v1/service-accounts/{service_account}/keys
+service_account_key_delete               DELETE   /v1/service-accounts/{service_account}/keys/{key}
+service_account_key_list                 GET      /v1/service-accounts/{service_account}/keys
+service_account_key_view                 GET      /v1/service-accounts/{service_account}/keys/{key}
+service_account_list                     GET      /v1/service-accounts
+service_account_view                     GET      /v1/service-accounts/{service_account}
+
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
 auth_settings_update                     PUT      /v1/auth-settings

@@ -29,6 +29,7 @@ omicron-cockroach-metrics.workspace = true
 omicron-generation-kinds.workspace = true
 omicron-git-version-types.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-http-signatures.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

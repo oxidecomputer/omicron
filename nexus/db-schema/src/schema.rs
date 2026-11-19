@@ -1537,6 +1537,36 @@ table! {
 }
 
 table! {
+    service_account (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
+        project_id -> Uuid,
+    }
+}
+
+table! {
+    service_account_key (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        time_expires -> Nullable<Timestamptz>,
+        service_account_id -> Uuid,
+        public_key -> Binary,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(service_account, service_account_key);
+allow_tables_to_appear_in_same_query!(service_account, project);
+
+table! {
     role_assignment (
         resource_id,
         resource_type,

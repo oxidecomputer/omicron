@@ -99,6 +99,7 @@ mod quota;
 mod rack;
 pub(crate) mod saga;
 mod scim;
+mod service_account;
 mod session;
 mod silo;
 pub(crate) mod sled;

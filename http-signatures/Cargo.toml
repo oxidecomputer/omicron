@@ -1,0 +1,15 @@
+[package]
+name = "oxide-http-signatures"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "pem"] }
+sfv = "0.16.1"
+sha2.workspace = true
+thiserror.workspace = true

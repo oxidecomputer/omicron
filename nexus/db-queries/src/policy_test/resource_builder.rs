@@ -258,6 +258,8 @@ impl_dyn_authorized_resource_for_resource!(authz::BgpAnnounceSet);
 impl_dyn_authorized_resource_for_resource!(authz::BgpConfig);
 impl_dyn_authorized_resource_for_resource!(authz::Blueprint);
 impl_dyn_authorized_resource_for_resource!(authz::Certificate);
+impl_dyn_authorized_resource_for_resource!(authz::ServiceAccount);
+impl_dyn_authorized_resource_for_resource!(authz::ServiceAccountKey);
 impl_dyn_authorized_resource_for_resource!(authz::ConsoleSession);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAccessToken);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAuthRequest);

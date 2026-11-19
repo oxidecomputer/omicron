@@ -169,6 +169,7 @@ oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-http-signatures.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
 
 [target.'cfg(target_os = "illumos")'.dependencies]

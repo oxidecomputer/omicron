@@ -132,8 +132,16 @@ impl oso::PolarClass for AuthenticatedActor {
                     authn::Actor::UserBuiltin { .. } => true,
 
                     authn::Actor::Scim { .. } => false,
+
+                    authn::Actor::ServiceAccount { .. } => false,
                 }
             })
+            .add_attribute_getter(
+                "is_service_account",
+                |a: &AuthenticatedActor| {
+                    matches!(a.actor, authn::Actor::ServiceAccount { .. })
+                },
+            )
             // Like the "is_user" guard above but reversed, this guard is used
             // in the Polar file to grant permissions to a SCIM IdP actor
             // without the need for a role.
@@ -144,16 +152,21 @@ impl oso::PolarClass for AuthenticatedActor {
                     authn::Actor::UserBuiltin { .. } => false,
 
                     authn::Actor::Scim { .. } => true,
+
+                    authn::Actor::ServiceAccount { .. } => false,
                 }
             })
             .add_attribute_getter("silo", |a: &AuthenticatedActor| {
                 match a.actor {
                     authn::Actor::SiloUser { silo_id, .. }
-                    | authn::Actor::Scim { silo_id } => Some(super::Silo::new(
-                        super::FLEET,
-                        silo_id,
-                        LookupType::by_id(silo_id),
-                    )),
+                    | authn::Actor::Scim { silo_id }
+                    | authn::Actor::ServiceAccount { silo_id, .. } => {
+                        Some(super::Silo::new(
+                            super::FLEET,
+                            silo_id,
+                            LookupType::by_id(silo_id),
+                        ))
+                    }
 
                     authn::Actor::UserBuiltin { .. } => None,
                 }
@@ -174,6 +187,8 @@ impl oso::PolarClass for AuthenticatedActor {
                     authn::Actor::UserBuiltin { .. } => false,
 
                     authn::Actor::Scim { .. } => false,
+
+                    authn::Actor::ServiceAccount { .. } => false,
                 },
             )
     }

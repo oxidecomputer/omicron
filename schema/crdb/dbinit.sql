@@ -3627,6 +3627,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
 CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
     ON omicron.public.device_access_token (silo_user_id);
 
+CREATE TABLE IF NOT EXISTS omicron.public.service_account (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    silo_id UUID NOT NULL,
+    project_id UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_account_by_project
+    ON omicron.public.service_account (project_id, name)
+    WHERE time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.service_account_key (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    time_expires TIMESTAMPTZ,
+    service_account_id UUID NOT NULL,
+    public_key BYTES NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_account_key_by_service_account
+    ON omicron.public.service_account_key (service_account_id, name)
+    WHERE time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS service_account_key_public_key_unique
+    ON omicron.public.service_account_key (public_key)
+    WHERE time_deleted IS NULL;
+
 
 /*
  * Assignments between users, roles, and resources
@@ -3641,7 +3676,8 @@ CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
 CREATE TYPE IF NOT EXISTS omicron.public.identity_type AS ENUM (
   'user_builtin',
   'silo_user',
-  'silo_group'
+  'silo_group',
+  'service_account'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
@@ -7527,7 +7563,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
     'user_builtin',
     'silo_user',
     'unauthenticated',
-    'scim'
+    'scim',
+    'service_account'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
@@ -7543,7 +7580,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.audit_log_auth_method AS ENUM (
     'session_cookie',
     'access_token',
     'scim_token',
-    'spoof'
+    'spoof',
+    'request_signature'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
@@ -7619,6 +7657,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         -- For a scim actor: must have a actor_silo_id
         (actor_kind = 'scim' AND actor_id IS NULL AND actor_silo_id IS NOT NULL)
         OR
+        (actor_kind = 'service_account' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
+        OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
     )
@@ -7635,7 +7675,7 @@ ALTER TABLE omicron.public.audit_log
 ADD CONSTRAINT IF NOT EXISTS auth_method_and_credential_id_consistent CHECK (
     (auth_method IS NULL AND credential_id IS NULL)
     OR (auth_method = 'spoof' AND credential_id IS NULL)
-    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token')
+    OR (auth_method IN ('session_cookie', 'access_token', 'scim_token', 'request_signature')
         AND credential_id IS NOT NULL)
 ) NOT VALID;
 
@@ -9980,7 +10020,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '320.0.0', NULL)
+    (TRUE, NOW(), NOW(), '321.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

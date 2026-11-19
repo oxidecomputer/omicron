@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111000.0.0"
+    "version": "2026111700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -7028,6 +7028,436 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/service-accounts": {
+      "get": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "List service accounts",
+        "operationId": "service_account_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Create service account",
+        "operationId": "service_account_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{service_account}": {
+      "get": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Fetch service account",
+        "operationId": "service_account_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or ID of the service account",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Delete service account",
+        "operationId": "service_account_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or ID of the service account",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{service_account}/keys": {
+      "get": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "List service account keys",
+        "operationId": "service_account_key_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or ID of the service account",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountKeyResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Create service account key",
+        "description": "Upload the public half of an Ed25519 key pair. Requests signed with the matching private key (RFC 9421 HTTP message signatures, with this key's ID as `keyid`) authenticate as the service account.",
+        "operationId": "service_account_key_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or ID of the service account",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/service-accounts/{service_account}/keys/{key}": {
+      "get": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Fetch service account key",
+        "operationId": "service_account_key_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "description": "Name or ID of the service account key",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or ID of the service account",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccountKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Delete service account key",
+        "operationId": "service_account_key_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key",
+            "description": "Name or ID of the service account key",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service_account",
+            "description": "Name or ID of the service account",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -17733,7 +18163,7 @@
           },
           "auth_method": {
             "nullable": true,
-            "description": "How the user authenticated the request (access token, session, or SCIM token). Null for unauthenticated requests like login attempts.",
+            "description": "How the user authenticated the request (access token, session, SCIM token, or service account key). Null for unauthenticated requests like login attempts.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/AuthMethod"
@@ -17742,7 +18172,7 @@
           },
           "credential_id": {
             "nullable": true,
-            "description": "ID of the credential used for authentication. Null for unauthenticated requests. The value of `auth_method` indicates what kind of credential it is (access token, session, or SCIM token).",
+            "description": "ID of the credential used for authentication. Null for unauthenticated requests. The value of `auth_method` indicates what kind of credential it is (access token, session, SCIM token, or service account key).",
             "type": "string",
             "format": "uuid"
           },
@@ -17865,6 +18295,30 @@
             },
             "required": [
               "kind",
+              "silo_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "service_account"
+                ]
+              },
+              "service_account_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "silo_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "service_account_id",
               "silo_id"
             ]
           },
@@ -17999,6 +18453,13 @@
             "type": "string",
             "enum": [
               "scim_token"
+            ]
+          },
+          {
+            "description": "Service account key (RFC 9421 HTTP message signature)",
+            "type": "string",
+            "enum": [
+              "request_signature"
             ]
           }
         ]
@@ -23390,7 +23851,8 @@
         "type": "string",
         "enum": [
           "silo_user",
-          "silo_group"
+          "silo_group",
+          "service_account"
         ]
       },
       "IdpMetadataSource": {
@@ -28810,6 +29272,195 @@
           "time_created"
         ]
       },
+      "ServiceAccount": {
+        "description": "View of a service account",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "Unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "The project that contains this service account",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "project_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ServiceAccountCreate": {
+        "description": "Create-time parameters for a `ServiceAccount`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "ServiceAccountKey": {
+        "description": "View of a service account key",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "Unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "public_key": {
+            "description": "Ed25519 public key in PEM (SubjectPublicKeyInfo) format",
+            "type": "string"
+          },
+          "service_account_id": {
+            "description": "The service account this key authenticates as",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "description": "When the key expires, if ever",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "public_key",
+          "service_account_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ServiceAccountKeyCreate": {
+        "description": "Create-time parameters for a `ServiceAccountKey`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "public_key": {
+            "description": "Ed25519 public key in PEM (SubjectPublicKeyInfo) format",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "nullable": true,
+            "description": "Lifetime of the key in seconds. If omitted, the key does not expire.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "public_key"
+        ]
+      },
+      "ServiceAccountKeyResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccountKey"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ServiceAccountResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccount"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "ServiceIcmpConfig": {
         "description": "Configuration of inbound ICMP allowed by API services.",
         "type": "object",
@@ -33770,6 +34421,13 @@
       "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/projects"
+      }
+    },
+    {
+      "name": "service-accounts",
+      "description": "Service accounts are non-human principals, scoped to a project, that authenticate with signed requests.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/service-accounts"
       }
     },
     {

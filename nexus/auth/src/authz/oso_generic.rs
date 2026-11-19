@@ -169,6 +169,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         DeviceAccessToken::init(),
         PhysicalDisk::init(),
         Rack::init(),
+        ServiceAccount::init(),
+        ServiceAccountKey::init(),
         SshKey::init(),
         Silo::init(),
         SiloUser::init(),

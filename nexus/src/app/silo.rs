@@ -229,9 +229,24 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         new_policy: &policy::Policy<policy::SiloRole>,
+        legacy_client: bool,
     ) -> UpdateResult<policy::Policy<policy::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
+
+        if legacy_client {
+            let current = self
+                .db_datastore
+                .role_assignment_fetch_visible(opctx, &authz_silo)
+                .await?;
+            Self::reject_if_service_accounts_present(&current)?;
+        }
+        self.check_service_account_grants(
+            opctx,
+            Some(authz_silo.id()),
+            &new_policy.role_assignments,
+        )
+        .await?;
 
         let role_assignments = self
             .db_datastore

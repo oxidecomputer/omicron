@@ -97,6 +97,14 @@ impl<'a> LookupPath<'a> {
         AffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    pub fn service_account_id(self, id: Uuid) -> ServiceAccount<'a> {
+        ServiceAccount::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn service_account_key_id(self, id: Uuid) -> ServiceAccountKey<'a> {
+        ServiceAccountKey::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type AntiAffinityGroup, identified by its id
     pub fn anti_affinity_group_id(self, id: Uuid) -> AntiAffinityGroup<'a> {
         AntiAffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
@@ -248,7 +256,9 @@ impl<'a> LookupPath<'a> {
                 SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
             ),
 
-            authn::Actor::UserBuiltin { .. } | authn::Actor::Scim { .. } => {
+            authn::Actor::UserBuiltin { .. }
+            | authn::Actor::Scim { .. }
+            | authn::Actor::ServiceAccount { .. } => {
                 Err(Error::non_resourcetype_not_found(
                     "could not find silo user",
                 ))
@@ -669,6 +679,22 @@ lookup_resource! {
 lookup_resource! {
     name = "AffinityGroup",
     ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "ServiceAccount",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "ServiceAccountKey",
+    ancestors = [ "Silo", "Project", "ServiceAccount" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]

@@ -63,13 +63,13 @@ pub mod alert {
 }
 
 pub mod audit {
-    pub use crate::v2025_11_20_00::audit::AuditLogEntryActor;
     pub use crate::v2025_11_20_00::audit::AuditLogEntryResult;
     pub use crate::v2025_11_20_00::audit::AuditLogParams;
 
-    pub use crate::v2026_01_15_00::audit::AuthMethod;
-
-    pub use crate::v2026_01_15_01::audit::AuditLogEntry;
+    pub use crate::v2026_11_17_00::audit::AuditLogEntry;
+    pub use crate::v2026_11_17_00::audit::AuditLogEntryActor;
+    pub use crate::v2026_11_17_00::audit::AuthMethod;
+    pub use crate::v2026_11_17_00::audit::ServiceAccountAuditNotRepresentable;
 }
 
 pub mod bfd {
@@ -355,12 +355,14 @@ pub mod oxql {
 
 pub mod policy {
     pub use crate::v2025_11_20_00::policy::FleetRole;
-    pub use crate::v2025_11_20_00::policy::IdentityType;
     pub use crate::v2025_11_20_00::policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
-    pub use crate::v2025_11_20_00::policy::Policy;
     pub use crate::v2025_11_20_00::policy::ProjectRole;
-    pub use crate::v2025_11_20_00::policy::RoleAssignment;
     pub use crate::v2025_11_20_00::policy::SiloRole;
+
+    pub use crate::v2026_11_17_00::policy::IdentityType;
+    pub use crate::v2026_11_17_00::policy::Policy;
+    pub use crate::v2026_11_17_00::policy::RoleAssignment;
+    pub use crate::v2026_11_17_00::policy::ServiceAccountNotRepresentable;
 }
 
 pub mod probe {
@@ -591,6 +593,13 @@ pub mod sled {
     pub use crate::v2026_08_12_00::sled::Sled;
 }
 
+pub mod service_account {
+    pub use crate::v2026_11_17_00::service_account::ServiceAccount;
+    pub use crate::v2026_11_17_00::service_account::ServiceAccountCreate;
+    pub use crate::v2026_11_17_00::service_account::ServiceAccountKey;
+    pub use crate::v2026_11_17_00::service_account::ServiceAccountKeyCreate;
+}
+
 pub mod ssh_key {
     pub use crate::v2025_11_20_00::ssh_key::SshKey;
     pub use crate::v2025_11_20_00::ssh_key::SshKeyCreate;
@@ -644,4 +653,7 @@ pub mod path_params {
     pub use crate::v2025_11_20_00::path_params::TufTrustRootPath;
     pub use crate::v2025_11_20_00::path_params::UserPath;
     pub use crate::v2025_11_20_00::path_params::VpcPath;
+
+    pub use crate::v2026_11_17_00::path_params::ServiceAccountKeyPath;
+    pub use crate::v2026_11_17_00::path_params::ServiceAccountPath;
 }

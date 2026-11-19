@@ -153,6 +153,16 @@ impl OpContext {
                     "type" => "scim",
                     "silo_id" => silo_id.to_string(),
                 )),
+
+                authn::Actor::ServiceAccount {
+                    service_account_id,
+                    silo_id,
+                } => log.new(o!(
+                    "authenticated" => true,
+                    "type" => "service_account",
+                    "service_account_id" => service_account_id.to_string(),
+                    "silo_id" => silo_id.to_string(),
+                )),
             }
         } else {
             metadata

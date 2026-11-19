@@ -43,6 +43,7 @@ pub mod scim;
 pub mod silo;
 pub mod sled;
 pub mod snapshot;
+pub mod service_account;
 pub mod ssh_key;
 pub mod subnet_pool;
 pub mod support_bundle;

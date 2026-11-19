@@ -50,7 +50,22 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         policy: &policy::Policy<policy::FleetRole>,
+        legacy_client: bool,
     ) -> UpdateResult<policy::Policy<policy::FleetRole>> {
+        if legacy_client {
+            let current = self
+                .db_datastore
+                .role_assignment_fetch_visible(opctx, &authz::FLEET)
+                .await?;
+            Self::reject_if_service_accounts_present(&current)?;
+        }
+        self.check_service_account_grants(
+            opctx,
+            None,
+            &policy.role_assignments,
+        )
+        .await?;
+
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(

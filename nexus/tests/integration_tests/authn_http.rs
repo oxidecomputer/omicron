@@ -440,6 +440,10 @@ async fn whoami_get(
         Actor::UserBuiltin { user_builtin_id } => user_builtin_id.to_string(),
 
         Actor::Scim { silo_id } => format!("scim for {silo_id}"),
+
+        Actor::ServiceAccount { service_account_id, .. } => {
+            service_account_id.to_string()
+        }
     });
     let authenticated = actor.is_some();
     let schemes_tried =

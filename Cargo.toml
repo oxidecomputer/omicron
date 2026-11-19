@@ -74,6 +74,7 @@ members = [
     "generation-kinds",
     "git-version",
     "git-version/types",
+    "http-signatures",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -275,6 +276,7 @@ default-members = [
     "generation-kinds",
     "git-version",
     "git-version/types",
+    "http-signatures",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -714,6 +716,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
 oxide-client = { path = "clients/oxide-client" }
+oxide-http-signatures = { path = "http-signatures" }
 oxide-tokio-rt = "0.1.4"
 oxide-rot = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738", default-features = false }
 oxide-update-engine = "0.1.2"
@@ -1130,7 +1133,7 @@ opt-level = 3
 [patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
 # drift = { path = "../drift" }
-# dropshot = { path = "../dropshot/dropshot" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "jmcarp/rfd-770-poc" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }

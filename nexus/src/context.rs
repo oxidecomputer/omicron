@@ -7,6 +7,7 @@ use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::HttpAuthnScheme;
+use authn::external::request_signature::HttpAuthnRequestSignature;
 use authn::external::scim::HttpAuthnScimToken;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
@@ -153,6 +154,9 @@ impl ServerContext {
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
                     SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
+                    SchemeName::RequestSignature => {
+                        Box::new(HttpAuthnRequestSignature)
+                    }
                 },
             )
             .collect();
@@ -522,6 +526,26 @@ impl authn::external::token::TokenContext for ServerContext {
     > {
         let opctx = self.nexus.opctx_external_authn();
         self.nexus.authenticate_token(opctx, token).await
+    }
+}
+
+#[async_trait]
+impl authn::external::request_signature::RequestSignatureContext
+    for ServerContext
+{
+    async fn service_account_key_for_authn(
+        &self,
+        key_id: Uuid,
+    ) -> Result<
+        (
+            authn::Actor,
+            oxide_http_signatures::VerifyingKey,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ),
+        authn::Reason,
+    > {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.service_account_key_for_authn(opctx, key_id).await
     }
 }
 

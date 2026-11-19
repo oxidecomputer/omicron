@@ -4,6 +4,48 @@
 
 //! Functional code for policy types.
 
+use crate::latest::policy::{IdentityType, RoleAssignment};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
+
+impl<AllowedRoles> RoleAssignment<AllowedRoles> {
+    pub fn for_silo_user(
+        silo_user_id: SiloUserUuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::SiloUser,
+            identity_id: silo_user_id.into_untyped_uuid(),
+            role_name,
+        }
+    }
+
+    pub fn for_silo_group(
+        silo_group_id: SiloGroupUuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::SiloGroup,
+            identity_id: silo_group_id.into_untyped_uuid(),
+            role_name,
+        }
+    }
+}
+
+impl<AllowedRoles> RoleAssignment<AllowedRoles> {
+    pub fn for_service_account(
+        service_account_id: uuid::Uuid,
+        role_name: AllowedRoles,
+    ) -> Self {
+        Self {
+            identity_type: IdentityType::ServiceAccount,
+            identity_id: service_account_id,
+            role_name,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::latest::policy::{MAX_ROLE_ASSIGNMENTS_PER_RESOURCE, Policy};

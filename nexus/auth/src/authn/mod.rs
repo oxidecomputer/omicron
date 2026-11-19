@@ -169,11 +169,13 @@ impl Context {
                 LookupType::by_id(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
-            Actor::Scim { silo_id } => Some(authz::Silo::new(
-                authz::FLEET,
-                *silo_id,
-                LookupType::by_id(*silo_id),
-            )),
+            Actor::Scim { silo_id } | Actor::ServiceAccount { silo_id, .. } => {
+                Some(authz::Silo::new(
+                    authz::FLEET,
+                    *silo_id,
+                    LookupType::by_id(*silo_id),
+                ))
+            }
         })
     }
 
@@ -462,6 +464,7 @@ pub enum Actor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: SiloUuid },
     Scim { silo_id: SiloUuid },
+    ServiceAccount { service_account_id: Uuid, silo_id: SiloUuid },
 }
 
 impl Actor {
@@ -470,6 +473,16 @@ impl Actor {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
             Actor::Scim { silo_id } => Some(*silo_id),
+            Actor::ServiceAccount { silo_id, .. } => Some(*silo_id),
+        }
+    }
+
+    pub fn service_account_id(&self) -> Option<Uuid> {
+        match self {
+            Actor::ServiceAccount { service_account_id, .. } => {
+                Some(*service_account_id)
+            }
+            _ => None,
         }
     }
 
@@ -478,6 +491,7 @@ impl Actor {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
             Actor::Scim { .. } => None,
+            Actor::ServiceAccount { .. } => None,
         }
     }
 
@@ -486,6 +500,7 @@ impl Actor {
             Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
             Actor::SiloUser { .. } => None,
             Actor::Scim { .. } => None,
+            Actor::ServiceAccount { .. } => None,
         }
     }
 
@@ -507,6 +522,10 @@ impl Actor {
             // a role assignment for this Actor is invalid, they have a fixed
             // policy.
             Actor::Scim { .. } => None,
+            Actor::ServiceAccount { service_account_id, .. } => Some((
+                *service_account_id,
+                nexus_db_model::IdentityType::ServiceAccount,
+            )),
         }
     }
 }
@@ -532,6 +551,11 @@ impl std::fmt::Debug for Actor {
                 .finish_non_exhaustive(),
             Actor::Scim { silo_id } => f
                 .debug_struct("Actor::Scim")
+                .field("silo_id", &silo_id)
+                .finish_non_exhaustive(),
+            Actor::ServiceAccount { service_account_id, silo_id } => f
+                .debug_struct("Actor::ServiceAccount")
+                .field("service_account_id", &service_account_id)
                 .field("silo_id", &silo_id)
                 .finish_non_exhaustive(),
         }

@@ -435,6 +435,19 @@ async fn make_project(
         LookupType::ByName(anti_affinity_group_name.clone()),
     );
 
+    let service_account_name = format!("{}-service-account1", project_name);
+    let service_account = authz::ServiceAccount::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(service_account_name.clone()),
+    );
+    builder.new_resource(service_account.clone());
+    builder.new_resource(authz::ServiceAccountKey::new(
+        service_account,
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-key1", service_account_name)),
+    ));
+
     let instance_name = format!("{}-instance1", project_name);
     let instance = authz::Instance::new(
         project.clone(),

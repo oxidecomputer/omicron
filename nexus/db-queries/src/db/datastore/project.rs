@@ -242,6 +242,11 @@ impl DataStore {
 
         // Verify that child resources do not exist.
         self.ensure_no_instances_in_project(opctx, authz_project).await?;
+        self.project_ensure_no_service_accounts(
+            opctx,
+            authz_project.id().into_untyped_uuid(),
+        )
+        .await?;
         self.ensure_no_disks_in_project(opctx, authz_project).await?;
         self.ensure_no_floating_ips_in_project(opctx, authz_project).await?;
         self.ensure_no_project_images_in_project(opctx, authz_project).await?;

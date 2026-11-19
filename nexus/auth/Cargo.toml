@@ -42,6 +42,7 @@ nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-http-signatures.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

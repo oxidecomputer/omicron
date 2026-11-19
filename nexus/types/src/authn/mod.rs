@@ -28,6 +28,8 @@ pub enum SchemeName {
     ScimToken,
     /// Spoof authentication (development/testing only)
     Spoof,
+    /// RFC 9421 HTTP message signature with a service account key
+    RequestSignature,
 }
 
 impl SchemeName {
@@ -38,6 +40,7 @@ impl SchemeName {
             SchemeName::AccessToken => "access_token",
             SchemeName::ScimToken => "scim_token",
             SchemeName::Spoof => "spoof",
+            SchemeName::RequestSignature => "request_signature",
         }
     }
 }
@@ -57,6 +60,7 @@ impl std::str::FromStr for SchemeName {
             "session_cookie" => Ok(SchemeName::SessionCookie),
             "access_token" => Ok(SchemeName::AccessToken),
             "scim_token" => Ok(SchemeName::ScimToken),
+            "request_signature" => Ok(SchemeName::RequestSignature),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }

@@ -29,6 +29,7 @@ use nexus_types_versions::v2026_01_03_00;
 use nexus_types_versions::v2026_01_05_00;
 use nexus_types_versions::v2026_01_08_00;
 use nexus_types_versions::v2026_01_15_00;
+use nexus_types_versions::v2026_01_15_01;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_21_00;
@@ -40,6 +41,7 @@ use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_05_07_00;
 use nexus_types_versions::v2026_06_05_00;
 use nexus_types_versions::v2026_08_14_00;
+use nexus_types_versions::v2026_11_17_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -89,6 +91,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_17_00, SERVICE_ACCOUNTS),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
@@ -314,6 +317,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/projects"
                 }
             },
+            "service-accounts" = {
+                description = "Service accounts are non-human principals, scoped to a project, that authenticate with signed requests.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/service-accounts"
+                }
+            },
             "silos" = {
                 description = "Silos represent a logical partition of users and resources.",
                 external_docs = {
@@ -457,6 +466,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/policy",
         tags = ["policy"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn system_policy_view(
         rqctx: RequestContext<Self::Context>,
@@ -465,11 +475,36 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Fetch top-level IAM policy
+    #[endpoint {
+        operation_id = "system_policy_view",
+        method = GET,
+        path = "/v1/system/policy",
+        tags = ["policy"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn system_policy_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::FleetRole>,
+        >,
+        HttpError,
+    > {
+        let policy = Self::system_policy_view(rqctx).await?.0;
+        Ok(HttpResponseOk(policy.try_into().map_err(
+            |e: latest::policy::ServiceAccountNotRepresentable| {
+                HttpError::for_bad_request(None, e.to_string())
+            },
+        )?))
+    }
+
     /// Update top-level IAM policy
     #[endpoint {
         method = PUT,
         path = "/v1/system/policy",
         tags = ["policy"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn system_policy_update(
         rqctx: RequestContext<Self::Context>,
@@ -478,6 +513,26 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::FleetRole>>,
+        HttpError,
+    >;
+
+    /// Update top-level IAM policy
+    #[endpoint {
+        operation_id = "system_policy_update",
+        method = PUT,
+        path = "/v1/system/policy",
+        tags = ["policy"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn system_policy_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::FleetRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::FleetRole>,
+        >,
         HttpError,
     >;
 
@@ -517,6 +572,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/policy",
         tags = ["silos"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn policy_view(
         rqctx: RequestContext<Self::Context>,
@@ -525,17 +581,62 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Fetch current silo's IAM policy
+    #[endpoint {
+        operation_id = "policy_view",
+        method = GET,
+        path = "/v1/policy",
+        tags = ["silos"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn policy_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+        HttpError,
+    > {
+        let policy = Self::policy_view(rqctx).await?.0;
+        Ok(HttpResponseOk(policy.try_into().map_err(
+            |e: latest::policy::ServiceAccountNotRepresentable| {
+                HttpError::for_bad_request(None, e.to_string())
+            },
+        )?))
+    }
+
     /// Update current silo's IAM policy
     #[endpoint {
         method = PUT,
         path = "/v1/policy",
         tags = ["silos"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn policy_update(
         rqctx: RequestContext<Self::Context>,
         new_policy: TypedBody<latest::policy::Policy<latest::policy::SiloRole>>,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    /// Update current silo's IAM policy
+    #[endpoint {
+        operation_id = "policy_update",
+        method = PUT,
+        path = "/v1/policy",
+        tags = ["silos"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn policy_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
         HttpError,
     >;
 
@@ -750,6 +851,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/silos/{silo}/policy",
         tags = ["system/silos"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn silo_policy_view(
         rqctx: RequestContext<Self::Context>,
@@ -759,11 +861,37 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Fetch silo IAM policy
+    #[endpoint {
+        operation_id = "silo_policy_view",
+        method = GET,
+        path = "/v1/system/silos/{silo}/policy",
+        tags = ["system/silos"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn silo_policy_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+        HttpError,
+    > {
+        let policy = Self::silo_policy_view(rqctx, path_params).await?.0;
+        Ok(HttpResponseOk(policy.try_into().map_err(
+            |e: latest::policy::ServiceAccountNotRepresentable| {
+                HttpError::for_bad_request(None, e.to_string())
+            },
+        )?))
+    }
+
     /// Update silo IAM policy
     #[endpoint {
         method = PUT,
         path = "/v1/system/silos/{silo}/policy",
         tags = ["system/silos"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn silo_policy_update(
         rqctx: RequestContext<Self::Context>,
@@ -771,6 +899,27 @@ pub trait NexusExternalApi {
         new_policy: TypedBody<latest::policy::Policy<latest::policy::SiloRole>>,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::SiloRole>>,
+        HttpError,
+    >;
+
+    /// Update silo IAM policy
+    #[endpoint {
+        operation_id = "silo_policy_update",
+        method = PUT,
+        path = "/v1/system/silos/{silo}/policy",
+        tags = ["system/silos"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn silo_policy_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::SiloRole>,
+        >,
         HttpError,
     >;
 
@@ -1262,6 +1411,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/projects/{project}/policy",
         tags = ["projects"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn project_policy_view(
         rqctx: RequestContext<Self::Context>,
@@ -1271,11 +1421,37 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Fetch project's IAM policy
+    #[endpoint {
+        operation_id = "project_policy_view",
+        method = GET,
+        path = "/v1/projects/{project}/policy",
+        tags = ["projects"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn project_policy_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::ProjectRole>,
+        >,
+        HttpError,
+    > {
+        let policy = Self::project_policy_view(rqctx, path_params).await?.0;
+        Ok(HttpResponseOk(policy.try_into().map_err(
+            |e: latest::policy::ServiceAccountNotRepresentable| {
+                HttpError::for_bad_request(None, e.to_string())
+            },
+        )?))
+    }
+
     /// Update project's IAM policy
     #[endpoint {
         method = PUT,
         path = "/v1/projects/{project}/policy",
         tags = ["projects"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn project_policy_update(
         rqctx: RequestContext<Self::Context>,
@@ -1285,6 +1461,27 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::ProjectRole>>,
+        HttpError,
+    >;
+
+    /// Update project's IAM policy
+    #[endpoint {
+        operation_id = "project_policy_update",
+        method = PUT,
+        path = "/v1/projects/{project}/policy",
+        tags = ["projects"],
+        versions = ..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn project_policy_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ProjectPath>,
+        new_policy: TypedBody<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::ProjectRole>,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            v2025_11_20_00::policy::Policy<v2025_11_20_00::policy::ProjectRole>,
+        >,
         HttpError,
     >;
 
@@ -5089,6 +5286,140 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Service accounts
+
+    /// List service accounts
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::service_account::ServiceAccount>>,
+        HttpError,
+    >;
+
+    /// Create service account
+    #[endpoint {
+        method = POST,
+        path = "/v1/service-accounts",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        create_params: TypedBody<latest::service_account::ServiceAccountCreate>,
+    ) -> Result<
+        HttpResponseCreated<latest::service_account::ServiceAccount>,
+        HttpError,
+    >;
+
+    /// Fetch service account
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{service_account}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::ServiceAccountPath>,
+    ) -> Result<
+        HttpResponseOk<latest::service_account::ServiceAccount>,
+        HttpError,
+    >;
+
+    /// Delete service account
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/service-accounts/{service_account}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::ServiceAccountPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List service account keys
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{service_account}/keys",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_key_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::ServiceAccountPath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::service_account::ServiceAccountKey>>,
+        HttpError,
+    >;
+
+    /// Create service account key
+    ///
+    /// Upload the public half of an Ed25519 key pair. Requests signed with the
+    /// matching private key (RFC 9421 HTTP message signatures, with this key's
+    /// ID as `keyid`) authenticate as the service account.
+    #[endpoint {
+        method = POST,
+        path = "/v1/service-accounts/{service_account}/keys",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_key_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::ServiceAccountPath>,
+        create_params: TypedBody<
+            latest::service_account::ServiceAccountKeyCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<latest::service_account::ServiceAccountKey>,
+        HttpError,
+    >;
+
+    /// Fetch service account key
+    #[endpoint {
+        method = GET,
+        path = "/v1/service-accounts/{service_account}/keys/{key}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_key_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::ServiceAccountKeyPath>,
+    ) -> Result<
+        HttpResponseOk<latest::service_account::ServiceAccountKey>,
+        HttpError,
+    >;
+
+    /// Delete service account key
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/service-accounts/{service_account}/keys/{key}",
+        tags = ["service-accounts"],
+        versions = VERSION_SERVICE_ACCOUNTS..,
+    }]
+    async fn service_account_key_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::ServiceAccountKeyPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Certificates
@@ -9272,7 +9603,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/audit-log",
         tags = ["system/audit-log"],
-        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..,
+        versions = VERSION_SERVICE_ACCOUNTS..,
     }]
     async fn audit_log_list(
         rqctx: RequestContext<Self::Context>,
@@ -9283,6 +9614,39 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::audit::AuditLogEntry>>,
         HttpError,
     >;
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..VERSION_SERVICE_ACCOUNTS,
+    }]
+    async fn audit_log_list_v2026_01_15_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_15_01::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page
+                .items
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()
+                .map_err(
+                    |e: v2026_11_17_00::audit::ServiceAccountAuditNotRepresentable| {
+                        HttpError::for_bad_request(None, e.to_string())
+                    },
+                )?,
+            next_page: page.next_page,
+        }))
+    }
 
     /// View audit log
     #[endpoint {
@@ -9301,7 +9665,8 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2026_01_15_00::audit::AuditLogEntry>>,
         HttpError,
     > {
-        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        let page =
+            Self::audit_log_list_v2026_01_15_01(rqctx, query_params).await?.0;
         Ok(HttpResponseOk(ResultsPage {
             items: page.items.into_iter().map(Into::into).collect(),
             next_page: page.next_page,
@@ -9325,7 +9690,8 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::audit::AuditLogEntry>>,
         HttpError,
     > {
-        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        let page =
+            Self::audit_log_list_v2026_01_15_01(rqctx, query_params).await?.0;
         Ok(HttpResponseOk(ResultsPage {
             items: page
                 .items

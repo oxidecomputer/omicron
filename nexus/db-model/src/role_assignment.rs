@@ -23,7 +23,10 @@ impl_enum_type!(
         FromSqlRow,
         Serialize,
         Deserialize,
-        PartialEq
+        PartialEq,
+        Eq,
+        PartialOrd,
+        Ord
     )]
     pub enum IdentityType;
 
@@ -31,6 +34,7 @@ impl_enum_type!(
     UserBuiltin => b"user_builtin"
     SiloUser => b"silo_user"
     SiloGroup => b"silo_group"
+    ServiceAccount => b"service_account"
 );
 
 impl From<policy::IdentityType> for IdentityType {
@@ -38,6 +42,9 @@ impl From<policy::IdentityType> for IdentityType {
         match other {
             policy::IdentityType::SiloUser => IdentityType::SiloUser,
             policy::IdentityType::SiloGroup => IdentityType::SiloGroup,
+            policy::IdentityType::ServiceAccount => {
+                IdentityType::ServiceAccount
+            }
         }
     }
 }
@@ -52,6 +59,9 @@ impl TryFrom<IdentityType> for policy::IdentityType {
             }
             IdentityType::SiloUser => Ok(policy::IdentityType::SiloUser),
             IdentityType::SiloGroup => Ok(policy::IdentityType::SiloGroup),
+            IdentityType::ServiceAccount => {
+                Ok(policy::IdentityType::ServiceAccount)
+            }
         }
     }
 }

@@ -1021,6 +1021,8 @@ pub enum ResourceType {
     Sled,
     SledInstance,
     SledLedger,
+    ServiceAccount,
+    ServiceAccountKey,
     Snapshot,
     SshKey,
     SupportBundle,

@@ -691,6 +691,48 @@ resource: Project "silo1-proj1"
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
+resource: ServiceAccount "silo1-proj1-service-account1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
+resource: ServiceAccountKey "silo1-proj1-service-account1-key1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-admin                       ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-collaborator                ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-limited-collaborator        ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-proj1-collaborator          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  internal-api                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  external-authn                    ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+
 resource: Disk "silo1-proj1-disk1"
 
   USER                              Q  R LC RP  M MP CC  D
@@ -1089,6 +1131,48 @@ resource: Project "silo1-proj2"
   db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
+resource: ServiceAccount "silo1-proj2-service-account1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
+resource: ServiceAccountKey "silo1-proj2-service-account1-key1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-admin                       ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-collaborator                ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-limited-collaborator        ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  internal-api                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  external-authn                    ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
 
 resource: Disk "silo1-proj2-disk1"
 
@@ -1866,6 +1950,48 @@ resource: Project "silo2-proj1"
   db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
+resource: ServiceAccount "silo2-proj1-service-account1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-limited-collaborator        ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
+resource: ServiceAccountKey "silo2-proj1-service-account1-key1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  fleet-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-limited-collaborator        ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  internal-api                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  external-authn                    ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
 
 resource: Disk "silo2-proj1-disk1"
 
