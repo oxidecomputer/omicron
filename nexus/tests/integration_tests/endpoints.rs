@@ -795,7 +795,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
     LazyLock::new(|| {
-        InstanceCreateBuilder::new(DEMO_INSTANCE_NAME.as_str())
+        InstanceCreateBuilder::new(DEMO_STOPPED_INSTANCE_NAME.as_str())
             .with_description("")
             .with_ncpus(instance::InstanceCpuCount(1))
             .with_memory(ByteCount::from_gibibytes_u32(16))

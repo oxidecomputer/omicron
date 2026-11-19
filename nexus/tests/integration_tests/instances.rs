@@ -3020,7 +3020,7 @@ async fn test_instances_create_stopped_start(
 
     // Create an instance in a stopped state.
     let instance: Instance =
-        create_instance_stopped(client, &get_project_selector(), instance_name)
+        create_instance_stopped(client, PROJECT_NAME, instance_name)
             .await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
@@ -4364,6 +4364,7 @@ async fn cannot_make_new_primary_nic_lacking_ip_stack_for_external_addresses(
                 pool: v4_pool.identity.id.into(),
             },
         }])
+        .with_start(false)
         .finish();
     let response = NexusRequest::objects_post(
         client,
