@@ -35,7 +35,7 @@ impl NvmeInstance {
         i32::try_from(value).map(Self).map_err(|_| InvalidNvmeInstance(value))
     }
 
-    /// Returns the instance number as libnvme represents it.
+    /// Returns the instance number as represented by libnvme.
     pub fn as_i32(self) -> i32 {
         self.0
     }
