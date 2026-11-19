@@ -67,10 +67,9 @@ pub enum DiskBayOccupant {
     /// topology finds a bay's occupant through the device node under its
     /// PCIe bridge, and has no separate presence detection.
     Empty,
-    /// An NVMe disk that sled-agent manages. It appears in the sled's disk
-    /// list under this identity.
+    /// A usable NVMe disk.
     Disk { identity: DiskIdentity },
-    /// A device is present, but sled-agent does not use it as a disk.
+    /// A device is present, but it cannot be used as a disk.
     UnusableDevice {
         reason: UnusableReason,
         /// The device's devfs path, relative to `/devices`, if the topology
