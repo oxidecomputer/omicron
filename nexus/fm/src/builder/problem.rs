@@ -4,6 +4,7 @@
 
 use super::rng::ProblemBuilderRng;
 use crate::problem::ProblemCode;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use iddqd::{IdOrdMap, id_ord_map};
 use nexus_types::fm::AllProblems;
@@ -543,14 +544,68 @@ impl<'parent> ProblemSetBuilder<'parent> {
         self.pending_revisions.get(id)
     }
 
-    pub fn build(self) -> anyhow::Result<(AllProblems, IdOrdMap<ActiveProblemReport>)> {
-        let n_problems = self.pending_revisions.len()
-            + self.parent_problems.map_or(0, |p| p.len());
-        let mut reports = IdOrdMap::with_capacity(n_problems);
-        let problems = self.
-        let problems = AllProblems::try_from_iter()?;
+    pub fn new_active_problems_requested(&self) -> usize {
+        self.new_active_problems_requested
+    }
 
-        todo!()
+    /// Builds the set of problems for the new sitrep, along with a report for
+    /// each problem with activity in this sitrep.
+    ///
+    /// The returned set contains every problem with a pending revision, plus
+    /// every problem in the parent sitrep that was not revised, copied forward
+    /// unchanged.
+    ///
+    /// A problem has activity if its debug log in this sitrep is non-empty:
+    /// it was requested, a field changed, it was resolved, a link was added,
+    /// or a diagnosis engine logged something about it (such as a warning
+    /// about a duplicate link). A problem that a diagnosis engine opened with
+    /// [`Self::revise`] but did nothing to has no activity, and neither does
+    /// a copied-forward problem, so neither gets a report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resulting problem set is invalid: a problem
+    /// with no revisions, or a problem ID that appears twice. Neither should
+    /// be possible. Pending revisions are keyed by problem ID, and
+    /// copied-forward problems are exactly the parent's problems without a
+    /// pending revision, so IDs are unique. A built problem has either a new
+    /// revision or its parent's revisions, which the parent's `AllProblems`
+    /// already required to be non-empty.
+    pub fn build(
+        self,
+    ) -> anyhow::Result<(AllProblems, IdOrdMap<ActiveProblemReport>)> {
+        let Self { pending_revisions, parent_problems, sitrep_id, .. } = self;
+        let mut problems = AllProblems::default();
+        let mut reports = IdOrdMap::new();
+
+        // Copy forward the parent's problems that have no pending revision.
+        // This must happen before consuming `pending_revisions`, which is
+        // what tells us which problems were revised.
+        for problem in parent_problems.into_iter().flat_map(|p| p.by_id()) {
+            if pending_revisions.contains_key(&problem.id) {
+                continue;
+            }
+            let id = problem.id;
+            problems.insert_unique(problem.clone()).with_context(|| {
+                format!("failed to copy forward problem {id}")
+            })?;
+        }
+
+        for pending in pending_revisions {
+            let id = pending.id;
+            let (problem, report) = pending.build(sitrep_id);
+            problems.insert_unique(problem).with_context(|| {
+                format!("failed to insert revised problem {id}")
+            })?;
+            if !report.log.is_empty() {
+                reports.insert_unique(report).expect(
+                    "pending revisions are keyed by problem ID, so each \
+                     report's ID is unique",
+                );
+            }
+        }
+
+        Ok((problems, reports))
     }
 }
 
@@ -777,6 +832,7 @@ const PARENT_OR_ALL_FIELDS_SET: &str = "a pending revision without a parent \
 mod tests {
     use super::*;
     use crate::builder::SitrepBuilderRng;
+    use nexus_types::fm::analysis_reports::ProblemState;
     use omicron_test_utils::dev;
 
     const DE: DiagnosisEngineKind = DiagnosisEngineKind::PhysicalDisk;
@@ -804,7 +860,6 @@ mod tests {
                 summary: "parent summary".to_string(),
                 description: "parent description".to_string(),
                 action_required: "parent action".to_string(),
-                comment: "parent comment".to_string(),
             })
             .expect("map is empty");
         let mut alerts = IdOrdMap::new();
@@ -929,6 +984,209 @@ mod tests {
         // Every attempted link, successful or not, leaves a log entry.
         assert_eq!(debug_log_len(&rev.revision.debug_log), 6);
         drop(rev);
+        logctx.cleanup_successful();
+    }
+
+    fn request() -> ActiveProblemRequest {
+        ActiveProblemRequest {
+            code: ProblemCode::UnhealthyZpool,
+            summary: "new summary".to_string(),
+            description: "new description".to_string(),
+            action_required: "new action".to_string(),
+        }
+    }
+
+    /// A newly requested problem is built with a single revision, requested
+    /// in the current sitrep, and gets a report.
+    #[test]
+    fn build_new_problem() {
+        let logctx = dev::test_setup_log("build_new_problem");
+        let mut problems = builder(&logctx.log, None);
+        let sitrep_id = problems.sitrep_id;
+        let alert_id = AlertUuid::new_v4();
+        let id = {
+            let mut rev =
+                problems.request_active_problem(DE, request(), "new problem");
+            rev.attach_alert(alert_id, "alert for new problem");
+            rev.id()
+        };
+
+        let (built, reports) = problems.build().expect("build succeeds");
+        assert_eq!(built.len(), 1);
+        let problem = built.by_id().get(&id).expect("problem was built");
+        assert_eq!(problem.requested_sitrep_id, sitrep_id);
+        assert_eq!(problem.comment, "new problem");
+        assert_eq!(problem.revisions.len(), 1);
+        let rev = problem.current_revision();
+        assert_eq!(rev.number, ProblemRevNum::new());
+        assert_eq!(rev.requested_sitrep_id, sitrep_id);
+        assert_eq!(rev.summary, "new summary");
+        assert_eq!(rev.time_resolved, None);
+        let link = problem.alerts.get(&alert_id).expect("alert is linked");
+        assert_eq!(link.revision, rev.number);
+        assert_eq!(link.linked_sitrep_id, sitrep_id);
+
+        let report = reports.get(&id).expect("new problem has a report");
+        assert_eq!(report.requested_sitrep_id, sitrep_id);
+        assert_eq!(report.revised_sitrep_id, sitrep_id);
+        assert_eq!(report.state, ProblemState::Active);
+        assert_eq!(report.revision, rev.number);
+        assert_eq!((report.new_alerts, report.total_alerts), (1, 1));
+        assert_eq!(
+            (report.new_support_bundles, report.total_support_bundles),
+            (0, 0)
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// Revising a parent problem appends a revision that overlays the
+    /// changed fields on the parent's, keeps the parent's revisions and
+    /// links, and preserves the sitrep in which the problem was requested.
+    #[test]
+    fn build_revised_problem() {
+        let logctx = dev::test_setup_log("build_revised_problem");
+        let parent = parent_problem();
+        let id = parent.id;
+        let parent_requested_in = parent.requested_sitrep_id;
+        let parent_problems = AllProblems::try_from_iter([parent])
+            .expect("parent problem is valid");
+        let mut problems = builder(&logctx.log, Some(&parent_problems));
+        let sitrep_id = problems.sitrep_id;
+        let new_bundle = SupportBundleUuid::new_v4();
+        {
+            let mut rev = problems.revise(DE, &id).expect("unresolved");
+            rev.set_summary("revised summary", "it got worse");
+            rev.attach_support_bundle(new_bundle, "collect evidence");
+        }
+
+        let (built, reports) = problems.build().expect("build succeeds");
+        let problem = built.by_id().get(&id).expect("problem was built");
+        assert_eq!(problem.requested_sitrep_id, parent_requested_in);
+        assert_eq!(problem.comment, "parent problem");
+        assert_eq!(problem.revisions.len(), 2);
+        let rev = problem.current_revision();
+        assert_eq!(rev.number, ProblemRevNum::new().next());
+        assert_eq!(rev.requested_sitrep_id, sitrep_id);
+        assert_eq!(rev.summary, "revised summary");
+        // Unchanged fields carry over from the parent's revision.
+        assert_eq!(rev.code, ProblemCode::UnhealthyZpool);
+        assert_eq!(rev.description, "parent description");
+        assert_eq!(rev.action_required, "parent action");
+        assert_eq!(problem.alerts.len(), 1);
+        assert_eq!(problem.support_bundles.len(), 2);
+        let link =
+            problem.support_bundles.get(&new_bundle).expect("bundle is linked");
+        assert_eq!(link.revision, rev.number);
+
+        let report = reports.get(&id).expect("revised problem has a report");
+        assert_eq!(report.requested_sitrep_id, parent_requested_in);
+        assert_eq!(report.revised_sitrep_id, sitrep_id);
+        assert_eq!(report.summary, "revised summary");
+        assert_eq!((report.new_alerts, report.total_alerts), (0, 1));
+        assert_eq!(
+            (report.new_support_bundles, report.total_support_bundles),
+            (1, 2)
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// Parent problems that are not changed in this sitrep are copied
+    /// forward without a new revision. Only those with activity in this
+    /// sitrep get a report: one that is never touched, or that a diagnosis
+    /// engine opens for revision but only no-ops on, gets none. One whose
+    /// only activity is a logged warning still gets a report, because the
+    /// warning is something an operator should see.
+    #[test]
+    fn build_unrevised_problems() {
+        let logctx = dev::test_setup_log("build_unrevised_problems");
+        let untouched = parent_problem();
+        let untouched_id = untouched.id;
+        let no_op = parent_problem();
+        let no_op_id = no_op.id;
+        let warned = parent_problem();
+        let warned_id = warned.id;
+        let warned_alert = warned.alerts.iter().next().unwrap().alert_id;
+        let warned_revised_in = warned.current_revision().requested_sitrep_id;
+        let parent_problems =
+            AllProblems::try_from_iter([untouched, no_op, warned])
+                .expect("parent problems are valid");
+        let mut problems = builder(&logctx.log, Some(&parent_problems));
+        {
+            let mut rev = problems.revise(DE, &no_op_id).expect("unresolved");
+            rev.set_summary("parent summary", "no-op");
+        }
+        {
+            let mut rev = problems.revise(DE, &warned_id).expect("unresolved");
+            rev.attach_alert(warned_alert, "already linked in parent");
+        }
+
+        let (built, reports) = problems.build().expect("build succeeds");
+        assert_eq!(built.len(), 3);
+        for id in [untouched_id, no_op_id, warned_id] {
+            let problem = built.by_id().get(&id).expect("problem is present");
+            let parent = parent_problems.by_id().get(&id).unwrap();
+            assert_eq!(problem, parent, "problem {id} was copied forward");
+        }
+        assert!(reports.get(&untouched_id).is_none());
+        assert!(reports.get(&no_op_id).is_none());
+        let report = reports.get(&warned_id).expect("warning is activity");
+        assert_eq!(report.revision, ProblemRevNum::new());
+        assert_eq!(report.revised_sitrep_id, warned_revised_in);
+        assert_eq!(report.state, ProblemState::Active);
+        assert_eq!((report.new_alerts, report.new_support_bundles), (0, 0));
+        assert_eq!(debug_log_len(&report.log), 1);
+        assert_eq!(reports.len(), 1);
+        logctx.cleanup_successful();
+    }
+
+    /// Resolving a problem records the caller's timestamp in the new
+    /// revision and the report, and a sitrep built on top of that one can no
+    /// longer revise the problem.
+    #[test]
+    fn build_resolved_problem() {
+        let logctx = dev::test_setup_log("build_resolved_problem");
+        let parent = parent_problem();
+        let id = parent.id;
+        let parent_problems = AllProblems::try_from_iter([parent])
+            .expect("parent problem is valid");
+        let mut problems = builder(&logctx.log, Some(&parent_problems));
+        let sitrep_id = problems.sitrep_id;
+        let time_resolved: DateTime<Utc> =
+            "2026-01-01T00:00:00Z".parse().unwrap();
+        {
+            let mut rev = problems.revise(DE, &id).expect("unresolved");
+            rev.resolve(time_resolved, "it got better");
+            // A second resolution must not overwrite the first.
+            rev.resolve(Utc::now(), "it got even better");
+            assert_eq!(rev.time_resolved(), Some(time_resolved));
+        }
+
+        let (built, reports) = problems.build().expect("build succeeds");
+        let problem = built.by_id().get(&id).expect("problem was built");
+        assert!(problem.is_resolved());
+        assert_eq!(
+            problem.current_revision().time_resolved,
+            Some(time_resolved)
+        );
+        assert_eq!(
+            reports.get(&id).expect("resolved problem has a report").state,
+            ProblemState::Resolved { sitrep_id, time_resolved },
+        );
+
+        let mut next = builder(&logctx.log, Some(&built));
+        assert!(
+            next.revise(DE, &id).is_none(),
+            "a resolved problem must not be revised"
+        );
+        let (next_built, next_reports) = next.build().expect("build succeeds");
+        assert_eq!(
+            next_built.by_id().get(&id),
+            built.by_id().get(&id),
+            "the resolved problem is still copied forward"
+        );
+        // A problem resolved in the parent sitrep cannot be revised, so it
+        // has no activity and gets no report.
+        assert!(next_reports.is_empty());
         logctx.cleanup_successful();
     }
 }
