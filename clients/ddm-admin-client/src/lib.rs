@@ -15,6 +15,7 @@ use omicron_common::address::BOOTSTRAP_PREFIX;
 use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::DDMD_PORT;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_sled_address;
 use omicron_common::http_client::internal_http_client_builder;
@@ -22,6 +23,7 @@ use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::SlogInlineError;
+use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -98,6 +100,18 @@ impl Client {
         &self,
     ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
         self.inner.get_originated().await.map(|resp| resp.into_inner())
+    }
+
+    pub async fn get_rack_prefixes(
+        &self,
+    ) -> Result<BTreeSet<Ipv6Net>, Error<types::Error>> {
+        let prefixes = self.inner.get_prefixes().await?.into_inner();
+        Ok(prefixes
+            .into_values()
+            .flatten()
+            .filter(|pv| pv.destination.width() == RACK_PREFIX_LENGTH)
+            .map(|pv| pv.destination)
+            .collect())
     }
 
     pub async fn enable_stats(
