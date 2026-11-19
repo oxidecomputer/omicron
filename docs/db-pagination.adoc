@@ -576,6 +576,6 @@ This approach can detect many kinds of pagination bugs, though not key mutation 
 
 == LLM review of pagination code [[llm-review]]
 
-There is a Claude skill available to review pagination and other database-related code, called `db-review`. The skill can be invoked with `/db-review`, and Claude has been instructed to load it automatically during database-related code review. The skill loads this document before performing its review.
+There is a Claude skill available to review pagination and other database-related code, called `crdb-review`. The skill can be invoked with `/crdb-review`, and Claude has been instructed to load it automatically during database-related code review. The skill loads this document before performing its review.
 
 The skill has been helpful at detecting pagination bugs in the codebase, but (like all LLM-based review) is not perfect, and should only be relied on in conjunction with human review.
