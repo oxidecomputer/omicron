@@ -281,6 +281,10 @@ impl PlanningInput {
         self.policy.oximeter_read_policy.mode.single_node_enabled()
     }
 
+    pub fn wicket_ssh_auth(&self) -> &WicketSshAuth {
+        &self.policy.wicket_ssh_auth
+    }
+
     /// ID of the currently running Nexus zones
     pub fn active_nexus_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
         &self.active_nexus_zones

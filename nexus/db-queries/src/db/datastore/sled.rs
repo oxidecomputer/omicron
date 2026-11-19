@@ -2610,6 +2610,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::SledUuid;
     use predicates::{BoxPredicate, prelude::*};
     use sled_agent_types::inventory::SledCpuFamily;
+    use sled_agent_types::inventory::WicketSshAuth;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
@@ -3066,6 +3067,7 @@ pub(in crate::db::datastore) mod test {
                 builder.ensure_sled_exists(
                     new_sled.id(),
                     Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    &WicketSshAuth::unauthenticated_initial_generation(),
                 );
             });
         let writes =
@@ -5505,6 +5507,7 @@ pub(in crate::db::datastore) mod test {
             builder.ensure_sled_exists(
                 sled_config.sled_id,
                 Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                &WicketSshAuth::unauthenticated_initial_generation(),
             );
         }
         let blueprint = builder.build(BlueprintSource::Test);

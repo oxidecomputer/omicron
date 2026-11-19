@@ -49,6 +49,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::WicketSshAuth;
 use slog::debug;
 use slog::info;
 use std::collections::BTreeMap;
@@ -471,6 +472,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             builder.ensure_sled_exists(
                 sled_id,
                 Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                &WicketSshAuth::unauthenticated_initial_generation(),
             );
             builder.comment(format!("add sled {sled_id}"));
             Ok(())
