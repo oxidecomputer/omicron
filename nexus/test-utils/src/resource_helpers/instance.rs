@@ -139,36 +139,6 @@ pub async fn create_instance_stopped(
     create_instance_from_body(client, project_name, builder.finish()).await
 }
 
-/// Creates an instance with associated configuration.
-///
-/// TODO: this might be removable in favor of InstanceCreateBuilder.
-// I know, Clippy. I don't like it either...
-#[allow(clippy::too_many_arguments)]
-pub async fn create_instance_with(
-    client: &ClientTestContext,
-    project_name: &str,
-    instance_name: &str,
-    nics: &instance::InstanceNetworkInterfaceAttachment,
-    disks: Vec<instance::InstanceDiskAttachment>,
-    external_ips: Vec<instance::ExternalIpCreate>,
-    start: bool,
-    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
-    cpu_platform: Option<InstanceCpuPlatform>,
-    multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
-) -> Instance {
-    let body = InstanceCreateBuilder::new(instance_name)
-        .with_nics(nics.clone())
-        .with_disks(disks)
-        .with_external_ips(external_ips)
-        .with_start(start)
-        .with_auto_restart_policy(auto_restart_policy)
-        .with_cpu_platform(cpu_platform)
-        .with_multicast_groups(multicast_groups)
-        .finish();
-
-    create_instance_from_body(client, project_name, body).await
-}
-
 /// Creates an instance with provided `InstanceCreate` payload.
 ///
 /// Callers are expected to use [`InstanceCreateBuilder`] to specify what
