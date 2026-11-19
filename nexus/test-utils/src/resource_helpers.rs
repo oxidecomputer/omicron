@@ -34,10 +34,6 @@ use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::hardware::Baseboard;
 use nexus_types::external_api::image;
-use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::{
-    InstanceAutoRestartPolicy, InstanceCpuCount,
-};
 use nexus_types::external_api::internet_gateway;
 use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
@@ -46,7 +42,6 @@ use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolRange, IpRange, IpVersion,
 };
-use nexus_types::external_api::multicast;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
@@ -62,8 +57,6 @@ use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
-use nexus_types_versions::latest::instance::Instance;
-use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -101,6 +94,12 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
+
+mod instance;
+pub use instance::{
+    InstanceCreateBuilder, create_instance, create_instance_from_body,
+    create_instance_with, create_instance_with_error,
+};
 
 pub async fn objects_list_page_authz<ItemType>(
     client: &ClientTestContext,
@@ -880,96 +879,6 @@ pub async fn delete_image(
 ) {
     let url = format!("/v1/images/{}?project={}", image_name, project_name);
     object_delete(client, &url).await
-}
-
-/// Creates an instance with a default NIC and no disks.
-///
-/// Wrapper around [`create_instance_with`].
-pub async fn create_instance(
-    client: &ClientTestContext,
-    project_name: &str,
-    instance_name: &str,
-) -> Instance {
-    create_instance_with(
-        client,
-        project_name,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        // Disks=
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        // External IPs=
-        Vec::<instance::ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        // Multicast groups=
-        Vec::<multicast::MulticastGroupJoinSpec>::new(),
-    )
-    .await
-}
-
-/// Creates an instance with attached resources.
-// I know, Clippy. I don't like it either...
-#[allow(clippy::too_many_arguments)]
-pub async fn create_instance_with(
-    client: &ClientTestContext,
-    project_name: &str,
-    instance_name: &str,
-    nics: &instance::InstanceNetworkInterfaceAttachment,
-    disks: Vec<instance::InstanceDiskAttachment>,
-    external_ips: Vec<instance::ExternalIpCreate>,
-    start: bool,
-    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
-    cpu_platform: Option<InstanceCpuPlatform>,
-    multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
-) -> Instance {
-    let url = format!("/v1/instances?project={}", project_name);
-
-    object_create(
-        client,
-        &url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces: nics.clone(),
-            external_ips,
-            disks,
-            boot_disk: None,
-            cpu_platform,
-            start,
-            auto_restart_policy,
-            anti_affinity_groups: Vec::new(),
-            multicast_groups,
-            enable_jumbo_frames: false,
-        },
-    )
-    .await
-}
-
-/// Creates an instance, asserting a status code and returning the error.
-///
-/// Note that this accepts any serializable body, which allows users to create
-/// invalid inputs to test our parameter validation.
-pub async fn create_instance_with_error<T>(
-    client: &ClientTestContext,
-    project_name: &str,
-    body: &T,
-    status: StatusCode,
-) -> HttpErrorResponseBody
-where
-    T: serde::Serialize,
-{
-    let url = format!("/v1/instances?project={project_name}");
-    object_create_error(client, &url, body, status).await
 }
 
 pub async fn attach_disk_to_instance(
