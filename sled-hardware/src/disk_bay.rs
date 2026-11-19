@@ -230,17 +230,18 @@ pub(crate) enum DescribeError {
 
 /// What the topology alone can say about a bay.
 #[derive(Debug)]
-pub(crate) enum Described<'a> {
+pub(crate) enum BayDescription<'a> {
     /// The bay is empty, or holds a device that is not an NVMe controller.
-    Bay(DiskBay),
+    Complete(DiskBay),
     /// The bay holds an NVMe controller, which needs libnvme's facts to
     /// finish describing.
-    Nvme(ObservedNvme<'a>),
+    NeedsNvmeFacts(ObservedNvmeBay<'a>),
 }
 
-/// An NVMe controller the topology found in a bay.
+/// A bay the topology found an NVMe controller in, before libnvme has been
+/// asked about that controller.
 #[derive(Debug)]
-pub(crate) struct ObservedNvme<'a> {
+pub(crate) struct ObservedNvmeBay<'a> {
     bay: &'a ObservedBay,
     pcie_slot: i64,
     instance: NvmeInstance,
@@ -250,11 +251,12 @@ pub(crate) struct ObservedNvme<'a> {
 
 /// Describes a bay from what the topology says about it.
 ///
-/// A bay holding an NVMe controller comes back as [`Described::Nvme`], to be
-/// finished with [`ObservedNvme::describe`].
+/// A bay holding an NVMe controller comes back as
+/// [`BayDescription::NeedsNvmeFacts`], to be finished with
+/// [`ObservedNvmeBay::describe`].
 pub(crate) fn describe_bay(
     bay: &ObservedBay,
-) -> Result<Described<'_>, DescribeError> {
+) -> Result<BayDescription<'_>, DescribeError> {
     let contents = match &bay.contents {
         Ok(contents) => contents,
         Err(problem) => {
@@ -277,7 +279,7 @@ pub(crate) fn describe_bay(
             }
         }
         ObservedOccupant::Nvme { instance, devfs_path, namespaces, .. } => {
-            return Ok(Described::Nvme(ObservedNvme {
+            return Ok(BayDescription::NeedsNvmeFacts(ObservedNvmeBay {
                 bay,
                 pcie_slot: contents.pcie_slot,
                 instance: *instance,
@@ -286,14 +288,14 @@ pub(crate) fn describe_bay(
             }));
         }
     };
-    Ok(Described::Bay(DiskBay {
+    Ok(BayDescription::Complete(DiskBay {
         location: bay.location.clone(),
         kind: bay.kind,
         occupant,
     }))
 }
 
-impl ObservedNvme<'_> {
+impl ObservedNvmeBay<'_> {
     pub(crate) fn instance(&self) -> NvmeInstance {
         self.instance
     }
@@ -315,8 +317,13 @@ impl ObservedNvme<'_> {
         nvme: &NvmeFacts,
         is_boot_disk: bool,
     ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
-        let ObservedNvme { bay, pcie_slot, instance, devfs_path, namespaces } =
-            self;
+        let ObservedNvmeBay {
+            bay,
+            pcie_slot,
+            instance,
+            devfs_path,
+            namespaces,
+        } = self;
         let describe = |occupant| DiskBay {
             location: bay.location.clone(),
             kind: bay.kind,
@@ -591,8 +598,8 @@ mod tests {
     /// Describes a bay that needs nothing from libnvme.
     fn describe_without_nvme(observed: &ObservedBay) -> DiskBay {
         match describe_bay(observed).unwrap() {
-            Described::Bay(bay) => bay,
-            Described::Nvme(nvme) => {
+            BayDescription::Complete(bay) => bay,
+            BayDescription::NeedsNvmeFacts(nvme) => {
                 panic!("expected no NVMe controller, got {nvme:?}")
             }
         }
@@ -605,8 +612,10 @@ mod tests {
         is_boot_disk: bool,
     ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
         match describe_bay(observed).unwrap() {
-            Described::Nvme(nvme) => nvme.describe(&facts, is_boot_disk),
-            Described::Bay(bay) => {
+            BayDescription::NeedsNvmeFacts(nvme) => {
+                nvme.describe(&facts, is_boot_disk)
+            }
+            BayDescription::Complete(bay) => {
                 panic!("expected an NVMe controller, got {bay:?}")
             }
         }
@@ -663,7 +672,9 @@ mod tests {
         observed.kind = DiskVariant::M2;
         observed.contents.as_mut().unwrap().pcie_slot = 18;
 
-        let Described::Nvme(nvme) = describe_bay(&observed).unwrap() else {
+        let BayDescription::NeedsNvmeFacts(nvme) =
+            describe_bay(&observed).unwrap()
+        else {
             panic!("expected an NVMe controller");
         };
         assert_eq!(nvme.instance(), instance());
@@ -823,8 +834,8 @@ mod tests {
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
         let (bay, disk) = match describe_bay(observed).unwrap() {
-            Described::Bay(bay) => (bay, None),
-            Described::Nvme(nvme) => {
+            BayDescription::Complete(bay) => (bay, None),
+            BayDescription::NeedsNvmeFacts(nvme) => {
                 let facts = facts.expect("an NVMe bay needs libnvme facts");
                 nvme.describe(facts, false).unwrap()
             }

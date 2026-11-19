@@ -8,8 +8,8 @@ use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
-    DescribeError, Described, NvmeFacts, ObservedBay, PolledBay, describe_bay,
-    resolve_bays,
+    BayDescription, DescribeError, NvmeFacts, ObservedBay, PolledBay,
+    describe_bay, resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
@@ -380,10 +380,10 @@ fn poll_bay(
     };
 
     let nvme_bay = match describe_bay(bay) {
-        Ok(Described::Bay(bay)) => {
+        Ok(BayDescription::Complete(bay)) => {
             return PolledBay::Described { bay, disk: None };
         }
-        Ok(Described::Nvme(nvme_bay)) => nvme_bay,
+        Ok(BayDescription::NeedsNvmeFacts(nvme_bay)) => nvme_bay,
         Err(err) => return could_not_describe(err),
     };
 
