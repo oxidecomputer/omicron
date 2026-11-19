@@ -1288,12 +1288,14 @@ impl SledAgent {
         let srv = propolis_mock_server::start(dropshot_config, log.clone())
             .map_err(|error| {
                 Error::unavail(&format!(
-                    "initializing propolis-server: {}",
-                    error
+                    "initializing propolis-server: {error}",
                 ))
             })?;
         let addr = srv.local_addr();
-        let client = propolis_client::Client::new(&format!("http://{}", addr));
+        let client = propolis_client::Client::new(&format!("http://{}", addr))
+            .map_err(|error| {
+                Error::unavail(&format!("creating propolis client: {error}"))
+            })?;
         *mock_lock = Some((srv, client));
         Ok(addr)
     }
@@ -1378,7 +1380,8 @@ impl SledAgent {
                 .map(|info| InventoryDisk {
                     identity: info.identity.clone(),
                     variant: info.variant,
-                    slot: info.slot,
+                    pcie_slot: info.slot,
+                    location: None,
                     active_firmware_slot: 1,
                     next_active_firmware_slot: None,
                     number_of_firmware_slots: 1,

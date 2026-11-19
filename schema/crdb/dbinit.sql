@@ -4873,7 +4873,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
-    -- The slot where this disk was last observed
+    -- The PCIe physical slot number of the bridge above this disk, as
+    -- reported by the sled. This is internal to the board's PCIe topology and
+    -- board-specific (the same U.2 bay is numbered differently on Gimlet and
+    -- Cosmo); it is not the location printed on the chassis. See `location`
+    -- for that. The column is named "slot" for historical reasons; the
+    -- corresponding Rust field is `pcie_slot`.
     slot INT8 CHECK (slot >= 0) NOT NULL,
 
     vendor STRING(63) NOT NULL,
@@ -4882,10 +4887,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
+    -- Where the disk sits in the chassis, as labelled by the sled's hardware
+    -- topology (e.g. "N5" for a U.2 bay, "M.2 East" for a boot device). NULL
+    -- if the sled did not report one.
+    location STRING(63),
+
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
-    -- - The slot in which this disk was found
+    -- - The PCIe slot in which this disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
@@ -4897,7 +4907,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
-    -- The slot where this disk was last observed
+    -- The PCIe physical slot number of the disk this firmware belongs to;
+    -- matches `inv_physical_disk.slot`.
     slot INT8 CHECK (slot >= 0) NOT NULL,
 
     -- total number of firmware slots the device has
@@ -4914,7 +4925,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
-    -- - The slot in which the disk was found
+    -- - The PCIe slot in which the disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
@@ -6781,6 +6792,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_affinity_group_by_project ON omicron.pu
     time_deleted IS NULL;
 
 -- Describes an instance's membership within an affinity group
+--
+-- The instance and the group must be in the same project. This is enforced
+-- when memberships are created, not by this table.
 CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
@@ -6816,6 +6830,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_anti_affinity_group_by_project ON omicr
     time_deleted IS NULL;
 
 -- Describes an instance's membership within an anti-affinity group
+--
+-- The instance and the group must be in the same project. This is enforced
+-- when memberships are created, not by this table.
 CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
@@ -10020,7 +10037,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '321.0.0', NULL)
+    (TRUE, NOW(), NOW(), '323.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

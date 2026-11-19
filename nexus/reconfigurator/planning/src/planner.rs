@@ -1668,11 +1668,10 @@ impl<'a> Planner<'a> {
                 self.blueprint.comment(update.description());
             }
         }
-        for (sled_id, new_disposition) in
-            pending_update_disposition_changes.iter()
-        {
+        for change in pending_update_disposition_changes.iter() {
             self.blueprint.comment(format!(
-                "setting sled {sled_id} update disposition to {new_disposition}"
+                "setting sled {} update disposition to {}",
+                change.sled_id, change.kind,
             ));
         }
         self.blueprint
@@ -1686,7 +1685,7 @@ impl<'a> Planner<'a> {
         report.pending_mgs_updates = pending_updates;
         report.blocked_mgs_updates = blocked_mgs_updates;
         report.update_disposition_changes =
-            pending_update_disposition_changes.into_map();
+            pending_update_disposition_changes.into_inner();
         Ok(report)
     }
 
@@ -1799,7 +1798,12 @@ impl<'a> Planner<'a> {
                 "zones_currently_updating" => ?zones_currently_updating,
             );
             return Ok(PlanningZoneUpdatesStepReport::waiting_on(
-                ZoneUpdatesWaitingOn::InventoryPropagation,
+                ZoneUpdatesWaitingOn::InventoryPropagation {
+                    kinds: zones_currently_updating
+                        .iter()
+                        .map(|z| z.zone_kind)
+                        .collect(),
+                },
             ));
         }
 
@@ -1823,7 +1827,7 @@ impl<'a> Planner<'a> {
                 if let Some(reason) =
                     zone_safety_checks.zone_unsafe_shutdown_reason(&zone.id)
                 {
-                    report.unsafe_zones.insert(zone.id, reason.clone());
+                    report.unsafe_zone(zone, reason.clone());
                     false
                 } else {
                     self.are_zones_ready_for_updates(mgs_updates)

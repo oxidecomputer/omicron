@@ -10510,7 +10510,8 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
         .await
         .unwrap();
     let propolis_client =
-        propolis_client::Client::new(&format!("http://{propolis_addr}"));
+        propolis_client::Client::new(&format!("http://{propolis_addr}"))
+            .unwrap();
 
     let instance = create_instance_with(
         client,

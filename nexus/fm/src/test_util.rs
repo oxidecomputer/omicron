@@ -497,7 +497,7 @@ pub fn make_zpool_degraded_fact(
     zpool_id: ZpoolUuid,
 ) -> fm::case::Fact {
     fm::case::Fact {
-        metadata: fm::case::FactMetadata {
+        metadata: fm::FactMetadata {
             id: FactUuid::new_v4(),
             created_sitrep_id: parent_sitrep_id,
             comment: format!("zpool {zpool_id} degraded"),
@@ -520,7 +520,7 @@ pub fn make_abandoned_saga_fact(
 ) -> fm::case::Fact {
     let saga_id = steno::SagaId::from_u128(saga_n);
     fm::case::Fact {
-        metadata: fm::case::FactMetadata {
+        metadata: fm::FactMetadata {
             id: FactUuid::new_v4(),
             created_sitrep_id: parent_sitrep_id,
             comment: format!("saga {saga_id} abandoned"),
