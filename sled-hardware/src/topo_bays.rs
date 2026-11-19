@@ -88,36 +88,62 @@ pub(crate) fn assemble_bays(
 
     let mut bays: Vec<ObservedBay> = Vec::new();
     for node in nodes {
-        let Some((kind, props)) = bay_kind(node)? else {
-            continue;
+        // First, does this node represent a disk bay at all, and can we read
+        // the properties of the node?
+        let (kind, props) = match &node.kind {
+            // Any "bay" topo node represents a U.2 bay,
+            TopoNodeKind::Bay(props) => (DiskVariant::U2, props),
+            // A "slot" topo node may represent a number of kinds of slots. It's
+            // only a disk if it has the M.2 slot type.
+            TopoNodeKind::Slot { slot_type, props } => match slot_type {
+                Ok(Some(TOPO_SLOT_TYPE_M2)) => (DiskVariant::M2, props),
+                // Not a disk, so skip this node entirely.
+                Ok(_) => continue,
+                // If we couldn't identify this node at all, return an error, so
+                // that we don't incorrectly claim that a previously-identified
+                // disk is missing.
+                Err(error) => {
+                    return Err(BayIdentError::SlotType {
+                        node: node.key.to_string(),
+                        error: error.clone(),
+                    });
+                }
+            },
+            // Any other topo node kind is not a disk, so skip it.
+            _ => continue,
         };
-        let location = identify_bay(&node.key, &props.label, &bays)?;
-        let mut bay = new_bay(&node.key, location, kind, props);
+
+        // Attempt to decode the properties of this bay.
+        let mut bay = ObservedBay::try_decode_props(&node.key, kind, props)?;
+        // Make sure we have not already visited this bay.
+        if bays.iter().any(|other_bay| bay.location == other_bay.location) {
+            return Err(BayIdentError::DuplicateLocation {
+                node: node.key.to_string(),
+                location: bay.location,
+            });
+        }
 
         for child in children_of(&node.key) {
             match &child.kind {
                 TopoNodeKind::Nvme { instance, driver, devfs_path } => {
-                    let added = add_nvme(
-                        log, &mut bay, child, instance, driver, devfs_path,
+                    let added = bay.record_nvme_occupant(
+                        log, child, instance, driver, devfs_path,
                     );
                     if added {
                         for disk in children_of(&child.key) {
-                            add_disk(&mut bay, disk);
+                            bay.record_namespace(disk);
                         }
                     }
                 }
                 TopoNodeKind::Board => {
                     // oxhc's placeholder for a device not bound to `nvme`;
                     // see the module docs.
-                    occupy(
-                        &mut bay,
-                        ObservedOccupant::Other {
-                            driver: None,
-                            devfs_path: None,
-                        },
-                    );
+                    bay.record_occupant(ObservedOccupant::Other {
+                        driver: None,
+                        devfs_path: None,
+                    });
                     for ic in children_of(&child.key) {
-                        add_ic(&mut bay, ic);
+                        bay.record_ic(ic);
                     }
                 }
                 _ => {}
@@ -138,105 +164,188 @@ pub(crate) fn assemble_bays(
     Ok(bays)
 }
 
-/// Whether `node` is a disk bay, and of which kind.
-fn bay_kind(
-    node: &TopoNode,
-) -> Result<Option<(DiskVariant, &BayProps)>, BayIdentError> {
-    match &node.kind {
-        TopoNodeKind::Bay(props) => Ok(Some((DiskVariant::U2, props))),
-        TopoNodeKind::Slot { slot_type, props } => match slot_type {
-            Ok(Some(TOPO_SLOT_TYPE_M2)) => Ok(Some((DiskVariant::M2, props))),
-            Ok(_) => Ok(None),
-            Err(error) => Err(BayIdentError::SlotType {
-                node: node.key.to_string(),
-                error: error.clone(),
-            }),
-        },
-        _ => Ok(None),
+impl ObservedBay {
+    fn try_decode_props(
+        key: &NodeKey,
+        kind: DiskVariant,
+        props: &BayProps,
+    ) -> Result<ObservedBay, BayIdentError> {
+        // The "label" property of a disk bay should tell us the bay's location.
+        let location = match &props.label {
+            Ok(label) if !label.is_empty() => DiskLocation::new(label.clone()),
+            Ok(_) => {
+                return Err(BayIdentError::EmptyLabel {
+                    node: key.to_string(),
+                });
+            }
+            Err(error) => {
+                return Err(BayIdentError::UnreadableLabel {
+                    node: key.to_string(),
+                    error: error.clone(),
+                });
+            }
+        };
+
+        let (binding_driver, driver_problem) = match &props.binding_driver {
+            Ok(driver) => (driver.clone(), None),
+            Err(error) => (None, Some(topology_problem(key, error))),
+        };
+        let pcie_slot = match &props.binding_slot {
+            Ok(Some(slot)) => Ok(i64::from(*slot)),
+            Ok(None) => Err(BayProblem::NoPcieSlot),
+            Err(error) => Err(topology_problem(key, error)),
+        };
+        let contents = match (pcie_slot, driver_problem) {
+            (Err(problem), _) | (Ok(_), Some(problem)) => Err(problem),
+            (Ok(pcie_slot), None) => {
+                Ok(BayContents { pcie_slot, occupant: ObservedOccupant::Empty })
+            }
+        };
+        Ok(ObservedBay { location, kind, binding_driver, contents })
     }
-}
 
-fn identify_bay(
-    key: &NodeKey,
-    label: &Result<String, String>,
-    bays: &[ObservedBay],
-) -> Result<DiskLocation, BayIdentError> {
-    let location = match label {
-        Ok(label) if !label.is_empty() => DiskLocation::new(label.clone()),
-        Ok(_) => {
-            return Err(BayIdentError::EmptyLabel { node: key.to_string() });
-        }
-        Err(error) => {
-            return Err(BayIdentError::UnreadableLabel {
-                node: key.to_string(),
-                error: error.clone(),
-            });
-        }
-    };
-    if bays.iter().any(|bay| bay.location == location) {
-        return Err(BayIdentError::DuplicateLocation {
-            node: key.to_string(),
-            location,
-        });
-    }
-    Ok(location)
-}
-
-fn new_bay(
-    key: &NodeKey,
-    location: DiskLocation,
-    kind: DiskVariant,
-    props: &BayProps,
-) -> ObservedBay {
-    let (binding_driver, driver_problem) = match &props.binding_driver {
-        Ok(driver) => (driver.clone(), None),
-        Err(error) => (None, Some(topology_problem(key, error))),
-    };
-    let pcie_slot = match &props.binding_slot {
-        Ok(Some(slot)) => Ok(i64::from(*slot)),
-        Ok(None) => Err(BayProblem::NoPcieSlot),
-        Err(error) => Err(topology_problem(key, error)),
-    };
-    let contents = match (pcie_slot, driver_problem) {
-        (Err(problem), _) | (Ok(_), Some(problem)) => Err(problem),
-        (Ok(pcie_slot), None) => {
-            Ok(BayContents { pcie_slot, occupant: ObservedOccupant::Empty })
-        }
-    };
-    ObservedBay { location, kind, binding_driver, contents }
-}
-
-/// Records the `nvme` node as the bay's occupant. Returns whether it was
-/// recorded, so that its namespaces belong to the bay.
-fn add_nvme(
-    log: &Logger,
-    bay: &mut ObservedBay,
-    node: &TopoNode,
-    instance: &Prop<u32>,
-    driver: &Prop<String>,
-    devfs_path: &Prop<String>,
-) -> bool {
-    let (driver, devfs_path) = match (driver, devfs_path) {
-        (Ok(driver), Ok(devfs_path)) => (driver.clone(), devfs_path.clone()),
-        (Err(error), _) | (_, Err(error)) => {
-            set_problem(bay, topology_problem(&node.key, error));
+    /// Records the `nvme` node as the bay's occupant. Returns whether it was
+    /// recorded, so that its namespaces belong to the bay.
+    fn record_nvme_occupant(
+        &mut self,
+        log: &Logger,
+        node: &TopoNode,
+        instance: &Prop<u32>,
+        driver: &Prop<String>,
+        devfs_path: &Prop<String>,
+    ) -> bool {
+        let (driver, devfs_path) = match (driver, devfs_path) {
+            (Ok(driver), Ok(devfs_path)) => {
+                (driver.clone(), devfs_path.clone())
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                self.record_problem(topology_problem(&node.key, error));
+                return false;
+            }
+        };
+        let Some(instance) = nvme_instance(log, &node.key, instance) else {
+            self.record_problem(BayProblem::NvmeWithoutInstance);
             return false;
-        }
-    };
-    let Some(instance) = nvme_instance(log, &node.key, instance) else {
-        set_problem(bay, BayProblem::NvmeWithoutInstance);
-        return false;
-    };
-    occupy(
-        bay,
-        ObservedOccupant::Nvme {
+        };
+        self.record_occupant(ObservedOccupant::Nvme {
             instance,
             driver,
             devfs_path,
             namespaces: Vec::new(),
-        },
-    );
-    true
+        });
+        true
+    }
+
+    /// Records why the bay is unreadable, unless an earlier problem already
+    /// made it so.
+    fn record_problem(&mut self, problem: BayProblem) {
+        if self.contents.is_ok() {
+            self.contents = Err(problem);
+        }
+    }
+
+    /// Sets this bay's occupant to `occupant`, if it didn't already have one.
+    /// Otherwise, if this function is called multiple times, it sets
+    /// `self.contents` to an error, as a single bay may not have multiple
+    /// occupants.
+    fn record_occupant(&mut self, occupant: ObservedOccupant) {
+        let Ok(contents) = &mut self.contents else {
+            return;
+        };
+        if contents.occupant == ObservedOccupant::Empty {
+            contents.occupant = occupant;
+        } else {
+            self.contents = Err(BayProblem::MultipleOccupants);
+        }
+    }
+
+    /// Records the `disk` node as a namespace of the bay's NVMe occupant.
+    /// Nodes of any other kind are ignored.
+    fn record_namespace(&mut self, node: &TopoNode) {
+        let TopoNodeKind::Disk {
+            manufacturer,
+            model,
+            serial,
+            devfs_path,
+            logical_disk,
+        } = &node.kind
+        else {
+            return;
+        };
+
+        // A property that cannot be read makes the bay unreadable before one
+        // that is missing does.
+        let props = [
+            (manufacturer, "storage/manufacturer"),
+            (model, "storage/model"),
+            (serial, "storage/serial-number"),
+            (devfs_path, "io/devfs-path"),
+            (logical_disk, "storage/logical-disk"),
+        ];
+        if let Some(error) =
+            props.iter().find_map(|(prop, _)| prop.as_ref().err())
+        {
+            self.record_problem(topology_problem(&node.key, error));
+            return;
+        }
+
+        let value = |prop: &Prop<String>| prop.clone().ok().flatten();
+        let (Some(manufacturer), Some(model), Some(serial), Some(devfs_path)) = (
+            value(manufacturer),
+            value(model),
+            value(serial),
+            value(devfs_path),
+        ) else {
+            // Only the logical disk name is optional.
+            let missing = props[..4]
+                .iter()
+                .find(|(prop, _)| value(prop).is_none())
+                .map(|(_, name)| name.to_string())
+                .unwrap_or_default();
+            self.record_problem(BayProblem::IncompleteDisk {
+                node: node.key.to_string(),
+                property: missing,
+            });
+            return;
+        };
+        let namespace = ObservedNamespace {
+            manufacturer,
+            model,
+            serial,
+            devfs_path,
+            logical_disk: value(logical_disk),
+        };
+        if let Ok(BayContents {
+            occupant: ObservedOccupant::Nvme { namespaces, .. },
+            ..
+        }) = &mut self.contents
+        {
+            namespaces.push(namespace);
+        }
+    }
+
+    /// Records the driver and path of the `ic` node on the bay's placeholder
+    /// occupant. Nodes of any other kind are ignored.
+    fn record_ic(&mut self, node: &TopoNode) {
+        let TopoNodeKind::Ic { driver, devfs_path } = &node.kind else {
+            return;
+        };
+        let (driver, devfs_path) = match (driver, devfs_path) {
+            (Ok(driver), Ok(devfs_path)) => (driver, devfs_path),
+            (Err(error), _) | (_, Err(error)) => {
+                self.record_problem(topology_problem(&node.key, error));
+                return;
+            }
+        };
+        if let Ok(BayContents {
+            occupant: ObservedOccupant::Other { driver: d, devfs_path: p },
+            ..
+        }) = &mut self.contents
+        {
+            *d = driver.clone();
+            *p = devfs_path.clone();
+        }
+    }
 }
 
 /// The driver instance of an `nvme` node, or `None`, with a log line, if it
@@ -277,109 +386,6 @@ fn nvme_instance(
             );
             None
         }
-    }
-}
-
-fn add_disk(bay: &mut ObservedBay, node: &TopoNode) {
-    let TopoNodeKind::Disk {
-        manufacturer,
-        model,
-        serial,
-        devfs_path,
-        logical_disk,
-    } = &node.kind
-    else {
-        return;
-    };
-
-    // A property that cannot be read makes the bay unreadable before one
-    // that is missing does.
-    let props = [
-        (manufacturer, "storage/manufacturer"),
-        (model, "storage/model"),
-        (serial, "storage/serial-number"),
-        (devfs_path, "io/devfs-path"),
-        (logical_disk, "storage/logical-disk"),
-    ];
-    if let Some(error) = props.iter().find_map(|(prop, _)| prop.as_ref().err())
-    {
-        set_problem(bay, topology_problem(&node.key, error));
-        return;
-    }
-
-    let value = |prop: &Prop<String>| prop.clone().ok().flatten();
-    let (Some(manufacturer), Some(model), Some(serial), Some(devfs_path)) =
-        (value(manufacturer), value(model), value(serial), value(devfs_path))
-    else {
-        // Only the logical disk name is optional.
-        let missing = props[..4]
-            .iter()
-            .find(|(prop, _)| value(prop).is_none())
-            .map(|(_, name)| name.to_string())
-            .unwrap_or_default();
-        set_problem(
-            bay,
-            BayProblem::IncompleteDisk {
-                node: node.key.to_string(),
-                property: missing,
-            },
-        );
-        return;
-    };
-    let namespace = ObservedNamespace {
-        manufacturer,
-        model,
-        serial,
-        devfs_path,
-        logical_disk: value(logical_disk),
-    };
-    if let Ok(BayContents {
-        occupant: ObservedOccupant::Nvme { namespaces, .. },
-        ..
-    }) = &mut bay.contents
-    {
-        namespaces.push(namespace);
-    }
-}
-
-fn add_ic(bay: &mut ObservedBay, node: &TopoNode) {
-    let TopoNodeKind::Ic { driver, devfs_path } = &node.kind else {
-        return;
-    };
-    let (driver, devfs_path) = match (driver, devfs_path) {
-        (Ok(driver), Ok(devfs_path)) => (driver, devfs_path),
-        (Err(error), _) | (_, Err(error)) => {
-            set_problem(bay, topology_problem(&node.key, error));
-            return;
-        }
-    };
-    if let Ok(BayContents {
-        occupant: ObservedOccupant::Other { driver: d, devfs_path: p },
-        ..
-    }) = &mut bay.contents
-    {
-        *d = driver.clone();
-        *p = devfs_path.clone();
-    }
-}
-
-/// Records why the bay is unreadable, unless an earlier problem already
-/// made it so.
-fn set_problem(bay: &mut ObservedBay, problem: BayProblem) {
-    if bay.contents.is_ok() {
-        bay.contents = Err(problem);
-    }
-}
-
-/// Claims the bay for a new occupant, which should be its first.
-fn occupy(bay: &mut ObservedBay, occupant: ObservedOccupant) {
-    let Ok(contents) = &mut bay.contents else {
-        return;
-    };
-    if contents.occupant == ObservedOccupant::Empty {
-        contents.occupant = occupant;
-    } else {
-        bay.contents = Err(BayProblem::MultipleOccupants);
     }
 }
 
