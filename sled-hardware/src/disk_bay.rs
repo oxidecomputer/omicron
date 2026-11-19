@@ -61,8 +61,11 @@ impl IdOrdItem for DiskBay {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DiskBayOccupant {
-    /// Nothing is behind this bay. A drive whose PCIe link is down also
-    /// looks like this until the host OS gains presence detection.
+    /// The bay is empty.
+    ///
+    /// A drive whose PCIe link is down also looks like this. The hardware
+    /// topology finds a bay's occupant through the device node under its
+    /// PCIe bridge, and has no separate presence detection.
     Empty,
     /// An NVMe disk that sled-agent manages. It appears in the sled's disk
     /// list under this identity.
