@@ -35,6 +35,7 @@ use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, warn};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 /// One U.2 bay or M.2 socket of the chassis, as the hardware topology
 /// describes it.
@@ -493,7 +494,7 @@ pub(crate) fn resolve_bays(
     }
 
     // Where the disk attributed to a `ResolvedBay` comes from.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum DiskSource {
         // The bay was read on this poll, and held this disk.
         ThisPoll,
@@ -528,42 +529,54 @@ pub(crate) fn resolve_bays(
         })
         .collect();
 
-    // Disks seen on this poll go first, so they win over a disk from the
-    // previous poll with the same identity: the disk may have moved.
-    resolved.sort_by_key(|bay| bay.disk_source);
+    // Make sure each disk ends up in exactly one bay. If several bays have a
+    // disk with the same identity, the bay that keeps it is:
+    // 1. A bay that read the disk on this poll, over a bay using a disk from
+    //    a previous poll (the disk may have moved)
+    // 2. Then, the bay whose location sorts first
+    //
+    // This sort puts the bays in that order: it is stable, and `polled` was
+    // ordered by location. So the first bay visited with a disk keeps it.
+    resolved.sort_by_key(|bay| match bay.disk_source {
+        DiskSource::ThisPoll => 0,
+        DiskSource::PreviousPoll => 1,
+    });
 
     let mut disks = HashMap::new();
-    let mut bay_of_disk: HashMap<DiskIdentity, DiskLocation> = HashMap::new();
-    for ResolvedBay { bay, disk, disk_source } in &mut resolved {
-        let Some(disk) = disk.take() else {
-            continue;
-        };
-        let identity = disk.identity().clone();
-        if let Some(winner) = bay_of_disk.get(&identity) {
-            warn!(
-                log,
-                "disk appears in more than one bay";
-                "identity" => ?identity,
-                "kept" => %winner,
-                "ignored" => %bay.location,
-            );
-            // An unreadable bay already reports that it is unreadable.
-            if *disk_source == DiskSource::ThisPoll {
-                bay.occupant = DiskBayOccupant::UnusableDevice {
-                    reason: UnusableReason::DuplicateIdentity {
-                        identity,
-                        kept_in: winner.clone(),
-                    },
-                    devfs_path: None,
-                };
+    let mut bays = IdOrdMap::new();
+    for ResolvedBay { mut bay, disk, disk_source } in resolved {
+        if let Some(disk) = disk {
+            match disks.entry(disk.identity().clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(disk);
+                }
+                Entry::Occupied(entry) => {
+                    let kept_in = entry.get().location().clone();
+                    warn!(
+                        log,
+                        "disk appears in more than one bay";
+                        "identity" => ?entry.key(),
+                        "kept" => %kept_in,
+                        "ignored" => %bay.location,
+                    );
+                    // This bay does not keep the disk. If it read the disk
+                    // on this poll, report the duplicate; an unreadable bay
+                    // stays unreadable.
+                    if disk_source == DiskSource::ThisPoll {
+                        bay.occupant = DiskBayOccupant::UnusableDevice {
+                            reason: UnusableReason::DuplicateIdentity {
+                                identity: entry.key().clone(),
+                                kept_in,
+                            },
+                            devfs_path: None,
+                        };
+                    }
+                }
             }
-        } else {
-            bay_of_disk.insert(identity.clone(), bay.location.clone());
-            disks.insert(identity, disk);
         }
+        // `polled` had one bay per location, so no bay overwrites another.
+        bays.insert_overwrite(bay);
     }
-    // `polled` had one bay per location, so no bay overwrites another.
-    let bays = resolved.into_iter().map(|resolved| resolved.bay).collect();
     (disks, bays)
 }
 
