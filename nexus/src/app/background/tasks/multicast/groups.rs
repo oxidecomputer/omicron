@@ -85,7 +85,7 @@ use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
-use omicron_common::api::external::{self, DataPageParams};
+use omicron_common::api::external;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::{
@@ -336,11 +336,7 @@ impl MulticastGroupReconciler {
 
         let groups = self
             .datastore
-            .multicast_groups_list_by_state(
-                opctx,
-                state,
-                &DataPageParams::max_page(),
-            )
+            .multicast_groups_list_by_states_batched(opctx, &[state])
             .await
             .map_err(|e| {
                 error!(

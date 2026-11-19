@@ -29,10 +29,12 @@ use omicron_uuid_kinds::{
 
 use crate::context::OpContext;
 use crate::db::datastore::DataStore;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::datastore::multicast::ops;
 use crate::db::model::{
     DbTypedUuid, MulticastGroupMember, MulticastGroupMemberState,
 };
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 
 /// Aggregated source filtering state for a multicast group.
@@ -330,6 +332,35 @@ impl DataStore {
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// A wrapper around [`Self::multicast_group_members_list_by_id`] that loads
+    /// all multicast group members.
+    pub async fn multicast_group_members_list_by_id_batched(
+        &self,
+        opctx: &OpContext,
+        external_group_id: MulticastGroupUuid,
+    ) -> ListResultVec<MulticastGroupMember> {
+        let mut members = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .multicast_group_members_list_by_id(
+                    opctx,
+                    external_group_id,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|member: &MulticastGroupMember| {
+                    member.id
+                });
+            members.extend(batch);
+        }
+        Ok(members)
     }
 
     /// List multicast group memberships for a specific instance.
