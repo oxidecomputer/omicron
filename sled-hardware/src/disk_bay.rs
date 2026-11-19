@@ -89,7 +89,8 @@ pub enum DiskBayOccupant {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UnusableReason {
-    /// No driver is bound to the device: nothing on the system claims it.
+    /// The topology records no attached driver for the device: either no
+    /// driver is bound to it, or the bound driver has not attached.
     NoDriver,
     /// A driver other than `nvme` is attached to the device.
     NotNvme { driver: String },
