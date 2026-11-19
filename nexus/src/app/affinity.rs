@@ -375,7 +375,7 @@ impl super::Nexus {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
@@ -397,7 +397,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
         let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
         let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore

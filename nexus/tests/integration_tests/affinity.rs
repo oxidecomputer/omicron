@@ -1047,45 +1047,47 @@ async fn test_group_member_must_share_project<T: AffinityGroupish>(
 }
 
 #[nexus_test]
-async fn test_affinity_group_member_add_requires_instance_modify(
+async fn test_affinity_group_member_change_requires_instance_modify(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let external_client = &cptestctx.external_client;
-    test_group_member_add_requires_instance_modify::<AffinityType>(
+    test_group_member_change_requires_instance_modify::<AffinityType>(
         external_client,
     )
     .await;
 }
 
 #[nexus_test]
-async fn test_anti_affinity_group_member_add_requires_instance_modify(
+async fn test_anti_affinity_group_member_change_requires_instance_modify(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let external_client = &cptestctx.external_client;
-    test_group_member_add_requires_instance_modify::<AntiAffinityType>(
+    test_group_member_change_requires_instance_modify::<AntiAffinityType>(
         external_client,
     )
     .await;
 }
 
-async fn group_member_add_as(
+async fn group_member_request_as(
     client: &ClientTestContext,
     user: SiloUserUuid,
+    method: http::Method,
     url: &str,
     status: StatusCode,
 ) {
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::POST, url)
-            .body(Some(&()))
+        RequestBuilder::new(client, method.clone(), url)
             .expect_status(Some(status)),
     )
     .authn_as(AuthnMode::SiloUser(user))
     .execute()
     .await
-    .unwrap_or_else(|err| panic!("Error adding member with {url}: {err}"));
+    .unwrap_or_else(|err| panic!("Error from {method} {url}: {err}"));
 }
 
-async fn test_group_member_add_requires_instance_modify<T: AffinityGroupish>(
+async fn test_group_member_change_requires_instance_modify<
+    T: AffinityGroupish,
+>(
     client: &ClientTestContext,
 ) {
     const GROUP_PROJECT: &'static str = "group-project";
@@ -1144,13 +1146,23 @@ async fn test_group_member_add_requires_instance_modify<T: AffinityGroupish>(
 
     // Reading an instance is not enough to change its group memberships.
     // (A 403, rather than a 404, shows the user can see the instance.)
+    use http::Method;
     let url = group_member_instance_url(
         T::URL_COMPONENT,
         None,
         &group_id,
         &other_instance.identity.id.to_string(),
     );
-    group_member_add_as(client, user.id, &url, StatusCode::FORBIDDEN).await;
+    for method in [Method::POST, Method::DELETE] {
+        group_member_request_as(
+            client,
+            user.id,
+            method,
+            &url,
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    }
 
     assert!(group_project_api.group_members_list(GROUP_NAME).await.is_empty());
     assert!(
@@ -1160,13 +1172,29 @@ async fn test_group_member_add_requires_instance_modify<T: AffinityGroupish>(
             .is_empty()
     );
 
-    // The same user can add an instance they are able to modify.
+    // The same user can add and remove an instance they are able to modify.
     let url = group_member_instance_url(
         T::URL_COMPONENT,
         None,
         &group_id,
         &local_instance.identity.id.to_string(),
     );
-    group_member_add_as(client, user.id, &url, StatusCode::CREATED).await;
+    group_member_request_as(
+        client,
+        user.id,
+        Method::POST,
+        &url,
+        StatusCode::CREATED,
+    )
+    .await;
     assert_eq!(group_project_api.group_members_list(GROUP_NAME).await.len(), 1);
+    group_member_request_as(
+        client,
+        user.id,
+        Method::DELETE,
+        &url,
+        StatusCode::NO_CONTENT,
+    )
+    .await;
+    assert!(group_project_api.group_members_list(GROUP_NAME).await.is_empty());
 }
