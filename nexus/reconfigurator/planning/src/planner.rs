@@ -195,7 +195,7 @@ impl<'a> Planner<'a> {
             creator,
             rng,
         )?;
-        Self::update_builder_from_planning_input(&mut blueprint, input);
+        Self::update_builder_from_planning_input(&mut blueprint, input)?;
         Ok(Planner { log, input, blueprint, inventory })
     }
 
@@ -213,8 +213,14 @@ impl<'a> Planner<'a> {
     pub fn update_builder_from_planning_input(
         builder: &mut BlueprintBuilder,
         input: &PlanningInput,
-    ) {
-        // Ensure we have an entry for every commissioned sled.
+    ) -> anyhow::Result<()> {
+        // Ensure we have an entry for every commissioned sled, and that it has
+        // the expected fleet-level wicket SSH auth setting. This may make
+        // changes to `OmicronSledConfig`s even if we would otherwise avoid
+        // making most changes (e.g., if we're waiting for mupdate recovery);
+        // the wicket SSH auth setting can safely be applied even if a mupdate
+        // has happened, and our job in this case is soley to broadcast whatever
+        // the latest setting from an operator is to all sleds.
         //
         // If `input` has new sleds that weren't in `builder`'s parent
         // blueprint, this will create empty configs for them.
@@ -222,8 +228,8 @@ impl<'a> Planner<'a> {
             builder.ensure_sled_exists(
                 sled_id,
                 details.resources.subnet,
-                input.wicket_ssh_auth(),
-            );
+                input.wicket_ssh_auth().clone(),
+            )?;
         }
 
         // Update various blueprint fields that track changes to the system but
@@ -238,6 +244,7 @@ impl<'a> Planner<'a> {
             oximeter_read_policy.version.into(),
             oximeter_read_policy.mode,
         );
+        Ok(())
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {

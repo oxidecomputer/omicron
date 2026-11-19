@@ -686,7 +686,8 @@ impl ExampleSystemBuilder {
             rng.blueprint2_rng,
         )
         .unwrap();
-        Planner::update_builder_from_planning_input(&mut builder, &base_input);
+        Planner::update_builder_from_planning_input(&mut builder, &base_input)
+            .expect("updated builder from planning input");
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();

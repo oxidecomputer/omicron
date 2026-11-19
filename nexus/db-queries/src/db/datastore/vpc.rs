@@ -3348,7 +3348,8 @@ mod tests {
             Planner::update_builder_from_planning_input(
                 &mut builder,
                 &planning_input,
-            );
+            )
+            .expect("updated builder from planning input");
 
             for &sled_id in &sled_ids {
                 builder

@@ -1348,11 +1348,13 @@ mod test {
         for (sled_id, sled_resources) in
             planning_input.all_sled_resources(SledFilter::InService)
         {
-            builder.ensure_sled_exists(
-                sled_id,
-                sled_resources.subnet,
-                &WicketSshAuth::unauthenticated_initial_generation(),
-            );
+            builder
+                .ensure_sled_exists(
+                    sled_id,
+                    sled_resources.subnet,
+                    WicketSshAuth::unauthenticated_initial_generation(),
+                )
+                .expect("ensured sled");
             builder
                 .sled_add_disks(sled_id, &sled_resources)
                 .expect("added disks");

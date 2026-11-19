@@ -39,8 +39,6 @@ impl WicketSshAuthEditor {
         Self { inner: ScalarEditor::new(current) }
     }
 
-    // TODO omicron#11821 Reconfigurator should call this as needed.
-    #[allow(unused)]
     pub fn set_value(
         &mut self,
         new_value: WicketSshAuth,
