@@ -31,6 +31,7 @@
 [libraries."libipcc.so.1"]
 binary_allow_list = [
   "installinator",
+  "jbor",
   "mgs",
   "mgs-dev",
   "omicron-dev",
@@ -48,6 +49,7 @@ binary_allow_list = [
 [libraries."libnvme.so.1"]
 binary_allow_list = [
   "installinator",
+  "jbor",
   "omicron-dev",
   "omicron-package",
   "services-ledger-check-migrate",
@@ -59,6 +61,7 @@ binary_allow_list = [
 # sled-agent to collect FMD case/resource information for inventory.
 [libraries."libfmd_adm.so.1"]
 binary_allow_list = [
+  "jbor",
   "omicron-dev",
   "sled-agent",
   "sled-agent-sim",
@@ -70,6 +73,7 @@ binary_allow_list = [
 [libraries."libtopo.so.1"]
 binary_allow_list = [
   "installinator",
+  "jbor",
   "omicron-dev",
   "omicron-package",
   "services-ledger-check-migrate",

@@ -9,11 +9,9 @@ use futures::StreamExt;
 use gateway_client::ClientInfo as _;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
-use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
-use signal_hook_tokio::Signals;
-use std::fs;
+use omicron_dev_lib::config::{Configurable, read_config, start_stream};
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
@@ -60,24 +58,19 @@ struct RunAllArgs {
     nexus_config: Utf8PathBuf,
 }
 
+impl Configurable for RunAllArgs {
+    fn nexus_config(&self) -> &Utf8PathBuf {
+        &self.nexus_config
+    }
+}
+
 impl RunAllArgs {
     async fn exec(&self) -> Result<(), anyhow::Error> {
         // Start a stream listening for SIGINT
-        let signals =
-            Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
-        let mut signal_stream = signals.fuse();
+        let mut signal_stream = start_stream();
 
         // Read configuration.
-        let config_str = fs::read_to_string(&self.nexus_config)?;
-        let mut config: NexusConfig = toml::from_str(&config_str).context(
-            format!("parsing config: {}", self.nexus_config.as_str()),
-        )?;
-        config.pkg.log = dropshot::ConfigLogging::File {
-            // See LogContext::new(),
-            path: "UNUSED".to_string().into(),
-            level: dropshot::ConfigLoggingLevel::Trace,
-            if_exists: dropshot::ConfigLoggingIfExists::Fail,
-        };
+        let mut config = read_config(self)?;
 
         if let Some(p) = self.nexus_listen_port {
             config
@@ -91,7 +84,7 @@ impl RunAllArgs {
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
             omicron_nexus::Server,
-        >(&mut config, 0, self.gateway_config.clone())
+        >(&mut config, 1, self.gateway_config.clone())
         .await
         .context("error setting up services")?;
 
@@ -187,6 +180,23 @@ impl RunAllArgs {
                 switch_slot,
             );
         }
+        for (location, dendrite) in cptestctx.dendrite.read().unwrap().iter() {
+            println!(
+                "omicron-dev: dendrite:               http://[::1]:{} ({:?})",
+                dendrite.port(),
+                location,
+            );
+        }
+        for (location, mgd) in &cptestctx.mgd {
+            println!(
+                "omicron-dev: mgd api:                http://[::1]:{} ({:?})",
+                mgd.port, location,
+            );
+            println!(
+                "omicron-dev: mgd bgp-dispatcher:     tcp {} ({:?})",
+                mgd.bgp_dispatcher_addr, location,
+            );
+        }
         println!(
             "omicron-dev: silo name:              {}",
             cptestctx.silo_name,
@@ -206,6 +216,7 @@ impl RunAllArgs {
         );
 
         cptestctx.teardown().await;
+
         Ok(())
     }
 }
