@@ -9,6 +9,7 @@ use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
 use crate::app::deployment::SetTargetDebugWriter;
+use chrono::Utc;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_auth::authz;
@@ -23,6 +24,7 @@ use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PlanningReport;
+use nexus_types::internal_api::background::BlueprintPlannerLatest;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
@@ -65,7 +67,18 @@ pub struct BlueprintPlanner {
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<Arc<Collection>>>,
     rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
+    // The following two channels expose results of recent planning attempts to
+    // different parts of the system.  `tx_planned` is given to the
+    // `blueprint_loader` so that it loads a newly-set target blueprint.
+    // `tx_latest` is used by the external API to present status to the user.
+    // These could in principle be combined.  The reason they're separated is
+    // that updating `tx_planned` always wakes up the blueprint_loader to read
+    // another blueprint and we don't need to do that in some of the cases where
+    // we update `tx_latest`.  (In particular, an idle system will wind up
+    // updating `tx_latest` a lot, but the loader never really needs to wake
+    // up.)
     tx_planned: Sender<Option<BlueprintUuid>>,
+    tx_latest: Sender<BlueprintPlannerLatest>,
     blueprint_limit: u64,
     debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
     creator: String,
@@ -93,6 +106,7 @@ impl BlueprintPlanner {
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
+        tx_latest: Sender<BlueprintPlannerLatest>,
         debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
@@ -103,6 +117,7 @@ impl BlueprintPlanner {
             rx_inventory,
             rx_blueprint,
             tx_planned,
+            tx_latest,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
             debug_dropbox,
             creator: format!("nexus {}", nexus_id),
@@ -129,11 +144,12 @@ impl BlueprintPlanner {
         self.tx_planned.subscribe()
     }
 
-    /// Run a planning iteration to generate a new blueprint.
-    /// If it is different from the current target blueprint,
-    /// save it and make it the current target.
+    /// Run a planning iteration to generate a new blueprint.  If it is
+    /// different from the current target blueprint, save it and make it the
+    /// current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
-        match self.plan_impl(opctx).await {
+        let time_planned = Utc::now();
+        let status = match self.plan_impl(opctx).await {
             Ok(status) => status,
             Err(plan_error) => {
                 let error = InlineErrorChain::new(&plan_error);
@@ -159,7 +175,13 @@ impl BlueprintPlanner {
                 }
                 BlueprintPlannerStatus::Error(error.to_string())
             }
-        }
+        };
+
+        self.tx_latest.send_modify(|latest| {
+            latest.record_activation(time_planned, &status)
+        });
+
+        status
     }
 
     async fn plan_impl(
@@ -570,11 +592,14 @@ mod test {
         );
 
         // Finally, spin up the planner background task.
+        let (tx_latest, rx_latest) =
+            watch::channel(BlueprintPlannerLatest::NotYetRun);
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
             rx_inventory,
             rx_loader.clone(),
+            tx_latest,
             debug_dropbox,
             nexus.id,
         );
@@ -599,6 +624,12 @@ mod test {
             }
             other => panic!("expected new target blueprint, found {other:?}"),
         };
+
+        // The planner should have published its report.
+        assert_matches!(
+            *rx_latest.borrow(),
+            BlueprintPlannerLatest::Succeeded { .. }
+        );
 
         // Load and check the new target blueprint.
         bp_loader.activate(&opctx).await;
@@ -766,6 +797,7 @@ mod test {
             rx_config_loader,
             rx_inventory,
             rx_blueprint,
+            watch::Sender::new(BlueprintPlannerLatest::NotYetRun),
             debug_dropbox,
             test_nexus_id,
         );

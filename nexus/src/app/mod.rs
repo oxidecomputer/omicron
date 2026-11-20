@@ -136,6 +136,7 @@ use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
+use nexus_types::internal_api::background::BlueprintPlannerLatest;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
 
@@ -399,6 +400,8 @@ impl Nexus {
         ));
 
         let (blueprint_load_tx, blueprint_load_rx) = watch::channel(None);
+        let (blueprint_planner_latest_tx, blueprint_planner_latest_rx) =
+            watch::channel(BlueprintPlannerLatest::NotYetRun);
         let quiesce_log = log.new(o!("component" => "NexusQuiesceHandle"));
         let quiesce_opctx = OpContext::for_background(
             quiesce_log,
@@ -637,7 +640,10 @@ impl Nexus {
             mgs_update_status_rx,
             mgs_resolver,
             repo_depot_resolver,
-            update_status: UpdateStatusHandle::new(blueprint_load_rx),
+            update_status: UpdateStatusHandle::new(
+                blueprint_load_rx,
+                blueprint_planner_latest_rx,
+            ),
             quiesce,
             sitrep_load_rx,
             debug_dropbox_reconfigurator: debug_dropbox_reconfigurator.clone(),
@@ -737,6 +743,7 @@ impl Nexus {
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
                     blueprint_load_tx,
+                    blueprint_planner_latest_tx,
                     sitrep_load_tx,
                     debug_dropbox_reconfigurator,
                     console_session_absolute_timeout,

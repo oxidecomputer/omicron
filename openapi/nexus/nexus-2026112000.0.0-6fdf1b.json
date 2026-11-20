@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111000.0.0"
+    "version": "2026112000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26567,6 +26567,81 @@
           }
         ]
       },
+      "OperatorNotes": {
+        "description": "Summary of what the system is doing, intended for operators",
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "What the reconfiguration system is doing at a high level\n\nThis is a best-effort debugging aid that may be incomplete or even misleading.  (It should not be incorrect.  However, the system is often waiting for more than one different thing to happen and the one reported here may not always be the most salient.)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OperatorStatus"
+              }
+            ]
+          },
+          "status_summary": {
+            "description": "Human-readable summary of what the system is doing\n\nThis is a best-effort debugging aid that may be incomplete or even misleading.  (It should not be incorrect.  However, the system is often waiting for more than one different thing to happen and the one reported here may not always be the most salient.)",
+            "type": "string"
+          },
+          "status_support_details": {
+            "nullable": true,
+            "description": "Additional details about `status` that may refer to undocumented system internals\n\nThis information is not expected to be useful for most operators aside from passing it along to Oxide support, but it may be useful for those familiar with system internals.\n\nLike `status` and `status_summary`, this is a best-effort debugging aid that may be incomplete or misleading.",
+            "type": "string"
+          },
+          "time_planned": {
+            "nullable": true,
+            "description": "Time when the summarized planning run started\n\nThis is null if no planning run has completed, in which case the status is `unknown`.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "status_summary",
+          "status_support_details",
+          "time_planned"
+        ]
+      },
+      "OperatorStatus": {
+        "description": "What the system is doing, as summarized for operators\n\nThe `status_summary` and `status_support_details` fields of `OperatorNotes` describe the status in more detail.",
+        "oneOf": [
+          {
+            "description": "The reconfiguration system is at rest because no changes are required",
+            "type": "string",
+            "enum": [
+              "at_rest"
+            ]
+          },
+          {
+            "description": "The system is busy with reconfigurations that don't have a more specific description",
+            "type": "string",
+            "enum": [
+              "busy"
+            ]
+          },
+          {
+            "description": "The system is waiting for resolution after having detected MUPdates",
+            "type": "string",
+            "enum": [
+              "waiting_for_mupdate_resolution"
+            ]
+          },
+          {
+            "description": "The system is working on an automated software update",
+            "type": "string",
+            "enum": [
+              "waiting_for_update"
+            ]
+          },
+          {
+            "description": "Unable to determine the current status\n\nIf the most recent planning run failed, `planner_error` in `UpdateStatus` describes the error.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          }
+        ]
+      },
       "OxqlQueryResult": {
         "description": "The result of a successful OxQL query.",
         "type": "object",
@@ -31728,6 +31803,19 @@
             "description": "If true, the system has detected one or more known conditions that require Oxide support to resolve\n\nYou should contact support to resolve these issues before proceeding with an update, or after one has completed. The checks underlying this field are not exhaustive, so this being `false` does not mean the entire system is completely healthy.",
             "type": "boolean"
           },
+          "operator_notes": {
+            "description": "Summary of what the update / reconfiguration system is doing",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OperatorNotes"
+              }
+            ]
+          },
+          "planner_error": {
+            "nullable": true,
+            "description": "Error from the most recent run of the update / reconfiguration planner, if it failed",
+            "type": "string"
+          },
           "suspended": {
             "description": "Whether automatic update is suspended due to manual update activity\n\nAfter a manual support procedure that changes the system software, automatic update activity is suspended to avoid undoing the change. To resume automatic update, first upload the TUF repository matching the manually applied update, then set that as the target release.",
             "type": "boolean"
@@ -31750,6 +31838,8 @@
         "required": [
           "components_by_release_version",
           "contact_support",
+          "operator_notes",
+          "planner_error",
           "suspended",
           "target_release",
           "time_last_step_planned"
