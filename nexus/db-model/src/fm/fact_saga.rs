@@ -12,18 +12,21 @@
 
 use crate::DbTypedUuid;
 use crate::SagaState;
+use crate::fm::FmFactRow;
 use crate::impl_enum_type;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_saga;
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
 use nexus_types::fm::{
-    FactPayload, SagaAbandonedFactPayload, SagaFact,
+    FactMetadata, FactPayload, SagaAbandonedFactPayload, SagaFact,
     SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
 };
 use nexus_types::observed_saga::{OrphanedReason, SagaProgressState};
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{CaseKind, FactKind, OmicronZoneKind, SitrepKind};
+use omicron_uuid_kinds::{
+    CaseKind, CaseUuid, FactKind, FactUuid, OmicronZoneKind, SitrepKind,
+    SitrepUuid,
+};
 use steno::SagaIdKind;
 
 impl_enum_type!(
@@ -125,12 +128,12 @@ pub struct FmFactSaga {
     pub orphan_reason: Option<FmFactSagaOrphanReason>,
 }
 
-impl FmFactSaga {
-    /// Build a row from a fact's shared metadata (`metadata`) and its
-    /// already-dispatched saga payload (`saga_fact`).
-    pub fn from_sitrep(
-        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
-        case_id: impl Into<DbTypedUuid<CaseKind>>,
+impl FmFactRow for FmFactSaga {
+    type Payload = SagaFact;
+
+    fn from_sitrep(
+        sitrep_id: SitrepUuid,
+        case_id: CaseUuid,
         metadata: &FactMetadata,
         saga_fact: &SagaFact,
     ) -> Self {
@@ -167,8 +170,15 @@ impl FmFactSaga {
         }
     }
 
-    /// Reconstruct an in-memory fact from a row.
-    pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
+    fn id(&self) -> FactUuid {
+        self.id.into()
+    }
+
+    fn case_id(&self) -> CaseUuid {
+        self.case_id.into()
+    }
+
+    fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let kind = self.kind;
         let saga_id = steno::SagaId::from(self.saga_id);
         let payload = match kind {
@@ -207,7 +217,7 @@ impl FmFactSaga {
             ),
         };
         Ok(fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: self.id.into(),
                 created_sitrep_id: self.created_sitrep_id.into(),
                 comment: self.comment,
