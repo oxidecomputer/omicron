@@ -129,14 +129,27 @@ pub(crate) fn assemble_bays(
             }
         }
 
-        // The topology found an NVMe device behind the bridge, and said so
-        // on the bay, but its disk enumerator produced nothing.
+        // The bay names a driver for the device behind the bridge, but no
+        // occupant was found under it.
         let empty = matches!(
             &bay.contents,
             Ok(BayContents { occupant: ObservedOccupant::Empty, .. })
         );
-        if empty && bay.binding_driver.as_deref() == Some("nvme") {
-            bay.contents = Err(BayProblem::NvmeNotEnumerated);
+        if empty {
+            match bay.binding_driver.clone() {
+                // The disk enumerator produced nothing.
+                Some(driver) if driver == "nvme" => {
+                    bay.contents = Err(BayProblem::NvmeNotEnumerated);
+                }
+                Some(driver) => occupy(
+                    &mut bay,
+                    ObservedOccupant::Other {
+                        driver: Some(driver),
+                        devfs_path: None,
+                    },
+                ),
+                None => {}
+            }
         }
         bays.push(bay);
     }
@@ -795,10 +808,18 @@ mod tests {
     fn nvme_not_enumerated() {
         let bay = Tree::default().add(N3, nvme_bay()).bay();
         assert_eq!(problem(&bay), &BayProblem::NvmeNotEnumerated);
+    }
 
-        // Without `binding/driver = "nvme"` an empty bay is just empty.
+    #[test]
+    fn other_driver_without_an_occupant() {
         let bay = Tree::default().add(N3, u2("N3", Some("other"))).bay();
-        assert_eq!(occupant(&bay), &ObservedOccupant::Empty);
+        assert_eq!(
+            occupant(&bay),
+            &ObservedOccupant::Other {
+                driver: Some("other".to_string()),
+                devfs_path: None,
+            }
+        );
     }
 
     #[test]

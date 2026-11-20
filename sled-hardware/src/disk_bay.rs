@@ -148,7 +148,7 @@ pub(crate) enum ObservedOccupant {
         /// list.
         namespaces: Vec<ObservedNamespace>,
     },
-    /// The topology's placeholder for a device it does not enumerate.
+    /// A device that is not an NVMe controller.
     Other { driver: Option<String>, devfs_path: Option<String> },
 }
 
