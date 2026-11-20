@@ -100,7 +100,7 @@ pub struct OperatorNotes {
     /// is `unknown`.
     pub time_planned: Nullable<DateTime<Utc>>,
 
-    /// What the system is doing
+    /// What the reconfiguration system is doing at a high level
     ///
     /// This is a best-effort debugging aid that may be incomplete or even
     /// misleading.  (It should not be incorrect.  However, the system is often
@@ -108,19 +108,30 @@ pub struct OperatorNotes {
     /// here may not always be the most salient.)
     pub status: OperatorStatus,
 
-    /// Human-readable description of `status`
+    /// Human-readable summary of what the system is doing
     ///
     /// This is a best-effort debugging aid that may be incomplete or even
     /// misleading.  (It should not be incorrect.  However, the system is often
     /// waiting for more than one different thing to happen and the one reported
     /// here may not always be the most salient.)
-    pub status_message: String,
+    pub status_summary: String,
+
+    /// Additional details about `status` that may refer to undocumented system
+    /// internals
+    ///
+    /// This information is not expected to be useful for most operators aside
+    /// from passing it along to Oxide support, but it may be useful for those
+    /// familiar with system internals.
+    ///
+    /// Like `status` and `status_summary`, this is a best-effort debugging aid
+    /// that may be incomplete or misleading.
+    pub status_support_details: Nullable<String>,
 }
 
 /// What the system is doing, as summarized for operators
 ///
-/// The `status_message` field of `OperatorNotes` describes the status in more
-/// detail.
+/// The `status_summary` and `status_support_details` fields of
+/// `OperatorNotes` describe the status in more detail.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]

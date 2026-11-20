@@ -21,6 +21,7 @@ use nexus_db_model::saga_types::Saga;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OperatorStatusDescription;
 use nexus_types::deployment::QuiesceInfo;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
@@ -693,11 +694,13 @@ impl super::Nexus {
         let quiesce_state = self.quiesce.state();
         let status = latest.operator_status(QuiesceInfo::Known(&quiesce_state));
         let time_planned = latest.latest_report().map(|r| r.time_planned);
-        let status_message = status.to_string();
+        let OperatorStatusDescription { summary, support_details } =
+            status.describe();
         let notes = update::OperatorNotes {
             time_planned: Nullable(time_planned),
             status: update::OperatorStatus::from(&status),
-            status_message,
+            status_summary: summary,
+            status_support_details: Nullable(support_details),
         };
         (notes, latest.last_error().map(String::from))
     }

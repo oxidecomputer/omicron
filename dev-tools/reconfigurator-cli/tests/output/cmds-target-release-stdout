@@ -122,8 +122,8 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO current sled measurements are in an unknown state, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 * noop converting 9/9 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting 8/8 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 8/8 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -1345,8 +1345,8 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1646,8 +1646,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 9f0d
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1712,8 +1712,8 @@ INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1780,8 +1780,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1858,8 +1858,9 @@ INFO marking sled for evacuation, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6,
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
+operator status: summary: Evacuating instances from sled in preparation for update (sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0)
+operator status: support details: marking sled for evacuation
 planning report:
-status for operators: Waiting for sled to be evacuated in preparation for update (sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0): marking sled for evacuation
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -1999,8 +2000,9 @@ INFO skipping board for MGS-driven update (found issues), serial_number: serial0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
+operator status: summary: Evacuating instances from sled in preparation for update (sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0)
+operator status: support details: waiting for ledgered sled config generation to be 5 (currently 4)
 planning report:
-status for operators: Waiting for sled to be evacuated in preparation for update (sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0): waiting for ledgered sled config generation to be 5 (currently 4)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2064,8 +2066,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 3f6a
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
+operator status: summary: Waiting for update of SP on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of SP on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2142,8 +2144,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2902
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2283,8 +2285,8 @@ INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2349,8 +2351,8 @@ INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2414,8 +2416,8 @@ INFO keeping apparently-impossible MGS-driven update (waiting for recent update 
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial0
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2482,8 +2484,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 9f0d
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2646,8 +2648,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 9f0d
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2720,8 +2722,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2798,8 +2800,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -2873,8 +2875,9 @@ INFO marking sled for evacuation, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c,
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35 based on parent blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 blueprint source: planner with report:
+operator status: summary: Evacuating instances from sled in preparation for update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1)
+operator status: support details: marking sled for evacuation
 planning report:
-status for operators: Waiting for sled to be evacuated in preparation for update (sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1): marking sled for evacuation
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3023,8 +3026,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 3f6a
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746 based on parent blueprint 9a9e6c32-5a84-4020-a159-33dceff18d35
 blueprint source: planner with report:
+operator status: summary: Waiting for update of SP on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of SP on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3099,8 +3102,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 3f6a
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint b82656b0-a9be-433d-83d0-e2bdf371777a based on parent blueprint 13cfdd24-52ba-4e94-8c83-02e3a48fc746
 blueprint source: planner with report:
+operator status: summary: Waiting for update of SP on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of SP on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3174,8 +3177,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2902
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 31c84831-be52-4630-bc3f-128d72cd8f22 based on parent blueprint b82656b0-a9be-433d-83d0-e2bdf371777a
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3334,8 +3337,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2902
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2 based on parent blueprint 31c84831-be52-4630-bc3f-128d72cd8f22
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial1
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial1
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3414,8 +3417,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 9f0d
 INFO ran out of boards for MGS-driven update
 generated blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6 based on parent blueprint 778e3f3a-58b1-4a5e-acff-d23c5d7124c2
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3575,8 +3578,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint e54a0836-53e1-4948-a3af-0b77165289b5 based on parent blueprint 386a7ec3-7c2e-43cf-8f00-999e91e1d5e6
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3652,8 +3655,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 459a45a5-616e-421f-873b-2fb08c36205c based on parent blueprint e54a0836-53e1-4948-a3af-0b77165289b5
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3731,8 +3734,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint b2295597-5788-482e-acf9-1731ec63fbd2 based on parent blueprint 459a45a5-616e-421f-873b-2fb08c36205c
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3807,8 +3810,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: dd37
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 6fad8fd4-e825-433f-b76d-495484e068ce based on parent blueprint b2295597-5788-482e-acf9-1731ec63fbd2
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of RoT on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -3881,8 +3884,9 @@ INFO marking sled for evacuation, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763,
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
 blueprint source: planner with report:
+operator status: summary: Evacuating instances from sled in preparation for update (sled d81c6a84-79b8-4958-ae41-ea46c9b19763, baseboard 913-0000019:serial2)
+operator status: support details: marking sled for evacuation
 planning report:
-status for operators: Waiting for sled to be evacuated in preparation for update (sled d81c6a84-79b8-4958-ae41-ea46c9b19763, baseboard 913-0000019:serial2): marking sled for evacuation
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4027,8 +4031,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 3f6a
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce based on parent blueprint 24b6e243-100c-428d-8ea6-35b504226f55
 blueprint source: planner with report:
+operator status: summary: Waiting for update of SP on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of SP on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4099,8 +4103,8 @@ INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 2902
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312 based on parent blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce
 blueprint source: planner with report:
+operator status: summary: Waiting for update of Host OS on 913-0000019:serial2
 planning report:
-status for operators: Waiting for update of Host OS on 913-0000019:serial2
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4254,8 +4258,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d based on parent blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
 blueprint source: planner with report:
+operator status: summary: Waiting for sled to be returned to service after update (sled d81c6a84-79b8-4958-ae41-ea46c9b19763, baseboard 913-0000019:serial2)
 planning report:
-status for operators: Waiting for sled to be returned to service after update (sled d81c6a84-79b8-4958-ae41-ea46c9b19763, baseboard 913-0000019:serial2)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4404,8 +4408,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint e2125c83-b255-45c9-bc9b-802cff09a812 based on parent blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: clickhouse
 planning report:
-status for operators: Waiting for a zone update to finish (clickhouse)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4547,8 +4552,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3 based on parent blueprint e2125c83-b255-45c9-bc9b-802cff09a812
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_ntp
 planning report:
-status for operators: Waiting for a zone update to finish (internal_ntp)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4704,8 +4710,9 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: a729999a-6e45-46ca-b51e-0bbb5490387a (omicron_zone), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash(HexArray(2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0)) } } }]
 generated blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c based on parent blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_ntp
 planning report:
-status for operators: Waiting for a zone update to finish (internal_ntp)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -4856,8 +4863,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1 based on parent blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: external_dns
 planning report:
-status for operators: Waiting for a zone update to finish (external_dns)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5023,8 +5031,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint e2deb7c0-2262-49fe-855f-4250c22afb36 based on parent blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5191,8 +5199,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf based on parent blueprint e2deb7c0-2262-49fe-855f-4250c22afb36
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5337,8 +5346,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d based on parent blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_dns
 planning report:
-status for operators: Waiting for a zone update to finish (internal_dns)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5507,8 +5517,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 60b55d33-5fec-4277-9864-935197eaead7 based on parent blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5678,8 +5688,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544 based on parent blueprint 60b55d33-5fec-4277-9864-935197eaead7
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible_pantry
 planning report:
-status for operators: Waiting for a zone update to finish (crucible_pantry)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5836,8 +5847,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111 based on parent blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -5995,8 +6006,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a based on parent blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -6146,8 +6158,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -6300,8 +6313,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482 based on parent blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -6439,8 +6453,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec based on parent blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_dns
 planning report:
-status for operators: Waiting for a zone update to finish (internal_dns)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -6598,8 +6613,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint a2c6496d-98fc-444d-aa36-99508aa72367 based on parent blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -6758,8 +6773,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 6ed56354-5941-40d1-a06c-b0e940701d52 based on parent blueprint a2c6496d-98fc-444d-aa36-99508aa72367
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -6899,8 +6915,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2 based on parent blueprint 6ed56354-5941-40d1-a06c-b0e940701d52
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_ntp
 planning report:
-status for operators: Waiting for a zone update to finish (internal_ntp)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7050,8 +7067,9 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 6f2b1c5e-838d-4698-9207-ebabc9990b7a (omicron_zone), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash(HexArray(2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0)) } } }]
 generated blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152 based on parent blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_ntp
 planning report:
-status for operators: Waiting for a zone update to finish (internal_ntp)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7202,8 +7220,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88 based on parent blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: external_dns
 planning report:
-status for operators: Waiting for a zone update to finish (external_dns)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7366,8 +7385,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4 based on parent blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7531,8 +7550,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 59630e63-c953-4807-9e84-9e750a79f68e based on parent blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible_pantry
 planning report:
-status for operators: Waiting for a zone update to finish (crucible_pantry)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7686,8 +7706,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194 based on parent blueprint 59630e63-c953-4807-9e84-9e750a79f68e
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7842,8 +7862,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 90650737-8142-47a6-9a48-a10efc487e57 based on parent blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -7993,8 +8014,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa based on parent blueprint 90650737-8142-47a6-9a48-a10efc487e57
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -8132,8 +8154,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece based on parent blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible_pantry
 planning report:
-status for operators: Waiting for a zone update to finish (crucible_pantry)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -8279,8 +8302,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 810ea95a-4730-43dd-867e-1984aeb9d873 based on parent blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -8427,8 +8450,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d based on parent blueprint 810ea95a-4730-43dd-867e-1984aeb9d873
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -8567,8 +8591,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e based on parent blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_dns
 planning report:
-status for operators: Waiting for a zone update to finish (internal_dns)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -8725,8 +8750,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint d69e1109-06be-4469-8876-4292dc7885d7 based on parent blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -8884,8 +8909,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097 based on parent blueprint d69e1109-06be-4469-8876-4292dc7885d7
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_ntp
 planning report:
-status for operators: Waiting for a zone update to finish (internal_ntp)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -9037,8 +9063,9 @@ INFO ran out of boards for MGS-driven update
 INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: bdbb9446-81ee-4326-a0b6-549b84381fac (omicron_zone), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash(HexArray(2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0)) } } }]
 generated blueprint 4713f6c4-e8ba-4a28-87a0-df75ebf7b8b6 based on parent blueprint 12f19448-6a10-4b4b-ae19-a8c94a566097
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: internal_ntp
 planning report:
-status for operators: Waiting for a zone update to finish (internal_ntp)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -9191,8 +9218,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 6d830d26-547e-492b-adfe-c5c4ad9c3751 based on parent blueprint 4713f6c4-e8ba-4a28-87a0-df75ebf7b8b6
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: crucible
 planning report:
-status for operators: Waiting for a zone update to finish (crucible)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -9336,8 +9364,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf based on parent blueprint 6d830d26-547e-492b-adfe-c5c4ad9c3751
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: external_dns
 planning report:
-status for operators: Waiting for a zone update to finish (external_dns)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -9499,8 +9528,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b based on parent blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -9666,8 +9695,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 3e332949-6785-4aff-ad86-6134f5ce6152 based on parent blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10003,8 +10032,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 05685571-d61f-4754-a2b2-604ea8c45dff based on parent blueprint 3e332949-6785-4aff-ad86-6134f5ce6152
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10096,8 +10125,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab based on parent blueprint 05685571-d61f-4754-a2b2-604ea8c45dff
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10158,8 +10187,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 8bf03c24-8f07-4e5f-902e-e5f23b50be91 based on parent blueprint 310670a1-8ec3-4579-b1d9-3137808a18d7
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10314,8 +10343,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 661acfdf-5168-4e79-a3a6-9d0dceeda09e based on parent blueprint 8bf03c24-8f07-4e5f-902e-e5f23b50be91
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: nexus
 planning report:
-status for operators: Waiting for a zone update to finish (nexus)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10550,8 +10580,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint b70d07ba-a48d-48ef-a653-85b4715e3c08 based on parent blueprint 661acfdf-5168-4e79-a3a6-9d0dceeda09e
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: nexus
 planning report:
-status for operators: Waiting for a zone update to finish (nexus)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10693,8 +10724,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 82039d86-8b67-4a8b-85b3-61889053daca based on parent blueprint b70d07ba-a48d-48ef-a653-85b4715e3c08
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Control plane service being updated: nexus
 planning report:
-status for operators: Waiting for a zone update to finish (nexus)
 planner config:
     disruption policy : terminate
     sled update reboot policy: evacuate
@@ -10854,8 +10886,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 4c3fd4bf-90aa-41d9-b4f6-e763ba054aac based on parent blueprint 82039d86-8b67-4a8b-85b3-61889053daca
 blueprint source: planner with report:
+operator status: summary: No changes in progress
 empty planning report
-status for operators: No changes in progress
 
 
 
@@ -11455,8 +11487,8 @@ parent:    82039d86-8b67-4a8b-85b3-61889053daca
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
+operator status: summary: No changes in progress
 empty planning report
-status for operators: No changes in progress
 
 
 

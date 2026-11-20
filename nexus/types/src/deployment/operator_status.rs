@@ -6,8 +6,8 @@
 //!
 //! These types carry more detail than the external API exposes.  The external
 //! API includes only the top-level kind of status (see
-//! [`crate::external_api::update::OperatorStatus`]) plus the message produced
-//! by this module's `Display` impls.
+//! [`crate::external_api::update::OperatorStatus`]) plus the summary and
+//! support details produced by [`OperatorStatus::describe()`].
 
 use crate::deployment::MgsUpdateComponent;
 use crate::deployment::planning_report::WaitingOnSledEvacuationDetails;
@@ -18,7 +18,6 @@ use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use std::fmt;
 
 /// What the system is doing, as summarized for operators
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,75 +40,85 @@ pub enum OperatorStatus {
     Unknown(UnknownReason),
 }
 
-impl fmt::Display for OperatorStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl OperatorStatus {
+    /// Returns a human-readable description of this status
+    pub fn describe(&self) -> OperatorStatusDescription {
         match self {
-            OperatorStatus::AtRest => write!(f, "No changes in progress"),
-            OperatorStatus::Busy => write!(f, "System is busy"),
+            OperatorStatus::AtRest => {
+                OperatorStatusDescription::summary("No changes in progress")
+            }
+            OperatorStatus::Busy => {
+                OperatorStatusDescription::summary("System is busy")
+            }
             OperatorStatus::WaitingForMupdateResolution => {
-                write!(f, "Waiting for MUPdate resolution")
+                OperatorStatusDescription::summary(
+                    "Waiting for MUPdate resolution",
+                )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::ServiceRecovery {
                 service,
-            }) => {
-                write!(
-                    f,
-                    "Waiting for internal services to recover after recent \
-                     changes ({})",
-                    service.report_str(),
-                )
-            }
+            }) => OperatorStatusDescription::summary_with_details(
+                "Waiting for internal services to recover after recent changes",
+                format!(
+                    "Internal service awaiting recovery: {}",
+                    service.report_str()
+                ),
+            ),
             OperatorStatus::WaitingForUpdate(UpdateWait::SledEvacuation {
                 sled_id,
                 baseboard_id,
                 progress,
-            }) => {
-                write!(
-                    f,
-                    "Waiting for sled to be evacuated in preparation for \
-                     update (sled {sled_id}, baseboard {baseboard_id}): \
-                     {progress}",
-                )
-            }
+            }) => describe_sled_evacuation(sled_id, baseboard_id, progress),
             OperatorStatus::WaitingForUpdate(UpdateWait::SledAvailable {
                 sled_id,
                 baseboard_id,
-            }) => {
-                write!(
-                    f,
-                    "Waiting for sled to be returned to service after \
-                     update (sled {sled_id}, baseboard {baseboard_id})",
-                )
-            }
+            }) => OperatorStatusDescription::summary(format!(
+                "Waiting for sled to be returned to service after update \
+                 (sled {sled_id}, baseboard {baseboard_id})",
+            )),
             OperatorStatus::WaitingForUpdate(UpdateWait::Mgs {
                 baseboard_id,
                 component,
-            }) => {
-                write!(f, "Waiting for update of {component} on {baseboard_id}")
-            }
+            }) => OperatorStatusDescription::summary(format!(
+                "Waiting for update of {component} on {baseboard_id}"
+            )),
             OperatorStatus::WaitingForUpdate(UpdateWait::Zones { kinds }) => {
+                let summary =
+                    "Waiting for a control plane zone update to finish";
                 if kinds.is_empty() {
-                    write!(
-                        f,
-                        "Waiting for a zone update to finish \
-                         (details unavailable)"
-                    )
+                    OperatorStatusDescription::summary(summary)
                 } else {
+                    let s = if kinds.len() == 1 { "" } else { "s" };
                     let kinds = kinds.iter().map(|k| k.report_str()).join(", ");
-                    write!(f, "Waiting for a zone update to finish ({kinds})")
+                    OperatorStatusDescription::summary_with_details(
+                        summary,
+                        format!(
+                            "Control plane service{s} being updated: {kinds}"
+                        ),
+                    )
                 }
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::HandoffSagas) => {
-                write!(f, "Waiting for sagas to finish running")
+                OperatorStatusDescription::summary(
+                    "Waiting for background activities (sagas) to finish \
+                     before handing off to the new control plane",
+                )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::HandoffFinal) => {
-                write!(f, "Waiting for final update handoff to complete")
+                OperatorStatusDescription::summary(
+                    "Waiting for the new control plane to take over",
+                )
             }
             OperatorStatus::Unknown(UnknownReason::PlannerNotYetRun) => {
-                write!(f, "Unknown: the system is determining what to do next")
+                OperatorStatusDescription::summary(
+                    "Unknown: the system is determining next steps",
+                )
             }
             OperatorStatus::Unknown(UnknownReason::PlannerFailed { error }) => {
-                write!(f, "Unknown: planner produced error: {error}")
+                OperatorStatusDescription::summary_with_details(
+                    "Unknown: planner error",
+                    format!("planner error: {error}"),
+                )
             }
         }
     }
@@ -126,6 +135,84 @@ impl From<&OperatorStatus> for external_api_update::OperatorStatus {
             OperatorStatus::WaitingForUpdate(_) => Self::WaitingForUpdate,
             OperatorStatus::Unknown(_) => Self::Unknown,
         }
+    }
+}
+
+/// Textual description of [`OperatorStatus`]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OperatorStatusDescription {
+    /// describes what the system is doing or waiting for, in terms that a
+    /// customer would be expected to know
+    pub summary: String,
+
+    /// additional details that refer to system internals that a customer is not
+    /// necessarily expected to know about
+    ///
+    /// This is aimed at Oxide support, engineering, testers, etc. as well as
+    /// sophisticated customers.  It's separated out from `summary` so that we
+    /// can make it available without front-loading it to people for whom it's
+    /// not actionable.
+    pub support_details: Option<String>,
+}
+
+impl OperatorStatusDescription {
+    /// Returns a description with the given summary and no support details
+    fn summary(summary: impl Into<String>) -> Self {
+        OperatorStatusDescription {
+            summary: summary.into(),
+            support_details: None,
+        }
+    }
+
+    /// Returns a description with the given summary and support details
+    fn summary_with_details(
+        summary: impl Into<String>,
+        support_details: impl Into<String>,
+    ) -> Self {
+        OperatorStatusDescription {
+            summary: summary.into(),
+            support_details: Some(support_details.into()),
+        }
+    }
+}
+
+/// Returns the description of a status waiting for a sled to be evacuated
+fn describe_sled_evacuation(
+    sled_id: &SledUuid,
+    baseboard_id: &BaseboardId,
+    progress: &SledEvacuationProgress,
+) -> OperatorStatusDescription {
+    use WaitingOnSledEvacuationDetails as Details;
+
+    let summary = format!(
+        "Evacuating instances from sled in preparation for update \
+         (sled {sled_id}, baseboard {baseboard_id})"
+    );
+    match progress {
+        SledEvacuationProgress::Starting => {
+            OperatorStatusDescription::summary_with_details(
+                summary,
+                "marking sled for evacuation",
+            )
+        }
+        SledEvacuationProgress::Waiting(
+            Details::InstanceManagerRegisteredVmms { num_registered_vmms },
+        ) => {
+            let s = if num_registered_vmms.get() == 1 { "" } else { "s" };
+            OperatorStatusDescription::summary(format!(
+                "{summary}: {num_registered_vmms} VMM{s} remaining"
+            ))
+        }
+        SledEvacuationProgress::Waiting(
+            details @ (Details::MissingFromInventory
+            | Details::MissingLedgeredSledConfig
+            | Details::WaitingForSledConfigGeneration { .. }
+            | Details::InstanceManagerNoConfig
+            | Details::InstanceManagerAvailable),
+        ) => OperatorStatusDescription::summary_with_details(
+            summary,
+            details.to_string(),
+        ),
     }
 }
 
@@ -218,33 +305,6 @@ pub enum SledEvacuationProgress {
     Waiting(WaitingOnSledEvacuationDetails),
 }
 
-impl fmt::Display for SledEvacuationProgress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SledEvacuationProgress::Starting => {
-                write!(f, "marking sled for evacuation")
-            }
-            SledEvacuationProgress::Waiting(
-                WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
-                    num_registered_vmms,
-                },
-            ) => {
-                let s = if num_registered_vmms.get() == 1 { "" } else { "s" };
-                write!(f, "{num_registered_vmms} VMM{s} remaining")
-            }
-            SledEvacuationProgress::Waiting(
-                details @ (WaitingOnSledEvacuationDetails::MissingFromInventory
-                | WaitingOnSledEvacuationDetails::MissingLedgeredSledConfig
-                | WaitingOnSledEvacuationDetails::WaitingForSledConfigGeneration {
-                    ..
-                }
-                | WaitingOnSledEvacuationDetails::InstanceManagerNoConfig
-                | WaitingOnSledEvacuationDetails::InstanceManagerAvailable),
-            ) => write!(f, "{details}"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -266,8 +326,14 @@ mod test {
         for status in OperatorStatusDiscriminants::iter()
             .flat_map(operator_status_examples)
         {
+            let OperatorStatusDescription { summary, support_details } =
+                status.describe();
             writeln!(output, "{status:?}").unwrap();
-            writeln!(output, "    {status}").unwrap();
+            writeln!(output, "    summary: {summary}").unwrap();
+            if let Some(support_details) = support_details {
+                writeln!(output, "    support details: {support_details}")
+                    .unwrap();
+            }
             writeln!(output).unwrap();
         }
         assert_contents("output/operator_status_messages.out", &output);
@@ -341,6 +407,7 @@ mod test {
             }],
             UpdateWaitDiscriminants::Zones => vec![
                 UpdateWait::for_zones([]),
+                UpdateWait::for_zones([ZoneKind::Nexus]),
                 UpdateWait::for_zones([ZoneKind::Crucible, ZoneKind::Nexus]),
             ],
             UpdateWaitDiscriminants::HandoffSagas => {

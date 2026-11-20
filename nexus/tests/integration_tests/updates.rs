@@ -730,9 +730,10 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(status.planner_error.0.as_deref(), Some(expected_error));
     assert_eq!(status.operator_notes.time_planned.0, None);
     assert_eq!(status.operator_notes.status, update::OperatorStatus::Unknown);
+    assert_eq!(status.operator_notes.status_summary, "Unknown: planner error");
     assert_eq!(
-        status.operator_notes.status_message,
-        format!("Unknown: planner produced error: {expected_error}")
+        status.operator_notes.status_support_details.0,
+        Some(format!("planner error: {expected_error}"))
     );
 
     // Upload a fake TUF repo and set it as the target release
@@ -844,7 +845,7 @@ async fn test_update_status() -> Result<()> {
     .expect("operator notes should have appeared within 60s");
     assert!(time_planned >= time_enabled);
     assert_ne!(notes.status, update::OperatorStatus::Unknown);
-    assert!(!notes.status_message.is_empty());
+    assert!(!notes.status_summary.is_empty());
 
     cptestctx.teardown().await;
     Ok(())
