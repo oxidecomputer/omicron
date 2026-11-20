@@ -2085,16 +2085,7 @@ impl DataStore {
             let err = err.clone();
 
             async move {
-                let current = {
-                    use nexus_db_schema::schema::sled::dsl;
-                    dsl::sled
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
-                        .select(Sled::as_select())
-                        .get_result_async(&conn)
-                        .await
-                        .optional()?
-                };
+                let current = Self::sled_get_live_conn(&conn, sled_id).await?;
                 // If the sled is already expunged, skip the trust quorum check.
                 // This way, expungement is idempotent.
                 let already_expunged = match current.as_ref().map(Sled::policy)
@@ -2146,6 +2137,20 @@ impl DataStore {
             ))
         })
         .map_err(|error| error.into_external_error())
+    }
+
+    pub(super) async fn sled_get_live_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+    ) -> Result<Option<Sled>, DieselError> {
+        use nexus_db_schema::schema::sled::dsl;
+        dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
+            .select(Sled::as_select())
+            .get_result_async(conn)
+            .await
+            .optional()
     }
 
     async fn sled_set_policy_conn(
