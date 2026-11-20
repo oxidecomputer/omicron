@@ -359,6 +359,18 @@ impl DataStore {
     ) -> Result<bool, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
+        Self::check_zpool_in_service_on_connection(&conn, id)
+            .await
+            .map_err(|e| e.into_public_ignore_retries())
+    }
+
+    /// Returns true if a zpool exists and is in-service, false if not.
+    ///
+    /// This function may be called from a transaction context.
+    pub async fn check_zpool_in_service_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: ZpoolUuid,
+    ) -> Result<bool, TransactionError<Error>> {
         use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
         use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
@@ -375,7 +387,7 @@ impl DataStore {
                             .eq(PhysicalDiskPolicy::InService),
                     ),
             ))
-            .get_result_async::<bool>(&*conn)
+            .get_result_async::<bool>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 

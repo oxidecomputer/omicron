@@ -74,6 +74,10 @@ impl DiskTypeLocalStorage {
         })
     }
 
+    pub fn disk_id(&self) -> Uuid {
+        self.disk_id
+    }
+
     pub fn required_dataset_overhead(&self) -> external::ByteCount {
         self.required_dataset_overhead.into()
     }

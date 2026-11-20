@@ -83,7 +83,10 @@ impl ConfirmationPrompt {
         Self(Reedline::create())
     }
 
-    fn read(&mut self, message: &str) -> Result<String, anyhow::Error> {
+    pub(crate) fn read(
+        &mut self,
+        message: &str,
+    ) -> Result<String, anyhow::Error> {
         let prompt = DefaultPrompt::new(
             DefaultPromptSegment::Basic(message.to_string()),
             DefaultPromptSegment::Empty,
