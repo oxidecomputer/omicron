@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Owned copies of hardware topology nodes, read on illumos and interpreted
-//! elsewhere.
+//! Owned copies of hardware topology nodes.
+//!
+//! `illumos::topo` copies these out of libtopo and `topo_bays` interprets
+//! them, so the interpreting code can be tested off illumos.
 
 // The topology is only read on illumos.
 #![cfg_attr(not(target_os = "illumos"), allow(dead_code))]
