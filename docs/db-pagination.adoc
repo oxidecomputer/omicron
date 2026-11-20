@@ -10,7 +10,13 @@ This document describes how database pagination works in Omicron and how to use 
 
 When loading data in bulk from the database, loading too many rows in one go can be very expensive. To avoid such situations, we use _pagination_ to only load a subset of rows at a time.
 
-Pagination depends on a unique key in the database. **Using pagination incorrectly can cause data to be skipped or duplicated.**
+Pagination requires a unique index (such as a primary key) in the database. The query should:
+
+* Filter by equality on the index's leading columns.
+* Page on the rest of the index's columns in order.
+* Not apply any other filters, other than whichever partial filters are needed to satisfy a partial unique index (often non-soft-deleted rows, i.e., a `time_deleted IS NULL` filter).
+
+**Using pagination incorrectly can cause data to be skipped or duplicated, or make each page take an unbounded amount of time.**
 
 Pagination on a single column works by:
 
@@ -20,9 +26,51 @@ Pagination on a single column works by:
 * For subsequent pages, determining the last value read so far, which we call the _marker_, then issuing a `SELECT` statement with `WHERE <column> > <marker> ORDER BY <column> ASC LIMIT <page_size>`. This returns the next `page_size` rows, ordered by the specified column.
 * Terminating the loop if fewer rows are returned than the page size.
 
-Paginating based on multiple columns is also supported. For example, for pagination based on two columns, if the marker is `(marker1, marker2)`, then the `WHERE` clause for subsequent pages is of the form `WHERE (<column1> = <marker1> AND <column2> > <marker2>) OR (<column1> > <marker1>)`.
+Paginating based on two or three columns is also supported:
 
-Concretely, a paginated query in Rust looks something like this:
+* To paginate based on two columns, use `paginated_multicolumn`. For example, if the marker is `(marker1, marker2)`, then the `WHERE` and `ORDER BY` clauses for subsequent pages are of the form:
++
+[source,sql]
+----
+WHERE ((<column1> = <marker1> AND <column2> > <marker2>) OR <column1> > <marker1>)
+  AND <other_filter>
+ORDER BY <column1> ASC, <column2> ASC
+----
+
+* To paginate based on three columns, use `paginated_multicolumn3`. For example, if the marker is `(marker1, marker2, marker3)`, then the `WHERE` and `ORDER BY` clauses for subsequent pages are of the form:
++
+[source,sql]
+----
+WHERE ((<column1> = <marker1> AND <column2> = <marker2> AND <column3> > <marker3>)
+       OR (<column1> = <marker1> AND <column2> > <marker2>)
+       OR <column1> > <marker1>)
+  AND <other_filter>
+ORDER BY <column1> ASC, <column2> ASC, <column3> ASC
+----
+
+Here, `<other_filter>` stands for any other filters the query applies. As described above, this should be part of the primary key or a unique index that is compared by equality.
+
+=== Example
+
+Consider this table from Omicron:
+
+[source,sql]
+----
+-- Blueprint information related to pending SP upgrades.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
+    blueprint_id UUID NOT NULL,
+    hw_baseboard_id UUID NOT NULL,
+    -- ... other fields
+    my_field STRING(64) NOT NULL,
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+----
+
+We would like to read all rows from the table corresponding to a given `blueprint_id`. To achieve this goal, this example uses a query that:
+
+* Filters by equality on `blueprint_id`.
+* Paginates on `hw_baseboard_id`, using the `(blueprint_id, hw_baseboard_id)` primary key.
 
 [source,rust]
 ----
@@ -68,6 +116,28 @@ while let Some(p) = paginator.next() {
 }
 ----
 
+For the first page of results, we generate this SQL query, where `$1` is the `blueprint_id` value:
+
+[source,sql]
+----
+SELECT blueprint_id, hw_baseboard_id, my_field
+FROM bp_pending_mgs_update_sp
+WHERE blueprint_id = $1
+ORDER BY hw_baseboard_id ASC
+LIMIT 1000
+----
+
+For each later page, the marker `$2` is the `hw_baseboard_id` of the last row on the previous page:
+
+[source,sql]
+----
+SELECT blueprint_id, hw_baseboard_id, my_field
+FROM bp_pending_mgs_update_sp
+WHERE hw_baseboard_id > $2 AND blueprint_id = $1
+ORDER BY hw_baseboard_id ASC
+LIMIT 1000
+----
+
 == Mistakes while paginating [[mistakes]]
 
 For pagination to work correctly, there are two invariants that callers must uphold.
@@ -93,16 +163,23 @@ The rest of this section describes some mistakes we've seen in practice.
 
 **Why this is bad:** For subsequent pages, pagination uses `WHERE <column> > <marker>`. If, after other filters are applied, there are two rows that both have `<column>` set to `<marker>`, and the rows are on either side of a page boundary, then the second row will fail the `>` comparison and be skipped. This violates the key invariant.
 
-**How to fix this:** **Always** page on a key that is unique within the filtered rows. Usually, this is the table's primary key minus any columns filtered out by equality filters. For example, when reading data from a table with primary key `(blueprint_id, sled_id, image_artifact_sha256)`, filtered on `blueprint_id = X`, always page on `(sled_id, image_artifact_sha256)`.
+You might imagine that you can change the filter to `WHERE <column> >= <marker>`, but you don't know how many items you need to skip, and also, if you have a full page size worth of rows that all match the marker, you'll never move forward. (1 is a valid page size.)
+
+**How to fix this:** **Always** page on a key that is unique within the filtered rows. Usually, this is the table's primary key minus the leading columns filtered out by equality filters. For example, when reading data from a table with primary key `(blueprint_id, sled_id, image_artifact_sha256)`, filtered on `blueprint_id = X`, always page on `(sled_id, image_artifact_sha256)`.
 
 Uniqueness must always be enforced by the database through a primary key or a unique index. An application-level invariant is insufficient to meet this requirement: if it is ever violated, pagination will silently drop rows.
 
 Look for these cases in particular:
 
 * **Scoped and partial unique indexes:** Some tables have a unique index like `(project_id, name) WHERE time_deleted IS NULL`. For such tables, `name` is only unique if the query filters on `project_id` and `time_deleted IS NULL`.
-* **Joins:** If the query performs a one-to-many join with many rows per paging key, the paging key is no longer unique in the result. Either page on the joined table's key as well, or make sure the join is not one-to-many.
+* **Joins:** If the query performs a one-to-many join with many rows per paging key, the paging key is no longer unique in the result. Add the joined table's key as another pagination column, or make sure the join is not one-to-many.
 
-**Example bug:** The `bp_single_measurements` table has primary key `(blueprint_id, sled_id, image_artifact_sha256)`. Since all sleds get the same set of measurements, the `image_artifact_sha256` values are shared across sleds. This code is buggy:
+**Example bug:** The `bp_single_measurements` table has primary key `(blueprint_id, sled_id, image_artifact_sha256)`. Since all sleds get the same set of measurements, the `image_artifact_sha256` values are shared across sleds.
+
+The below code has two bugs.
+
+* The query pages on `image_artifact_sha256`, which isn't unique across sleds.
+* The query skips `sled_id`, the middle column of the primary key, so it doesn't match the index. This means that for every page, the database has to read and sort all of the rows in `bp_single_measurements` corresponding to that blueprint.
 
 [source,rust]
 ----
@@ -126,7 +203,7 @@ while let Some(p) = paginator.next() {
 }
 ----
 
-**Fixed code:** Paginate on `(sled_id, image_artifact_sha256)`, which is unique after filtering to a single blueprint:
+**Fixed code:** Paginate on `(sled_id, image_artifact_sha256)`, which is unique after filtering to a single blueprint and matches the primary key:
 
 [source,rust]
 ----
@@ -234,7 +311,7 @@ while let Some(p) = paginator.next() {
 
 **Why this is bad:** The next page uses `WHERE <paging column> > <marker>` as its filter, so the marker has to be a value of the paging column. A marker from another column might be completely unrelated to the first column. This violates the key invariant.
 
-There might be an application-level invariant expressing a relationship between the columns, but such invariants should not be relied on in pagination code. (Nor is there any need to rely on them!)
+There might be an application-level invariant expressing a relationship between the columns, but pagination code shouldn't rely on it. There's no need to, since the marker can always come from the paging column.
 
 **How to fix this:** Return the marker from exactly the column (or columns) passed to `paginated()`, in the correct order.
 
@@ -349,17 +426,12 @@ while let Some(p) = paginator.next() {
     .await
     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
     paginator = p.found_batch(&names_batch, &|dns_name| dns_name.name.clone());
-    zone_records.extend(
-        names_batch
-            .into_iter()
-            // Corrected: filtering happens after `found_batch`.
-            .filter_map(|dns_name| {
-                dns_name
-                    .records()
-                    .ok()
-                    .map(|records| (dns_name.name, records))
-            }),
-    );
+    // Corrected: records are decoded after `found_batch`, and a row that fails
+    // to decode is an error rather than being silently dropped.
+    for dns_name in names_batch {
+        let records = dns_name.records()?;
+        zone_records.push((dns_name.name, records));
+    }
 }
 ----
 
@@ -407,11 +479,11 @@ while let Some(p) = paginator.next() {
 
 This violates the key invariant.
 
-(Note that rows can be inserted or deleted concurrently, and that is a separate concern that isn't a bug. For example, a new row concurrently added behind a marker is generally missed, and this is usually acceptable. The concern here is with rows being _mutated_ concurrently.)
+(Note that rows can be inserted or deleted concurrently, and that is a separate concern that isn't a bug. For example, a new row concurrently added behind a marker is generally missed, and this is usually acceptable. The concern here is with rows being _mutated_ concurrently, in a way that moves them across the marker while they still match the query.)
 
-NOTE: External API endpoints that paginate by `name` are subject to this problem, since a resource renamed in the middle of a scan can cause rows to be skipped or duplicated. We accept this for external APIs since clients can paginate by `id` for a stable scan. Internal code must always paginate on immutable columns.
+NOTE: External API endpoints that paginate by `name` are subject to this problem, since a resource renamed in the middle of a scan can cause rows to be skipped or duplicated. We accept this for external APIs since clients can paginate by `id` for a stable scan. Internal code must always paginate on immutable columns unless every possible change to the column would remove the row from the query's results (see below for an example).
 
-**How to fix this:** Only paginate on immutable columns. (Another alternative is to use a serializable transaction, but that is quite expensive so we only do this rarely.)
+**How to fix this:** Only paginate on immutable columns, with one narrow exception, described below. (Another alternative is to use a serializable transaction, but that is quite expensive so we only do this rarely.)
 
 **Example bug:**
 
@@ -444,10 +516,11 @@ while let Some(p) = paginator.next() {
 [source,rust]
 ----
 while let Some(p) = paginator.next() {
-    let batch = paginated(
+    let batch = paginated_multicolumn(
         dsl::metric_producer,
-        // Corrected: `id` is immutable.
-        dsl::id,
+        // Corrected: `id` is immutable, and (time_modified, id) is a unique
+        // index. For why it's okay that `time_modified` is mutable, see below.
+        (dsl::time_modified, dsl::id),
         &p.current_pagparams(),
     )
     .filter(dsl::time_modified.lt(expiration))
@@ -455,10 +528,16 @@ while let Some(p) = paginator.next() {
     .load_async(&*conn)
     .await
     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-    paginator = p.found_batch(&batch, &|producer| producer.id());
+    paginator = p.found_batch(&batch, &|producer| {
+        (producer.time_modified(), producer.id())
+    });
     producers.extend(batch);
 }
 ----
+
+The fixed code above pages on `time_modified` even though it's mutable. This is okay because whenever a producer re-registers, its `time_modified` is set to the current time, which is always later than `expiration`. So a row that's changed during the scan stops matching the filter, which is okay for the purposes of determining which rows have expired.
+
+In general, paging on a mutable column is okay if _every_ possible change to the column takes the row out of the query's results. This is (unfortunately) an application-level invariant, so avoid this if you can, and only do this when there's no other alternative. If you do this, add a comment to every writer of the column saying that pagination depends on it.
 
 === Not paging at all [[not-paging]]
 
@@ -468,7 +547,7 @@ A variant of this is setting a page size of `DataPageParams::max_page()`, which 
 
 **Why this is bad:** Even if the number of rows is small and the code is okay at that moment in time, if the table does become large (over time, or due to an application bug), the query's memory use and latency can grow without limit.
 
-**How to fix this:** Use the pagination infrastructure with `SQL_BATCH_SIZE` for _all_ bulk reads, using the rules above. The primary key, minus any columns that have equality filters on them, is always suitable as a paging key.
+**How to fix this:** Use the pagination infrastructure with `SQL_BATCH_SIZE` for _all_ bulk reads, using the rules above. The primary key, minus leading columns which have equality filters on them, is always suitable as a paging key.
 
 **Example bug:**
 
@@ -517,9 +596,9 @@ while let Some(p) = paginator.next() {
 
 **Why this is bad:** If more rows need to be returned than the limit, the query will discard excess rows. The limit is often chosen to match a product limit (e.g., sleds per rack), but such limits might only be enforced on some write paths, and they can change over time (for sleds per rack, this can occur due to multirack).
 
-NOTE: Debugging tools like omdb intentionally read a single page bounded by `--fetch-limit`. That is fine as long as the tool produces a warning if the limit is reached. Within omdb, call `check_limit` on the rows returned by the query (before performing any filtering).
+NOTE: Debugging tools like omdb sometimes read a single page bounded by `--fetch-limit`. This is a deprecated pattern — new code should use paged reads. For old code in omdb, ensure that `check_limit` is always called on the rows returned by the query (before performing any filtering).
 
-**How to fix this:** Use a `Paginator` loop. If the result really is bounded, fetch `limit + 1` rows and return an error if the database returns that many rows.
+**How to fix this:** Use a `Paginator` loop. If the table is small by construction, such as the fixed list of built-in roles, fetch `limit + 1` rows and return an error if the database returns that many rows.
 
 **Example bug:**
 
@@ -531,7 +610,7 @@ let ranges = ip_pool_range::table
     .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
     .filter(ip_pool_range::time_deleted.is_null())
     .select((ip_pool_range::first_address, ip_pool_range::last_address))
-    // BUG: rows past the first 10,000 are silently dropped.
+    // BUG: Rows past the first 10,000 are silently dropped.
     .limit(10000)
     .get_results_async::<(IpNetwork, IpNetwork)>(conn)
     .await?;
@@ -545,7 +624,8 @@ let mut ranges = Vec::new();
 let mut paginator =
     Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
 while let Some(p) = paginator.next() {
-    // Corrected: page on first_address, which is unique among live ranges.
+    // Corrected: Page on first_address, using the (ip_pool_id, first_address)
+    // unique index.
     let batch = paginated(
         ip_pool_range::table,
         ip_pool_range::first_address,
