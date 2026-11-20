@@ -12,9 +12,9 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pools, create_local_user, create_project, create_vpc,
-    create_vpc_with_error, grant_iam, object_create, objects_list_page_authz,
-    test_params,
+    InstanceCreateBuilder, create_default_ip_pools, create_local_user,
+    create_project, create_vpc, create_vpc_with_error, grant_iam,
+    object_create, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
@@ -499,41 +499,24 @@ async fn test_limited_collaborator_can_create_instance(
     let instances_url = format!("/v1/instances?project={}", project_name);
     let instance_name = "test-instance";
 
-    let instance: Instance = NexusRequest::objects_post(
-        client,
-        &instances_url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: "test instance created by limited-collaborator"
-                    .to_string(),
-            },
-            ncpus: instance::InstanceCpuCount(2),
-            memory:
-                omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
-            hostname: "test-instance".parse().unwrap(),
-            user_data: vec![],
-            ssh_public_keys: None,
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            external_ips: vec![],
-            multicast_groups: vec![],
-            disks: vec![],
-            boot_disk: None,
-            cpu_platform: None,
-            start: true,
-            auto_restart_policy: None,
-            anti_affinity_groups: vec![],
-            enable_jumbo_frames: false,
-            shutdown_policy: instance::InstanceShutdownPolicy::default(),
-        },
-    )
-    .authn_as(AuthnMode::SiloUser(limited_user.id))
-    .execute()
-    .await
-    .expect("limited-collaborator should be able to create instance")
-    .parsed_body()
-    .unwrap();
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_description("test instance created by limited-collaborator")
+        .with_ncpus(instance::InstanceCpuCount(2))
+        .with_memory(
+            omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
+        )
+        .with_hostname("test-instance")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .finish();
+    let instance: Instance =
+        NexusRequest::objects_post(client, &instances_url, &instance_params)
+            .authn_as(AuthnMode::SiloUser(limited_user.id))
+            .execute()
+            .await
+            .expect("limited-collaborator should be able to create instance")
+            .parsed_body()
+            .unwrap();
 
     assert_eq!(instance.identity.name, instance_name);
 }

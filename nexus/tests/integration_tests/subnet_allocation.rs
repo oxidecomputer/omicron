@@ -13,8 +13,9 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_from_body;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
@@ -53,28 +54,14 @@ async fn create_instance_expect_failure(
                 ip_config: PrivateIpStackCreate::auto_ipv4(),
             },
         ]);
-    let new_instance = instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: name.parse().unwrap(),
-            description: "".to_string(),
-        },
-        ncpus: InstanceCpuCount(1),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: Some(Vec::new()),
-        network_interfaces,
-        external_ips: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
-        shutdown_policy: instance::InstanceShutdownPolicy::default(),
-    };
+    let new_instance = InstanceCreateBuilder::new(name)
+        .with_description("")
+        .with_ncpus(InstanceCpuCount(1))
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(name)
+        .with_user_data(&[])
+        .with_nics(network_interfaces)
+        .finish();
 
     NexusRequest::new(
         RequestBuilder::new(&client, Method::POST, &url_instances)
@@ -153,20 +140,12 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     } as usize;
     let subnet_size = subnet_size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES;
     for i in 0..subnet_size {
-        create_instance_with(
+        create_instance_from_body(
             client,
             project_name,
-            &format!("i{}", i),
-            &nic,
-            // Disks=
-            Vec::<instance::InstanceDiskAttachment>::new(),
-            // External IPs=
-            Vec::<instance::ExternalIpCreate>::new(),
-            true,
-            Default::default(),
-            None,
-            Vec::new(),
-            instance::InstanceShutdownPolicy::default(),
+            InstanceCreateBuilder::new(&format!("i{}", i))
+                .with_nics(nic.clone())
+                .finish(),
         )
         .await;
     }

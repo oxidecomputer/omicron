@@ -11,8 +11,9 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_from_body;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::grant_iam;
@@ -68,25 +69,13 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         &self,
         instance_name: &str,
     ) -> latest::instance::Instance {
-        create_instance_with(
+        create_instance_from_body(
             &self.client,
             &self.project.as_ref().expect("Need to specify project name"),
-            instance_name,
-            &instance::InstanceNetworkInterfaceAttachment::None,
-            // Disks=
-            Vec::<instance::InstanceDiskAttachment>::new(),
-            // External IPs=
-            Vec::<instance::ExternalIpCreate>::new(),
-            // Start=
-            false,
-            // Auto-restart policy=
-            None,
-            // Instance CPU platform=
-            None,
-            // Multicast groups=
-            Vec::new(),
-            // Shutdown policy=
-            instance::InstanceShutdownPolicy::default(),
+            InstanceCreateBuilder::new(instance_name)
+                .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
+                .with_start(false)
+                .finish(),
         )
         .await
     }

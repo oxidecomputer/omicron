@@ -24,10 +24,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_from_body;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::object_create_error;
@@ -3222,20 +3223,15 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
     // the instance triggers `sled_reservation_create`, which allocates a
     // dataset for the local storage disk. Without this allocation, the disk
     // delete saga short-circuits and never reaches the retry loop.
-    let instance = create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![instance::InstanceDiskAttachment::Attach(
-            instance::InstanceDiskAttach { name: local_disk_name.clone() },
-        )],
-        Vec::<instance::ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
-        instance::InstanceShutdownPolicy::default(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_disks(vec![instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach { name: local_disk_name.clone() },
+            )])
+            .with_start(true)
+            .finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);

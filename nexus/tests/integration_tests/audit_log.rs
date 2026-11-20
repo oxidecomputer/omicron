@@ -9,21 +9,17 @@ use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    DiskTest, create_console_session, create_default_ip_pools, create_disk,
-    create_instance_with, create_local_user, create_project, create_silo,
-    get_device_token, grant_iam, object_create_error, object_create_no_body,
-    object_delete, objects_list_page_authz, test_params,
+    DiskTest, InstanceCreateBuilder, create_console_session,
+    create_default_ip_pools, create_disk, create_instance_from_body,
+    create_local_user, create_project, create_silo, get_device_token,
+    grant_iam, object_create_error, object_create_no_body, object_delete,
+    objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::audit::{
     self, AuditLogEntry, AuditLogEntryActor, AuditLogEntryResult,
 };
 use nexus_types::external_api::device;
-use nexus_types::external_api::instance::{
-    ExternalIpCreate, InstanceAutoRestartPolicy, InstanceCpuPlatform,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-    InstanceShutdownPolicy,
-};
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project::ProjectCreate;
 use nexus_types::external_api::scim;
@@ -400,18 +396,13 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let t1 = Utc::now();
 
     let _project = create_project(client, "test-project").await;
-    let _instance = create_instance_with(
+    let _instance = create_instance_from_body(
         client,
         "test-project",
-        "test-instance",
-        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        false, // start=false, so instance is created in stopped state
-        None::<InstanceAutoRestartPolicy>,
-        None::<InstanceCpuPlatform>,
-        Vec::new(),
-        InstanceShutdownPolicy::default(),
+        InstanceCreateBuilder::new("test-instance")
+            // create the instance in the stopped state
+            .with_start(false)
+            .finish(),
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;
