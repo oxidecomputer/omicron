@@ -1147,25 +1147,43 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn rot_measurement_log(
-        _request_context: RequestContext<Self::Context>,
-        _path_params: Path<RotPathParams>,
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
     ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        if let Some(rot) = sa.rot_attestor(path_params.into_inner().rot) {
+            let log = rot.get_measurement_log().await?;
+            Ok(HttpResponseOk(log.into()))
+        } else {
+            method_unimplemented()
+        }
     }
 
     async fn rot_certificate_chain(
-        _request_context: RequestContext<Self::Context>,
-        _path_params: Path<RotPathParams>,
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
     ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        if let Some(rot) = sa.rot_attestor(path_params.into_inner().rot) {
+            let chain = rot.get_certificate_chain().await?;
+            Ok(HttpResponseOk(chain.into()))
+        } else {
+            method_unimplemented()
+        }
     }
 
     async fn rot_attest(
-        _request_context: RequestContext<Self::Context>,
-        _path_params: Path<RotPathParams>,
-        _body: TypedBody<Nonce>,
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+        body: TypedBody<Nonce>,
     ) -> Result<HttpResponseOk<Attestation>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        if let Some(rot) = sa.rot_attestor(path_params.into_inner().rot) {
+            let attestation = rot.attest(body.into_inner().into()).await?;
+            Ok(HttpResponseOk(attestation.into()))
+        } else {
+            method_unimplemented()
+        }
     }
 
     async fn multirack_join_complete(
