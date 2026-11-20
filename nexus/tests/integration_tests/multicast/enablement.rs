@@ -9,7 +9,7 @@
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_project, object_get,
 };
-use omicron_common::api::external::{Instance, InstanceState};
+use nexus_types::external_api::instance::{Instance, InstanceState};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
 use super::*;

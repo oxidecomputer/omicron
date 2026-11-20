@@ -26,13 +26,12 @@ use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pools, create_instance, create_project, object_create,
+    create_default_ip_pools, create_instance, create_instance_from_body,
+    create_instance_with_error, create_project, instance_compute_update,
     object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, InstanceUpdate,
-};
+use nexus_types::external_api::instance::{InstanceCpuCount, InstanceState};
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
     MulticastGroupMember,
@@ -40,10 +39,7 @@ use nexus_types::external_api::multicast::{
 use nexus_types::internal_api::params::InstanceMigrateDestination;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
-use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    InstanceState, Nullable,
-};
+use omicron_common::api::external::ByteCount;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
@@ -661,30 +657,19 @@ async fn test_multicast_member_cleanup_instance_never_started(
     .await;
 
     // Create instance but don't start it
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: "Instance that will never be started".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: instance_name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false, // Don't start the instance
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_description("Instance that will never be started")
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
 
-    let instance_url = format!("/v1/instances?project={project_name}");
-    let instance: Instance =
-        object_create(client, &instance_url, &instance_params).await;
+    let instance =
+        create_instance_from_body(client, project_name, instance_params).await;
 
     // Add instance as multicast member (implicitly creates group)
     // Member will be in "Left" state since instance is stopped with no sled_id
@@ -1227,33 +1212,21 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     .await;
 
     // Create instance with specified resources (need to match InstanceUpdate)
-    let instance: Instance = object_create(
-        client,
-        &format!("/v1/instances?project={project_name}"),
-        &InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description:
-                    "test instance for reconfigure source_ips preservation"
-                        .into(),
-            },
-            ncpus: InstanceCpuCount(2),
-            memory: ByteCount::from_gibibytes_u32(4),
-            hostname: instance_name.parse().unwrap(),
-            user_data: Vec::new(),
-            ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            external_ips: Vec::new(),
-            disks: Vec::new(),
-            boot_disk: None,
-            start: false,
-            auto_restart_policy: None,
-            anti_affinity_groups: Vec::new(),
-            cpu_platform: None,
-            multicast_groups: Vec::new(),
-        },
-    )
-    .await;
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_description(
+            "test instance for reconfigure source_ips preservation",
+        )
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_hostname(instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
+
+    let instance =
+        create_instance_from_body(client, project_name, instance_params).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Start instance so we can join groups
@@ -1416,35 +1389,25 @@ async fn test_instance_create_with_ssm_multicast_groups(
     let ssm_ip: IpAddr = "232.70.0.10".parse().unwrap();
     let source_ip: IpAddr = "10.70.70.1".parse().unwrap();
 
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: "Instance created with SSM multicast groups".into(),
-        },
-        ncpus: InstanceCpuCount(2),
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: instance_name.parse().unwrap(),
-        user_data: Vec::new(),
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: Vec::new(),
-        disks: Vec::new(),
-        boot_disk: None,
-        start: true, // Start the instance
-        auto_restart_policy: None,
-        anti_affinity_groups: Vec::new(),
-        cpu_platform: None,
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_description("Instance created with SSM multicast groups")
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_hostname(instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        // Start the instance
+        .with_start(true)
         // Key part: SSM group with source_ips via MulticastGroupJoinSpec
-        multicast_groups: vec![MulticastGroupJoinSpec {
+        .with_multicast_groups(vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
             source_ips: Some(vec![source_ip]),
             ip_version: None,
-        }],
-    };
+        }])
+        .finish();
 
-    let instance_url = format!("/v1/instances?project={project_name}");
-    let instance: Instance =
-        object_create(client, &instance_url, &instance_params).await;
+    let instance =
+        create_instance_from_body(client, project_name, instance_params).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Simulate instance to running state
@@ -1514,46 +1477,30 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
     let ssm_ip: IpAddr = "232.80.0.10".parse().unwrap();
 
     // Case: Instance creation with SSM group without sources should fail
-    let instance_params_with_ssm = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: "Instance should fail with SSM without sources".into(),
-        },
-        ncpus: InstanceCpuCount(2),
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: instance_name.parse().unwrap(),
-        user_data: Vec::new(),
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: Vec::new(),
-        disks: Vec::new(),
-        boot_disk: None,
-        start: true,
-        auto_restart_policy: None,
-        anti_affinity_groups: Vec::new(),
-        cpu_platform: None,
-        multicast_groups: vec![MulticastGroupJoinSpec {
+    let instance_params_with_ssm = InstanceCreateBuilder::new(instance_name)
+        .with_description("Instance should fail with SSM without sources")
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_hostname(instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_start(true)
+        .with_multicast_groups(vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
             source_ips: None, // Missing sources for SSM!
             ip_version: None,
-        }],
-    };
+        }])
+        .finish();
 
-    let instance_url = format!("/v1/instances?project={project_name}");
-    let create_error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &instance_url)
-            .body(Some(&instance_params_with_ssm))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    let create_error = create_instance_with_error(
+        client,
+        project_name,
+        &instance_params_with_ssm,
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Creating instance with SSM without sources should fail");
+    .await;
 
-    let create_error_body: serde_json::Value =
-        serde_json::from_slice(&create_error.body).unwrap();
-    let create_error_message =
-        create_error_body["message"].as_str().unwrap_or("");
+    let create_error_message = create_error.message.as_str();
     assert!(
         create_error_message.contains("SSM")
             || create_error_message.contains("source"),
@@ -1564,29 +1511,24 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
     // should fail
     //
     // We first create instance without multicast groups
-    let instance_params_no_mcast = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: "Instance for SSM reconfigure test".into(),
-        },
-        ncpus: InstanceCpuCount(2),
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: instance_name.parse().unwrap(),
-        user_data: Vec::new(),
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: Vec::new(),
-        disks: Vec::new(),
-        boot_disk: None,
-        start: true,
-        auto_restart_policy: None,
-        anti_affinity_groups: Vec::new(),
-        cpu_platform: None,
-        multicast_groups: vec![], // No multicast groups init
-    };
+    let instance_params_no_mcast = InstanceCreateBuilder::new(instance_name)
+        .with_description("Instance for SSM reconfigure test")
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_hostname(instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_start(true)
+        // No multicast groups init
+        .with_multicast_groups(vec![])
+        .finish();
 
-    let instance: Instance =
-        object_create(client, &instance_url, &instance_params_no_mcast).await;
+    let instance = create_instance_from_body(
+        client,
+        project_name,
+        instance_params_no_mcast,
+    )
+    .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     let nexus = &cptestctx.server.server_context().nexus;
@@ -1594,18 +1536,13 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // Try to reconfigure to add SSM group without sources
-    let update_params = InstanceUpdate {
-        ncpus: InstanceCpuCount(2),
-        memory: ByteCount::from_gibibytes_u32(4),
-        boot_disk: Nullable(None),
-        auto_restart_policy: Nullable(None),
-        cpu_platform: Nullable(None),
-        multicast_groups: Some(vec![MulticastGroupJoinSpec {
+    let update_params = instance_compute_update(&instance, |update| {
+        update.multicast_groups = Some(vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
             source_ips: None, // Missing sources for new SSM group!
             ip_version: None,
-        }]),
-    };
+        }]);
+    });
 
     let update_url =
         format!("/v1/instances/{instance_name}?project={project_name}");

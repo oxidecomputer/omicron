@@ -15,21 +15,19 @@ use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pools, create_project, object_create, object_delete,
+    InstanceCreateBuilder, create_default_ip_pools, create_instance_from_body,
+    create_project, object_delete,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip::{
     AddressAllocator, FloatingIp, FloatingIpAttach,
 };
 use nexus_types::external_api::instance::{
-    EphemeralIpCreate, ExternalIpCreate, InstanceCreate,
+    EphemeralIpCreate, ExternalIpCreate, InstanceCpuCount,
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
-use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    NameOrId,
-};
+use omicron_common::api::external::{ByteCount, NameOrId};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
@@ -77,31 +75,24 @@ async fn test_multicast_external_ip_scenarios(
         let group_name = "basic-attach-detach-group";
 
         // Create instance (will start by default)
-        let instance_params = InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: "Instance with external IP and multicast"
-                    .to_string(),
-            },
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: instance_name.parse().unwrap(),
-            user_data: vec![],
-            ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            external_ips: vec![], // Start without external IP
-            multicast_groups: vec![],
-            disks: vec![],
-            boot_disk: None,
-            cpu_platform: None,
-            start: true, // Start the instance
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-        };
+        let instance_params = InstanceCreateBuilder::new(instance_name)
+            .with_description("Instance with external IP and multicast")
+            .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+            .with_memory(ByteCount::from_gibibytes_u32(1))
+            .with_hostname(instance_name)
+            .with_user_data(&[])
+            .with_ssh_public_keys(None)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+            // Start without external IP
+            .with_external_ips(vec![])
+            .with_multicast_groups(vec![])
+            // Start the instance
+            .with_start(true)
+            .finish();
 
-        let instance_url = format!("/v1/instances?project={project_name}");
-        let instance: Instance =
-            object_create(client, &instance_url, &instance_params).await;
+        let instance =
+            create_instance_from_body(client, project_name, instance_params)
+                .await;
         let instance_id = instance.identity.id;
 
         // Transition instance to Running state
@@ -223,31 +214,23 @@ async fn test_multicast_external_ip_scenarios(
         let group_name = "lifecycle-group";
 
         // Create instance
-        let instance_params = InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: "Instance for external IP lifecycle test"
-                    .to_string(),
-            },
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: instance_name.parse().unwrap(),
-            user_data: vec![],
-            ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            external_ips: vec![],
-            multicast_groups: vec![],
-            disks: vec![],
-            boot_disk: None,
-            cpu_platform: None,
-            start: true,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-        };
+        let instance_params = InstanceCreateBuilder::new(instance_name)
+            .with_description("Instance for external IP lifecycle")
+            .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+            .with_memory(ByteCount::from_gibibytes_u32(1))
+            .with_hostname(instance_name)
+            .with_user_data(&[])
+            .with_ssh_public_keys(None)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+            // Start without external IP and not in any multicast groups.
+            .with_external_ips(vec![])
+            .with_multicast_groups(vec![])
+            .with_start(true)
+            .finish();
 
-        let instance_url = format!("/v1/instances?project={project_name}");
-        let instance: Instance =
-            object_create(client, &instance_url, &instance_params).await;
+        let instance =
+            create_instance_from_body(client, project_name, instance_params)
+                .await;
         let instance_id = instance.identity.id;
 
         // Start instance and add to multicast group
@@ -386,31 +369,24 @@ async fn test_multicast_external_ip_scenarios(
                 ip_version: Some(IpVersion::V4),
             },
         };
-        let instance_params = InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: "Instance created with external IP and multicast"
-                    .to_string(),
-            },
-            ncpus: InstanceCpuCount::try_from(1).unwrap(),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: instance_name.parse().unwrap(),
-            user_data: vec![],
-            ssh_public_keys: None,
-            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            external_ips: vec![external_ip_param], // External IP at creation
-            multicast_groups: vec![], // Will add to multicast group after creation
-            disks: vec![],
-            boot_disk: None,
-            cpu_platform: None,
-            start: true,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-        };
+        let instance_params = InstanceCreateBuilder::new(instance_name)
+            .with_description("Instance created with external IP and multicast")
+            .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+            .with_memory(ByteCount::from_gibibytes_u32(1))
+            .with_hostname(instance_name)
+            .with_user_data(&[])
+            .with_ssh_public_keys(None)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+            // External IP at creation
+            .with_external_ips(vec![external_ip_param])
+            // Will add to multicast group after creation
+            .with_multicast_groups(vec![])
+            .with_start(true)
+            .finish();
 
-        let instance_url = format!("/v1/instances?project={project_name}");
-        let instance: Instance =
-            object_create(client, &instance_url, &instance_params).await;
+        let instance =
+            create_instance_from_body(client, project_name, instance_params)
+                .await;
         let instance_id = instance.identity.id;
 
         // Transition to running
@@ -510,30 +486,22 @@ async fn test_multicast_with_floating_ip_basic(
     .await;
 
     // Create instance (will start by default)
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: "Instance with floating IP and multicast".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: instance_name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![], // Start without external IP
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true, // Start the instance
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_description("Instance created with external IP and multicast")
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+        // Start without external IP
+        .with_external_ips(vec![])
+        .with_multicast_groups(vec![])
+        .with_start(true)
+        .finish();
 
-    let instance_url = format!("/v1/instances?project={project_name}");
-    let instance: Instance =
-        object_create(client, &instance_url, &instance_params).await;
+    let instance =
+        create_instance_from_body(client, project_name, instance_params).await;
     let instance_id = instance.identity.id;
 
     let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);

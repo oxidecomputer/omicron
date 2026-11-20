@@ -39,6 +39,7 @@ use nexus_test_utils::resource_helpers::{
     object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType, IpRange,
     IpVersion, Ipv4Range, Ipv6Range,
@@ -46,9 +47,7 @@ use nexus_types::external_api::ip_pool::{
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceState,
-};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;
@@ -1283,7 +1282,13 @@ async fn test_default_pool_on_implicit_creation(
         .await;
 
     // Link as default so it can be auto-discovered when joining by name
-    link_ip_pool(&client, "default-mcast-pool", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default-mcast-pool",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
 
     // Case: Joining when multicast pool exists - should succeed (pool auto-discovered)
     multicast_group_attach(cptestctx, project_name, instance_name, group_name2)

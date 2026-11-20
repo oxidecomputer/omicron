@@ -20,9 +20,7 @@ use nexus_test_utils::resource_helpers::{
     create_project, grant_iam, link_ip_pool, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
-};
+use nexus_types::external_api::instance::{Instance, InstanceCpuCount};
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
@@ -31,10 +29,7 @@ use nexus_types::external_api::project::ProjectCreate;
 use nexus_types::external_api::silo::{
     Silo, SiloCreate, SiloIdentityMode, SiloQuotasCreate,
 };
-use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount,
-};
+use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 use omicron_uuid_kinds::SiloUserUuid;
 
 use super::*;
@@ -76,26 +71,16 @@ async fn create_group_via_instance_join(
     .expect("User should be able to create project");
 
     // Case: Create an instance as the user (stopped)
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
-            description: format!("Instance for {group_name}"),
-        },
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: instance_name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_params = InstanceCreateBuilder::new(&instance_name)
+        .with_description(&format!("Instance for {group_name}"))
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(&instance_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
 
     let instance_url = format!("/v1/instances?project={project_name}");
     NexusRequest::new(
@@ -244,26 +229,16 @@ async fn test_silo_user_multicast_permissions(
     .await
     .unwrap();
 
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "second-instance".parse().unwrap(),
-            description: "Second instance for testing".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "second-instance".parse::<Hostname>().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_params = InstanceCreateBuilder::new("second-instance")
+        .with_description(&format!("Second instance for testing"))
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("second-instance")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
 
     let instance2: Instance = NexusRequest::new(
         RequestBuilder::new(
@@ -423,26 +398,19 @@ async fn test_silo_user_multicast_permissions(
 
     // A project-only user can create a multicast group via instance join.
     // They create an instance in their project, then add it as a member.
-    let project_instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "project-user-instance".parse().unwrap(),
-            description: "Instance for testing project-only user".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "project-user-instance".parse::<Hostname>().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let project_instance_params =
+        InstanceCreateBuilder::new("project-user-instance")
+            .with_description(&format!(
+                "Instance for testing project-only user"
+            ))
+            .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+            .with_memory(ByteCount::from_gibibytes_u32(1))
+            .with_hostname("project-user-instance")
+            .with_user_data(&[])
+            .with_ssh_public_keys(None)
+            .with_multicast_groups(vec![])
+            .with_start(false)
+            .finish();
 
     let project_instance: Instance = NexusRequest::new(
         RequestBuilder::new(
@@ -493,27 +461,18 @@ async fn test_silo_user_multicast_permissions(
     let instance_name2 = "project-user-instance-2";
     let instances_url =
         format!("/v1/instances?project={}", project_only.identity.id);
-    let instance_params2 = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_name2.parse().unwrap(),
-            description: "Second instance created by project-only user"
-                .to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: instance_name2.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-    };
+    let instance_params2 = InstanceCreateBuilder::new(instance_name2)
+        .with_description(&format!(
+            "Second instance created by project-only user"
+        ))
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name2)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
     let instance2: Instance = NexusRequest::objects_post(
         client,
         &instances_url,
@@ -1099,26 +1058,16 @@ async fn test_cross_silo_multicast_isolation(
     .unwrap();
 
     // Admin A creates instance in Silo A's project
-    let instance_a_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "instance-silo-a".parse().unwrap(),
-            description: "Instance in Silo A".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "instance-silo-a".parse::<Hostname>().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_a_params = InstanceCreateBuilder::new("instance-silo-a")
+        .with_description(&format!("Instance in Silo A"))
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("instance-silo-a")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
 
     let instance_a: Instance = NexusRequest::new(
         RequestBuilder::new(
@@ -1137,26 +1086,16 @@ async fn test_cross_silo_multicast_isolation(
     .unwrap();
 
     // Admin B creates instance in Silo B's project
-    let instance_b_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "instance-silo-b".parse().unwrap(),
-            description: "Instance in Silo B".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "instance-silo-b".parse::<Hostname>().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_b_params = InstanceCreateBuilder::new("instance-silo-b")
+        .with_description(&format!("Instance in Silo B"))
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("instance-silo-b")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
 
     let instance_b: Instance = NexusRequest::new(
         RequestBuilder::new(
@@ -1338,26 +1277,16 @@ async fn test_cross_silo_multicast_isolation(
     .await
     .expect("User C should create project in Silo C");
 
-    let instance_c_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "instance-silo-c".parse().unwrap(),
-            description: "Instance in Silo C".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "instance-silo-c".parse::<Hostname>().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_c_params = InstanceCreateBuilder::new("instance-silo-c")
+        .with_description(&format!("Instance in Silo C"))
+        .with_ncpus(InstanceCpuCount::try_from(1).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname("instance-silo-c")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
 
     NexusRequest::new(
         RequestBuilder::new(
@@ -1469,26 +1398,16 @@ async fn test_both_member_endpoints_have_same_permissions(
 
     // User A creates an instance in the project
     let instance_a_name = "parity-test-instance";
-    let instance_params = InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: instance_a_name.parse().unwrap(),
-            description: "Instance for parity test".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        hostname: instance_a_name.parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        multicast_groups: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: false,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-    };
+    let instance_params = InstanceCreateBuilder::new(instance_a_name)
+        .with_description(&format!("Instance for parity test"))
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_a_name)
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .with_multicast_groups(vec![])
+        .with_start(false)
+        .finish();
     let instance_url =
         format!("/v1/instances?project={}", project_a.identity.name);
     let instance_a: Instance = NexusRequest::new(
