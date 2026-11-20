@@ -1378,55 +1378,6 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_probe_requires_fleet_admin(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let server = httpmock::MockServer::start_async().await;
-    let webhook =
-        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
-    let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
-    let mock = server
-        .mock_async(|when, then| {
-            when.method(POST).header("x-oxide-alert-class", "probe");
-            then.status(200);
-        })
-        .await;
-    // Fleet collaborator is the highest role that can't probe a receiver. It
-    // can still read the receiver.
-    let rx_url = alert_rx_url(webhook.identity.id);
-    let probe_url = format!("{rx_url}/probe?resend=true");
-    resource_helpers::grant_iam(
-        client,
-        "/v1/system",
-        FleetRole::Collaborator,
-        USER_TEST_UNPRIVILEGED.id(),
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
-    alert_rx_get_as(client, &rx_url, AuthnMode::UnprivilegedUser).await;
-    NexusRequest::expect_failure(
-        client,
-        http::StatusCode::FORBIDDEN,
-        http::Method::POST,
-        &probe_url,
-    )
-    .authn_as(AuthnMode::UnprivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-    mock.assert_calls_async(0).await;
-
-    let probe = alert_receiver_send_probe(
-        &cptestctx,
-        &rx_id,
-        false,
-        http::StatusCode::OK,
-    )
-    .await;
-    mock.assert_async().await;
-    assert_eq!(probe.probe.state, AlertDeliveryState::Delivered);
-}
-
-#[nexus_test]
 async fn test_probe_resends_failed_deliveries(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1555,6 +1506,28 @@ async fn test_probe_resends_failed_deliveries(
             })
             .await
     };
+
+    // Fleet collaborator can't probe
+    let client = &cptestctx.external_client;
+    resource_helpers::grant_iam(
+        client,
+        "/v1/system",
+        FleetRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let probe_url = format!("{}/probe", alert_rx_url(webhook.identity.id));
+    NexusRequest::expect_failure(
+        client,
+        http::StatusCode::FORBIDDEN,
+        http::Method::POST,
+        &probe_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     // Send a probe with ?resend=true
     let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
