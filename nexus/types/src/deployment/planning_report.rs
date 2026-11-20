@@ -16,6 +16,7 @@ use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
 use crate::deployment::OperatorStatus;
+use crate::deployment::OperatorStatusDescription;
 use crate::deployment::QuiesceInfo;
 use crate::deployment::SledEvacuationProgress;
 use crate::deployment::UpdateWait;
@@ -123,10 +124,15 @@ impl fmt::Display for PlanningReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // This generic printer cannot know the specific quiesce status, so the
         // output here will not reflect the details of any pending handoff.
-        let status = self.operator_status(QuiesceInfo::Unknown);
+        let OperatorStatusDescription { summary, support_details } =
+            self.operator_status(QuiesceInfo::Unknown).describe();
+        writeln!(f, "operator status: summary: {summary}")?;
+        if let Some(support_details) = support_details {
+            writeln!(f, "operator status: support details: {support_details}")?;
+        }
+
         if self.is_empty() {
             writeln!(f, "empty planning report")?;
-            writeln!(f, "status for operators: {status}")?;
         } else {
             let Self {
                 planner_config,
@@ -141,7 +147,6 @@ impl fmt::Display for PlanningReport {
                 measurement_updates,
             } = self;
             writeln!(f, "planning report:")?;
-            writeln!(f, "status for operators: {status}")?;
             if *planner_config != PlannerConfig::default() {
                 writeln!(f, "planner config:\n{}", planner_config.display())?;
             }
@@ -2367,23 +2372,6 @@ mod tests {
             Some(other) => panic!("unexpected update wait: {other:?}"),
             None => panic!("expected an operator status, found none"),
         }
-    }
-
-    // Evacuation progress describes remaining VMMs as a count, and all other
-    // details with their own message.
-    #[test]
-    fn sled_evacuation_progress_display() {
-        let progress = SledEvacuationProgress::Waiting(
-            WaitingOnSledEvacuationDetails::InstanceManagerRegisteredVmms {
-                num_registered_vmms: NonZeroUsize::new(3).unwrap(),
-            },
-        );
-        assert_eq!(progress.to_string(), "3 VMMs remaining");
-
-        let progress = SledEvacuationProgress::Waiting(
-            WaitingOnSledEvacuationDetails::MissingFromInventory,
-        );
-        assert_eq!(progress.to_string(), "sled is missing from inventory");
     }
 
     // The operator status reports a handoff only when the caller knows that

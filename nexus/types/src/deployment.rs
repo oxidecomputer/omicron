@@ -123,6 +123,7 @@ pub use network_resources::OmicronZoneNicIp;
 pub use network_resources::ZoneExternalSnatError;
 use omicron_common::api::external::Error;
 pub use operator_status::OperatorStatus;
+pub use operator_status::OperatorStatusDescription;
 pub use operator_status::QuiesceInfo;
 pub use operator_status::SledEvacuationProgress;
 pub use operator_status::UnknownReason;

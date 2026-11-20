@@ -638,8 +638,8 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (2) is lower than minimum required by blueprint (3)
@@ -927,8 +927,8 @@ INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -1047,8 +1047,8 @@ ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096 version 1.0.0
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (1c0ce176-6dc8-4a90-adea-d4a8000751da)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting current measurements to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone adds waiting on blockers
@@ -1286,8 +1286,8 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO measurement install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, expected_hash: fbb89a9ab7f6767df5f8ee28a7857fd592f0b614731bb01f47133c9629e36c17
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
@@ -1520,8 +1520,8 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
@@ -1666,8 +1666,8 @@ ffa6a263fe18e2882f2024aeec01b6b7b3e8f50c87b49fb44a217ccab18b32cb version 2.0.0
 
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * noop converting current measurements to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
@@ -1898,8 +1898,8 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * noop converting current measurements to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
@@ -2034,8 +2034,8 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
@@ -2101,8 +2101,8 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * only placed 0/1 desired nexus zones
 * zone updates waiting on reference measurement changes
@@ -2334,8 +2334,8 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
-status for operators: System is busy
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * only placed 0/1 desired nexus zones
 * zone updates waiting on reference measurement changes
@@ -2595,8 +2595,8 @@ INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 5978
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/1 desired nexus zones
@@ -2833,8 +2833,8 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
 
 
 blueprint source: planner with report:
+operator status: summary: Waiting for update of RoT Bootloader on 913-0000019:serial0
 planning report:
-status for operators: Waiting for update of RoT Bootloader on 913-0000019:serial0
 * 1 pending MGS update:
   * 913-0000019:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 * only placed 0/1 desired nexus zones
@@ -2959,8 +2959,9 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
+operator status: summary: Waiting for a control plane zone update to finish
+operator status: support details: Internal service being updated: internal_dns
 planning report:
-status for operators: Waiting for a control plane zone update to finish (internal_dns)
 * noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting host phase 2 slot B to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting host phase 2 slot B to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -3270,8 +3271,8 @@ INFO current sled measurements are in an unknown state, sled_id: c3bc4c6d-fdde-4
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (7) that is older than the generation in the parent blueprint (8)
 generated blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f based on parent blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)

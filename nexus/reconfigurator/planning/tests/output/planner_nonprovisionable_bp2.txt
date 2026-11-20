@@ -679,8 +679,8 @@ parent:    2c4d059d-6498-49ca-8052-6e696a675f6e
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
-status for operators: Waiting for MUPdate resolution
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9: 15 zones
