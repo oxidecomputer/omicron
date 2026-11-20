@@ -1861,8 +1861,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_producer_by_oximeter ON omicron.public.
     id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_producer_by_time_modified ON omicron.public.metric_producer (
-    time_modified
+-- This index lets the expired-producer scan paginate on (time_modified, id) so
+-- that each page reads only expired rows. Paging on time_modified is safe only
+-- because every write sets it to the current time, which takes the row out of
+-- the expired set. This is an application-level invariant that we depend on;
+-- see docs/db-pagination.adoc.
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_producer_by_time_modified ON omicron.public.metric_producer (
+    time_modified,
+    id
 );
 
 /*
@@ -2525,23 +2531,14 @@ STORING (first_address)
 WHERE time_deleted IS NULL;
 
 /*
- * Index to support efficient lookups of ip_pool_range rows by ip_pool_id.
- *
- * This index benefits several important queries:
- * - ip_pool_fetch_containing_address: finds pools containing a specific IP
- * - ip_pool_delete: checks for remaining ranges before pool deletion
- * - ip_pool_list_ranges_batched_on_connection: lists all ranges in a pool
- * - ip_pools_fetch_ssm_multicast_pool / ip_pools_fetch_asm_multicast_pool:
- *   joins ip_pool_range to ip_pool for multicast pool lookups
- *
- * The STORING clause includes first_address and last_address because these
- * columns are commonly filtered or selected alongside ip_pool_id, allowing
- * the query to be satisfied entirely from the index without an additional
- * lookup to the primary table.
+ * This index serves queries that look up ranges by ip_pool_id,
+ * and lets queries that list a pool's ranges paginate on first_address
+ * efficiently.
  */
-CREATE INDEX IF NOT EXISTS ip_pool_range_by_pool_id ON omicron.public.ip_pool_range (
-    ip_pool_id
-) STORING (first_address, last_address)
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_pool_and_first_address ON omicron.public.ip_pool_range (
+    ip_pool_id,
+    first_address
+) STORING (last_address)
 WHERE time_deleted IS NULL;
 
 /* The kind of external IP address. */
@@ -9997,7 +9994,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '322.0.0', NULL)
+    (TRUE, NOW(), NOW(), '323.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

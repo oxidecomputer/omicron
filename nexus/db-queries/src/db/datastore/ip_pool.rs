@@ -1133,15 +1133,15 @@ impl DataStore {
         authz_pool: &authz::IpPool,
     ) -> Result<Vec<(IpNetwork, IpNetwork)>, DieselError> {
         use nexus_db_schema::schema::ip_pool_range;
-        // Here, the lookup_pool_range_by_first_address index ensures that
-        // first_address is unique for non-soft-deleted ranges, so it is a valid
-        // paging key.
         let mut ranges = Vec::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
         );
         while let Some(p) = paginator.next() {
+            // In this query, first_address is only unique among
+            // non-soft-deleted ranges, so time_deleted.is_null() is required
+            // for first_address to be a valid paging key.
             let batch = paginated(
                 ip_pool_range::table,
                 ip_pool_range::first_address,
