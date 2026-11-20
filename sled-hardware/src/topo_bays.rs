@@ -91,6 +91,8 @@ pub(crate) fn assemble_bays(
             children.entry(parent).or_default().push(node);
         }
     }
+    let children_of =
+        |key: &NodeKey| children.get(key).map(Vec::as_slice).unwrap_or(&[]);
 
     let mut bays: Vec<ObservedBay> = Vec::new();
     for node in nodes {
@@ -129,16 +131,14 @@ pub(crate) fn assemble_bays(
             });
         }
 
-        for child in children.get(&node.key).into_iter().flatten() {
+        for child in children_of(&node.key) {
             match &child.kind {
                 TopoNodeKind::Nvme { instance, driver, devfs_path } => {
                     let added = bay.record_nvme_occupant(
                         log, child, instance, driver, devfs_path,
                     );
                     if added {
-                        for disk in
-                            children.get(&child.key).into_iter().flatten()
-                        {
+                        for disk in children_of(&child.key) {
                             bay.record_namespace(disk);
                         }
                     }
@@ -150,7 +150,7 @@ pub(crate) fn assemble_bays(
                         driver: None,
                         devfs_path: None,
                     });
-                    for ic in children.get(&child.key).into_iter().flatten() {
+                    for ic in children_of(&child.key) {
                         bay.record_ic(ic);
                     }
                 }
