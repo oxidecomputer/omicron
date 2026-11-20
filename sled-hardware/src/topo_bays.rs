@@ -25,6 +25,10 @@
 //!   `ic` has `io/driver` and `io/devfs-path`. The bay has no
 //!   `binding/driver`.
 //!
+//! `binding/driver` is an input to the illumos disk enumerator. It names
+//! the driver whose devices the enumerator should look for under the bay.
+//! oxhc sets it only on bays it hands to that enumerator.
+//!
 //! The illumos module reads the topology into [`TopoNode`]s; everything
 //! here is plain data manipulation so it can be tested anywhere.
 //!
