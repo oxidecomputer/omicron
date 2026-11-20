@@ -65,9 +65,33 @@ impl Styles {
         self.style(|s| s)
     }
 
+    /// Default body text. This is used when a value is conditionally styled, to
+    /// ensure the types line up.
+    pub(crate) fn normal(self) -> Style {
+        self.style(|s| s)
+    }
+
     /// Annotations pointing at a value of note (e.g. `<!-- this sitrep`).
     pub(crate) fn annotation(self) -> Style {
         self.style(|s| s.cyan())
+    }
+
+    /// Diff markers for something added in the sitrep being displayed (e.g.
+    /// the `+` gutter marker for a case opened in this sitrep).
+    pub(crate) fn added(self) -> Style {
+        self.style(|s| s.green())
+    }
+
+    /// Diff markers for something removed in the sitrep being displayed (e.g.
+    /// the `-` gutter marker for a case closed in this sitrep).
+    pub(crate) fn removed(self) -> Style {
+        self.style(|s| s.red())
+    }
+
+    /// Diff markers for something modified in the sitrep being displayed
+    /// (e.g. the `*` gutter marker for a case changed in this sitrep).
+    pub(crate) fn modified(self) -> Style {
+        self.style(|s| s.purple())
     }
 
     /// Placeholders for missing values (`<none>`, `<UNKNOWN>`) appearing on
@@ -296,11 +320,27 @@ pub struct Comment<'c> {
     indent: usize,
     leading_newline: bool,
     colored: bool,
+    wrap_mode: WrapMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WrapMode {
+    /// Unwrap the comment into a single line, even if it is wrapped.
+    SingleLine,
+    /// Don't mess with the comment's wrapping
+    None,
+    // TODO(eliza): add an "always word wrap at the _n_th column" mode.
 }
 
 impl<'c> Comment<'c> {
     pub fn new(comment: &'c str, indent: usize) -> Self {
-        Self { comment, indent, leading_newline: false, colored: false }
+        Self {
+            comment,
+            indent,
+            leading_newline: false,
+            colored: false,
+            wrap_mode: WrapMode::None,
+        }
     }
 
     pub fn indent(self, indent: usize) -> Self {
@@ -314,6 +354,11 @@ impl<'c> Comment<'c> {
     /// If `colored` is true, dim the comment text.
     pub fn colored(self, colored: bool) -> Self {
         Self { colored, ..self }
+    }
+
+    /// Sets how comment text is line-wrapped.
+    pub fn wrap_mode(self, wrap_mode: WrapMode) -> Self {
+        Self { wrap_mode, ..self }
     }
 }
 
@@ -343,7 +388,8 @@ impl<'c> From<Option<&'c str>> for Comment<'c> {
 
 impl std::fmt::Display for Comment<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let &Self { comment, indent, leading_newline, colored } = self;
+        let &Self { comment, indent, leading_newline, colored, wrap_mode } =
+            self;
         if comment.is_empty() {
             return Ok(());
         }
@@ -351,13 +397,23 @@ impl std::fmt::Display for Comment<'_> {
             writeln!(f, "")?;
         }
         let style = Styles::new(colored).comment();
-        for line in comment.lines() {
-            writeln!(
-                f,
-                "{:indent$}{}",
-                "",
-                style.style(format_args!("// {line}"))
-            )?;
+        match wrap_mode {
+            WrapMode::SingleLine => {
+                write!(f, "{:indent$}{}", "", style.style("//"))?;
+                for line in comment.lines() {
+                    write!(f, "{}", style.style(format_args!(" {line}")))?;
+                }
+            }
+            WrapMode::None => {
+                for line in comment.lines() {
+                    writeln!(
+                        f,
+                        "{:indent$}{}",
+                        "",
+                        style.style(format_args!("// {line}"))
+                    )?;
+                }
+            }
         }
         Ok(())
     }

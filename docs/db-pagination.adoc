@@ -226,15 +226,22 @@ while let Some(p) = paginator.next() {
 }
 ----
 
-=== Overriding the ORDER BY after `paginated()` [[overriding-order-by]]
+=== ORDER BY, LIMIT, or OR filters after `paginated()` [[overriding-order-by]]
 
-**What this is:** A call to `paginated()`, then `order_by()` or `order()` before execution.
+**What this is:** A call to `paginated()`, then any of the following:
 
-**Why this is bad:** Diesel's `order_by` overrides the existing `ORDER BY` rather than appending to it. So, within `found_batch`, the marker detection (which uses the last row returned from the database) is no longer in sync with the `WHERE <column> > <marker>` clause. This violates the key invariant.
+- `order_by()` or `order()` to reorder by columns.
+- `limit()` to limit the number of rows returned.
+- `or_filter()` to add an OR filter.
 
-The override also hardcodes the sort direction, which might not match the direction the `WHERE` clause uses.
+**Why this is bad:** All of these change the returned rows in a way that breaks `paginated()`.
 
-**How to fix this:** Don't call `order_by` or `order` for paginated queries. If you need a particular order, make that order the paging key.
+* Calling `order_by()` overrides the existing `ORDER BY` rather than appending to it. So, within `found_batch`, the marker detection (which uses the last row returned from the database) is no longer in sync with the `WHERE <column> > <marker>` clause.
+* Calling `.limit(n)` replaces the page size that `paginated()` set. If `n` is smaller than the page size, the first page has fewer rows than `found_batch` expects, so the loop ends after one page.
+* Calling `.or_filter(x)` turns the `WHERE` clause into `(<marker condition>) OR x`. Rows that should be skipped due to the marker condition will be included if `x` is true, and the pagination loop might never end.
+
+**How to fix this:** Don't call these methods on paginated queries.
+
 
 **Example bug:**
 
@@ -386,25 +393,29 @@ All of these violate the row invariant.
 [source,rust]
 ----
 while let Some(p) = paginator.next() {
-    let names_batch: Vec<(String, Vec<DnsRecord>)> = paginated(
-        dsl::dns_name,
-        dsl::name,
-        &p.current_pagparams(),
-    )
-    .filter(dsl::dns_zone_id.eq(zone.id))
-    .filter(dsl::version_added.le(version.version))
-    .select(DnsName::as_select())
-    .load_async(&*conn)
-    .await
-    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-    .into_iter()
-    // BUG: if dns_name.records() returns an error, that row will be filtered
-    // out and names_batch will have fewer rows than the page size.
-    .filter_map(|dns_name| {
-        dns_name.records().ok().map(|records| (dns_name.name, records))
-    })
-    .collect();
-    paginator = p.found_batch(&names_batch, &|(name, _)| name.clone());
+    let names_batch: Vec<(String, Generation, Vec<DnsRecord>)> =
+        paginated_multicolumn(
+            dsl::dns_name,
+            (dsl::name, dsl::version_added),
+            &p.current_pagparams(),
+        )
+        .filter(dsl::dns_zone_id.eq(zone.id))
+        .filter(dsl::version_added.le(version.version))
+        .select(DnsName::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+        .into_iter()
+        // BUG: if dns_name.records() returns an error, that row will be filtered
+        // out and names_batch will have fewer rows than the page size.
+        .filter_map(|dns_name| {
+            let records = dns_name.records().ok()?;
+            Some((dns_name.name, dns_name.version_added, records))
+        })
+        .collect();
+    paginator = p.found_batch(&names_batch, &|(name, version_added, _)| {
+        (name.clone(), *version_added)
+    });
     zone_records.extend(names_batch);
 }
 ----
@@ -414,9 +425,9 @@ while let Some(p) = paginator.next() {
 [source,rust]
 ----
 while let Some(p) = paginator.next() {
-    let names_batch: Vec<DnsName> = paginated(
+    let names_batch: Vec<DnsName> = paginated_multicolumn(
         dsl::dns_name,
-        dsl::name,
+        (dsl::name, dsl::version_added),
         &p.current_pagparams(),
     )
     .filter(dsl::dns_zone_id.eq(zone.id))
@@ -425,7 +436,9 @@ while let Some(p) = paginator.next() {
     .load_async(&*conn)
     .await
     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-    paginator = p.found_batch(&names_batch, &|dns_name| dns_name.name.clone());
+    paginator = p.found_batch(&names_batch, &|dns_name| {
+        (dns_name.name.clone(), dns_name.version_added)
+    });
     // Corrected: records are decoded after `found_batch`, and a row that fails
     // to decode is an error rather than being silently dropped.
     for dns_name in names_batch {
