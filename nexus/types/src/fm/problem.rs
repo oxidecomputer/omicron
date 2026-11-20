@@ -7,6 +7,7 @@
 //! These are *not* part of the external API; for that, see the
 //! [`crate::external_api::problem`] module.
 
+use super::display;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
@@ -17,6 +18,7 @@ use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::Arc;
 
 /// A structured internal representation of problem codes.
@@ -65,7 +67,7 @@ macro_rules! problem_descriptions {
         }
     ),+) => {
         impl ProblemCode {
-            pub fn description(&self) -> &'static ProblemCodeDescription {
+            pub const fn description(&self) -> &'static ProblemCodeDescription {
                 match self {
                     $(
                         ProblemCode::$Variant => {
@@ -462,6 +464,167 @@ impl SitrepProblem {
 
     pub fn code(&self) -> ProblemCode {
         self.current_revision().code
+    }
+
+    pub fn is_resolved(&self) -> bool {
+        self.current_revision().time_resolved.is_some()
+    }
+
+    pub fn display_summary(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayProblemSummary<'_> {
+        DisplayProblemSummary {
+            problem: self,
+            indent,
+            sitrep_id,
+            colored: false,
+        }
+    }
+
+    /// Returns `true` if the current revision of this problem was requested
+    /// in `sitrep_id`, or if any alert or support bundle links were added to
+    /// this problem in `sitrep_id`.
+    fn changed_in_sitrep(&self, sitrep_id: SitrepUuid) -> bool {
+        self.current_revision().requested_sitrep_id == sitrep_id
+            || self.alerts.iter().any(|a| a.linked_sitrep_id == sitrep_id)
+            || self
+                .support_bundles
+                .iter()
+                .any(|b| b.linked_sitrep_id == sitrep_id)
+    }
+}
+
+/// Displays a summary of a [`SitrepProblem`] as a single line, as returned by
+/// [`SitrepProblem::display_summary`].
+///
+/// The line begins with a two-column gutter describing whether the problem had
+/// interesting activity in the sitrep being displayed, if this displayer was
+/// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
+///
+/// - column 1 is `+` if the problem was requested in the current sitrep, `*`
+///   if it was requested in an earlier sitrep, but a new revision, alert link,
+///   or support bundle link, was requested in this sitrep, and blank otherwise.
+/// - column 2 is `-` if the problem was resolved in this sitrep (i.e., its
+///   current revision is resolved and was requested in this sitrep), and
+///   blank otherwise. If a problem requested in this sitrep was resolved by a
+///   revision from some other sitrep, the record is inconsistent, and column 2
+///   is `!`.
+///
+/// Because resolving a problem requires a new revision, a problem requested in
+/// an earlier sitrep and resolved in this one is always displayed as `*-`.
+///
+/// If no sitrep ID was provided, the gutter is blank, so that rows remain
+/// aligned.
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayProblemSummary<'a> {
+    problem: &'a SitrepProblem,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayProblemSummary<'_> {
+    /// Explains the gutter markers in [`DisplayProblemSummary`]'s output.
+    /// Callers displaying a list of problem summaries should print this
+    /// legend.
+    pub fn legend() -> DisplayProblemSummaryLegend {
+        DisplayProblemSummaryLegend { colored: false }
+    }
+
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayProblemSummaryLegend {
+    colored: bool,
+}
+
+impl DisplayProblemSummaryLegend {
+    pub fn colored(self, colored: bool) -> Self {
+        Self { colored }
+    }
+}
+
+impl fmt::Display for DisplayProblemSummaryLegend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { colored } = self;
+        let styles = display::Styles::new(colored);
+        write!(
+            f,
+            "activity in this sitrep: \
+            {} requested, {} revised, {} resolved\n\n   \
+            STATE            ID                                   CODE SUMMARY",
+            styles.added_marker(),
+            styles.modified_marker(),
+            styles.removed_marker(),
+        )
+    }
+}
+
+impl fmt::Display for DisplayProblemSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { problem, indent, sitrep_id, colored } = self;
+        let SitrepProblem {
+            id,
+            requested_sitrep_id,
+            comment: _,
+            revisions: _,
+            alerts: _,
+            support_bundles: _,
+        } = problem;
+        let current_rev = problem.current_revision();
+
+        let styles = display::Styles::new(colored);
+
+        const ACTIVE: &str = "active";
+        const RESOLVED: &str = "resolved";
+        const STATE_WIDTH: usize = display::const_max_len(&[ACTIVE, RESOLVED]);
+
+        let is_resolved = current_rev.time_resolved.is_some();
+        let state = if is_resolved {
+            styles.normal().style(RESOLVED)
+        } else {
+            styles.warning().style(ACTIVE)
+        };
+        let (created, resolved) = match sitrep_id {
+            Some(this_sitrep) => {
+                let created_here = *requested_sitrep_id == this_sitrep;
+                let created = if created_here {
+                    styles.added_marker()
+                } else if problem.changed_in_sitrep(this_sitrep) {
+                    styles.modified_marker()
+                } else {
+                    styles.normal().style(' ')
+                };
+                let resolved = if !is_resolved {
+                    styles.normal().style(' ')
+                } else if current_rev.requested_sitrep_id == this_sitrep {
+                    styles.removed_marker()
+                } else if created_here {
+                    styles.warning().style('!')
+                } else {
+                    styles.normal().style(' ')
+                };
+                (created, resolved)
+            }
+            None => (styles.normal().style(' '), styles.normal().style(' ')),
+        };
+
+        let code = u32::from(current_rev.code);
+        write!(
+            f,
+            "{:>indent$}{created}{resolved} {state:>STATE_WIDTH$} {} \
+             {code:04} {}",
+            "",
+            styles.heading().style(format_args!("problem {id}")),
+            current_rev.summary,
+        )?;
+        Ok(())
     }
 }
 

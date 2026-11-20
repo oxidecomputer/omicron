@@ -563,6 +563,27 @@ async fn cmd_db_sitrep_show(
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?
 
+    if !problems.is_empty() {
+        let num_resolved =
+            problems.by_id().iter().filter(|p| p.is_resolved()).count();
+        let num_active = problems.len() - num_resolved;
+
+        println!("\n{:=<80}", "== ACTIVE PROBLEMS ");
+        println!("{num_active} active, {num_resolved} resolved\n");
+        println!(
+            "(i) {}",
+            fm::problem::DisplayProblemSummary::legend().colored(colored)
+        );
+        // The by-code index is sorted by problem code, and then by problem ID
+        // within each code.
+        for problem in problems.by_code().values().flat_map(|ps| ps.iter()) {
+            println!(
+                "{}",
+                problem.display_summary(0, Some(id)).colored(colored)
+            );
+        }
+    }
+
     if cases.is_empty() {
         return Ok(());
     }
