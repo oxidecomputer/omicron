@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::app::authz;
 use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::bfd;
@@ -37,8 +38,9 @@ impl super::Nexus {
 
     pub async fn bfd_status(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
     ) -> Result<Vec<bfd::BfdStatus>, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
         let mg_clients = self.mg_clients().await.map_err(|err| {
