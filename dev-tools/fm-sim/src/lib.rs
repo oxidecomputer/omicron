@@ -11,24 +11,30 @@
 
 mod command;
 mod error;
+mod session;
 mod simulator;
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-pub use error::Error;
-pub use simulator::Simulator;
+pub use error::{Error, SessionError};
+pub use simulator::{SimStateId, SimStateNode, SimStateOrigin, Simulator};
 
 use clap::Parser;
 
 use command::SimCommand;
+use session::SessionCommand;
 
 /// fm-sim: Fault Management Simulator
 #[derive(Debug, PartialEq, Parser)]
 #[command(multicall = true)]
 pub(crate) enum CliCommand {
+    /// A command that runs against the current state.
     #[command(flatten)]
     Sim(SimCommand),
-    // TODO(#10209): Add support for session commands: `state`, `op`, `script`.
+    /// A command that acts on the session (e.g. navigating history) rather than
+    /// on the current simulated state.
+    #[command(flatten)]
+    Session(SessionCommand),
 }
 
 /// Parses one line of input into a command.
