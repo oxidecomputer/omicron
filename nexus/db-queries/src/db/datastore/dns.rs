@@ -14,6 +14,7 @@ use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
@@ -41,6 +42,14 @@ use uuid::Uuid;
 
 // This restriction could be removed by just implementing paginated reads.
 const NMAX_DNS_ZONES: u32 = 10;
+
+/// A DNS name and its records.
+#[derive(Clone, Debug)]
+pub struct DnsNameRecords {
+    pub name: String,
+    pub version_added: Generation,
+    pub records: Vec<DnsRecord>,
+}
 
 impl DataStore {
     /// List all DNS zones in a DNS group (paginated)
@@ -156,24 +165,26 @@ impl DataStore {
         opctx: &OpContext,
         dns_zone_id: Uuid,
         version: Generation,
-        pagparams: &DataPageParams<'_, String>,
-    ) -> ListResultVec<(String, Vec<DnsRecord>)> {
+        pagparams: &DataPageParams<'_, (String, Generation)>,
+    ) -> ListResultVec<DnsNameRecords> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use nexus_db_schema::schema::dns_name::dsl;
-        let rows = paginated(dsl::dns_name, dsl::name, pagparams)
-            .filter(dsl::dns_zone_id.eq(dns_zone_id))
-            .filter(dsl::version_added.le(version))
-            .filter(
-                dsl::version_removed
-                    .is_null()
-                    .or(dsl::version_removed.gt(version)),
-            )
-            .select(DnsName::as_select())
-            .load_async::<DnsName>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let rows = paginated_multicolumn(
+            dsl::dns_name,
+            // The primary key for this table is (dns_zone_id, name, version).
+            // Filter by dns_zone_id and paginate by (name, version_added).
+            (dsl::name, dsl::version_added),
+            pagparams,
+        )
+        .filter(dsl::dns_zone_id.eq(dns_zone_id))
+        .filter(dsl::version_added.le(version))
+        .filter(
+            dsl::version_removed.is_null().or(dsl::version_removed.gt(version)),
+        )
+        .select(DnsName::as_select())
+        .load_async::<DnsName>(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         // If a row cannot be decoded, we fail the whole read rather than
         // skipping it. This is a bit fragile, since it uses runtime JSON
         // parsing rather than modelling state as db rows, but we've verified as
@@ -187,7 +198,11 @@ impl DataStore {
                      (zone {}, version added {})",
                     n.name, n.dns_zone_id, *n.version_added,
                 ))?;
-                Ok((n.name, records))
+                Ok(DnsNameRecords {
+                    name: n.name,
+                    version_added: n.version_added,
+                    records,
+                })
             })
             .collect()
     }
@@ -270,8 +285,12 @@ impl DataStore {
                         &p.current_pagparams(),
                     )
                     .await?;
-                paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
-                zone_records.extend(names_batch);
+                paginator = p.found_batch(&names_batch, &|n| {
+                    (n.name.clone(), n.version_added)
+                });
+                zone_records.extend(
+                    names_batch.into_iter().map(|n| (n.name, n.records)),
+                );
             }
 
             debug!(log, "found all DNS names for zone";
