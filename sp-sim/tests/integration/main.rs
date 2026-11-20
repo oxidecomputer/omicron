@@ -3,3 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod ereports;
+mod ignition;
+mod sp_client;
+
+/// Path to the sp-sim configuration.
+///
+/// This is shared by the ereports and ignition tests here, and with gateway's
+/// integration tests.
+pub(crate) const SP_SIM_CONFIG_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../gateway-test-utils/configs/sp_sim_config.test.toml"
+);
