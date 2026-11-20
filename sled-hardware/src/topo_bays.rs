@@ -88,8 +88,6 @@ pub(crate) fn assemble_bays(
             children.entry(parent).or_default().push(node);
         }
     }
-    let children_of =
-        |key: &NodeKey| children.get(key).map(Vec::as_slice).unwrap_or(&[]);
 
     let mut bays: Vec<ObservedBay> = Vec::new();
     for node in nodes {
@@ -99,14 +97,16 @@ pub(crate) fn assemble_bays(
         let location = identify_bay(&node.key, &props.label, &bays)?;
         let mut bay = new_bay(&node.key, location, kind, props);
 
-        for child in children_of(&node.key) {
+        for child in children.get(&node.key).into_iter().flatten() {
             match &child.kind {
                 TopoNodeKind::Nvme { instance, driver, devfs_path } => {
                     let added = add_nvme(
                         log, &mut bay, child, instance, driver, devfs_path,
                     );
                     if added {
-                        for disk in children_of(&child.key) {
+                        for disk in
+                            children.get(&child.key).into_iter().flatten()
+                        {
                             add_disk(&mut bay, disk);
                         }
                     }
@@ -121,7 +121,7 @@ pub(crate) fn assemble_bays(
                             devfs_path: None,
                         },
                     );
-                    for ic in children_of(&child.key) {
+                    for ic in children.get(&child.key).into_iter().flatten() {
                         add_ic(&mut bay, ic);
                     }
                 }
