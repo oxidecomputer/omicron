@@ -25,7 +25,7 @@ use libtopo::{Snapshot, TopoHdl};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::inventory::{
     NvmeCriticalWarnings, NvmeEnduranceGroupWarnings, NvmeHealth,
-    NvmeHealthError, NvmeThermalManagement,
+    NvmeHealthError, NvmeHealthErrorKind, NvmeThermalManagement,
 };
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
@@ -430,7 +430,10 @@ fn poll_bay(
                         "nvme_instance" => %instance,
                         &err,
                     );
-                    NvmeHealthError { message: err.to_string() }
+                    NvmeHealthError {
+                        kind: NvmeHealthErrorKind::LogPageReadFailed,
+                        message: err.to_string(),
+                    }
                 });
                 Box::new(PolledDisk { disk, health })
             });

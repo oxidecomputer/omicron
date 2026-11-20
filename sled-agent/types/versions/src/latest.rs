@@ -219,6 +219,7 @@ pub mod inventory {
     pub use crate::v66::inventory::NvmeEnduranceGroupWarnings;
     pub use crate::v66::inventory::NvmeHealth;
     pub use crate::v66::inventory::NvmeHealthError;
+    pub use crate::v66::inventory::NvmeHealthErrorKind;
     pub use crate::v66::inventory::NvmeThermalManagement;
 
     pub use crate::v62::inventory::SledRegistrationInfo;

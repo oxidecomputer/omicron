@@ -7995,12 +7995,35 @@
         "description": "An error reported by sled-agent in place of an [`NvmeHealth`].\n\n`message` is informational only and should not be parsed.",
         "type": "object",
         "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/NvmeHealthErrorKind"
+          },
           "message": {
             "type": "string"
           }
         },
         "required": [
+          "kind",
           "message"
+        ]
+      },
+      "NvmeHealthErrorKind": {
+        "description": "Why sled-agent has no [`NvmeHealth`] for a disk.",
+        "oneOf": [
+          {
+            "description": "Sled-agent reached the disk's controller, but could not read the SMART / Health Information log page from it.",
+            "type": "string",
+            "enum": [
+              "log_page_read_failed"
+            ]
+          },
+          {
+            "description": "Sled-agent's latest poll of its hardware did not read this disk at all. Among other reasons, this happens while the controller is locked for a format or a firmware update.",
+            "type": "string",
+            "enum": [
+              "not_polled"
+            ]
+          }
         ]
       },
       "NvmeThermalManagement": {

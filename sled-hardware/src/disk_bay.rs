@@ -628,6 +628,7 @@ pub(crate) fn disk_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sled_agent_types::inventory::NvmeHealthErrorKind;
 
     fn firmware() -> DiskFirmware {
         DiskFirmware::new(1, None, true, 1, vec![Some("FW1".to_string())])
@@ -1190,7 +1191,10 @@ mod tests {
 
     #[test]
     fn health_read_error_is_reported_for_the_disk() {
-        let error = NvmeHealthError { message: "log page too short".into() };
+        let error = NvmeHealthError {
+            kind: NvmeHealthErrorKind::LogPageReadFailed,
+            message: "log page too short".into(),
+        };
         let ((disks, _bays), health) = poll_with_health(
             Ok(vec![described_with_health(
                 &nvme_bay(vec![namespace()]),

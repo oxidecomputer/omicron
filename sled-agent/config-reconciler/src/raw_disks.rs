@@ -10,6 +10,7 @@ use iddqd::IdOrdMap;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::NvmeHealth;
 use sled_agent_types::inventory::NvmeHealthError;
+use sled_agent_types::inventory::NvmeHealthErrorKind;
 use sled_hardware::DiskHealthMap;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
@@ -128,8 +129,9 @@ impl RawDisksSender {
                         .cloned()
                         .unwrap_or_else(|| {
                             Err(NvmeHealthError {
+                                kind: NvmeHealthErrorKind::NotPolled,
                                 message: "the latest hardware poll did not \
-                                          read this disk's health"
+                                          read this disk"
                                     .to_string(),
                             })
                         }),
@@ -429,8 +431,10 @@ mod tests {
         // A reading that could not be mistaken for a fake one.
         let polled_health =
             NvmeHealth { media_errors: 7, ..NvmeHealth::new_fake(Utc::now()) };
-        let read_error =
-            NvmeHealthError { message: "controller is on fire".to_string() };
+        let read_error = NvmeHealthError {
+            kind: NvmeHealthErrorKind::LogPageReadFailed,
+            message: "controller is on fire".to_string(),
+        };
         let (_health_tx, health_rx) =
             watch::channel(Arc::new(DiskHealthMap::from([
                 (polled.identity().clone(), Ok(polled_health.clone())),
@@ -450,7 +454,10 @@ mod tests {
         assert_eq!(health_of(&polled), Ok(polled_health));
         assert_eq!(health_of(&unreadable), Err(read_error));
         // A real disk the poll did not read is an error, not healthy.
-        health_of(&not_polled).unwrap_err();
+        assert_eq!(
+            health_of(&not_polled).unwrap_err().kind,
+            NvmeHealthErrorKind::NotPolled
+        );
         // A synthetic disk is healthy without the poll reading it.
         let synthetic_health = health_of(&synthetic).unwrap();
         assert_eq!(

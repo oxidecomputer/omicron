@@ -94,6 +94,7 @@ progenitor::generate_api!(
         NvmeEnduranceGroupWarnings = sled_agent_types_versions::latest::inventory::NvmeEnduranceGroupWarnings,
         NvmeHealth = sled_agent_types_versions::latest::inventory::NvmeHealth,
         NvmeHealthError = sled_agent_types_versions::latest::inventory::NvmeHealthError,
+        NvmeHealthErrorKind = sled_agent_types_versions::latest::inventory::NvmeHealthErrorKind,
         NvmeThermalManagement = sled_agent_types_versions::latest::inventory::NvmeThermalManagement,
         OmicronPhysicalDiskConfig = sled_agent_types::disk::OmicronPhysicalDiskConfig,
         OmicronSledConfig = sled_agent_types_versions::latest::inventory::OmicronSledConfig,

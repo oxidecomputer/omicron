@@ -134,6 +134,21 @@ pub struct NvmeHealth {
     pub thermal_management: Option<NvmeThermalManagement>,
 }
 
+/// Why sled-agent has no [`NvmeHealth`] for a disk.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NvmeHealthErrorKind {
+    /// Sled-agent reached the disk's controller, but could not read the
+    /// SMART / Health Information log page from it.
+    LogPageReadFailed,
+    /// Sled-agent's latest poll of its hardware did not read this disk at
+    /// all. Among other reasons, this happens while the controller is locked
+    /// for a format or a firmware update.
+    NotPolled,
+}
+
 /// An error reported by sled-agent in place of an [`NvmeHealth`].
 ///
 /// `message` is informational only and should not be parsed.
@@ -149,6 +164,7 @@ pub struct NvmeHealth {
 )]
 #[error("{message}")]
 pub struct NvmeHealthError {
+    pub kind: NvmeHealthErrorKind,
     pub message: String,
 }
 
