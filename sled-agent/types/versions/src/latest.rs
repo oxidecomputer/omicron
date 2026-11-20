@@ -213,8 +213,13 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v65::inventory::Inventory;
-    pub use crate::v65::inventory::InventoryDisk;
+    pub use crate::v66::inventory::Inventory;
+    pub use crate::v66::inventory::InventoryDisk;
+    pub use crate::v66::inventory::NvmeCriticalWarnings;
+    pub use crate::v66::inventory::NvmeEnduranceGroupWarnings;
+    pub use crate::v66::inventory::NvmeHealth;
+    pub use crate::v66::inventory::NvmeHealthError;
+    pub use crate::v66::inventory::NvmeThermalManagement;
 
     pub use crate::v62::inventory::SledRegistrationInfo;
 

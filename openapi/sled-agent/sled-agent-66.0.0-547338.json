@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "65.0.0"
+    "version": "66.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6603,6 +6603,46 @@
             "format": "uint8",
             "minimum": 0
           },
+          "nvme_health": {
+            "description": "The disk's SMART / Health Information log page, or why sled-agent has no reading of it. A reading's `time_collected` says how old it is.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/NvmeHealth"
+                },
+                {
+                  "$ref": "#/components/schemas/NvmeHealthError"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/NvmeHealth"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "$ref": "#/components/schemas/NvmeHealthError"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
           "pcie_slot": {
             "description": "PCIe physical slot number of the bridge above this disk.\n\nThis is the `physical-slot#` of the parent `pcieb` device. It is internal to the board's PCIe topology and board-specific: the same U.2 bay is numbered differently on Gimlet and Cosmo. It is not the location label printed on the chassis; see `location` for that. Nothing guarantees the numbering stays the same across host OS versions either, so anything that needs a stable identifier should use `location`.",
             "type": "integer",
@@ -6626,6 +6666,7 @@
           "active_firmware_slot",
           "identity",
           "number_of_firmware_slots",
+          "nvme_health",
           "pcie_slot",
           "slot1_is_read_only",
           "slot_firmware_versions",
@@ -7684,6 +7725,49 @@
           }
         ]
       },
+      "NvmeCriticalWarnings": {
+        "description": "The Critical Warning field of an NVMe SMART / Health Information log page. Each is `true` if that warning is raised.",
+        "type": "object",
+        "properties": {
+          "available_spare_low": {
+            "description": "Available spare capacity has fallen below the threshold.",
+            "type": "boolean"
+          },
+          "indeterminate_personality_state": {
+            "nullable": true,
+            "description": "A change to a personality's settings did not complete and could not be reverted. `None` if the controller's NVMe version is before 2.3.",
+            "type": "boolean"
+          },
+          "persistent_memory_region_read_only": {
+            "nullable": true,
+            "description": "Persistent Memory Region has become read-only or unreliable. `None` if the controller's NVMe version is before 1.4.",
+            "type": "boolean"
+          },
+          "read_only": {
+            "description": "Media has been placed in read-only mode.",
+            "type": "boolean"
+          },
+          "reliability_degraded": {
+            "description": "Reliability is degraded due to media errors.",
+            "type": "boolean"
+          },
+          "temperature": {
+            "description": "Temperature is outside the threshold.",
+            "type": "boolean"
+          },
+          "volatile_memory_backup_failed": {
+            "nullable": true,
+            "description": "Volatile memory backup device has failed. `None` if the controller has no volatile write cache.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available_spare_low",
+          "read_only",
+          "reliability_degraded",
+          "temperature"
+        ]
+      },
       "NvmeDisk": {
         "description": "A disk that presents an NVMe interface to the guest.",
         "type": "object",
@@ -7727,6 +7811,233 @@
           "serial_number"
         ],
         "additionalProperties": false
+      },
+      "NvmeEnduranceGroupWarnings": {
+        "description": "The Endurance Group Critical Warning Summary field of an NVMe SMART / Health Information log page. Each is `true` if that warning is raised for one or more Endurance Groups.",
+        "type": "object",
+        "properties": {
+          "available_spare_low": {
+            "description": "Available spare capacity has fallen below the threshold.",
+            "type": "boolean"
+          },
+          "read_only": {
+            "description": "Namespaces have been placed in read-only mode.",
+            "type": "boolean"
+          },
+          "reliability_degraded": {
+            "description": "Reliability is degraded due to media or internal errors.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available_spare_low",
+          "read_only",
+          "reliability_degraded"
+        ]
+      },
+      "NvmeHealth": {
+        "description": "The SMART / Health Information log page of an NVMe controller.\n\nThe controller reports its counters as 128-bit values. A count too large for a `u64` is reported as `u64::MAX`.",
+        "type": "object",
+        "properties": {
+          "available_spare_percent": {
+            "description": "Normalized percentage of remaining spare capacity.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "available_spare_threshold_percent": {
+            "description": "The percentage below which `available_spare_percent` raises a critical warning.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "controller_busy_minutes": {
+            "description": "Minutes the controller was busy with I/O commands.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "critical_temperature_minutes": {
+            "nullable": true,
+            "description": "Minutes above the critical composite temperature threshold. `None` if the controller's NVMe version is before 1.2, or it reports no critical threshold.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "critical_warnings": {
+            "$ref": "#/components/schemas/NvmeCriticalWarnings"
+          },
+          "data_read_bytes": {
+            "description": "Bytes read by the host. The controller counts in units of 512,000 bytes, rounded up.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "data_written_bytes": {
+            "description": "Bytes written by the host, counted as `data_read_bytes` is.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "endurance_group_warnings": {
+            "nullable": true,
+            "description": "`None` if the controller's NVMe version is before 1.4.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NvmeEnduranceGroupWarnings"
+              }
+            ]
+          },
+          "error_log_entries": {
+            "description": "Entries in the controller's Error Information log over its life.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "host_read_commands": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "host_write_commands": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "life_used_percent": {
+            "description": "Vendor estimate of the percentage of rated life used; may exceed 100.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "media_errors": {
+            "description": "Occurrences of the controller detecting an unrecovered data integrity error.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "power_cycles": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "power_on_hours": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "temperature_kelvin": {
+            "nullable": true,
+            "description": "Composite temperature. `None` if the controller did not report one.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "temperature_sensors_kelvin": {
+            "description": "Temperature sensors 1 through 8, in order. A sensor is `None` if it isn't implemented, or the controller's NVMe version is before 1.2.",
+            "type": "array",
+            "items": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            },
+            "minItems": 8,
+            "maxItems": 8
+          },
+          "thermal_management": {
+            "nullable": true,
+            "description": "`None` if the controller's NVMe version is before 1.3.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NvmeThermalManagement"
+              }
+            ]
+          },
+          "time_collected": {
+            "description": "When sled-agent read this log page from the controller.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "unsafe_shutdowns": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "warning_temperature_minutes": {
+            "nullable": true,
+            "description": "Minutes above the warning composite temperature threshold. `None` if the controller's NVMe version is before 1.2, or it reports no warning threshold.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "available_spare_percent",
+          "available_spare_threshold_percent",
+          "controller_busy_minutes",
+          "critical_warnings",
+          "data_read_bytes",
+          "data_written_bytes",
+          "error_log_entries",
+          "host_read_commands",
+          "host_write_commands",
+          "life_used_percent",
+          "media_errors",
+          "power_cycles",
+          "power_on_hours",
+          "temperature_sensors_kelvin",
+          "time_collected",
+          "unsafe_shutdowns"
+        ]
+      },
+      "NvmeHealthError": {
+        "description": "An error reported by sled-agent in place of an [`NvmeHealth`].\n\n`message` is informational only and should not be parsed.",
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "NvmeThermalManagement": {
+        "description": "The thermal management statistics of an NVMe SMART / Health Information log page.",
+        "type": "object",
+        "properties": {
+          "temp1_seconds": {
+            "description": "Seconds in thermal management temperature 1.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "temp1_transitions": {
+            "description": "Transitions into thermal management temperature 1.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "temp2_seconds": {
+            "description": "Seconds in thermal management temperature 2.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "temp2_transitions": {
+            "description": "Transitions into thermal management temperature 2.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "temp1_seconds",
+          "temp1_transitions",
+          "temp2_seconds",
+          "temp2_transitions"
+        ]
       },
       "OmicronFileSourceResolverInventory": {
         "description": "Inventory representation of zone image resolver and measurement resolver status and health. Previously known as `ZoneImageResolverInventory`",

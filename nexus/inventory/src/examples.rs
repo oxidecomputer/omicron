@@ -68,6 +68,7 @@ use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
+use sled_agent_types::inventory::NvmeHealth;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
@@ -550,6 +551,7 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
+            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
         },
         InventoryDisk {
             identity: DiskIdentity {
@@ -565,6 +567,7 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
+            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
         },
         InventoryDisk {
             identity: DiskIdentity {
@@ -580,6 +583,7 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
+            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
         },
         // ... and one manufacturer for our M.2.
         InventoryDisk {
@@ -596,6 +600,7 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
+            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
         },
     ];
     let mut zpools = Vec::new();

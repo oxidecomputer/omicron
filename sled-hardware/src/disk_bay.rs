@@ -25,6 +25,7 @@
 #![cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 
 use crate::DiskFirmware;
+use crate::DiskHealthMap;
 use crate::DiskLocation;
 use crate::UnparsedDisk;
 use crate::nvme_instance::NvmeInstance;
@@ -33,6 +34,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::inventory::{NvmeHealth, NvmeHealthError};
 use slog::{Logger, warn};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -396,12 +398,20 @@ impl ObservedNvmeBay<'_> {
     }
 }
 
+/// A disk found in a bay by a single hardware poll.
+#[derive(Clone, Debug)]
+pub(crate) struct PolledDisk {
+    pub disk: UnparsedDisk,
+    /// The disk's health, or why it could not be read.
+    pub health: Result<NvmeHealth, NvmeHealthError>,
+}
+
 /// One bay from a single hardware poll.
 #[derive(Clone, Debug)]
 pub(crate) enum PolledBay {
     Described {
         bay: DiskBay,
-        disk: Option<Box<UnparsedDisk>>,
+        disk: Option<Box<PolledDisk>>,
     },
     /// The topology or libnvme could not describe the bay on this poll.
     Unreadable {
@@ -457,6 +467,9 @@ pub(crate) fn collect_polled_bays(
 /// The disk previously seen at its location stays in the disk list, so a fault
 /// in one bay neither drops its disk nor holds up the others.
 ///
+/// Health is reported only for a disk this poll read, from the bay that
+/// keeps the disk. It is never carried over from the previous view.
+///
 /// If two bays have a disk with the same identity, a bay that saw the disk on
 /// this poll keeps it over a bay whose disk is from the previous poll (the
 /// disk may have moved). Otherwise the bay whose location sorts first keeps
@@ -466,7 +479,7 @@ pub(crate) fn resolve_bays(
     polled: Result<IdOrdMap<PolledBay>, String>,
     previous_bays: &IdOrdMap<DiskBay>,
     previous_disks: &HashMap<DiskIdentity, UnparsedDisk>,
-) -> (HashMap<DiskIdentity, UnparsedDisk>, IdOrdMap<DiskBay>) {
+) -> (HashMap<DiskIdentity, UnparsedDisk>, IdOrdMap<DiskBay>, DiskHealthMap) {
     let (mut polled, missing_error) = match polled {
         Ok(polled) => (polled, "not in the hardware topology".to_string()),
         Err(error) => {
@@ -490,6 +503,8 @@ pub(crate) fn resolve_bays(
     struct ResolvedBay {
         bay: DiskBay,
         disk: Option<UnparsedDisk>,
+        // Only for a disk read on this poll.
+        health: Option<Result<NvmeHealth, NvmeHealthError>>,
         disk_source: DiskSource,
     }
 
@@ -509,11 +524,20 @@ pub(crate) fn resolve_bays(
     let mut resolved: Vec<ResolvedBay> = polled
         .into_iter()
         .map(|polled_bay| match polled_bay {
-            PolledBay::Described { bay, disk } => ResolvedBay {
-                bay,
-                disk: disk.map(|d| *d),
-                disk_source: DiskSource::ThisPoll,
-            },
+            PolledBay::Described { bay, disk } => {
+                let (disk, health) = match disk.map(|d| *d) {
+                    Some(PolledDisk { disk, health }) => {
+                        (Some(disk), Some(health))
+                    }
+                    None => (None, None),
+                };
+                ResolvedBay {
+                    bay,
+                    disk,
+                    health,
+                    disk_source: DiskSource::ThisPoll,
+                }
+            }
             PolledBay::Unreadable { location, kind, driver, error } => {
                 let disk = previous_disks
                     .values()
@@ -523,6 +547,7 @@ pub(crate) fn resolve_bays(
                 ResolvedBay {
                     bay: DiskBay { location, kind, occupant },
                     disk,
+                    health: None,
                     disk_source: DiskSource::PreviousPoll,
                 }
             }
@@ -544,10 +569,14 @@ pub(crate) fn resolve_bays(
 
     let mut disks = HashMap::new();
     let mut bays = IdOrdMap::new();
-    for ResolvedBay { mut bay, disk, disk_source } in resolved {
+    let mut disk_health = DiskHealthMap::new();
+    for ResolvedBay { mut bay, disk, health, disk_source } in resolved {
         if let Some(disk) = disk {
             match disks.entry(disk.identity().clone()) {
                 Entry::Vacant(entry) => {
+                    if let Some(health) = health {
+                        disk_health.insert(entry.key().clone(), health);
+                    }
                     entry.insert(disk);
                 }
                 Entry::Occupied(entry) => {
@@ -577,7 +606,7 @@ pub(crate) fn resolve_bays(
         // `polled` had one bay per location, so no bay overwrites another.
         bays.insert_overwrite(bay);
     }
-    (disks, bays)
+    (disks, bays, disk_health)
 }
 
 /// The model string of a disk, from the `inquiry-vendor-id` and
@@ -890,6 +919,14 @@ mod tests {
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
+        described_with_health(observed, facts, Ok(fake_health()))
+    }
+
+    fn described_with_health(
+        observed: &ObservedBay,
+        facts: Option<&NvmeFacts>,
+        health: Result<NvmeHealth, NvmeHealthError>,
+    ) -> PolledBay {
         let (bay, disk) = match describe_bay_from_topology(observed).unwrap() {
             BayDescription::Complete(bay) => (bay, None),
             BayDescription::NeedsNvmeFacts(nvme) => {
@@ -897,7 +934,12 @@ mod tests {
                 nvme.combine_with_nvme_facts(facts, false).unwrap()
             }
         };
-        PolledBay::Described { bay, disk: disk.map(Box::new) }
+        let disk = disk.map(|disk| Box::new(PolledDisk { disk, health }));
+        PolledBay::Described { bay, disk }
+    }
+
+    fn fake_health() -> NvmeHealth {
+        NvmeHealth::new_fake(chrono::DateTime::UNIX_EPOCH)
     }
 
     fn unreadable(location: &str) -> PolledBay {
@@ -918,12 +960,19 @@ mod tests {
 
     type View = (HashMap<DiskIdentity, UnparsedDisk>, IdOrdMap<DiskBay>);
 
-    fn poll(
+    fn poll(polled: Result<Vec<PolledBay>, String>, previous: &View) -> View {
+        let (view, _health) = poll_with_health(polled, previous);
+        view
+    }
+
+    fn poll_with_health(
         polled: Result<Vec<PolledBay>, String>,
         (previous_disks, previous_bays): &View,
-    ) -> View {
+    ) -> (View, DiskHealthMap) {
         let polled = polled.map(|bays| collect_polled_bays(&log(), bays));
-        resolve_bays(&log(), polled, previous_bays, previous_disks)
+        let (disks, bays, health) =
+            resolve_bays(&log(), polled, previous_bays, previous_disks);
+        ((disks, bays), health)
     }
 
     /// The view after one poll that found a disk in N3.
@@ -1106,6 +1155,64 @@ mod tests {
                 devfs_path: None,
             }
         );
+    }
+
+    #[test]
+    fn duplicate_disk_identity_reports_health_of_kept_bay() {
+        let first = nvme_bay(vec![namespace()]);
+        let mut second = nvme_bay(vec![namespace()]);
+        second.location = loc("N4");
+        let first_health = NvmeHealth { media_errors: 3, ..fake_health() };
+        let second_health = NvmeHealth { media_errors: 4, ..fake_health() };
+        // The bay that loses the disk is polled first.
+        let ((disks, _bays), health) = poll_with_health(
+            Ok(vec![
+                described_with_health(
+                    &second,
+                    Some(&facts(1)),
+                    Ok(second_health),
+                ),
+                described_with_health(
+                    &first,
+                    Some(&facts(1)),
+                    Ok(first_health.clone()),
+                ),
+            ]),
+            &View::default(),
+        );
+        let disk = disks.values().next().unwrap();
+        assert_eq!(disk.location().as_str(), "N3");
+        assert_eq!(
+            health,
+            DiskHealthMap::from([(disk.identity().clone(), Ok(first_health))])
+        );
+    }
+
+    #[test]
+    fn health_read_error_is_reported_for_the_disk() {
+        let error = NvmeHealthError { message: "log page too short".into() };
+        let ((disks, _bays), health) = poll_with_health(
+            Ok(vec![described_with_health(
+                &nvme_bay(vec![namespace()]),
+                Some(&facts(1)),
+                Err(error.clone()),
+            )]),
+            &View::default(),
+        );
+        let disk = disks.values().next().unwrap();
+        assert_eq!(
+            health,
+            DiskHealthMap::from([(disk.identity().clone(), Err(error))])
+        );
+    }
+
+    #[test]
+    fn unreadable_bay_keeps_previous_disk_without_health() {
+        let previous = disk_in_n3();
+        let ((disks, _bays), health) =
+            poll_with_health(Ok(vec![unreadable("N3")]), &previous);
+        assert_eq!(disks, previous.0);
+        assert!(health.is_empty());
     }
 
     #[test]

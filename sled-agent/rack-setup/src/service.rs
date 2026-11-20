@@ -1655,8 +1655,9 @@ mod test {
         early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
             ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
-            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
-            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+            InventoryDisk, NvmeHealth, OmicronFileSourceResolverInventory,
+            OmicronZoneType, SledCpuFamily, SledRole,
+            SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1711,6 +1712,9 @@ mod test {
                         number_of_firmware_slots: 1,
                         slot1_is_read_only: true,
                         slot_firmware_versions: vec![Some("TEST1".to_string())],
+                        nvme_health: Ok(NvmeHealth::new_fake(
+                            chrono::Utc::now(),
+                        )),
                     })
                     .collect(),
                 zpools: vec![],

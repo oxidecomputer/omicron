@@ -1552,6 +1552,11 @@ mod tests {
                 number_of_firmware_slots: 8,
                 slot1_is_read_only: false,
                 slot_firmware_versions: vec![],
+                nvme_health: Ok(
+                    sled_agent_types::inventory::NvmeHealth::new_fake(
+                        chrono::Utc::now(),
+                    ),
+                ),
             })
             .collect();
 

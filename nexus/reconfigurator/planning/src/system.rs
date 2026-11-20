@@ -71,6 +71,7 @@ use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::NvmeHealth;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
@@ -1577,6 +1578,7 @@ impl Sled {
                         slot_firmware_versions: vec![Some(
                             "SIMUL1".to_string(),
                         )],
+                        nvme_health: Ok(NvmeHealth::new_fake(Utc::now())),
                     })
                     .collect(),
                 zpools: zpools
