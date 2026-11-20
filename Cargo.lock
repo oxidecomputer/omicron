@@ -945,7 +945,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -1531,7 +1531,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1548,7 +1548,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1565,7 +1565,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1730,7 +1730,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1821,7 +1821,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5#f1b1706fda2fba927b82a1f4f00e06965fc816e5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2741,7 +2741,7 @@ dependencies = [
  "ddm-api-types-versions",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "serde",
  "slog",
@@ -3286,7 +3286,7 @@ dependencies = [
  "oxide-tokio-rt",
  "pretty-hex",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -3324,7 +3324,7 @@ dependencies = [
  "internal-dns-types-versions",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -3425,16 +3425,16 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5#f1b1706fda2fba927b82a1f4f00e06965fc816e5"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
- "crc8",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5)",
  "futures",
  "http",
  "oxnet",
- "progenitor 0.14.0",
+ "progenitor 0.16.1",
+ "progenitor-extras 0.4.0",
  "regress 0.11.1",
  "reqwest",
  "schemars 0.8.22",
@@ -3449,7 +3449,7 @@ dependencies = [
 [[package]]
 name = "dpd-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5#f1b1706fda2fba927b82a1f4f00e06965fc816e5"
 dependencies = [
  "dpd-types-versions",
 ]
@@ -3457,10 +3457,10 @@ dependencies = [
 [[package]]
 name = "dpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3#e577a94678bf0a8d64d719acd3e19edd965f66a3"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5#f1b1706fda2fba927b82a1f4f00e06965fc816e5"
 dependencies = [
  "chrono",
- "dropshot 0.17.1",
+ "dropshot 0.18.0",
  "omicron-common",
  "oxnet",
  "rand 0.9.2",
@@ -4517,7 +4517,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "rand 0.9.2",
  "regress 0.10.5",
  "reqwest",
@@ -6153,7 +6153,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-update-engine-types",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -6242,7 +6242,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "qorb",
  "reqwest",
  "semver 1.0.28",
@@ -7310,7 +7310,7 @@ dependencies = [
  "mg-api-types-versions",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -7665,7 +7665,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -8172,7 +8172,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -8659,7 +8659,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5)",
  "dropshot 0.18.0",
  "fmd-adm-sys",
  "futures",
@@ -8949,7 +8949,7 @@ dependencies = [
  "chrono",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -9398,7 +9398,7 @@ dependencies = [
  "oxnet",
  "parse-display",
  "progenitor-client 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "proptest",
  "rand 0.9.2",
  "regress 0.10.5",
@@ -9728,7 +9728,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5)",
  "dropshot 0.18.0",
  "ereport-types",
  "expectorate",
@@ -9833,7 +9833,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "propolis-client",
  "qorb",
  "rand 0.9.2",
@@ -10602,7 +10602,7 @@ dependencies = [
  "predicates",
  "primeorder 0.14.0",
  "proc-macro2",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "quote",
  "rand 0.10.1",
  "rand 0.8.6",
@@ -11115,7 +11115,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "serde",
  "slog",
@@ -12532,17 +12532,6 @@ dependencies = [
 
 [[package]]
 name = "progenitor"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8ba1d77160e6d5c95bdf0792527f76bf528791093fa83015bc2908a0ba9d076"
-dependencies = [
- "progenitor-client 0.14.0",
- "progenitor-impl 0.14.0",
- "progenitor-macro 0.14.0",
-]
-
-[[package]]
-name = "progenitor"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15bd395aa613c6491be9233fae4a870a35cd611655c0ef1cbaae7aa9e1c4c0e6"
@@ -12553,25 +12542,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "progenitor-client"
-version = "0.13.0"
+name = "progenitor"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3999c302f5f2a42b7ca1cc39ad9e612c74cf2910ef6e58f869e45f3068b9659f"
+checksum = "34c1ae9a579ea631276daef15ee3b5c872f90860a1b54d5b6df72aa189881fc7"
 dependencies = [
- "bytes",
- "futures-core",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "serde_urlencoded",
+ "progenitor-client 0.16.1",
+ "progenitor-impl 0.16.1",
+ "progenitor-macro 0.16.1",
 ]
 
 [[package]]
 name = "progenitor-client"
-version = "0.14.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e8a874cf25a33cac7a01b9c1de87bcfbc8aea93f3156d09dcc3bee516a78926"
+checksum = "3999c302f5f2a42b7ca1cc39ad9e612c74cf2910ef6e58f869e45f3068b9659f"
 dependencies = [
  "bytes",
  "futures-core",
@@ -12598,6 +12583,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor-client"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77a5c9bb7a283a09f3ed5fab3a41fc1afb73782b7ca6f701ed26cb457b5fca3f"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+]
+
+[[package]]
 name = "progenitor-extras"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12612,32 +12612,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "progenitor-impl"
-version = "0.13.0"
+name = "progenitor-extras"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de362a0477182f45accdbad4d43cd89a95a1db0a518a7c1ddf3e525e6896f0f0"
+checksum = "cf70fd39ab9e9cbf6cfddcd7da96f36aed98c0ef85226d9a0b7d369f7f1f3472"
 dependencies = [
- "heck 0.5.0",
- "http",
- "indexmap 2.14.0",
- "openapiv3",
- "proc-macro2",
- "quote",
- "regex",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "typify 0.6.2",
- "unicode-ident",
+ "progenitor-client 0.16.1",
+ "reqwest",
+ "slog",
 ]
 
 [[package]]
 name = "progenitor-impl"
-version = "0.14.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6e349eed84b9a1a6a5dbe478d335e3df73d32a93c5eefe571c9b8cb298aab5d"
+checksum = "de362a0477182f45accdbad4d43cd89a95a1db0a518a7c1ddf3e525e6896f0f0"
 dependencies = [
  "heck 0.5.0",
  "http",
@@ -12678,6 +12667,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor-impl"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0605947a436e83717c41205dc5c308e845890c424c48d851783ccf04f173bec8"
+dependencies = [
+ "heck 0.5.0",
+ "http",
+ "indexmap 2.14.0",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "syn 3.0.3",
+ "thiserror 2.0.18",
+ "typify 0.8.0",
+ "unicode-ident",
+]
+
+[[package]]
 name = "progenitor-macro"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12697,24 +12708,6 @@ dependencies = [
 
 [[package]]
 name = "progenitor-macro"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efa969a1349979c5f64347f204e794781a86d738206d75672e6c9493f5910002"
-dependencies = [
- "openapiv3",
- "proc-macro2",
- "progenitor-impl 0.14.0",
- "quote",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_tokenstream 0.2.3",
- "serde_yaml",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "progenitor-macro"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dccde5096e96f6a57e16af4a4ac575755d5973f0c1bd4e6b7b86808932a33408"
@@ -12722,6 +12715,24 @@ dependencies = [
  "openapiv3",
  "proc-macro2",
  "progenitor-impl 0.15.1",
+ "quote",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_tokenstream 0.3.0",
+ "serde_yaml",
+ "syn 3.0.3",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eddb119cb80c48f5c0c03b9efa4e8b0d5419df6b65a91c7a938f29485c93255"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.16.1",
  "quote",
  "schemars 0.8.22",
  "serde",
@@ -13557,7 +13568,7 @@ version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -15098,7 +15109,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "propolis-client",
  "regress 0.10.5",
  "reqwest",
@@ -15371,7 +15382,7 @@ dependencies = [
  "daft",
  "ddm-admin-client",
  "ddm-api-types",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5)",
  "dropshot 0.18.0",
  "either",
  "futures",
@@ -18863,7 +18874,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5)",
  "dropshot 0.18.0",
  "gateway-client",
  "gateway-types",
@@ -18930,7 +18941,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=e577a94678bf0a8d64d719acd3e19edd965f66a3)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=f1b1706fda2fba927b82a1f4f00e06965fc816e5)",
  "dropshot 0.18.0",
  "either",
  "expectorate",
@@ -19046,7 +19057,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-update-engine-types",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -19084,7 +19095,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
