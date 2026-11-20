@@ -1651,6 +1651,7 @@ impl InstanceRunner {
                 "Failed to archive zone root for terminated instance: \
                  non-existent parent (this should be impossible)";
                 "zone_name" => &zname,
+                "zone_root_path" => %running_state.running_zone.root(),
             );
         }
 
