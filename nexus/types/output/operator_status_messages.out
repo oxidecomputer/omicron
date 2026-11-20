@@ -59,7 +59,7 @@ WaitingForUpdate(Zones { kinds: {Crucible, Nexus} })
     support details: Control plane services being updated: crucible, nexus
 
 WaitingForUpdate(HandoffSagas)
-    summary: Waiting for background activities (sagas) to finish before handing off to the new control plane
+    summary: Waiting for in-progress control plane operations (sagas) to finish before handing off to the new control plane
 
 WaitingForUpdate(HandoffFinal)
     summary: Waiting for the new control plane to take over
