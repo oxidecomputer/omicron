@@ -86,7 +86,9 @@ impl OperatorStatus {
                     let kinds = kinds.iter().map(|k| k.report_str()).join(", ");
                     OperatorStatusDescription::summary_with_details(
                         summary,
-                        format!("Control plane service{s} being updated: {kinds}"),
+                        format!(
+                            "Control plane service{s} being updated: {kinds}"
+                        ),
                     )
                 }
             }

@@ -52,11 +52,11 @@ WaitingForUpdate(Zones { kinds: {} })
 
 WaitingForUpdate(Zones { kinds: {Nexus} })
     summary: Waiting for a control plane zone update to finish
-    support details: Internal service being updated: nexus
+    support details: Control plane service being updated: nexus
 
 WaitingForUpdate(Zones { kinds: {Crucible, Nexus} })
     summary: Waiting for a control plane zone update to finish
-    support details: Internal services being updated: crucible, nexus
+    support details: Control plane services being updated: crucible, nexus
 
 WaitingForUpdate(HandoffSagas)
     summary: Waiting for background activities (sagas) to finish before handing off to the new control plane
