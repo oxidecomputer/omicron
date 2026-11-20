@@ -12,18 +12,23 @@
 //! slot type, and named by their labels.
 //!
 //! The `oxhc` enumerator fills in each bay from the device behind its PCIe
-//! bridge (`topo_oxhc_enum_pcie_child` in illumos):
+//! bridge ([`topo_oxhc_enum_pcie_child`] in illumos). This will be one of
+//! the following:
 //!
-//! - No device: the bay has no children.
-//! - A device bound to `nvme`: the bay gets `binding/driver = "nvme"` and,
-//!   if the disk enumerator succeeds, an `nvme` child with one `disk` child
-//!   per namespace the nvme driver does not ignore.
-//! - Any other device: a `board` child with an `ic` under it as a
-//!   placeholder, carrying the device's driver, if any, and path.
-//!   `binding/driver` is not set.
+//! - **No device**: the bay has no children.
+//! - **A device bound to the `nvme` driver**: the bay gets
+//!   `binding/driver = "nvme"` and, if the disk enumerator succeeds, an
+//!   `nvme` child with one `disk` child per namespace the nvme driver
+//!   does not ignore.
+//! - **Any other device**, such as a K.2: the bay gets a placeholder
+//!   `board` child with an `ic` under it. If the device has a driver, the
+//!   `ic` has `io/driver` and `io/devfs-path`. The bay has no
+//!   `binding/driver`.
 //!
 //! The illumos module reads the topology into [`TopoNode`]s; everything
 //! here is plain data manipulation so it can be tested anywhere.
+//!
+//! [`topo_oxhc_enum_pcie_child`]: https://github.com/oxidecomputer/illumos-gate/blob/d9acef1b044723c4cd230b23d26175d92e538b05/usr/src/lib/fm/topo/modules/oxide/oxhc/oxhc.c#L568-L649
 
 // The topology is only read on illumos.
 #![cfg_attr(not(target_os = "illumos"), allow(dead_code))]
@@ -604,14 +609,14 @@ mod tests {
     #[test]
     fn placeholder_device() {
         let bay = Tree::default()
-            .add(N3, u2("N3", Some("pciex8086,1234")))
+            .add(N3, u2("N3", None))
             .add(N3_BOARD, TopoNodeKind::Board)
-            .add(N3_IC, ic(Some("pciex8086,1234"), Some("/pci@0,0/x@0")))
+            .add(N3_IC, ic(Some("igb"), Some("/pci@0,0/x@0")))
             .bay();
         assert_eq!(
             occupant(&bay),
             &ObservedOccupant::Other {
-                driver: Some("pciex8086,1234".to_string()),
+                driver: Some("igb".to_string()),
                 devfs_path: Some("/pci@0,0/x@0".to_string()),
             }
         );
