@@ -1155,7 +1155,12 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let s = plural(n);
             writeln!(f, "* {n} sled{s} changed update disposition:")?;
             for change in update_disposition_changes.iter() {
-                writeln!(f, "  * {}: {}", change.sled_id, change.kind)?;
+                let SledUpdateDispositionChange { sled_id, baseboard_id, kind } =
+                    change;
+                writeln!(
+                    f,
+                    "  * sled {sled_id}, baseboard {baseboard_id}: {kind}"
+                )?;
             }
         }
 

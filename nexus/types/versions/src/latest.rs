@@ -373,6 +373,18 @@ pub mod probe {
     pub use crate::v2026_01_05_00::probe::ProbeCreate;
 }
 
+pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactListParams;
+    pub use crate::v2026_11_05_00::problem::ImpactState;
+    pub use crate::v2026_11_05_00::problem::ImpactedResource;
+    pub use crate::v2026_11_05_00::problem::Problem;
+    pub use crate::v2026_11_05_00::problem::ProblemImpact;
+    pub use crate::v2026_11_05_00::problem::ProblemListParams;
+    pub use crate::v2026_11_05_00::problem::ProblemSelector;
+    pub use crate::v2026_11_05_00::problem::ProblemState;
+    pub use crate::v2026_11_05_00::problem::RelatedProblem;
+}
+
 pub mod project {
     pub use crate::v2025_11_20_00::project::OptionalProjectSelector;
     pub use crate::v2025_11_20_00::project::Project;
@@ -464,9 +476,9 @@ pub mod update {
     pub use crate::v2026_10_13_00::update::TufRepo;
     pub use crate::v2026_10_13_00::update::TufRepoUpload;
 
-    pub use crate::v2026_11_09_00::update::OperatorNotes;
-    pub use crate::v2026_11_09_00::update::OperatorStatus;
-    pub use crate::v2026_11_09_00::update::UpdateStatus;
+    pub use crate::v2026_11_20_00::update::OperatorNotes;
+    pub use crate::v2026_11_20_00::update::OperatorStatus;
+    pub use crate::v2026_11_20_00::update::UpdateStatus;
 }
 
 pub mod vpc {

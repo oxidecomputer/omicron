@@ -43,3 +43,5 @@ pub mod v4;
 pub mod v5;
 #[path = "update_progress_repository/mod.rs"]
 pub mod v6;
+#[path = "trust_quorum_members/mod.rs"]
+pub mod v7;

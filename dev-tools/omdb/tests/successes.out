@@ -163,6 +163,38 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+                                     ID: ..........<REDACTED_UUID>........... (sitrep)
+                       parent sitrep ID: None
+                             created by: ..........<REDACTED_UUID>...........
+                             created at: <REDACTED_TIMESTAMP>
+                                comment: N/A
+
+                                 status: this is the current sitrep!
+                                version: v1
+                        made current at: <REDACTED_TIMESTAMP>
+
+== DIAGNOSIS INPUTS ============================================================
+                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
+                             started at: <REDACTED_TIMESTAMP>
+                            finished at: <REDACTED_TIMESTAMP>
+      next inventory minimum start time: <REDACTED_TIMESTAMP>
+    
+    rendezvous resource generation numbers:
+                       alert generation: 1
+              support bundle generation: 1
+    
+    ereports in this sitrep: 0
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["mgs", "inventory"]
 termination: Exited(0)
 ---------------------------------------------
@@ -793,7 +825,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -841,6 +874,7 @@ task: "fm_analysis"
       ereporter_restarts:     <REDACTED DURATION>ms
       ereports:               <REDACTED DURATION>ms
       in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
       observed_sagas:         <REDACTED DURATION>ms
       silo_certificates:      <REDACTED DURATION>ms
       support_bundle_markers: <REDACTED DURATION>ms
@@ -902,33 +936,7 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                                1000
-    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_alert_request rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_case rows deleted:                                                0
-      batches:                                                                    1
-    orphaned fm_ereport_in_case rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_fact_certificate rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_fact_physical_disk rows deleted:                                  0
-      batches:                                                                    1
-    orphaned fm_fact_saga rows deleted:                                           0
-      batches:                                                                    1
-    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_support_bundle_request rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
-      batches:                                                                    1
+    task explicitly disabled by config!
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -1557,7 +1565,8 @@ task: "capacity_metrics"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    samples queued: 0
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1605,6 +1614,7 @@ task: "fm_analysis"
       ereporter_restarts:     <REDACTED DURATION>ms
       ereports:               <REDACTED DURATION>ms
       in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
       observed_sagas:         <REDACTED DURATION>ms
       silo_certificates:      <REDACTED DURATION>ms
       support_bundle_markers: <REDACTED DURATION>ms
@@ -1666,33 +1676,7 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                                1000
-    orphaned sitreps deleted:                                                     <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_alert_request rows deleted:                                       0
-      batches:                                                                    1
-    orphaned fm_case rows deleted:                                                0
-      batches:                                                                    1
-    orphaned fm_ereport_in_case rows deleted:                                     0
-      batches:                                                                    1
-    orphaned fm_fact_certificate rows deleted:                                    0
-      batches:                                                                    1
-    orphaned fm_fact_physical_disk rows deleted:                                  0
-      batches:                                                                    1
-    orphaned fm_fact_saga rows deleted:                                           0
-      batches:                                                                    1
-    orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                    1
-    orphaned fm_support_bundle_request rows deleted:                              0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:      0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:         0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:     0
-      batches:                                                                    1
-    orphaned fm_support_bundle_request_data_selection_time_range rows deleted:    0
-      batches:                                                                    1
+    task explicitly disabled by config!
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
@@ -2732,4 +2716,116 @@ fault management configuration v1:
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+                                     ID: 00000000-0000-0000-0000-000000000001 (sitrep)
+                       parent sitrep ID: None
+                             created by: 00000000-0000-0000-0000-000000000004
+                             created at: <REDACTED_TIMESTAMP>
+                                comment:
+      an example sitrep with cases
+
+                                 status: not committed to the sitrep history
+
+== DIAGNOSIS INPUTS ============================================================
+                inventory collection ID: 00000000-0000-0000-0000-00000000001e (collection)
+      note: this collection no longer exists (perhaps it has been pruned?)
+      next inventory minimum start time: <REDACTED_TIMESTAMP>
+    
+    rendezvous resource generation numbers:
+                       alert generation: 1
+              support bundle generation: 1
+    
+    ereports in this sitrep: 3
+
+== CASES =======================================================================
+
+  * case 00000000-0000-0000-0000-00000000000a
+    =========================================
+    // zpool is degraded
+    diagnosis engine: physical_disk
+    opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+    ereports:
+    ---------
+    * ereport 00000000-0000-0000-0000-000000000003:1
+      // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
+      class:         ereport.example.disk
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-00000000000b
+
+    * ereport 00000000-0000-0000-0000-000000000003:2
+      // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
+      class:         ereport.example.zpool
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-00000000000c
+
+
+    facts:
+    ------
+    * fact 00000000-0000-0000-0000-00000000000d
+      // zpool health was observed in inventory
+      added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+      * payload:
+        * engine: physical_disk
+        * kind: zpool_unhealthy
+        * last_seen_health: degraded
+        * observed_in_inv: 00000000-0000-0000-0000-000000000010
+        * physical_disk_id: 00000000-0000-0000-0000-00000000000e
+        * time_observed: <REDACTED_TIMESTAMP>
+        * zpool_id: 00000000-0000-0000-0000-00000000000f
+
+
+    alerts requested:
+    -----------------
+    * alert 00000000-0000-0000-0000-000000000011
+      // tell someone about the zpool
+      class:        test.foo, v0
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+
+    support bundles requested:
+    -------------------------
+    * bundle 00000000-0000-0000-0000-000000000012
+      // collect everything
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+      data:
+        - reconfigurator
+        - host_info(all)
+        - sled_cubby_info
+        - sp_dumps
+        - sp_components
+        - ereports(none)
+
+
+
+  * case 00000000-0000-0000-0000-000000000014
+    =========================================
+    // PSU was reseated
+    diagnosis engine: power_shelf
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+    ereports:
+    ---------
+    * ereport 00000000-0000-0000-0000-000000000003:3
+      // ereport 00000000-0000-0000-0000-000000000003:3 looks relevant
+      class:         ereport.example.psu
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-000000000015
+
+
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
 =============================================

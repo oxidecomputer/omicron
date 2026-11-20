@@ -25,6 +25,7 @@ use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfigContents;
+use bootstrap_agent_lockstep_types::SledAgentStartStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use dropshot::ClientErrorStatusCode;
 use dropshot::{
@@ -40,6 +41,7 @@ use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 use crate::bootstrap::rack_ops::RssAccess;
 use crate::bootstrap::rack_ops::RssConflictError;
@@ -55,6 +57,7 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
     pub(crate) measurements: Arc<MeasurementsHandle>,
     pub(crate) scrimlet_reconcilers: Arc<ScrimletReconcilers>,
+    pub(crate) sled_agent_start_status: watch::Receiver<SledAgentStartStatus>,
 }
 
 impl From<&BootstrapServerContext> for RssContext {
@@ -202,6 +205,14 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             .collect();
 
         Ok(HttpResponseOk(BaseboardIds { data }))
+    }
+
+    async fn sled_agent_start_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledAgentStartStatus>, HttpError> {
+        let ctx = rqctx.context();
+        let status = ctx.sled_agent_start_status.borrow().clone();
+        Ok(HttpResponseOk(status))
     }
 
     async fn multirack_join(

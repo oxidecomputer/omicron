@@ -8,8 +8,9 @@ use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::fm::EreportId;
+use crate::fm::FactMetadata;
 use crate::fm::FactPayload;
-use crate::fm::{CertificateFact, DiskFact, SagaFact};
+use crate::fm::{CertificateFact, DiskFact, SagaFact, SmfServiceFact};
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
@@ -199,19 +200,6 @@ pub struct Fact {
     pub payload: FactPayload,
 }
 
-/// The diagnosis-engine-agnostic part of a [`Fact`]: everything that is not
-/// the typed [`payload`](Fact::payload). Every diagnosis engine's facts share
-/// these fields.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct FactMetadata {
-    pub id: FactUuid,
-    /// The sitrep in which this fact was first added. Preserved
-    /// unchanged when the fact is carried forward into a child sitrep.
-    /// Debug-only.
-    pub created_sitrep_id: SitrepUuid,
-    pub comment: String,
-}
-
 impl Fact {
     /// The saga payload, or a [`ForeignFact`] error if this fact belongs to
     /// a different diagnosis engine.
@@ -229,6 +217,12 @@ impl Fact {
     /// belongs to a different diagnosis engine.
     pub fn as_certificate(&self) -> Result<&CertificateFact, ForeignFact> {
         self.payload.as_certificate().ok_or_else(|| self.foreign_fact())
+    }
+
+    /// The SMF service payload, or a [`ForeignFact`] error if this fact
+    /// belongs to a different diagnosis engine.
+    pub fn as_smf_service(&self) -> Result<&SmfServiceFact, ForeignFact> {
+        self.payload.as_smf_service().ok_or_else(|| self.foreign_fact())
     }
 
     fn foreign_fact(&self) -> ForeignFact {

@@ -345,6 +345,7 @@ async fn siu_fetch_state_and_start_real_saga(
             "current.active_vmm" => ?state.active_vmm,
             "current.target_vmm" => ?state.target_vmm,
             "update.new_runtime_state" => ?update.new_runtime,
+            "update.no_vmm_reason" => ?update.no_vmm_reason,
             "update.network_config_update" => ?update.network_config,
             "update.destroy_active_vmm" => ?update.destroy_active_vmm,
             "update.destroy_target_vmm" => ?update.destroy_target_vmm,

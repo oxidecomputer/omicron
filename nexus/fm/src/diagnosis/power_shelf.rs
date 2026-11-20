@@ -1003,6 +1003,7 @@ mod tests {
                 parent,
                 collection.into(),
                 Arc::new(IdOrdMap::new()),
+                Arc::new(BTreeSet::new()),
                 Arc::new(IdOrdMap::new()),
                 Arc::new(IdOrdMap::new()),
                 Default::default(),

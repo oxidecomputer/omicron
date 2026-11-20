@@ -19,6 +19,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
+use crate::db::model::fm::FmFactRow;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -40,9 +41,6 @@ use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
-use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
-use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
-use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -139,6 +137,7 @@ sitrep_child_tables! {
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
     FmFactCertificate => { table: "fm_fact_certificate" },
+    FmFactSmfService => { table: "fm_fact_smf_service" },
     AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
@@ -159,6 +158,143 @@ fn insert_fact_for_case(
         );
         Error::InternalError { internal_message }
     })
+}
+
+/// Convert fact rows read from one table and add them to the per-case map.
+fn add_fact_rows_to_map<R: FmFactRow>(
+    by_case: &mut HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>,
+    rows: Vec<R>,
+) -> Result<(), Error> {
+    for row in rows {
+        let case_id = row.case_id();
+        let fact_id = row.id();
+        let fact = row.into_fact().with_internal_context(|| {
+            format!("failed to read fact {fact_id} on case {case_id}")
+        })?;
+        insert_fact_for_case(by_case, case_id, fact)?;
+    }
+    Ok(())
+}
+
+/// Generates the insert and read code for the `fm_fact_*` tables.
+///
+/// Each `Variant` uses the table `fm_fact_<variant>` and the model
+/// `FmFact<Variant>`. See [`nexus_types::fm::fact`] for how to add one.
+macro_rules! fm_fact_tables {
+    ($($variant:ident),* $(,)?) => { ::paste::paste! {
+        /// A sitrep's facts, split by table for insertion.
+        #[derive(Default)]
+        struct FactRows {
+            $(
+                [<fm_fact_ $variant:snake>]:
+                    Vec<model::fm::[<FmFact $variant>]>,
+            )*
+        }
+
+        impl FactRows {
+            fn push(
+                &mut self,
+                sitrep_id: SitrepUuid,
+                case_id: CaseUuid,
+                fact: &fm::case::Fact,
+            ) {
+                match &fact.payload {
+                    $(
+                        fm::FactPayload::$variant(payload) => {
+                            self.[<fm_fact_ $variant:snake>].push(
+                                model::fm::[<FmFact $variant>]::from_sitrep(
+                                    sitrep_id,
+                                    case_id,
+                                    &fact.metadata,
+                                    payload,
+                                ),
+                            );
+                        }
+                    )*
+                }
+            }
+
+            async fn insert(
+                self,
+                conn: &async_bb8_diesel::Connection<DbConnection>,
+            ) -> Result<(), Error> {
+                $(
+                    let rows = self.[<fm_fact_ $variant:snake>];
+                    if !rows.is_empty() {
+                        use nexus_db_schema::schema::
+                            [<fm_fact_ $variant:snake>]::dsl;
+                        diesel::insert_into(dsl::[<fm_fact_ $variant:snake>])
+                            .values(rows)
+                            .execute_async(conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(concat!(
+                                    "failed to insert ",
+                                    stringify!([<fm_fact_ $variant:snake>]),
+                                    " rows",
+                                ))
+                            })?;
+                    }
+                )*
+                Ok(())
+            }
+        }
+
+        /// Fetch all case facts belonging to cases in the given sitrep,
+        /// grouped by `case_id`.
+        async fn fm_facts_read(
+            conn: &async_bb8_diesel::Connection<DbConnection>,
+            sitrep_id: SitrepUuid,
+        ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error>
+        {
+            let mut by_case = HashMap::new();
+            // NOTE: Each per-DE set of facts belongs to a distinct table.
+            // This would be a reasonable spot to insert parallel_task_set
+            // and do some concurrent queries.
+            //
+            // (... gonna punt on that until we actually have a couple
+            // different tables to query from).
+            $({
+                use nexus_db_schema::schema::[<fm_fact_ $variant:snake>]::dsl;
+                let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+                    Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+                while let Some(p) = paginator.next() {
+                    let batch = paginated(
+                        dsl::[<fm_fact_ $variant:snake>],
+                        dsl::id,
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+                    .select(model::fm::[<FmFact $variant>]::as_select())
+                    .load_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(concat!(
+                                "failed to load ",
+                                stringify!([<fm_fact_ $variant:snake>]),
+                                " rows",
+                            ))
+                    })?;
+
+                    paginator = p.found_batch(&batch, &|f| f.id().into());
+                    add_fact_rows_to_map(&mut by_case, batch)?;
+                }
+            })*
+            Ok(by_case)
+        }
+    }};
+}
+
+fm_fact_tables! {
+    PhysicalDisk,
+    Saga,
+    Certificate,
+    SmfService,
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -430,7 +566,7 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
-        let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
+        let mut case_facts = fm_facts_read(conn, id).await?;
 
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
@@ -559,113 +695,6 @@ impl DataStore {
                         );
                         Error::InternalError { internal_message }
                     })?;
-            }
-        }
-
-        Ok(by_case)
-    }
-
-    /// Fetch all case facts belonging to cases in the given sitrep, grouped
-    /// by `case_id`.
-    ///
-    /// Each diagnosis engine stores its facts in its own typed table, read by
-    /// its own paginated loop here and unioned into the same `by_case` map. A
-    /// case belongs to exactly one engine, so keys never collide across tables.
-    async fn fm_facts_read_on_conn(
-        &self,
-        id: SitrepUuid,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error> {
-        let mut by_case =
-            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
-
-        // NOTE: Each per-DE set of facts belongs to a distinct table.
-        // This would be a reasonable spot to insert parallel_task_set
-        // and do some concurrent queries.
-        //
-        // (... gonna punt on that until we actually have a couple different
-        // tables to query from).
-
-        // --- physical-disk diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_pd_dsl::fm_fact_physical_disk,
-                fact_pd_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_pd_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactPhysicalDisk::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load physical-disk case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
-            }
-        }
-
-        // --- saga diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_saga_dsl::fm_fact_saga,
-                fact_saga_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_saga_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactSaga::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load saga case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
-            }
-        }
-
-        // --- certificate diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_cert_dsl::fm_fact_certificate,
-                fact_cert_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_cert_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactCertificate::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load certificate case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
             }
         }
 
@@ -927,9 +956,7 @@ impl DataStore {
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
-        let mut physical_disk_facts = Vec::new();
-        let mut saga_facts = Vec::new();
-        let mut certificate_facts = Vec::new();
+        let mut facts = FactRows::default();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -954,37 +981,7 @@ impl DataStore {
                 bundle_data_selections_requested.push((req_id, data_selection));
             }
             for fact in case.facts.iter() {
-                // Dispatch each fact to its diagnosis engine's typed table.
-                match &fact.payload {
-                    fm::FactPayload::PhysicalDisk(disk_fact) => {
-                        physical_disk_facts.push(
-                            model::fm::FmFactPhysicalDisk::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                disk_fact,
-                            ),
-                        );
-                    }
-                    fm::FactPayload::Saga(saga_fact) => {
-                        saga_facts.push(model::fm::FmFactSaga::from_sitrep(
-                            sitrep_id,
-                            case_id,
-                            &fact.metadata,
-                            saga_fact,
-                        ));
-                    }
-                    fm::FactPayload::Certificate(cert_fact) => {
-                        certificate_facts.push(
-                            model::fm::FmFactCertificate::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                cert_fact,
-                            ),
-                        );
-                    }
-                }
+                facts.push(sitrep_id, case_id, fact);
             }
         }
 
@@ -1044,42 +1041,7 @@ impl DataStore {
         )
         .await?;
 
-        if !physical_disk_facts.is_empty() {
-            diesel::insert_into(fact_pd_dsl::fm_fact_physical_disk)
-                .values(physical_disk_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert physical-disk case facts",
-                        )
-                })?;
-        }
-
-        if !saga_facts.is_empty() {
-            diesel::insert_into(fact_saga_dsl::fm_fact_saga)
-                .values(saga_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context("failed to insert saga case facts")
-                })?;
-        }
-
-        if !certificate_facts.is_empty() {
-            diesel::insert_into(fact_cert_dsl::fm_fact_certificate)
-                .values(certificate_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert certificate case facts",
-                        )
-                })?;
-        }
+        facts.insert(&conn).await?;
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -1174,7 +1136,8 @@ impl DataStore {
                 match data {
                     BundleData::Reconfigurator
                     | BundleData::SledCubbyInfo
-                    | BundleData::SpDumps => {}
+                    | BundleData::SpDumps
+                    | BundleData::SpComponents => {}
                     BundleData::HostInfo(sleds) => {
                         host_info_rows.push(HostInfo::from_sitrep(
                             sitrep_id, req_id, sleds,
@@ -2911,7 +2874,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative fact for case 1".to_string(),
@@ -3000,7 +2963,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative not-progressing saga fact"
@@ -3021,7 +2984,7 @@ mod tests {
                 .unwrap();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative orphaned saga fact"
@@ -3060,7 +3023,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative abandoned saga fact"
@@ -3100,7 +3063,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: format!("a representative {comment} fact"),
@@ -3137,6 +3100,49 @@ mod tests {
             "best certificate has expired",
         );
 
+        // An SMF service case, exercising the fm_fact_smf_service
+        // read/write/GC paths.
+        let case7 = {
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative in-maintenance fact"
+                            .to_string(),
+                    },
+                    payload: fm::FactPayload::SmfService(
+                        fm::SmfServiceFact::InMaintenance(
+                            fm::SmfServiceFactPayload {
+                                sled_id: omicron_uuid_kinds::SledUuid::new_v4(),
+                                zone_name: "oxz_ntp".to_string(),
+                                fmri: "svc:/oxide/ntp:default".to_string(),
+                                observed_in_inv:
+                                    omicron_uuid_kinds::CollectionUuid::new_v4(
+                                    ),
+                                time_observed: omicron_common::now_db_precision(
+                                ),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+            fm::Case {
+                id: omicron_uuid_kinds::CaseUuid::new_v4(),
+                metadata: fm::case::Metadata {
+                    created_sitrep_id: sitrep_id,
+                    closed_sitrep_id: None,
+                    de: fm::DiagnosisEngineKind::SmfService,
+                    comment: "an SMF service in maintenance".to_string(),
+                },
+                ereports: iddqd::IdOrdMap::new(),
+                alerts_requested: iddqd::IdOrdMap::new(),
+                support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts,
+            }
+        };
+
         let mut cases = iddqd::IdOrdMap::new();
         cases.insert_unique(case1.clone()).expect("failed to insert case 1");
         cases.insert_unique(case2.clone()).expect("failed to insert case 2");
@@ -3144,6 +3150,7 @@ mod tests {
         cases.insert_unique(case4).expect("failed to insert case 4");
         cases.insert_unique(case5).expect("failed to insert case 5");
         cases.insert_unique(case6).expect("failed to insert case 6");
+        cases.insert_unique(case7).expect("failed to insert case 7");
         let mut ereports_by_id = iddqd::IdOrdMap::new();
         for case in cases.iter() {
             ereports_by_id
@@ -3193,6 +3200,7 @@ mod tests {
             open_cases: Default::default(),
             closed_cases_copied_forward: Default::default(),
             in_service_disks: Default::default(),
+            in_service_sleds: Default::default(),
             observed_sagas: Default::default(),
             observed_silo_certificates: Default::default(),
             config: None,
@@ -3453,7 +3461,7 @@ mod tests {
             .get_result_async::<i64>(&*conn)
             .await
             .expect("failed to count cases before deletion");
-        assert_eq!(cases_before, 6, "six cases should exist before deletion");
+        assert_eq!(cases_before, 7, "seven cases should exist before deletion");
 
         let case_ereports_before: i64 = case_ereport_dsl::fm_ereport_in_case
             .filter(
@@ -3801,6 +3809,7 @@ mod tests {
                 include_reconfigurator: true,
                 include_sled_cubby_info: false,
                 include_sp_dumps: true,
+                include_sp_components: false,
             })
             .execute_async(&*conn)
             .await
@@ -3836,6 +3845,7 @@ mod tests {
                 num_ereporter_restarts: 0,
                 unknown_restart_ereport_ids: Default::default(),
                 in_service_disks: Default::default(),
+                in_service_sleds: Default::default(),
                 observed_sagas: Default::default(),
                 observed_silo_certificates: Default::default(),
                 config: None,

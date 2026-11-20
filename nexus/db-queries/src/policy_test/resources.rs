@@ -215,6 +215,13 @@ pub async fn make_resources(
         LookupType::by_id(webhook_alert_id),
     ));
 
+    let problem_id = "5b2e9e47-6a1c-4f0d-9d3e-7c8a1f2b4e60".parse().unwrap();
+    builder.new_resource(authz::Problem::new(
+        authz::FLEET,
+        problem_id,
+        LookupType::by_id(problem_id),
+    ));
+
     make_webhook_rx(&mut builder).await;
 
     let subnet_pool_id =

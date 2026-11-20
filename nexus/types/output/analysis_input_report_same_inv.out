@@ -10,6 +10,8 @@ no cases copied forward
 
 no in-service control plane disks
 
+no in-service sleds
+
 no non-terminal sagas observed
 
 no silos observed

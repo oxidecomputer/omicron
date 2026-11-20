@@ -11,6 +11,7 @@ use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::{MultirackJoinAccessor, RssAccess};
+use crate::bootstrap::rack_unlock::{RackUnlockOutcome, wait_for_rack_unlock};
 use crate::bootstrap::secret_retriever::{
     HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
 };
@@ -22,6 +23,7 @@ use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use bootstore::schemes::v0 as bootstore;
+use bootstrap_agent_lockstep_types::SledAgentStartStatus;
 use camino::Utf8PathBuf;
 use dropshot::HttpServer;
 use illumos_utils::dladm;
@@ -50,7 +52,9 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use trust_quorum_types::persistent_state::ExpungedMetadata;
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.json";
 
@@ -207,6 +211,9 @@ impl Server {
         let multirack_join_accessor =
             MultirackJoinAccessor::new(rss_access.clone());
 
+        let (start_status_tx, start_status_rx) =
+            watch::channel(SledAgentStartStatus::NotStarted);
+
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
@@ -220,6 +227,7 @@ impl Server {
             scrimlet_reconcilers: Arc::clone(
                 &long_running_task_handles.scrimlet_reconcilers,
             ),
+            sled_agent_start_status: start_status_rx,
         };
 
         // Start the lockstep dropshot server for rack initialization.
@@ -253,26 +261,34 @@ impl Server {
         // Do we have a persistent sled-agent request that we need to restore?
         let state = if let Some(ledger) = maybe_ledger {
             let start_sled_agent_request = ledger.into_inner();
-            let sled_agent_server = start_sled_agent(
+            let outcome = start_sled_agent(
                 &config,
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
                 config_reconciler_spawn_token,
                 service_manager.clone(),
                 multirack_join_accessor.clone(),
+                &start_status_tx,
                 &base_log,
                 &startup_log,
             )
             .await?;
 
-            // Give the HardwareMonitor access to the `SledAgent`
-            let sled_agent = sled_agent_server.sled_agent();
-            sled_agent_started_tx
-                .send(sled_agent.clone())
-                .map_err(|_| ())
-                .expect("Failed to send to StorageMonitor");
+            match outcome {
+                StartSledAgentOutcome::Started(sled_agent_server) => {
+                    // Give the HardwareMonitor access to the `SledAgent`
+                    let sled_agent = sled_agent_server.sled_agent();
+                    sled_agent_started_tx
+                        .send(sled_agent.clone())
+                        .map_err(|_| ())
+                        .expect("Failed to send to StorageMonitor");
 
-            SledAgentState::ServerStarted(sled_agent_server)
+                    SledAgentState::ServerStarted(sled_agent_server)
+                }
+                StartSledAgentOutcome::Expunged(metadata) => {
+                    SledAgentState::Expunged(metadata)
+                }
+            }
         } else {
             SledAgentState::Bootstrapping(Some(BootstrappingDependencies {
                 sled_agent_started_tx,
@@ -292,6 +308,7 @@ impl Server {
             _sprockets_server_handle: sprockets_server_handle,
             base_log,
             multirack_join_accessor,
+            start_status_tx,
         };
         let inner_task = tokio::spawn(inner.run());
 
@@ -322,6 +339,14 @@ enum SledAgentState {
     Bootstrapping(Option<BootstrappingDependencies>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
+    // ... or this sled has been expunged and will never start a sled agent.
+    Expunged(ExpungedMetadata),
+}
+
+// The result of attempting to start a sled-agent
+enum StartSledAgentOutcome {
+    Started(SledAgentServer),
+    Expunged(ExpungedMetadata),
 }
 
 struct BootstrappingDependencies {
@@ -371,9 +396,10 @@ async fn start_sled_agent(
     config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     service_manager: ServiceManager,
     multirack_join_accessor: MultirackJoinAccessor,
+    start_status_tx: &watch::Sender<SledAgentStartStatus>,
     base_log: &Logger,
     log: &Logger,
-) -> Result<SledAgentServer, SledAgentServerStartError> {
+) -> Result<StartSledAgentOutcome, SledAgentServerStartError> {
     info!(log, "Loading Sled Agent: {:?}", request);
 
     // TODO-correctness: If we fail partway through, we do not cleanly roll back
@@ -411,6 +437,31 @@ async fn start_sled_agent(
         }
     }
 
+    // Prevent configuring the underlay network until a trust quorum unlock
+    // is performed.
+    //
+    // This guarantees that when a sled is expunged it won't start up a sled
+    // agent on the underlay network. It also guarantees that a sled-agent won't
+    // start until this node is a committed member of the latest configuration.
+    if request.body.use_trust_quorum {
+        match wait_for_rack_unlock(
+            &long_running_task_handles.trust_quorum,
+            start_status_tx,
+            log,
+        )
+        .await
+        {
+            RackUnlockOutcome::Unlocked => (),
+            RackUnlockOutcome::Expunged(metadata) => {
+                start_status_tx.send_replace(SledAgentStartStatus::Expunged {
+                    epoch: metadata.epoch,
+                    from: metadata.from.clone(),
+                });
+                return Ok(StartSledAgentOutcome::Expunged(metadata));
+            }
+        }
+    }
+
     // Inform our DDM reconciler of our underlay subnet and the information it
     // needs for maghemite to enable Oximeter stats.
     let ddm_reconciler = service_manager.ddm_reconciler();
@@ -445,7 +496,10 @@ async fn start_sled_agent(
     let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
 
-    Ok(server)
+    start_status_tx
+        .send_replace(SledAgentStartStatus::Started { sled_id: server.id() });
+
+    Ok(StartSledAgentOutcome::Started(server))
 }
 
 // Clippy doesn't like `StartError` due to
@@ -521,6 +575,7 @@ struct Inner {
     _sprockets_server_handle: JoinHandle<()>,
     base_log: Logger,
     multirack_join_accessor: MultirackJoinAccessor,
+    start_status_tx: watch::Sender<SledAgentStartStatus>,
 }
 
 impl Inner {
@@ -561,12 +616,13 @@ impl Inner {
                     config_reconciler_spawn_token,
                     self.service_manager.clone(),
                     self.multirack_join_accessor.clone(),
+                    &self.start_status_tx,
                     &self.base_log,
                     &log,
                 )
                 .await
                 {
-                    Ok(server) => {
+                    Ok(StartSledAgentOutcome::Started(server)) => {
                         // We've created sled-agent; we need to (possibly)
                         // reconfigure the switch zone, if we're a scrimlet, to
                         // give it our underlay network information.
@@ -576,6 +632,17 @@ impl Inner {
                             .expect("Failed to send to StorageMonitor");
                         self.state = SledAgentState::ServerStarted(server);
                         Ok(SledAgentResponse { id: request_id })
+                    }
+                    Ok(StartSledAgentOutcome::Expunged(metadata)) => {
+                        let message = format!(
+                            "This sled was expunged from the trust quorum \
+                             at epoch {} (learned from {}); refusing to \
+                             start sled agent",
+                            metadata.epoch, metadata.from
+                        );
+                        error!(log, "{}", message);
+                        self.state = SledAgentState::Expunged(metadata);
+                        Err(message)
                     }
                     Err(err) => {
                         // This error is unrecoverable, and if returned we'd
@@ -611,6 +678,15 @@ impl Inner {
                 };
 
                 _ = response_tx.send(response);
+            }
+            SledAgentState::Expunged(metadata) => {
+                let message = format!(
+                    "This sled was expunged from the trust quorum at epoch \
+                     {} (learned from {}); refusing to start sled agent",
+                    metadata.epoch, metadata.from
+                );
+                error!(log, "{}", message);
+                _ = response_tx.send(Err(message));
             }
         }
     }

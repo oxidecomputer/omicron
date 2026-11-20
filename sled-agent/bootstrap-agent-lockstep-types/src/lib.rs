@@ -42,6 +42,7 @@ use std::net::Ipv6Addr;
 use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use trust_quorum_types::membership::TrustQuorumMembers;
 use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 use trust_quorum_types::status::CoordinatorStatus;
 use trust_quorum_types::types::Epoch;
@@ -64,7 +65,7 @@ pub struct RackInitializeRequest {
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
-    pub trust_quorum_peers: Option<Vec<BaseboardId>>,
+    pub trust_quorum_peers: Option<TrustQuorumMembers>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -171,7 +172,7 @@ impl RackInitializeRequest {
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    trust_quorum_peers: Option<Vec<BaseboardId>>,
+    trust_quorum_peers: Option<TrustQuorumMembers>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
@@ -434,6 +435,27 @@ impl IdOrdItem for BootstrapIpOfBaseboardId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BaseboardIds {
     pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
+}
+
+/// The status of starting sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum SledAgentStartStatus {
+    NotStarted,
+    WaitingForTrustQuorumConfig {
+        connected_peers: BTreeSet<BaseboardId>,
+    },
+    WaitingForRackUnlock {
+        connected_peers: BTreeSet<BaseboardId>,
+        latest_committed_epoch: Epoch,
+    },
+    Expunged {
+        epoch: Epoch,
+        from: BaseboardId,
+    },
+    Started {
+        sled_id: SledUuid,
+    },
 }
 
 /// The state of the commit phase of the trust quorum protocol

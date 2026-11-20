@@ -1257,7 +1257,10 @@ impl BackgroundTasksInitializer {
             name: "fm_sitrep_gc",
             description: "garbage collects fault management situation reports",
             period: config.fm.sitrep_gc_period_secs,
-            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
+            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(
+                datastore.clone(),
+                config.fm.sitrep_gc_disable,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher)],
             activator: task_fm_sitrep_gc,
@@ -1367,8 +1370,10 @@ impl BackgroundTasksInitializer {
             activator: task_populate_switch_ports,
         });
 
-        let vmm_mark_stop_for_update =
-            VmmMarkStopForUpdate::new(datastore.clone());
+        let vmm_mark_stop_for_update = VmmMarkStopForUpdate::new(
+            datastore.clone(),
+            config.vmm_mark_stop_for_update.disable,
+        );
         let vmm_mark_stop_for_update_watcher =
             vmm_mark_stop_for_update.watcher();
         driver.register(TaskDefinition {
@@ -1394,6 +1399,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(vmm_stop_for_update::VmmStopForUpdate::new(
                 datastore,
                 sagas.clone(),
+                config.vmm_stop_for_update.disable,
             )),
             opctx: opctx.child(BTreeMap::new()),
             // Like the vmm_mark_stop_for_update task, this task will be

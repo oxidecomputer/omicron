@@ -5,6 +5,7 @@
 //! Tests for APIs against sled-based endpoints.
 
 use dropshot::test_util::ClientTestContext;
+use http::Method;
 use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
@@ -12,22 +13,28 @@ use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_model::Sled as DbSled;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::pub_test_utils::trust_quorum::TrustQuorumConfigDriver;
+use nexus_lockstep_client::types::LastResult;
 use nexus_lockstep_client::types::SledPolicy;
 use nexus_lockstep_client::types::SledProvisionPolicy;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::background::activate_background_task_with_timeout;
 use nexus_test_utils::background::run_inventory_collection;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::trust_quorum::commission_fake_trust_quorum_member;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::physical_disk::PhysicalDisk;
+use nexus_types::external_api::rack::RackMembershipStatus;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
-use nexus_types::trust_quorum::IsLrtqUpgrade;
-use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
+use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types::trust_quorum::TrustQuorumConfigState;
 use omicron_common::api::external::LookupType;
@@ -44,9 +51,7 @@ use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::str::FromStr;
-use trust_quorum_types::configuration::Configuration;
-use trust_quorum_types::crypto::Sha3_256Digest;
-use trust_quorum_types::types::Epoch;
+use std::time::Duration;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -420,120 +425,6 @@ async fn test_sled_agent_put_checks_fetched_identity(
     expunge_and_decommission(cptestctx, &opctx, sled_id).await;
 }
 
-struct TrustQuorumConfigDriver<'a> {
-    opctx: &'a OpContext,
-    datastore: &'a DataStore,
-    rack_id: RackUuid,
-}
-
-impl TrustQuorumConfigDriver<'_> {
-    fn authz_tq(&self) -> authz::TrustQuorumConfig {
-        authz::TrustQuorumConfig::for_rack_id(self.rack_id)
-    }
-
-    async fn config(&self, epoch: u64) -> TrustQuorumConfig {
-        self.datastore
-            .tq_get_config(self.opctx, self.authz_tq(), Epoch(epoch))
-            .await
-            .expect("loaded trust quorum config")
-            .unwrap_or_else(|| {
-                panic!("trust quorum config at epoch {epoch} exists")
-            })
-    }
-
-    async fn propose(
-        &self,
-        epoch: u64,
-        last_committed_epoch: u64,
-        members: &BTreeSet<BaseboardId>,
-    ) {
-        self.datastore
-            .tq_insert_latest_config(
-                self.opctx,
-                ProposedTrustQuorumConfig {
-                    rack_id: self.rack_id,
-                    epoch: Epoch(epoch),
-                    is_lrtq_upgrade: IsLrtqUpgrade::No {
-                        last_committed_epoch: Epoch(last_committed_epoch),
-                    },
-                    members: members.clone(),
-                },
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("inserted trust quorum config at epoch {epoch}: {error}")
-            });
-        assert_eq!(
-            self.config(epoch).await.state,
-            TrustQuorumConfigState::Preparing
-        );
-    }
-
-    async fn ack_all_prepares(&self, epoch: u64) {
-        let config = self.config(epoch).await;
-        let members: BTreeSet<_> = config.members.keys().cloned().collect();
-        let coordinator_config = Configuration {
-            rack_id: config.rack_id,
-            epoch: config.epoch,
-            coordinator: config.coordinator.clone(),
-            members: members
-                .iter()
-                .cloned()
-                .map(|id| (id, Sha3_256Digest([0u8; 32])))
-                .collect(),
-            threshold: config.threshold,
-            encrypted_rack_secrets: None,
-        };
-        let state = self
-            .datastore
-            .tq_update_prepare_status(self.opctx, coordinator_config, members)
-            .await
-            .unwrap_or_else(|error| {
-                panic!("acked prepares at epoch {epoch}: {error}")
-            });
-        assert_eq!(state, TrustQuorumConfigState::Committing);
-    }
-
-    async fn ack_commits(
-        &self,
-        epoch: u64,
-        acked: &BTreeSet<BaseboardId>,
-        expected_state: TrustQuorumConfigState,
-    ) {
-        let state = self
-            .datastore
-            .tq_update_commit_status(
-                self.opctx,
-                self.authz_tq(),
-                Epoch(epoch),
-                acked.clone(),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("acked commits at epoch {epoch}: {error}")
-            });
-        assert_eq!(state, expected_state);
-    }
-
-    async fn abort(&self, epoch: u64) {
-        self.datastore
-            .tq_abort_config(
-                self.opctx,
-                self.authz_tq(),
-                Epoch(epoch),
-                "aborted by test".to_string(),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("aborted trust quorum config at epoch {epoch}: {error}")
-            });
-        assert_eq!(
-            self.config(epoch).await.state,
-            TrustQuorumConfigState::Aborted
-        );
-    }
-}
-
 async fn expunge_sled(
     client: &nexus_lockstep_client::Client,
     sled_id: SledUuid,
@@ -628,10 +519,11 @@ async fn test_sled_expunge_trust_quorum_gate(
     assert!(!others.contains(&sled_baseboard));
     let with_sled: BTreeSet<_> =
         others.iter().cloned().chain([sled_baseboard.clone()]).collect();
+    commission_fake_trust_quorum_member(cptestctx).await;
 
     tq.propose(2, 1, &with_sled).await;
     tq.ack_all_prepares(2).await;
-    tq.ack_commits(2, &with_sled, TrustQuorumConfigState::Committed).await;
+    tq.ack_commits(2, with_sled, TrustQuorumConfigState::Committed).await;
 
     tq.propose(3, 2, &others).await;
     assert_rejected_as_preparing(
@@ -657,4 +549,153 @@ async fn test_sled_expunge_trust_quorum_gate(
         expunge_sled(&lockstep_client, sled_id).await,
         Ok(SledPolicy::InService(SledProvisionPolicy::Provisionable)),
     );
+}
+
+#[nexus_test]
+async fn test_trust_quorum_manager_aborts_config_with_coordinator_not_in_service(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = test_opctx(cptestctx);
+    let coordinator = commission_fake_trust_quorum_member(cptestctx).await;
+    let tq = TrustQuorumConfigDriver {
+        opctx: &opctx,
+        datastore,
+        rack_id: nexus_test_utils::RACK_UUID,
+    };
+    let members: BTreeSet<_> = tq.config(1).await.members.into_keys().collect();
+
+    tq.propose(2, 1, &members).await;
+    expunge_and_decommission(cptestctx, &opctx, coordinator.sled_id).await;
+
+    let task = activate_background_task_with_timeout(
+        &cptestctx.lockstep_client,
+        "trust_quorum_manager",
+        // This timeout is well beyond the trust quorum manager's 15s sled-agent
+        // client timeout.
+        Duration::from_secs(60),
+    )
+    .await;
+    let LastResult::Completed(completed) = task.last else {
+        panic!("trust_quorum_manager completed an activation: {:?}", task.last);
+    };
+    let details = completed.details;
+    match serde_json::from_value::<TrustQuorumManagerStatus>(details.clone())
+        .expect("parsed trust_quorum_manager details")
+    {
+        TrustQuorumManagerStatus::PerRackStatus { errors, .. } => {
+            assert_eq!(errors, Vec::<String>::new(), "details: {details}");
+        }
+        TrustQuorumManagerStatus::Error(error) => {
+            panic!("trust_quorum_manager activation failed: {error}")
+        }
+    }
+    let config = tq.config(2).await;
+    assert_eq!(
+        (config.state, config.abort_reason),
+        (
+            TrustQuorumConfigState::Aborted,
+            Some(format!(
+                "Coordinator {} is no longer an in-service sled in rack {}; \
+                 aborted by the trust quorum background task.",
+                coordinator.baseboard_id, tq.rack_id
+            )),
+        ),
+        "activation details: {details}",
+    );
+}
+
+async fn rack_membership_abort(
+    client: &ClientTestContext,
+    rack_id: RackUuid,
+    version: Option<u64>,
+    old_api_version: Option<semver::Version>,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let url = match version {
+        None => format!("/v1/system/hardware/racks/{rack_id}/membership/abort"),
+        Some(version) => format!(
+            "/v1/system/hardware/racks/{rack_id}/membership/abort\
+             ?version={version}"
+        ),
+    };
+    let mut request = RequestBuilder::new(client, Method::POST, &url);
+    if let Some(old_api_version) = old_api_version {
+        request = request.header(
+            omicron_common::api::VERSION_HEADER,
+            old_api_version.to_string(),
+        );
+    }
+    let response = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|error| {
+            panic!("sent rack membership abort request to {url}: {error}")
+        });
+    if response.status == StatusCode::OK {
+        Ok(response.parsed_body().expect("parsed rack membership status"))
+    } else {
+        let error = response
+            .parsed_body::<dropshot::HttpErrorResponseBody>()
+            .expect("parsed error response body");
+        Err((response.status, error.message))
+    }
+}
+
+#[track_caller]
+fn assert_abort_returned(
+    result: Result<serde_json::Value, (StatusCode, String)>,
+    config: &TrustQuorumConfig,
+) {
+    assert_eq!(config.state, TrustQuorumConfigState::Aborted);
+    let expected =
+        serde_json::to_value(RackMembershipStatus::from(config.clone()))
+            .expect("serialized rack membership status");
+    assert_eq!(result.expect("abort succeeded"), expected);
+}
+
+#[nexus_test]
+async fn test_rack_membership_abort_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let rack_id = cptestctx.server.server_context().nexus.rack_id();
+    let tq = TrustQuorumConfigDriver { opctx: &opctx, datastore, rack_id };
+    let abort = |version: Option<u64>| {
+        rack_membership_abort(client, rack_id, version, None)
+    };
+
+    let initial_config = tq.config(1).await;
+    assert_eq!(initial_config.state, TrustQuorumConfigState::Committed);
+    let members: BTreeSet<_> = initial_config.members.keys().cloned().collect();
+    commission_fake_trust_quorum_member(cptestctx).await;
+    tq.propose(2, 1, &members).await;
+
+    assert_eq!(
+        abort(Some(1)).await.expect_err("aborting a committed config fails"),
+        (
+            StatusCode::CONFLICT,
+            format!(
+                "Cannot abort the trust quorum configuration at epoch 1 for \
+                 rack {rack_id}: it is already committed and can no longer be \
+                 aborted."
+            ),
+        ),
+    );
+
+    let result = abort(Some(2)).await;
+    assert_abort_returned(result, &tq.config(2).await);
+
+    tq.propose(3, 1, &members).await;
+    let result = rack_membership_abort(
+        client,
+        rack_id,
+        Some(2),
+        Some(nexus_external_api::VERSION_UNADOPTED_RACK_LIST),
+    )
+    .await;
+    assert_abort_returned(result, &tq.config(3).await);
 }

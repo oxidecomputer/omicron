@@ -263,7 +263,7 @@ impl CaseBuilder {
             .comment(comment.clone())
             .finish();
         let fact = fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id,
                 created_sitrep_id: self.sitrep_id,
                 comment,

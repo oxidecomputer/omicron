@@ -80,6 +80,10 @@ type DiskTest<'a> =
 
 pub static HARDWARE_RACK_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
+pub static HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/support-shell/tunnel", RACK_UUID)
+    });
 pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: LazyLock<String> =
@@ -1532,6 +1536,21 @@ pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
         system_version: Version::new(0, 0, 0),
     });
 
+// Problems
+pub static PROBLEMS_URL: &'static str = "/v1/system/problems";
+pub static DEMO_PROBLEM_URL: &'static str =
+    "/v1/system/problems/001de000-7768-4000-8000-000000000001";
+pub static DEMO_PROBLEM_CAUSES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/causes"));
+pub static DEMO_PROBLEM_CONSEQUENCES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/consequences"));
+pub static DEMO_PROBLEM_IMPACTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/impacts"));
+pub static DEMO_PROBLEM_SUPPORT_BUNDLES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/support-bundles"));
+pub static DEMO_PROBLEM_ALERTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/alerts"));
+
 // Alerts
 pub static ALERTS_URL: &'static str = "/v1/alerts";
 pub static DEMO_ALERT_URL: &'static str =
@@ -1761,6 +1780,11 @@ pub enum AllowedMethod {
     GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
+    /// HTTP "GET" method with websocket handshake headers, for an
+    /// endpoint that tunnels to a service the test environment does
+    /// not run. Privileged requests are expected to fail with 503
+    /// after authorization, rather than upgrade.
+    GetWebsocketUnavailable,
     /// HTTP "HEAD" method
     #[allow(dead_code)]
     Head,
@@ -1788,7 +1812,8 @@ impl AllowedMethod {
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
-            | AllowedMethod::GetWebsocket => &Method::GET,
+            | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable => &Method::GET,
             AllowedMethod::Head | AllowedMethod::HeadNonexistent => {
                 &Method::HEAD
             }
@@ -1810,6 +1835,7 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable
             | AllowedMethod::Head
             | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
@@ -1817,6 +1843,36 @@ impl AllowedMethod {
             AllowedMethod::Patch(body) => Some(&body),
         }
     }
+
+    /// Returns what kind of websocket handshake, if any, to use for this method
+    pub fn websocket_handshake(&self) -> Option<WebsocketHandshake> {
+        match self {
+            AllowedMethod::GetWebsocket => {
+                Some(WebsocketHandshake::ExpectUpgrade)
+            }
+            AllowedMethod::GetWebsocketUnavailable => {
+                Some(WebsocketHandshake::HeadersOnly)
+            }
+            AllowedMethod::Delete
+            | AllowedMethod::Get
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetVolatile
+            | AllowedMethod::Head
+            | AllowedMethod::HeadNonexistent
+            | AllowedMethod::Post(_)
+            | AllowedMethod::Put(_)
+            | AllowedMethod::Patch(_) => None,
+        }
+    }
+}
+
+/// Describes the websocket handshake a test request should make
+pub enum WebsocketHandshake {
+    /// Send handshake headers and expect an upgrade
+    ExpectUpgrade,
+    /// Send handshake headers but keep the request's expected status
+    HeadersOnly,
 }
 
 pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
@@ -2966,6 +3022,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
+                url: &HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetWebsocketUnavailable],
+            },
+            VerifyEndpoint {
                 url: &HARDWARE_RACK_MEMBERSHIP_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -3612,6 +3674,49 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                             .unwrap(),
                     ),
                 ],
+            },
+            // Problems
+            VerifyEndpoint {
+                url: &PROBLEMS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_CAUSES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_CONSEQUENCES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_IMPACTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_SUPPORT_BUNDLES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_ALERTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             // Alerts
             VerifyEndpoint {

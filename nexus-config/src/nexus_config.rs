@@ -561,6 +561,18 @@ pub struct VmmMarkStopForUpdateConfig {
     /// period (in seconds) for periodic activations of this task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -844,6 +856,18 @@ pub struct VmmStopForUpdateConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1076,6 +1100,14 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// A toggle to disable garbage collection of fault management sitreps
+    ///
+    /// This is intended for tests. If it is left on, sitreps accumulate until
+    /// the sitrep limit is reached, and analysis can no longer write new ones.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub sitrep_gc_disable: bool,
     /// period (in seconds) for periodic activations of the background task that
     /// prunes the oldest entries from the fault management sitrep history
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1102,6 +1134,7 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            sitrep_gc_disable: false,
             // This need not be activated very frequently, as it's triggered
             // whenever a new sitrep is committed and by the analysis task when
             // nearing capacity limits, so periodic activation is only a
@@ -1430,6 +1463,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_gc_disable = true
             fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
@@ -1655,6 +1689,7 @@ mod test {
                         },
                         vmm_stop_for_update: VmmStopForUpdateConfig {
                             period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                         saga_recovery: SagaRecoveryConfig {
                             period_secs: Duration::from_secs(60),
@@ -1710,6 +1745,7 @@ mod test {
                             config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_gc_disable: true,
                             sitrep_history_prune_period_secs:
                                 Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
@@ -1748,6 +1784,7 @@ mod test {
                         },
                         vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
                             period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },

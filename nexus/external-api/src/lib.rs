@@ -12,7 +12,8 @@ use dropshot::{
     HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
     HttpResponseSeeOther, HttpResponseUpdatedNoContent, PaginationParams, Path,
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
-    WebsocketChannelResult, WebsocketConnection,
+    WebsocketChannelResult, WebsocketConnection, WebsocketEndpointResult,
+    WebsocketUpgrade,
 };
 use dropshot_api_manager_types::{ValidationContext, api_versions};
 use http::Response;
@@ -90,7 +91,9 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_11_09_00, ADD_OPERATOR_NOTES_TO_UPDATE_STATUS),
+    (2026_11_20_00, ADD_OPERATOR_NOTES_TO_UPDATE_STATUS),
+    (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
+    (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
     (2026_11_02_00, LAST_CERTIFICATE_DOCS),
     (2026_10_29_00, SLED_ADD_PRECHECK_OVERRIDES),
@@ -344,6 +347,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/problems" = {
+                description = "Problems detected by the fault management \
+                 subsystem.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/problems"
                 }
             },
             "system/alerts" = {
@@ -7672,6 +7682,24 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::RackPath>,
     ) -> Result<HttpResponseOk<latest::rack::Rack>, HttpError>;
 
+    /// Tunnel to a Support Shell proxy in a switch zone
+    // Use #[endpoint] rather than #[channel] so this handler can
+    // authorize the request and connect to the proxy before upgrading
+    // to WebSocket. With #[channel], Dropshot upgrades the connection
+    // before calling the handler, making it too late to return HTTP
+    // errors.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/support-shell/tunnel",
+        tags = ["system/hardware"],
+        unpublished = true,
+    }]
+    async fn rack_support_shell_tunnel(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+        upgrade: WebsocketUpgrade,
+    ) -> WebsocketEndpointResult;
+
     /// List uninitialized sleds
     #[endpoint {
         method = GET,
@@ -7737,6 +7765,26 @@ pub trait NexusExternalApi {
         .await
     }
 
+    /// Abort rack membership change
+    ///
+    /// This operation is synchronous. Upon returning from the API call, a
+    /// success response indicates that the prior membership change was aborted.
+    /// An error response indicates that there is no active membership change in
+    /// progress (previous changes have completed), that the specified
+    /// membership change could not be aborted, or that (if a version is
+    /// specified) configuration has moved past it.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
+        tags = ["experimental"],
+        versions = VERSION_RACK_MEMBERSHIP_ABORT_BY_VERSION..
+    }]
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::RackPath>,
+        query_params: Query<latest::rack::RackMembershipVersionParam>,
+    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+
     /// Abort the latest rack membership change
     ///
     /// This operation is synchronous. Upon returning from the API call, a
@@ -7745,15 +7793,28 @@ pub trait NexusExternalApi {
     /// in progress (previous changes have completed) or that the current
     /// membership change could not be aborted.
     #[endpoint {
+        operation_id = "rack_membership_abort",
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
         tags = ["experimental"],
-        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..
+        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..VERSION_RACK_MEMBERSHIP_ABORT_BY_VERSION,
     }]
-    async fn rack_membership_abort(
+    async fn rack_membership_abort_v2026_02_02_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::RackPath>,
-    ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
+        path_params: Path<v2025_11_20_00::path_params::RackPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_21_00::rack::RackMembershipStatus>,
+        HttpError,
+    > {
+        Self::rack_membership_abort(
+            rqctx,
+            path_params,
+            Query::from(latest::rack::RackMembershipVersionParam {
+                version: None,
+            }),
+        )
+        .await
+    }
 
     /// Fetch rack cluster membership status
     ///
@@ -9492,29 +9553,10 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = GET,
-        path = "/access",
+        path = "/access/{path:.*}",
         unpublished = true,
     }]
     async fn console_silo_access(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/users/{path:.*}",
-        unpublished = true,
-    }]
-    async fn console_silo_users(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::console::RestPathParam>,
-    ) -> Result<Response<Body>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/groups/{path:.*}",
-        unpublished = true,
-    }]
-    async fn console_silo_groups(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError>;
@@ -9608,6 +9650,130 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::device_params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Problems
+
+    /// List problems
+    ///
+    /// Problems are sorted by the time at which they were detected, and may be
+    /// filtered by state.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<
+            PaginatedByTimeAndId<latest::problem::ProblemListParams>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::problem::Problem>>, HttpError>;
+
+    /// Fetch problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+    ) -> Result<HttpResponseOk<latest::problem::Problem>, HttpError>;
+
+    /// List causes of problem
+    ///
+    /// Returns any other problems which are the causes of the specified
+    /// problem. If the specified problem has no causes, this list may be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/causes",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_causes_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List consequences of problem
+    ///
+    /// Returns any other problems which are caused by the specified problem. If
+    /// no other problem is caused by the specified problem, then this list may
+    /// be empty.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/consequences",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_consequences_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ProblemListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::RelatedProblem>>,
+        HttpError,
+    >;
+
+    /// List resources impacted by problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/impacts",
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_impact_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedById<latest::problem::ImpactListParams>>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::problem::ProblemImpact>>,
+        HttpError,
+    >;
+
+    /// List support bundles attached to problem
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/support-bundles",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/support-bundles` tag, but only one tag is allowed per
+        // endpoint (why is it an array, then?)...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_support_bundles_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
+
+    /// List alerts for problem
+    ///
+    /// Lists alerts associated with the requested problem. Alerts may be
+    /// filtered by alert class or alert class glob and by an inclusive creation
+    /// time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/problems/{problem_id}/alerts",
+        // XXX(eliza): it would be nice if this could also have the
+        // `system/alerts` tag, but only one tag is allowed per endpoint...
+        tags = ["system/problems"],
+        versions = VERSION_PROBLEMS..,
+    }]
+    async fn problem_alert_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::problem::ProblemSelector>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
     // Alerts
 

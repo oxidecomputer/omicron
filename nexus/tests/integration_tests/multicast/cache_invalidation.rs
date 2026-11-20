@@ -201,6 +201,10 @@ async fn test_sled_move_updates_multicast_port_mapping(
     let new_collection = builder.build();
 
     // Insert the new inventory collection
+    //
+    // TODO: This is flaky since the background task can kick off an inventory
+    // collection as well. Before enabling this test, fix the flake by disabling
+    // the collection bg task.
     datastore
         .inventory_insert_collection(&opctx, &new_collection)
         .await
@@ -469,6 +473,10 @@ async fn test_cache_ttl_behavior() {
     let new_collection = builder.build();
 
     // Insert the new inventory collection
+    //
+    // TODO: This is flaky since the background task can kick off an inventory
+    // collection as well. Before enabling this test, fix the flake by disabling
+    // the collection bg task.
     datastore
         .inventory_insert_collection(&opctx, &new_collection)
         .await
