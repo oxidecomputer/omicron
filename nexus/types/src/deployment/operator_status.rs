@@ -180,7 +180,7 @@ fn describe_sled_evacuation(
         ) => {
             let s = if num_registered_vmms.get() == 1 { "" } else { "s" };
             OperatorStatusDescription::summary(format!(
-                "{summary}: {num_registered_vmms} VMM{s} remaining"
+                "{summary}: {num_registered_vmms} instance{s} remaining"
             ))
         }
         SledEvacuationProgress::Waiting(
