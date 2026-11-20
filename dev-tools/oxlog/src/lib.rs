@@ -491,9 +491,19 @@ pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
     // Log files are named by the SMF services, with the `/` in the FMRI
     // translated to a `-`.
     let filename = filename.as_ref();
-    OX_SMF_PREFIXES
-        .iter()
-        .any(|prefix| filename.starts_with(prefix) && filename.contains(".log"))
+    if !OX_SMF_PREFIXES.iter().any(|prefix| filename.starts_with(prefix)) {
+        return false;
+    }
+    let (_, numeric_suffix) = split_numeric_suffix(filename);
+    // Archived logs that were never rotated (i.e. they were the live log at the
+    // time an entire zone was archived) will not have the `.log` extension, but
+    // will always end with an mtime (see
+    // https://github.com/oxidecomputer/omicron/issues/9271).
+    //
+    // On the other hand,the live log file inside a running zone will have the
+    // `.log` extension, but no numeric suffix. Therefore, we consider it a log
+    // file if it has a numeric suffix OR if its name includes `.log`.
+    filename.contains(".log") || numeric_suffix.is_some()
 }
 
 // Parse an oxide smf log file name and return the name of the underlying
@@ -962,6 +972,15 @@ mod tests {
         assert!(!is_oxide_smf_log_file("not-oxide-blah:default.log"));
         assert!(!is_oxide_smf_log_file("not-system-illumos-blah:default.log"));
         assert!(!is_oxide_smf_log_file("system-blah:default.log"));
+        // Archived logs that were never rotated (i.e. they were the live log at
+        // the time an entire zone was archived) will not have the `.log`
+        // extension, but will always end with an mtime.
+        // This reproduces https://github.com/oxidecomputer/omicron/issues/9271
+        assert!(is_oxide_smf_log_file("oxide-blah:default.1761086667"));
+        assert!(is_oxide_smf_log_file(
+            "system-illumos-blah:default.1761086667"
+        ));
+        assert!(!is_oxide_smf_log_file("oxide-blah:default"));
     }
 
     #[test]
