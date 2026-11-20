@@ -758,7 +758,7 @@ planner config:
     sled update reboot policy: evacuate
 
 * 1 sled changed update disposition:
-  * 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: evacuating (terminate)
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0: evacuating (terminate)
 * zone updates waiting on sled update disposition changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 

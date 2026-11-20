@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
     v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
-    v50, v51, v52, v53, v55, v61,
+    v50, v51, v52, v53, v55, v57, v61,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (65, ADD_DISK_LOCATION_TO_INVENTORY),
     (64, TRUST_QUORUM_MEMBERS),
     (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
     (62, ADD_SLED_REGISTRATION_INFO),
@@ -1131,11 +1132,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..,
+        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_RACK_ID_TO_INVENTORY..VERSION_ADD_DISK_LOCATION_TO_INVENTORY,
+    }]
+    async fn inventory_v57(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v57::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v57::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1147,13 +1163,14 @@ pub trait SledAgentApi {
     async fn inventory_v55(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v55::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v57(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v55::inventory::Inventory::from(inv))
         })
     }
 
     /// Fetch basic information about this sled
     #[endpoint {
+        operation_id = "inventory",
         method = GET,
         path = "/inventory",
         versions = VERSION_ADD_INSTANCE_MANAGER_STATUS_TO_INVENTORY..VERSION_ARTIFACT_HASH_SCHEMA,
