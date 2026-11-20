@@ -100,8 +100,9 @@ impl OperatorStatus {
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::HandoffSagas) => {
                 OperatorStatusDescription::summary(
-                    "Waiting for background activities (sagas) to finish \
-                     before handing off to the new control plane",
+                    "Waiting for in-progress control plane operations \
+                     (sagas) to finish before handing off to the new \
+                     control plane",
                 )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::HandoffFinal) => {
