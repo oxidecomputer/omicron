@@ -80,11 +80,11 @@ pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 /// part number.
 pub const FAKE_SIDECAR_MODEL: &str = "FAKE_SIM_SIDECAR";
 
-/// The number of ignition targets sp-sim simulates (32 sleds, 2 PSCs, and the
-/// other sidecar).
+/// The number of ignition targets sp-sim simulates (32 sleds, 2 PSCs, and both
+/// sidecars).
 ///
 /// The total number of simulated SPs can't exceed this value.
-pub const NUM_IGNITION_TARGETS: usize = 35;
+pub const NUM_IGNITION_TARGETS: usize = 36;
 
 pub struct Sidecar {
     sp: sp::Handle<Handler>,
