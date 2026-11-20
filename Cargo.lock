@@ -8287,6 +8287,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gateway-client",
+ "gateway-types",
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
