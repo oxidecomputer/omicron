@@ -169,27 +169,25 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: ..........<REDACTED_UUID>........... (sitrep)
-                       parent sitrep ID: None
-                             created by: ..........<REDACTED_UUID>...........
-                             created at: <REDACTED_TIMESTAMP>
-                                comment: N/A
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
+created by:                  ..........<REDACTED_UUID>...........
+created at:                  <REDACTED_TIMESTAMP>
+comment:                     N/A
 
-                                 status: this is the current sitrep!
-                                version: v1
-                        made current at: <REDACTED_TIMESTAMP>
+status:                      this is the current sitrep!
+  version:                   v1
+  made current at:           <REDACTED_TIMESTAMP>
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
-                             started at: <REDACTED_TIMESTAMP>
-                            finished at: <REDACTED_TIMESTAMP>
-      next inventory minimum start time: <REDACTED_TIMESTAMP>
-    
-    rendezvous resource generation numbers:
-                       alert generation: 1
-              support bundle generation: 1
-    
-    ereports in this sitrep: 0
+inventory collection ID:     ..........<REDACTED_UUID>...........
+  started at:                <REDACTED_TIMESTAMP>
+  finished at:               <REDACTED_TIMESTAMP>
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -201,27 +199,25 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: ..........<REDACTED_UUID>........... (sitrep)
-                       parent sitrep ID: None
-                             created by: ..........<REDACTED_UUID>...........
-                             created at: <REDACTED_TIMESTAMP>
-                                comment: N/A
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
+created by:                  ..........<REDACTED_UUID>...........
+created at:                  <REDACTED_TIMESTAMP>
+comment:                     N/A
 
-                                 status: this is the current sitrep!
-                                version: v1
-                        made current at: <REDACTED_TIMESTAMP>
+status:                      this is the current sitrep!
+  version:                   v1
+  made current at:           <REDACTED_TIMESTAMP>
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
-                             started at: <REDACTED_TIMESTAMP>
-                            finished at: <REDACTED_TIMESTAMP>
-      next inventory minimum start time: <REDACTED_TIMESTAMP>
-    
-    rendezvous resource generation numbers:
-                       alert generation: 1
-              support bundle generation: 1
-    
-    ereports in this sitrep: 0
+inventory collection ID:     ..........<REDACTED_UUID>...........
+  started at:                <REDACTED_TIMESTAMP>
+  finished at:               <REDACTED_TIMESTAMP>
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -2755,25 +2751,22 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: 00000000-0000-0000-0000-000000000001 (sitrep)
-                       parent sitrep ID: None
-                             created by: 00000000-0000-0000-0000-000000000004
-                             created at: <REDACTED_TIMESTAMP>
-                                comment:
-      an example sitrep with cases
-
-                                 status: not committed to the sitrep history
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
+created by:                  00000000-0000-0000-0000-000000000004
+created at:                  <REDACTED_TIMESTAMP>
+comment:
+  an example sitrep with cases
+status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: 00000000-0000-0000-0000-00000000001e (collection)
-      note: this collection no longer exists (perhaps it has been pruned?)
-      next inventory minimum start time: <REDACTED_TIMESTAMP>
-    
-    rendezvous resource generation numbers:
-                       alert generation: 1
-              support bundle generation: 1
-    
-    ereports in this sitrep: 3
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     3
 
 == CASES =======================================================================
 3 open, 4 closed
@@ -2803,25 +2796,22 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: 00000000-0000-0000-0000-000000000001 (sitrep)
-                       parent sitrep ID: None
-                             created by: 00000000-0000-0000-0000-000000000004
-                             created at: <REDACTED_TIMESTAMP>
-                                comment:
-      an example sitrep with cases
-
-                                 status: not committed to the sitrep history
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
+created by:                  00000000-0000-0000-0000-000000000004
+created at:                  <REDACTED_TIMESTAMP>
+comment:
+  an example sitrep with cases
+status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: 00000000-0000-0000-0000-00000000001e (collection)
-      note: this collection no longer exists (perhaps it has been pruned?)
-      next inventory minimum start time: <REDACTED_TIMESTAMP>
-    
-    rendezvous resource generation numbers:
-                       alert generation: 1
-              support bundle generation: 1
-    
-    ereports in this sitrep: 3
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     3
 
 == CASES =======================================================================
 
