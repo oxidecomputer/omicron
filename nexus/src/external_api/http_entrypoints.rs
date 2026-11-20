@@ -4823,7 +4823,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let session = session.into_inner();
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             nexus.bfd_enable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -4836,7 +4835,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let session = session.into_inner();
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             nexus.bfd_disable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -4851,7 +4849,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             let status = nexus.bfd_status(&opctx).await?;
             Ok(HttpResponseOk(status))
         };

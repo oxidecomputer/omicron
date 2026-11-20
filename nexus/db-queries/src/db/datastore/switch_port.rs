@@ -1188,7 +1188,7 @@ impl DataStore {
             switch_port_settings_route_config::dsl as route_config_dsl,
         };
 
-        // Here, each page runs three queries,:
+        // Here, each page runs three queries:
         //
         // 1. A page of switch ports that have settings, via
         //    `lookup_switch_port_by_port_settings`, paged on `id`.
