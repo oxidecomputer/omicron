@@ -32,7 +32,7 @@ use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pools, create_instance, create_instance_with,
+    create_default_ip_pools, create_instance, create_instance_stopped,
     create_project, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
@@ -495,18 +495,8 @@ async fn test_concurrent_implicit_creation_race(
     let instance_names =
         ["race-instance-1", "race-instance-2", "race-instance-3"];
     let create_instance_futures = instance_names.iter().map(|name| {
-        create_instance_with(
-            client,
-            project_name,
-            name,
-            &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            Vec::<InstanceDiskAttachment>::new(),
-            Vec::<ExternalIpCreate>::new(),
-            false, // start=false: Don't start instances to avoid timing issues
-            Default::default(),
-            None,
-            Vec::<MulticastGroupJoinSpec>::new(),
-        )
+        // Don't start instances to avoid timing issues
+        create_instance_stopped(client, project_name, name)
     });
     let instances = ops::join_all(create_instance_futures).await;
 
@@ -961,19 +951,8 @@ async fn test_left_member_waits_for_group_active(
     .await;
 
     // Create a stopped instance first (not running)
-    let instance = create_instance_with(
-        client,
-        project_name,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![],
-        vec![],
-        false,  // don't start
-        None,   // auto_restart_policy
-        None,   // cpu_platform
-        vec![], // multicast_groups
-    )
-    .await;
+    let instance =
+        create_instance_stopped(client, project_name, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Stop DPD to keep group in "Creating" state
