@@ -23,6 +23,7 @@ use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
 use omicron_git_version_types::GitVersion;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::fmt;
@@ -46,7 +47,7 @@ enum Commands {
     /// Show the current situation report.
     ///
     /// This is an alias for `omdb db sitrep info current`.
-    Current(ShowOptions),
+    Current(InfoOptions),
 
     /// Show details on a situation report.
     #[clap(alias = "show")]
@@ -62,7 +63,7 @@ enum Commands {
         sitrep: SitrepSelector,
 
         #[clap(flatten)]
-        opts: ShowOptions,
+        opts: InfoOptions,
     },
 
     /// Show the analysis report for the requested sitrep, if one exists.
@@ -117,6 +118,25 @@ struct AnalysisReportArgs {
 struct ShowOptions {
     #[clap(long, short)]
     json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+struct InfoOptions {
+    /// Show details for only the case with this ID, rather than the sitrep.
+    ///
+    /// With `--json`, only the requested case is serialized.
+    #[clap(long, short, value_name = "CASE_ID", conflicts_with = "all_cases")]
+    case: Option<CaseUuid>,
+
+    /// Show full details for every case in the sitrep, rather than a summary
+    /// table.
+    ///
+    /// This has no effect with `--json`, which always includes every case.
+    #[clap(long, short)]
+    all_cases: bool,
+
+    #[clap(flatten)]
+    show: ShowOptions,
 }
 
 /// Selects a sitrep by UUID, by version number, or the current one.
@@ -368,7 +388,7 @@ pub(super) async fn cmd_db_sitrep_history(
 async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    opts: &ShowOptions,
+    opts: &InfoOptions,
     sitrep_selector: SitrepSelector,
     colored: bool,
 ) -> anyhow::Result<()> {
@@ -386,7 +406,22 @@ async fn cmd_db_sitrep_show(
         .await
         .with_context(|| format!("failed to look up {err_ctx}"))?;
 
-    if opts.json {
+    if let Some(case_id) = opts.case {
+        let case = sitrep.cases.get(&case_id).ok_or_else(|| {
+            anyhow::anyhow!("case {case_id} does not exist in {err_ctx}")
+        })?;
+        if opts.show.json {
+            serde_json::to_writer_pretty(std::io::stdout(), case)
+                .with_context(|| {
+                    format!("failed to serialize case {case_id} in {err_ctx}")
+                })?;
+        } else {
+            println!("{}", case.display_indented(0, Some(id)).colored(colored));
+        }
+        return Ok(());
+    }
+
+    if opts.show.json {
         serde_json::to_writer_pretty(std::io::stdout(), &sitrep)
             .with_context(|| format!("failed to serialize {err_ctx}"))?;
         return Ok(());
@@ -520,12 +555,38 @@ async fn cmd_db_sitrep_show(
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?
 
-    if !cases.is_empty() {
+    if cases.is_empty() {
+        return Ok(());
+    }
+
+    if opts.all_cases {
         println!("\n{:=<80}\n", "== CASES ");
         for case in cases {
             println!("{}", case.display_indented(4, Some(id)).colored(colored));
         }
+        return Ok(());
     }
+
+    let num_open = cases.iter().filter(|case| case.is_open()).count();
+    let num_closed = cases.len() - num_open;
+    let mut cases = cases.iter().collect::<Vec<_>>();
+    cases.sort_by_key(|case| (case.metadata.de.as_str(), case.id));
+
+    println!("\n{:=<80}", "== CASES ");
+    println!("{num_open} open, {num_closed} closed\n");
+    println!(
+        "(i) {}\n",
+        fm::case::DisplayCaseSummary::legend().colored(colored)
+    );
+    for case in cases {
+        println!("{}", case.display_summary(0, Some(id)).colored(colored));
+    }
+    println!(
+        "\n(i) to view details for a single case, use:\n    \
+               $ omdb db sitrep show {id} --case <CASE_ID>\n\
+           (i) or, to show details for all cases in this sitrep, use:\n    \
+               $ omdb db sitrep show {id} --all-cases"
+    );
 
     Ok(())
 }
