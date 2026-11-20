@@ -53,6 +53,7 @@ use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use glob::Pattern;
 use jiff::Timestamp;
 use rayon::prelude::*;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use uuid::Uuid;
@@ -545,13 +546,26 @@ fn split_numeric_suffix(filename: &str) -> (&str, Option<&str>) {
 /// Returns the name of the series that an SMF log file belongs to: its live
 /// file's name.
 ///
-/// SMF log files are named `<service>.log` (live), `<service>.log.<N>`
-/// (rotated by logadm(8)), and `<service>.log.<epoch>` (archived by
-/// sled-agent's debug collector). Keying on the full live file name, rather
-/// than the service name, keeps the series of separate instances of a
-/// service apart.
-fn smf_series(filename: &str) -> &str {
-    split_numeric_suffix(filename).0
+/// SMF log files are named `<service>.log` (live), `<service>.log.<N>` (rotated
+/// by logadm(8)), `<service>.log.<epoch>` (rotated logs archived by
+/// sled-agent's debug collector), or, (unfortunately, see omicron#9271),
+/// `<service>.<epoch>` (the live log from a zone that was being destroyed,
+/// archived by sled-agent's debug collector).
+///
+/// Keying on the full live file name, rather than the service name, keeps the
+/// series of separate instances of a service apart.
+fn smf_series(filename: &str) -> Cow<'_, str> {
+    match split_numeric_suffix(filename) {
+        // If there is an epoch, but no `.log` before it, this was the live log
+        // in a destroyed zone when it was being archived by the sled-agent's
+        // debug collector. It should be treated as part of the `<service>.log`
+        // series,so we must, regretfully, munge it into the correct live log
+        // file name.
+        (name, Some(_)) if !name.ends_with(".log") => {
+            Cow::Owned(format!("{name}.log"))
+        }
+        (name, _) => Cow::Borrowed(name),
+    }
 }
 
 /// A directory of log files kept outside SMF's log directories.
@@ -778,7 +792,7 @@ fn load_svc_logs(
         };
 
         let mut file = LogFile::new(dir.join(filename));
-        let mut series = Some(smf_series(filename).to_string());
+        let mut series = Some(smf_series(filename));
         let mut newest_write = None;
         if read_metadata {
             file.read_metadata(&entry);
@@ -802,7 +816,7 @@ fn load_svc_logs(
         undated.push(UndatedLogFile {
             service: svc_name.to_string(),
             kind,
-            series,
+            series: series.map(Cow::into_owned),
             symlink_target: None,
             newest_write,
             path,
