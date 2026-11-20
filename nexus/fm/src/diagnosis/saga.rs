@@ -562,7 +562,7 @@ mod tests {
         payload: SagaFact,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_sitrep_id,
                 comment: "parent saga fact".to_string(),
@@ -1088,7 +1088,7 @@ mod tests {
         last_event_time: chrono::DateTime<Utc>,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id,
                 created_sitrep_id,
                 comment: "parent saga fact".to_string(),
@@ -1249,7 +1249,7 @@ mod tests {
         saga: steno::SagaId,
     ) -> fm::case::Fact {
         fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id,
                 created_sitrep_id,
                 comment: "parent abandoned fact".to_string(),
@@ -1596,7 +1596,7 @@ mod tests {
         let parent_id = SitrepUuid::new_v4();
         let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
         let foreign_fact = fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id: omicron_uuid_kinds::FactUuid::new_v4(),
                 created_sitrep_id: parent_id,
                 comment: "a fact belonging to the physical-disk engine"
