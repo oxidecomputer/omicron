@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::bail;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
@@ -551,6 +552,82 @@ pub async fn test_setup_with_simrack(
         listen_addr,
     )
     .await
+}
+
+/// A simulated rack served by two MGS instances (one per switch).
+///
+/// This is similar to how a real rack works.
+pub struct TwoSwitchSimRack {
+    pub simrack: Arc<SimRack>,
+    pub mgs0: GatewayTestContext,
+    pub mgs1: GatewayTestContext,
+}
+
+impl TwoSwitchSimRack {
+    pub async fn start(
+        test_name: &str,
+        log: &slog::Logger,
+        gimlet_count: usize,
+    ) -> Self {
+        let (mut mgs_config, mut sp_sim_config) =
+            load_test_config(DEFAULT_SP_SIM_CONFIG.into());
+        let default_gimlets = sp_sim_config.simulated_sps.gimlet.len();
+        let extra_gimlets =
+            gimlet_count.checked_sub(default_gimlets).unwrap_or_else(|| {
+                panic!(
+                    "requested at least the default sp-sim config's \
+                     {default_gimlets} gimlets (requested {gimlet_count})"
+                )
+            });
+        let added = add_simulated_gimlet_sps(&mut sp_sim_config, extra_gimlets);
+        add_simulated_gimlet_ports(&mut mgs_config, added);
+        let simrack = Arc::new(
+            SimRack::start(&sp_sim_config, log)
+                .await
+                .expect("started a simulated SP rack"),
+        );
+        let mgs0 = test_setup_with_simrack(
+            test_name,
+            SpPort::One,
+            mgs_config.clone(),
+            Arc::clone(&simrack),
+            None,
+        )
+        .await;
+        let mgs1 = test_setup_with_simrack(
+            test_name,
+            SpPort::Two,
+            mgs_config,
+            Arc::clone(&simrack),
+            None,
+        )
+        .await;
+        Self { simrack, mgs0, mgs1 }
+    }
+
+    /// Tears down both MGS instances, then the simulated rack.
+    ///
+    /// Returns an error if something other than the two MGS instances still
+    /// holds a reference to the simulated rack, or if any simulated SP task
+    /// panicked.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either MGS instance fails to tear down.
+    pub async fn teardown(self) -> anyhow::Result<()> {
+        let Self { simrack, mgs0, mgs1 } = self;
+        // TODO: These should return an error and be collected.
+        mgs0.teardown().await;
+        mgs1.teardown().await;
+        let Some(simrack) = Arc::into_inner(simrack) else {
+            bail!(
+                "something other than the two MGS instances still holds a \
+                 reference to the simulated SP rack, so it could not be torn \
+                 down"
+            );
+        };
+        simrack.teardown().await
+    }
 }
 
 async fn test_setup_with_simrack_impl(
