@@ -75,6 +75,9 @@ pub(crate) enum BayIdentError {
 /// behind it. A bay the topology only partly describes, or whose nodes could
 /// not be read, comes back with an `Err` in [`ObservedBay::contents`].
 ///
+/// Fails if any bay cannot be identified. [`BayIdentError`] says why that
+/// fails the whole read.
+///
 /// A node belongs to a bay through its parent: an `nvme` or `board` directly
 /// under the bay, a `disk` under that `nvme`, an `ic` under that `board`.
 /// Nodes anywhere else are ignored.
