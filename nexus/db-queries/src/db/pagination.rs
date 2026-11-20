@@ -175,7 +175,7 @@ where
 
 // We'd like to be able to call:
 //
-//  c1.eq(v1).and(c2.gt(v2))
+//  c1.eq(v1).and(c2.gt(v2)).or(c1.gt(v1))
 //
 // This means "c1.eq(v1)" must implement BoolExpressionMethods, and
 // satisfy the requirements of the ".and" method.
@@ -184,36 +184,27 @@ where
     Eq<C1, M1>: Expression<SqlType = Bool>,
 // The RHS (c2.gt(v2)) must be a boolean expression:
     Gt<C2, M2>: Expression<SqlType = Bool>,
-// Putting it together, we should be able to filter by LHS.and(RHS):
+// The other side of the OR (c1.gt(v1)) must be a boolean expression:
+    Gt<C1, M1>: Expression<SqlType = Bool>,
+// Putting it together, we should be able to filter by
+// "c1.eq(v1).and(c2.gt(v2)).or(c1.gt(v1))":
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
-            And<Eq<C1, M1>, Gt<C2, M2>>,
+            Or<And<Eq<C1, M1>, Gt<C2, M2>>, Gt<C1, M1>>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 
 // We'd also like to be able to call:
 //
-//  c1.eq(v1).and(c2.lt(v2))
+//  c1.eq(v1).and(c2.lt(v2)).or(c1.lt(v1))
 //
-// We've already defined the bound on the LHS, so we add the equivalent
-// bounds on the RHS for the "Less than" variant.
+// We've already defined the bound on c1.eq(v1), so we add the equivalent
+// bounds for the "Less than" variant.
     Lt<C2, M2>: Expression<SqlType = Bool>,
+    Lt<C1, M1>: Expression<SqlType = Bool>,
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
-            And<Eq<C1, M1>, Lt<C2, M2>>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-
-// Necessary for "query.or_filter(c1.gt(v1))"
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            Gt<C1, M1>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-// Necessary for "query.or_filter(c1.lt(v1))"
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            Lt<C1, M1>,
+            Or<And<Eq<C1, M1>, Lt<C2, M2>>, Lt<C1, M1>>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 {
@@ -226,15 +217,23 @@ where
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some((v1, v2)) = marker {
-                query = query.filter(c1.eq(v1.clone()).and(c2.gt(v2)));
-                query = query.or_filter(c1.gt(v1));
+                // We add the whole marker condition in one filter call so that
+                // it's ANDed with any conditions already in the WHERE clause.
+                // If we used or_filter for the later branches, those existing
+                // conditions would apply only to the first branch.
+                //
+                // (The type bounds also prevent this from happening by
+                // disallowing any already-filtered queries from being passed
+                // in. This is defense in depth.)
+                query = query
+                    .filter(c1.eq(v1.clone()).and(c2.gt(v2)).or(c1.gt(v1)));
             }
             query.order(c1.asc()).then_order_by(c2.asc())
         }
         dropshot::PaginationOrder::Descending => {
             if let Some((v1, v2)) = marker {
-                query = query.filter(c1.eq(v1.clone()).and(c2.lt(v2)));
-                query = query.or_filter(c1.lt(v1));
+                query = query
+                    .filter(c1.eq(v1.clone()).and(c2.lt(v2)).or(c1.lt(v1)));
             }
             query.order(c1.desc()).then_order_by(c2.desc())
         }
@@ -320,57 +319,54 @@ where
 // We'd like to be able to call:
 //
 //  c1.eq(v1).and(c2.eq(v2)).and(c3.gt(v3))
+//      .or(c1.eq(v1).and(c2.gt(v2)))
+//      .or(c1.gt(v1))
 //
 // This means each of "c1.eq(v1)", "c2.eq(v2)" and "c3.gt(v3)" must be a
 // boolean expression:
     Eq<C1, M1>: Expression<SqlType = Bool>,
     Eq<C2, M2>: Expression<SqlType = Bool>,
     Gt<C3, M3>: Expression<SqlType = Bool>,
-// Putting it together, we should be able to filter by the conjunction:
+// The later branches of the OR (c1.eq(v1).and(c2.gt(v2)) and c1.gt(v1))
+// must also be boolean expressions:
+    Gt<C2, M2>: Expression<SqlType = Bool>,
+    Gt<C1, M1>: Expression<SqlType = Bool>,
+// Putting it together, we should be able to filter by
+// "c1.eq(v1).and(c2.eq(v2)).and(c3.gt(v3))
+//      .or(c1.eq(v1).and(c2.gt(v2)))
+//      .or(c1.gt(v1))":
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
-            And<And<Eq<C1, M1>, Eq<C2, M2>>, Gt<C3, M3>>,
+            Or<
+                Or<
+                    And<And<Eq<C1, M1>, Eq<C2, M2>>, Gt<C3, M3>>,
+                    And<Eq<C1, M1>, Gt<C2, M2>>,
+                >,
+                Gt<C1, M1>,
+            >,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 
 // We'd also like to be able to call:
 //
 //  c1.eq(v1).and(c2.eq(v2)).and(c3.lt(v3))
+//      .or(c1.eq(v1).and(c2.lt(v2)))
+//      .or(c1.lt(v1))
 //
 // We've already defined the bounds on the equality terms, so we add the
-// equivalent bound for the "Less than" variant.
+// equivalent bounds for the "Less than" variant.
     Lt<C3, M3>: Expression<SqlType = Bool>,
+    Lt<C2, M2>: Expression<SqlType = Bool>,
+    Lt<C1, M1>: Expression<SqlType = Bool>,
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
-            And<And<Eq<C1, M1>, Eq<C2, M2>>, Lt<C3, M3>>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-
-// Necessary for "query.or_filter(c1.eq(v1).and(c2.gt(v2)))"
-    Gt<C2, M2>: Expression<SqlType = Bool>,
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            And<Eq<C1, M1>, Gt<C2, M2>>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-// Necessary for "query.or_filter(c1.eq(v1).and(c2.lt(v2)))"
-    Lt<C2, M2>: Expression<SqlType = Bool>,
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            And<Eq<C1, M1>, Lt<C2, M2>>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-
-// Necessary for "query.or_filter(c1.gt(v1))"
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            Gt<C1, M1>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-// Necessary for "query.or_filter(c1.lt(v1))"
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            Lt<C1, M1>,
+            Or<
+                Or<
+                    And<And<Eq<C1, M1>, Eq<C2, M2>>, Lt<C3, M3>>,
+                    And<Eq<C1, M1>, Lt<C2, M2>>,
+                >,
+                Lt<C1, M1>,
+            >,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 {
@@ -383,11 +379,21 @@ where
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some((v1, v2, v3)) = marker {
+                // We add the whole marker condition in one filter call so that
+                // it's ANDed with any conditions already in the WHERE clause.
+                // If we used or_filter for the later branches, those existing
+                // conditions would apply only to the first branch.
+                //
+                // (The type bounds also prevent this from happening by
+                // disallowing any already-filtered queries from being passed
+                // in. This is defense in depth.)
                 query = query.filter(
-                    c1.eq(v1.clone()).and(c2.eq(v2.clone())).and(c3.gt(v3)),
+                    c1.eq(v1.clone())
+                        .and(c2.eq(v2.clone()))
+                        .and(c3.gt(v3))
+                        .or(c1.eq(v1.clone()).and(c2.gt(v2)))
+                        .or(c1.gt(v1)),
                 );
-                query = query.or_filter(c1.eq(v1.clone()).and(c2.gt(v2)));
-                query = query.or_filter(c1.gt(v1));
             }
             query
                 .order(c1.asc())
@@ -397,10 +403,12 @@ where
         dropshot::PaginationOrder::Descending => {
             if let Some((v1, v2, v3)) = marker {
                 query = query.filter(
-                    c1.eq(v1.clone()).and(c2.eq(v2.clone())).and(c3.lt(v3)),
+                    c1.eq(v1.clone())
+                        .and(c2.eq(v2.clone()))
+                        .and(c3.lt(v3))
+                        .or(c1.eq(v1.clone()).and(c2.lt(v2)))
+                        .or(c1.lt(v1)),
                 );
-                query = query.or_filter(c1.eq(v1.clone()).and(c2.lt(v2)));
-                query = query.or_filter(c1.lt(v1));
             }
             query
                 .order(c1.desc())
