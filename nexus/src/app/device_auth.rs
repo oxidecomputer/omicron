@@ -232,9 +232,7 @@ impl super::Nexus {
             .device_access_token_fetch(opctx, client_id, device_code)
             .await
         {
-            Ok(token) if token.is_device_code_expired(Utc::now()) => {
-                Ok(Expired)
-            }
+            Ok(token) if token.device_code_expired(Utc::now()) => Ok(Expired),
             Ok(token) => Ok(Granted(token)),
             Err(_) => Ok(Pending),
             // TODO: TokenResponse::Denied

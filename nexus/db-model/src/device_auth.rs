@@ -180,9 +180,7 @@ impl DeviceAccessToken {
         self.silo_user_id.into()
     }
 
-    /// A `device_code` is valid for `expires_in` seconds from the initial auth
-    /// request (RFC 8628 §3.2).
-    pub fn is_device_code_expired(&self, now: DateTime<Utc>) -> bool {
+    pub fn device_code_expired(&self, now: DateTime<Utc>) -> bool {
         let expires = self.time_requested
             + Duration::seconds(CLIENT_AUTHENTICATION_TIMEOUT);
         now >= expires
