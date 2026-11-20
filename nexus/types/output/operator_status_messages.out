@@ -36,10 +36,10 @@ WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 
     support details: instance manager is still available
 
 WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(InstanceManagerRegisteredVmms { num_registered_vmms: 1 }) })
-    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0): 1 VMM remaining
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0): 1 instance remaining
 
 WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(InstanceManagerRegisteredVmms { num_registered_vmms: 3 }) })
-    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0): 3 VMMs remaining
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0): 3 instances remaining
 
 WaitingForUpdate(SledAvailable { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" } })
     summary: Waiting for sled to be returned to service after update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
