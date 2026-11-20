@@ -94,8 +94,20 @@ pub(crate) fn assemble_bays(
 
     let mut bays: Vec<ObservedBay> = Vec::new();
     for node in nodes {
-        let Some((kind, props)) = bay_kind(node)? else {
-            continue;
+        let (kind, props) = match &node.kind {
+            TopoNodeKind::Bay(props) => (DiskVariant::U2, props),
+            TopoNodeKind::Slot { slot_type, props } => match slot_type {
+                Ok(Some(TOPO_SLOT_TYPE_M2)) => (DiskVariant::M2, props),
+                Ok(_) => continue,
+                // This could be an M.2 bay, so it cannot be skipped.
+                Err(error) => {
+                    return Err(BayIdentError::SlotType {
+                        node: node.key.to_string(),
+                        error: error.clone(),
+                    });
+                }
+            },
+            _ => continue,
         };
         let location = identify_bay(&node.key, &props.label, &bays)?;
         let mut bay = new_bay(&node.key, location, kind, props);
@@ -157,24 +169,6 @@ pub(crate) fn assemble_bays(
         bays.push(bay);
     }
     Ok(bays)
-}
-
-/// Whether `node` is a disk bay, and of which kind.
-fn bay_kind(
-    node: &TopoNode,
-) -> Result<Option<(DiskVariant, &BayProps)>, BayIdentError> {
-    match &node.kind {
-        TopoNodeKind::Bay(props) => Ok(Some((DiskVariant::U2, props))),
-        TopoNodeKind::Slot { slot_type, props } => match slot_type {
-            Ok(Some(TOPO_SLOT_TYPE_M2)) => Ok(Some((DiskVariant::M2, props))),
-            Ok(_) => Ok(None),
-            Err(error) => Err(BayIdentError::SlotType {
-                node: node.key.to_string(),
-                error: error.clone(),
-            }),
-        },
-        _ => Ok(None),
-    }
 }
 
 fn identify_bay(
