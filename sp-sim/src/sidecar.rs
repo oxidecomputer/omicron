@@ -160,8 +160,7 @@ impl SimulatedSp for Sidecar {
 impl Sidecar {
     pub(crate) async fn spawn(
         sidecar: &SidecarConfig,
-        index: usize,
-        rack_ignition_state: RackIgnitionState,
+        ignition_power: SpIgnitionPower,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated sidecar");
@@ -201,7 +200,10 @@ impl Sidecar {
             let handler = Handler::new(
                 baseboard_vpd,
                 sidecar.common.components.clone(),
-                FakeIgnition::new(index, rack_ignition_state),
+                FakeIgnition::new(
+                    ignition_power.rack_target,
+                    ignition_power.rack_state.clone(),
+                ),
                 log.clone(),
                 sidecar.common.old_rot_state,
                 update_state,
@@ -210,6 +212,7 @@ impl Sidecar {
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_power,
                 handler,
                 &log,
             );
@@ -1143,37 +1146,95 @@ pub(crate) struct RackIgnitionState {
     targets: Arc<Mutex<[IgnitionState; NUM_IGNITION_TARGETS]>>,
 }
 
-impl RackIgnitionState {
-    /// Returns a new `RackIgnitionState` for the given config.
+pub(crate) struct RackSpIgnitionPowers {
+    pub(crate) sidecars: Vec<SpIgnitionPower>,
+    pub(crate) gimlets: Vec<SpIgnitionPower>,
+    pub(crate) pscs: Vec<SpIgnitionPower>,
+}
+
+impl RackSpIgnitionPowers {
     pub(crate) fn new(config: &SimulatedSpsConfig) -> Self {
-        let mut state = [IgnitionState {
-            receiver: ignition::ReceiverStatus {
-                aligned: false,
-                locked: false,
-                polarity_inverted: false,
-            },
-            target: None,
-        }; NUM_IGNITION_TARGETS];
+        let rack_state = RackIgnitionState {
+            targets: Arc::new(Mutex::new(
+                [IgnitionState {
+                    receiver: ignition::ReceiverStatus {
+                        aligned: false,
+                        locked: false,
+                        polarity_inverted: false,
+                    },
+                    target: None,
+                }; NUM_IGNITION_TARGETS],
+            )),
+        };
+        let mut targets = rack_state.lock();
         let mut num_sps = 0;
         let mut add_sp = |system_type| {
             assert!(num_sps < NUM_IGNITION_TARGETS, "too many simulated SPs");
-            state[num_sps] = initial_ignition_state(system_type);
+            targets[num_sps] = initial_ignition_state(system_type);
+            let power = SpIgnitionPower {
+                rack_state: rack_state.clone(),
+                rack_target: num_sps,
+            };
             num_sps += 1;
+            power
         };
 
-        for _ in &config.sidecar {
-            add_sp(ignition::SystemType::Sidecar);
-        }
-        for _ in &config.gimlet {
-            add_sp(ignition::SystemType::Gimlet);
-        }
-        for _ in &config.psc {
-            add_sp(ignition::SystemType::Psc);
-        }
+        let sidecars = config
+            .sidecar
+            .iter()
+            .map(|_| add_sp(ignition::SystemType::Sidecar))
+            .collect();
+        let gimlets = config
+            .gimlet
+            .iter()
+            .map(|_| add_sp(ignition::SystemType::Gimlet))
+            .collect();
+        let pscs = config
+            .psc
+            .iter()
+            .map(|_| add_sp(ignition::SystemType::Psc))
+            .collect();
 
-        Self { targets: Arc::new(Mutex::new(state)) }
+        Self { sidecars, gimlets, pscs }
     }
+}
 
+#[derive(Clone)]
+pub(crate) struct SpIgnitionPower {
+    rack_state: RackIgnitionState,
+    rack_target: usize,
+}
+
+impl SpIgnitionPower {
+    /// Returns true if the simulated SP is powered.
+    ///
+    /// If the SP is not powered, then it won't respond to requests.
+    ///
+    /// For our purposes, only `On` counts as powered. This is not quite the
+    /// same as MGS, which reports `PoweringOn` as true as well, but (a) an SP
+    /// that's still powering on hasn't booted yet so probably won't be able to
+    /// answer requests, and (b) sp-sim's ignition never produces the
+    /// transitional states anyway.
+    ///
+    /// Note that ignition power only controls whether a simulated SP sends data
+    /// or responds to requests. Unlike a real SP, a simulated SP's state isn't
+    /// reset.
+    pub(crate) fn is_powered(&self) -> bool {
+        let state = self.rack_state.lock()[self.rack_target];
+        let target = state
+            .target
+            .expect("a simulated SP's own ignition target is present");
+        match target.power_state {
+            ignition::SystemPowerState::On => true,
+            ignition::SystemPowerState::Off
+            | ignition::SystemPowerState::Aborted
+            | ignition::SystemPowerState::PoweringOff
+            | ignition::SystemPowerState::PoweringOn => false,
+        }
+    }
+}
+
+impl RackIgnitionState {
     fn lock(&self) -> MutexGuard<'_, [IgnitionState; NUM_IGNITION_TARGETS]> {
         self.targets.lock().unwrap()
     }

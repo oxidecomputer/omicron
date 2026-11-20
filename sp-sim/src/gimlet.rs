@@ -16,6 +16,7 @@ use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::sidecar::SpIgnitionPower;
 use crate::sp;
 use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
@@ -180,9 +181,10 @@ impl SimulatedSp for Gimlet {
 }
 
 impl Gimlet {
-    pub async fn spawn(
+    pub(crate) async fn spawn(
         gimlet: &GimletConfig,
         phase1_hash_policy: HostFlashHashPolicy,
+        ignition_power: SpIgnitionPower,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
@@ -272,6 +274,7 @@ impl Gimlet {
                         Arc::clone(servers[1].socket()),
                     ],
                     Arc::clone(&attached_mgs),
+                    ignition_power.clone(),
                     log.new(slog::o!("serial-console" => id.to_string())),
                 );
                 serial_console_tasks.push((
@@ -297,6 +300,7 @@ impl Gimlet {
             servers,
             ereport_servers,
             ereport_state,
+            ignition_power,
             handler,
             &log,
         );
@@ -342,6 +346,7 @@ struct SerialConsoleTcpTask {
     incoming_serial_console: UnboundedReceiver<Vec<u8>>,
     socks: [Arc<UdpSocket>; 2],
     attached_mgs: AttachedMgsSerialConsole,
+    ignition_power: SpIgnitionPower,
     serial_console_tx_offset: u64,
     component: SpComponent,
     log: Logger,
@@ -355,6 +360,7 @@ impl SerialConsoleTcpTask {
         incoming_serial_console: UnboundedReceiver<Vec<u8>>,
         socks: [Arc<UdpSocket>; 2],
         attached_mgs: AttachedMgsSerialConsole,
+        ignition_power: SpIgnitionPower,
         log: Logger,
     ) -> Self {
         Self {
@@ -362,6 +368,7 @@ impl SerialConsoleTcpTask {
             incoming_serial_console,
             socks,
             attached_mgs,
+            ignition_power,
             serial_console_tx_offset: 0,
             component,
             log,
@@ -376,6 +383,17 @@ impl SerialConsoleTcpTask {
     }
 
     async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
+        // If an SP doesn't have ignition power, it won't have a serial
+        // console. Discard the data.
+        if !self.ignition_power.is_powered() {
+            debug!(
+                self.log,
+                "ignition power is off; discarding serial console data";
+                "len" => data.len(),
+            );
+            return Ok(());
+        }
+
         let (component, sender) = match *self.attached_mgs.lock().unwrap() {
             Some((component, sender)) => (component, sender),
             None => {
