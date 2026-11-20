@@ -9854,6 +9854,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-tungstenite 0.28.0",
  "tokio-util",
+ "toml 0.8.23",
  "transient-dns-server",
  "trust-quorum-types",
  "tufaceous",
