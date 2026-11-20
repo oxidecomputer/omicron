@@ -104,6 +104,8 @@ pub fn upsert_producer(
         .param()
         .bind::<sql_types::Uuid, _>(producer.id)
         .sql(", now()") // time_created
+        // Expired-producer pagination depends on this write setting
+        // time_modified to the current time. See producers_list_expired.
         .sql(", now()") // time_modified
         .sql(", ")
         .param()
@@ -124,6 +126,9 @@ pub fn upsert_producer(
     // the first clause in our CTE (selecting the existing oximeter id if it's
     // not expunged), or reassign to our randomly-chosen one (the second clause
     // above) if our current assignment is expunged.
+    //
+    // Expired-producer pagination depends on this write setting time_modified
+    // to the current time. See producers_list_expired.
     builder.sql(
         r#"
         ON CONFLICT (id)
