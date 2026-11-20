@@ -736,10 +736,6 @@ impl DisplayCaseSummary<'_> {
         self.colored = colored;
         self
     }
-
-    const GUTTER_ADDED: char = '+';
-    const GUTTER_MODIFIED: char = '*';
-    const GUTTER_REMOVED: char = '-';
 }
 
 pub struct DisplayCaseSummaryLegend {
@@ -759,9 +755,9 @@ impl fmt::Display for DisplayCaseSummaryLegend {
         write!(
             f,
             "activity in this sitrep: {} opened, {} changed, {} closed",
-            styles.added().style(DisplayCaseSummary::GUTTER_ADDED),
-            styles.modified().style(DisplayCaseSummary::GUTTER_MODIFIED),
-            styles.removed().style(DisplayCaseSummary::GUTTER_REMOVED),
+            styles.added_marker(),
+            styles.modified_marker(),
+            styles.removed_marker(),
         )
     }
 }
@@ -792,16 +788,14 @@ impl fmt::Display for DisplayCaseSummary<'_> {
             Some(this_sitrep) => {
                 let opened_here = *created_sitrep_id == this_sitrep;
                 let opened = if opened_here {
-                    styles.added().style(Self::GUTTER_ADDED)
+                    styles.added_marker()
                 } else if case.additions_in_sitrep(this_sitrep) {
-                    styles.modified().style(Self::GUTTER_MODIFIED)
+                    styles.modified_marker()
                 } else {
                     styles.normal().style(' ')
                 };
                 let closed = match closed_sitrep_id {
-                    Some(s) if *s == this_sitrep => {
-                        styles.removed().style(Self::GUTTER_REMOVED)
-                    }
+                    Some(s) if *s == this_sitrep => styles.removed_marker(),
                     Some(_) if opened_here => styles.warning().style('!'),
                     _ => styles.normal().style(' '),
                 };
