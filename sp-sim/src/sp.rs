@@ -13,7 +13,7 @@ use crate::server::Command;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::server::UdpTask;
-use crate::sidecar::SpIgnitionPower;
+use crate::sidecar::SpIgnitionHandle;
 use gateway_ereport_messages::Ena;
 use gateway_messages::SpPort;
 use slog::Logger;
@@ -67,7 +67,7 @@ where
         servers: [UdpServer; 2],
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
-        ignition_power: SpIgnitionPower,
+        ignition_handle: SpIgnitionHandle,
         handler: H,
         log: &Logger,
     ) -> (Self, AbortOnDropHandle<()>) {
@@ -82,7 +82,7 @@ where
             servers,
             ereport_servers,
             ereport_state,
-            ignition_power,
+            ignition_handle,
             handler.clone(),
             commands_rx,
             log.clone(),

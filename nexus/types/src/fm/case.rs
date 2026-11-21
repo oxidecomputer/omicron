@@ -51,6 +51,32 @@ impl Case {
     ) -> DisplayCase<'_> {
         DisplayCase { case: self, indent, sitrep_id, colored: false }
     }
+
+    pub fn display_summary(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayCaseSummary<'_> {
+        DisplayCaseSummary { case: self, indent, sitrep_id, colored: false }
+    }
+
+    /// Returns `true` if any records were added to this case in the given
+    /// `sitrep_id`.
+    fn additions_in_sitrep(&self, sitrep_id: SitrepUuid) -> bool {
+        self.ereports.iter().any(|e| e.assigned_sitrep_id == sitrep_id)
+            || self
+                .alerts_requested
+                .iter()
+                .any(|a| a.requested_sitrep_id == sitrep_id)
+            || self
+                .support_bundles_requested
+                .iter()
+                .any(|b| b.requested_sitrep_id == sitrep_id)
+            || self
+                .facts
+                .iter()
+                .any(|f| f.metadata.created_sitrep_id == sitrep_id)
+    }
 }
 
 impl fmt::Display for Case {
@@ -374,10 +400,10 @@ impl DisplayCase<'_> {
     }
 }
 
+const BULLET: &str = "* ";
+
 impl fmt::Display for DisplayCase<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const BULLET: &str = "* ";
-
         let &Self {
             case:
                 Case {
@@ -597,6 +623,134 @@ impl fmt::Display for DisplayCase<'_> {
 
         writeln!(f)?;
 
+        Ok(())
+    }
+}
+
+/// Displays a summary of a [`Case`] as a single line, as returned by
+/// [`Case::display_summary`].
+///
+/// The line begins with a two-column gutter describing whether the case had
+/// interesting activity in the sitrep being displayed, if this displayer was
+/// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
+///
+/// - column 1 is `+` if the case was opened in the current sitrep, `*` if it
+///   was opened in an earlier sitrep and data was added in the current sitrep,
+///   and blank otherwise,
+/// - column 2 is `-` if the case was closed in this sitrep, and blank
+///   otherwise. If a case opened in this sitrep was closed in some earlier
+///   sitrep, the record is inconsistent (how could the case close before it
+///   opened?), and column 2 is `!`.
+///
+/// Alongside the `open`/`closed` state that follows, the gutter allows the
+/// reader to determine whether these states are the result of changes in the
+/// current sitrep, or if the case was already in that state in an earlier
+/// sitrep. If no sitrep ID was provided, the gutter is blank, so that rows
+/// remain aligned.
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayCaseSummary<'a> {
+    case: &'a Case,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayCaseSummary<'_> {
+    /// Explains the gutter markers in [`DisplayCaseSummary`]'s output. Callers
+    /// displaying a list of case summaries should print this legend.
+    pub fn legend() -> DisplayCaseSummaryLegend {
+        DisplayCaseSummaryLegend { colored: false }
+    }
+
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+
+    const GUTTER_ADDED: char = '+';
+    const GUTTER_MODIFIED: char = '*';
+    const GUTTER_REMOVED: char = '-';
+}
+
+pub struct DisplayCaseSummaryLegend {
+    colored: bool,
+}
+
+impl DisplayCaseSummaryLegend {
+    pub fn colored(self, colored: bool) -> Self {
+        Self { colored }
+    }
+}
+
+impl fmt::Display for DisplayCaseSummaryLegend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { colored } = self;
+        let styles = display::Styles::new(colored);
+        write!(
+            f,
+            "activity in this sitrep: {} opened, {} changed, {} closed",
+            styles.added().style(DisplayCaseSummary::GUTTER_ADDED),
+            styles.modified().style(DisplayCaseSummary::GUTTER_MODIFIED),
+            styles.removed().style(DisplayCaseSummary::GUTTER_REMOVED),
+        )
+    }
+}
+
+impl fmt::Display for DisplayCaseSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { case, indent, sitrep_id, colored } = self;
+        let Case {
+            id,
+            metadata,
+            ereports: _,
+            alerts_requested: _,
+            support_bundles_requested: _,
+            facts: _,
+        } = case;
+        let Metadata { created_sitrep_id, closed_sitrep_id, de, comment } =
+            metadata;
+
+        let styles = display::Styles::new(colored);
+
+        const OPEN: &str = "open";
+        const CLOSED: &str = "closed";
+        const STATE_WIDTH: usize = display::const_max_len(&[OPEN, CLOSED]);
+
+        let state = if closed_sitrep_id.is_some() { CLOSED } else { OPEN };
+        let (opened, closed) = match sitrep_id {
+            Some(this_sitrep) => {
+                let opened_here = *created_sitrep_id == this_sitrep;
+                let opened = if opened_here {
+                    styles.added().style(Self::GUTTER_ADDED)
+                } else if case.additions_in_sitrep(this_sitrep) {
+                    styles.modified().style(Self::GUTTER_MODIFIED)
+                } else {
+                    styles.normal().style(' ')
+                };
+                let closed = match closed_sitrep_id {
+                    Some(s) if *s == this_sitrep => {
+                        styles.removed().style(Self::GUTTER_REMOVED)
+                    }
+                    Some(_) if opened_here => styles.warning().style('!'),
+                    _ => styles.normal().style(' '),
+                };
+                (opened, closed)
+            }
+            None => (styles.normal().style(' '), styles.normal().style(' ')),
+        };
+        let de_width = DiagnosisEngineKind::MAX_WIDTH;
+
+        let comment = display::Comment::new(comment, 0)
+            .wrap_mode(display::WrapMode::SingleLine)
+            .colored(colored);
+        write!(
+            f,
+            "{:>indent$}{opened}{closed} {} \
+             {state:<STATE_WIDTH$} {de:<de_width$} {comment}",
+            "",
+            styles.heading().style(format_args!("case {id}")),
+        )?;
         Ok(())
     }
 }

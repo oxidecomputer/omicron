@@ -118,6 +118,8 @@ async fn ignition_power_off_silences_peer_switch() {
         }
     }
 
+    let gimlet = usize::from(gimlet_target(&simrack, NEIGHBOR_GIMLET));
+
     // Ensure that ignition commands work in both directions: switch 0 to switch
     // 1 and switch 1 to switch 0.
     for (local, peer) in [(1, 0), (0, 1)] {
@@ -142,7 +144,6 @@ async fn ignition_power_off_silences_peer_switch() {
         switches[peer].assert_not_discoverable().await;
         switches[local].assert_discoverable().await;
 
-        let gimlet = usize::from(gimlet_target(&simrack, NEIGHBOR_GIMLET));
         for (sidecar, expected_switches) in [
             (peer, [SystemPowerState::Off, SystemPowerState::On]),
             (local, [SystemPowerState::On, SystemPowerState::Off]),

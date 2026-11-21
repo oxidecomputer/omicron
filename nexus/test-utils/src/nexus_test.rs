@@ -823,8 +823,9 @@ pub(crate) async fn teardown_shared_simrack(
         Some(simrack) => {
             let Some(simrack) = Arc::into_inner(simrack) else {
                 bail!(
-                    "every MGS sharing this simulated rack was torn down \
-                     before the rack"
+                    "something other than the MGS instances still holds a \
+                     reference to the simulated SP rack, so it could not be \
+                     torn down"
                 );
             };
             simrack.teardown().await
