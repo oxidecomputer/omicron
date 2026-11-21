@@ -250,50 +250,56 @@ pub(crate) struct ObservedNvmeBay<'a> {
     namespaces: &'a [ObservedNamespace],
 }
 
-/// Describes a bay from what the topology says about it.
-///
-/// A bay holding an NVMe controller comes back as
-/// [`BayDescription::NeedsNvmeFacts`], to be finished with
-/// [`ObservedNvmeBay::combine_with_nvme_facts`].
-pub(crate) fn describe_bay_from_topology(
-    bay: &ObservedBay,
-) -> Result<BayDescription<'_>, DescribeError> {
-    let contents = match &bay.contents {
-        Ok(contents) => contents,
-        Err(problem) => {
-            return Err(DescribeError::Unreadable { problem: problem.clone() });
-        }
-    };
-
-    let occupant = match &contents.occupant {
-        ObservedOccupant::Empty => DiskBayOccupant::Empty,
-        ObservedOccupant::Other { driver, devfs_path } => {
-            let reason = match driver {
-                Some(driver) => {
-                    UnusableReason::NotNvme { driver: driver.clone() }
-                }
-                None => UnusableReason::NoDriver,
-            };
-            DiskBayOccupant::UnusableDevice {
-                reason,
-                devfs_path: devfs_path.clone(),
+impl<'a> BayDescription<'a> {
+    /// Describes a bay from what the topology says about it.
+    ///
+    /// A bay holding an NVMe controller comes back as
+    /// [`BayDescription::NeedsNvmeFacts`], to be finished with
+    /// [`ObservedNvmeBay::combine_with_nvme_facts`].
+    pub(crate) fn from_topology(
+        bay: &'a ObservedBay,
+    ) -> Result<Self, DescribeError> {
+        let contents = match &bay.contents {
+            Ok(contents) => contents,
+            Err(problem) => {
+                return Err(DescribeError::Unreadable {
+                    problem: problem.clone(),
+                });
             }
-        }
-        ObservedOccupant::Nvme { instance, devfs_path, namespaces, .. } => {
-            return Ok(BayDescription::NeedsNvmeFacts(ObservedNvmeBay {
-                bay,
-                pcie_slot: contents.pcie_slot,
-                instance: *instance,
-                devfs_path,
-                namespaces,
-            }));
-        }
-    };
-    Ok(BayDescription::Complete(DiskBay {
-        location: bay.location.clone(),
-        kind: bay.kind,
-        occupant,
-    }))
+        };
+
+        let occupant = match &contents.occupant {
+            ObservedOccupant::Empty => DiskBayOccupant::Empty,
+            ObservedOccupant::Other { driver, devfs_path } => {
+                let reason = match driver {
+                    Some(driver) => {
+                        UnusableReason::NotNvme { driver: driver.clone() }
+                    }
+                    None => UnusableReason::NoDriver,
+                };
+                DiskBayOccupant::UnusableDevice {
+                    reason,
+                    devfs_path: devfs_path.clone(),
+                }
+            }
+            ObservedOccupant::Nvme {
+                instance, devfs_path, namespaces, ..
+            } => {
+                return Ok(BayDescription::NeedsNvmeFacts(ObservedNvmeBay {
+                    bay,
+                    pcie_slot: contents.pcie_slot,
+                    instance: *instance,
+                    devfs_path,
+                    namespaces,
+                }));
+            }
+        };
+        Ok(BayDescription::Complete(DiskBay {
+            location: bay.location.clone(),
+            kind: bay.kind,
+            occupant,
+        }))
+    }
 }
 
 impl ObservedNvmeBay<'_> {
@@ -653,7 +659,7 @@ mod tests {
 
     /// Describes a bay that needs nothing from libnvme.
     fn describe_without_nvme(observed: &ObservedBay) -> DiskBay {
-        match describe_bay_from_topology(observed).unwrap() {
+        match BayDescription::from_topology(observed).unwrap() {
             BayDescription::Complete(bay) => bay,
             BayDescription::NeedsNvmeFacts(nvme) => {
                 panic!("expected no NVMe controller, got {nvme:?}")
@@ -667,7 +673,7 @@ mod tests {
         facts: NvmeFacts,
         is_boot_disk: bool,
     ) -> Result<(DiskBay, Option<UnparsedDisk>), DescribeError> {
-        match describe_bay_from_topology(observed).unwrap() {
+        match BayDescription::from_topology(observed).unwrap() {
             BayDescription::NeedsNvmeFacts(nvme) => {
                 nvme.combine_with_nvme_facts(&facts, is_boot_disk)
             }
@@ -729,7 +735,7 @@ mod tests {
         observed.contents.as_mut().unwrap().pcie_slot = 18;
 
         let BayDescription::NeedsNvmeFacts(nvme) =
-            describe_bay_from_topology(&observed).unwrap()
+            BayDescription::from_topology(&observed).unwrap()
         else {
             panic!("expected an NVMe controller");
         };
@@ -863,7 +869,7 @@ mod tests {
         ];
         for problem in problems {
             let observed = unreadable_bay(problem.clone());
-            let err = describe_bay_from_topology(&observed).unwrap_err();
+            let err = BayDescription::from_topology(&observed).unwrap_err();
             assert!(
                 matches!(
                     &err,
@@ -890,7 +896,8 @@ mod tests {
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
     ) -> PolledBay {
-        let (bay, disk) = match describe_bay_from_topology(observed).unwrap() {
+        let (bay, disk) = match BayDescription::from_topology(observed).unwrap()
+        {
             BayDescription::Complete(bay) => (bay, None),
             BayDescription::NeedsNvmeFacts(nvme) => {
                 let facts = facts.expect("an NVMe bay needs libnvme facts");
