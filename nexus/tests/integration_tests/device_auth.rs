@@ -926,6 +926,122 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
     assert!(sessions.is_empty());
 }
 
+/// `/device/token` must return `expired_token` once the request timeout
+/// elapses, whether the user confirmed the request in time or after it
+/// expired. It is a little unfortunate to have to test this by reaching
+/// into the DB and backdating the code, but the alternatives all seemed
+/// too heavy.
+#[nexus_test]
+async fn test_device_code_expires_with_request(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::prelude::*;
+    use nexus_db_schema::schema::{device_access_token, device_auth_request};
+
+    let testctx = &cptestctx.external_client;
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let expired_at = Utc::now() - chrono::TimeDelta::seconds(1);
+    let requested_at = |expires_in: u16| {
+        expired_at - chrono::TimeDelta::seconds(expires_in.into())
+    };
+
+    // Case 1: user confirms in time, then the request timeout elapses before
+    // the client polls `/device/token`.
+    let client_id = Uuid::new_v4();
+    let auth_response = device_auth_request(testctx, client_id, None).await;
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("failed to confirm device auth");
+
+    // Backdate `time_requested` so the device code has aged past its timeout.
+    let updated = diesel::update(device_access_token::table)
+        .filter(device_access_token::client_id.eq(client_id))
+        .filter(
+            device_access_token::device_code
+                .eq(auth_response.device_code.clone()),
+        )
+        .set(
+            device_access_token::time_requested
+                .eq(requested_at(auth_response.expires_in)),
+        )
+        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    assert_device_code_expired(testctx, client_id, auth_response.device_code)
+        .await;
+
+    // Case 2: request expires before the user confirms. Confirmation fails,
+    // and `/device/token` reports `expired_token`.
+    let client_id = Uuid::new_v4();
+    let auth_response = device_auth_request(testctx, client_id, None).await;
+
+    // Backdate the pending request so it expires before confirmation. Keep
+    // its creation and expiry timestamps `expires_in` seconds apart.
+    let updated = diesel::update(device_auth_request::table)
+        .filter(
+            device_auth_request::user_code.eq(auth_response.user_code.clone()),
+        )
+        .set((
+            device_auth_request::time_created
+                .eq(requested_at(auth_response.expires_in)),
+            device_auth_request::time_expires.eq(expired_at),
+        ))
+        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    let confirm_error = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+    assert_eq!(confirm_error.message, "device authorization request expired");
+
+    assert_device_code_expired(testctx, client_id, auth_response.device_code)
+        .await;
+}
+
+async fn assert_device_code_expired(
+    testctx: &ClientTestContext,
+    client_id: Uuid,
+    device_code: String,
+) {
+    let error: OAuthError =
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code,
+                client_id,
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST))
+            .execute()
+            .await
+            .expect("failed to poll for device token")
+            .parsed_body()
+            .expect("failed to parse OAuth error");
+    assert_eq!(error.error, "expired_token");
+}
+
 // Strictly speaking, this is not about device auth at all, but we need the
 // lovely helpers we've defined in this file to make things convenient. This
 // suggests we could stand to reorganize or rename some test files.
@@ -1036,16 +1152,9 @@ async fn create_and_confirm_device_auth(
     ttl_seconds: Option<NonZeroU32>,
     confirm_auth: AuthnMode,
 ) -> (DeviceAccessTokenGrant, chrono::DateTime<Utc>) {
-    let auth_request = DeviceAuthRequest { client_id, ttl_seconds };
-
     // note only confirm requires auth. initial request and token fetch don't
-    let auth_response = NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/device/auth")
-            .body_urlencoded(Some(&auth_request))
-            .expect_status(Some(StatusCode::OK)),
-    )
-    .execute_and_parse_unwrap::<DeviceAuthResponse>()
-    .await;
+    let auth_response =
+        device_auth_request(testctx, client_id, ttl_seconds).await;
 
     let confirmation_time = Utc::now();
 
@@ -1065,6 +1174,23 @@ async fn create_and_confirm_device_auth(
         fetch_device_token(testctx, auth_response.device_code, client_id).await;
 
     (token_grant, confirmation_time)
+}
+
+async fn device_auth_request(
+    testctx: &ClientTestContext,
+    client_id: Uuid,
+    ttl_seconds: Option<NonZeroU32>,
+) -> DeviceAuthResponse {
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&DeviceAuthRequest {
+                client_id,
+                ttl_seconds,
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await
 }
 
 async fn fetch_device_token(

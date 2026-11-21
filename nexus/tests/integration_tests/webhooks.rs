@@ -7,6 +7,7 @@
 use dropshot::test_util::ClientTestContext;
 use hmac::{Hmac, Mac};
 use httpmock::prelude::*;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -23,6 +24,8 @@ use nexus_types::external_api::alert::{
     WebhookDeliveryAttemptResult, WebhookReceiver, WebhookReceiverUpdate,
     WebhookSecret, WebhookSecretCreate, WebhookSecrets,
 };
+use nexus_types::external_api::policy::FleetRole;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
@@ -1503,6 +1506,28 @@ async fn test_probe_resends_failed_deliveries(
             })
             .await
     };
+
+    // Fleet collaborator can't probe
+    let client = &cptestctx.external_client;
+    resource_helpers::grant_iam(
+        client,
+        "/v1/system",
+        FleetRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let probe_url = format!("{}/probe", alert_rx_url(webhook.identity.id));
+    NexusRequest::expect_failure(
+        client,
+        http::StatusCode::FORBIDDEN,
+        http::Method::POST,
+        &probe_url,
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 
     // Send a probe with ?resend=true
     let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
