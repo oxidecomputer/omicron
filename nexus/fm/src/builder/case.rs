@@ -161,7 +161,7 @@ impl CaseBuilder {
         &mut self,
         alert: &A,
         comment: impl ToString,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<AlertUuid> {
         let class = A::CLASS;
         let version = A::VERSION;
         let payload_type = std::any::type_name::<A>();
@@ -199,14 +199,14 @@ impl CaseBuilder {
             .comment(comment)
             .finish();
         self.new_alerts_requested = true;
-        Ok(())
+        Ok(id)
     }
 
     pub fn request_support_bundle(
         &mut self,
         data_selection: BundleDataSelection,
         comment: impl ToString,
-    ) {
+    ) -> SupportBundleUuid {
         let id = loop {
             let id = self.rng.next_support_bundle();
             if !self.case.support_bundles_requested.contains_key(&id) {
