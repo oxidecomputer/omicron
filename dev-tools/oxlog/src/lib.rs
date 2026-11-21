@@ -1107,6 +1107,42 @@ mod tests {
         assert_eq!(svc_logs.extra[1].path, "/bar/blah/sub.default.log2");
     }
 
+    // Archived log files for a service should be sorted by the epoch in their
+    // filenames within the same SMF series. This must work regardless of
+    // whether they were rotated before archival (`<svc>.log.<epoch>`) or were
+    // the live log when the zone was archived (`<svc>.<epoch>`). See
+    // https://github.com/oxidecomputer/omicron/issues/9271 for details.
+    #[test]
+    fn test_sort_by_file_name_archived_live_logs() {
+        // The log files in the expected sorting order.
+        let expected = [
+            "/pool/a/oxide-blah:default.log.1600000000",
+            "/pool/b/oxide-blah:default.1650000000",
+            "/pool/a/oxide-blah:default.log.1700000000",
+            "/pool/b/oxide-blah:default.log.1750000000",
+            // The newest file has no `.log`, and must still sort last.
+            "/pool/a/oxide-blah:default.1800000000",
+        ];
+
+        let mut svc_logs = SvcLogs {
+            current: None,
+            // Populate the list of archived log files in reverse order, so that
+            // we must sort them.
+            archived: expected
+                .iter()
+                .rev()
+                .map(|path| LogFile::new(path.into()))
+                .collect(),
+            extra: Vec::new(),
+        };
+
+        svc_logs.sort_by_file_name();
+
+        let sorted: Vec<&str> =
+            svc_logs.archived.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(sorted, expected);
+    }
+
     fn ts(s: &str) -> jiff::Timestamp {
         s.parse().expect("test timestamp should be valid RFC 3339")
     }
