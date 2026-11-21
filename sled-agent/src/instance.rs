@@ -13,7 +13,7 @@ use crate::instance_manager::{
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
-use crate::zone_bundle::ZoneBundler;
+
 use omicron_common::http_client::internal_http_client_builder;
 
 use chrono::Utc;
@@ -44,11 +44,11 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::FormerZoneRootArchiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::inventory::NetworkInterface;
-use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
@@ -752,9 +752,6 @@ struct InstanceRunner {
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
 
-    // Object used to collect zone bundles from this instance when terminated.
-    zone_bundler: ZoneBundler,
-
     // Queue to notify the sled agent's metrics task about our VNICs.
     metrics_queue: MetricsRequestQueue,
 
@@ -766,6 +763,10 @@ struct InstanceRunner {
 
     // Requests that the VMM terminate and publishes the result.
     terminator: Arc<Terminator>,
+
+    // Used to archive the Propolis zone's root dataset when the VMM is
+    // terminated.
+    former_zone_root_archiver: FormerZoneRootArchiver,
 }
 
 fn classify_vmm_state_publish_error(
@@ -841,11 +842,11 @@ impl InstanceRunner {
             nexus_client,
             vnic_allocator,
             port_manager,
-            zone_bundler,
             zone_builder_factory,
             metrics_queue,
             available_datasets_rx,
             currently_managed_zpools_rx,
+            former_zone_root_archiver,
         } = services;
 
         let InstanceSledLocalConfig {
@@ -925,12 +926,12 @@ impl InstanceRunner {
             nexus_client,
             available_datasets_rx,
             zone_builder_factory,
-            zone_bundler,
             metrics_queue,
             delegated_zvols,
             attached_subnets,
             terminator,
             currently_managed_zpools_rx,
+            former_zone_root_archiver,
         })
     }
 
@@ -1636,20 +1637,21 @@ impl InstanceRunner {
             ),
         }
 
-        // Take a zone bundle whenever this instance stops.
-        if let Err(e) = self
-            .zone_bundler
-            .create(
-                &running_state.running_zone,
-                ZoneBundleCause::TerminatedInstance,
-            )
-            .await
+        // Make a best-effort attempt to archive the former zone's root dataset.
+        if let Some(zone_dataset_root) =
+            running_state.running_zone.root().parent()
         {
-            error!(
+            self.former_zone_root_archiver
+                .archive_former_zone_root(zone_dataset_root.to_owned())
+                .await
+        } else {
+            // This should be impossible.
+            warn!(
                 self.log,
-                "Failed to take zone bundle for terminated instance";
+                "Failed to archive zone root for terminated instance: \
+                 non-existent parent (this should be impossible)";
                 "zone_name" => &zname,
-                "reason" => ?e,
+                "zone_root_path" => %running_state.running_zone.root(),
             );
         }
 
@@ -3065,6 +3067,7 @@ mod tests {
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use assert_matches::assert_matches;
+    use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
@@ -3076,18 +3079,14 @@ mod tests {
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-    use omicron_uuid_kinds::{ExternalZpoolUuid, InternalZpoolUuid};
+    use omicron_uuid_kinds::ExternalZpoolUuid;
     use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
+    use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
     use sled_agent_config_reconciler::UpdateDispositionReceiver;
-    use sled_agent_config_reconciler::{
-        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
-        InternalDisksReceiver,
-    };
     use sled_agent_types::attached_subnet::AttachedSubnetKind;
-    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
@@ -3097,9 +3096,7 @@ mod tests {
     use sled_agent_types::inventory::{
         CurrentUpdateDisposition, NetworkInterfaceKind,
     };
-    use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
-    use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
@@ -3247,7 +3244,7 @@ mod tests {
         nexus_client: NexusClient,
         zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
-    ) -> (Instance, MetricsRx) {
+    ) -> (Instance, MetricsRx, ArchivedZoneRoots) {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
 
@@ -3255,7 +3252,7 @@ mod tests {
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let (services, rx) =
+        let (services, rx, archived_zone_roots) =
             fake_instance_manager_services(log, nexus_client, zones, temp_dir)
                 .await;
 
@@ -3282,7 +3279,7 @@ mod tests {
             metadata,
         )
         .unwrap();
-        (instance, rx)
+        (instance, rx, archived_zone_roots)
     }
 
     fn fake_instance_initial_state(
@@ -3389,12 +3386,14 @@ mod tests {
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
+    type ArchivedZoneRoots = Arc<std::sync::Mutex<Vec<Utf8PathBuf>>>;
+
     async fn fake_instance_manager_services(
         log: &Logger,
         nexus_client: NexusClient,
         zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
-    ) -> (InstanceManagerServices, MetricsRx) {
+    ) -> (InstanceManagerServices, MetricsRx, ArchivedZoneRoots) {
         let vnic_allocator = VnicAllocator::new(
             "Instance",
             Etherstub("mystub".to_string()),
@@ -3408,36 +3407,15 @@ mod tests {
         let fake_zpool = ZpoolName::External(ExternalZpoolUuid::new_v4());
         let available_datasets_rx =
             AvailableDatasetsReceiver::fake_in_tempdir_for_tests(fake_zpool);
-        let cleanup_context = CleanupContext::default();
-        let zone_bundler = ZoneBundler::new(
-            log.new(o!("component" => "ZoneBundler")),
-            InternalDisksReceiver::fake_static(
-                Arc::new(MountConfig::default()),
-                [InternalDiskDetails::fake_details(
-                    DiskIdentity {
-                        vendor: "test-vendor".to_string(),
-                        model: "test-model".to_string(),
-                        serial: "test-serial".to_string(),
-                    },
-                    InternalZpoolUuid::new_v4(),
-                    true, // is_boot_disk
-                    None,
-                    None,
-                )]
-                .into_iter(),
-            ),
-            available_datasets_rx.clone(),
-            cleanup_context,
-        )
-        .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
+        let (former_zone_root_archiver, archived_zone_roots) =
+            FormerZoneRootArchiver::recording(log);
         let services = InstanceManagerServices {
             nexus_client,
             vnic_allocator,
             port_manager,
             available_datasets_rx,
-            zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(
                 Some(temp_dir),
                 zones,
@@ -3447,8 +3425,9 @@ mod tests {
                 CurrentlyManagedZpoolsReceiver::fake_static(std::iter::once(
                     fake_zpool,
                 )),
+            former_zone_root_archiver,
         };
-        (services, rx)
+        (services, rx, archived_zone_roots)
     }
 
     /// Holds assorted objects that are needed to test an Instance and its
@@ -3478,23 +3457,24 @@ mod tests {
         ) -> Self {
             let nexus = FakeNexusParts::new(&log).await;
             let temp_guard = Utf8TempDir::new().unwrap();
-            let (services, metrics_rx) = fake_instance_manager_services(
-                log,
-                nexus.nexus_client.clone(),
-                illumos_utils::fakes::zone::Zones::new(),
-                temp_guard.path().as_str(),
-            )
-            .await;
+            let (services, metrics_rx, _archived_zone_roots) =
+                fake_instance_manager_services(
+                    log,
+                    nexus.nexus_client.clone(),
+                    illumos_utils::fakes::zone::Zones::new(),
+                    temp_guard.path().as_str(),
+                )
+                .await;
 
             let InstanceManagerServices {
                 nexus_client,
                 vnic_allocator,
                 port_manager,
                 available_datasets_rx,
-                zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
                 currently_managed_zpools_rx,
+                former_zone_root_archiver,
             } = services;
 
             let vmm_reservoir_manager =
@@ -3507,11 +3487,11 @@ mod tests {
                     port_manager,
                     currently_managed_zpools_rx,
                     available_datasets_rx,
-                    zone_bundler,
                     zone_builder_factory,
                     vmm_reservoir_manager,
                     metrics_queue,
                     update_disposition_rx,
+                    former_zone_root_archiver,
                 )
                 .unwrap();
 
@@ -3543,7 +3523,7 @@ mod tests {
 
         let temp_guard = Utf8TempDir::new().unwrap();
 
-        let (inst, mut metrics_rx) = timeout(
+        let (inst, mut metrics_rx, _archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -3642,7 +3622,7 @@ mod tests {
                 _nexus_server,
             } = FakeNexusParts::new(&log).await;
 
-            let (inst, _) = timeout(
+            let (inst, _, _) = timeout(
                 TIMEOUT_DURATION,
                 instance_struct(
                     &log,
@@ -4270,13 +4250,14 @@ mod tests {
             } = FakeNexusParts::new(&log).await;
 
             let temp_guard = Utf8TempDir::new().unwrap();
-            let (services, _metrics_rx) = fake_instance_manager_services(
-                &log,
-                nexus_client,
-                illumos_utils::fakes::zone::Zones::new(),
-                temp_guard.path().as_str(),
-            )
-            .await;
+            let (services, _metrics_rx, _archived_zone_roots) =
+                fake_instance_manager_services(
+                    &log,
+                    nexus_client,
+                    illumos_utils::fakes::zone::Zones::new(),
+                    temp_guard.path().as_str(),
+                )
+                .await;
             let propolis_id = PropolisUuid::new_v4();
             let instance_id = InstanceUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
@@ -4483,7 +4464,7 @@ mod tests {
             illumos_utils::fakes::zone::Zones::new_with_halt_control();
 
         // Create an instance but don't start it.
-        let (inst, _metrics_rx) = timeout(
+        let (inst, _metrics_rx, archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -4547,6 +4528,16 @@ mod tests {
             .expect("zone did not start halting");
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         assert_eq!(zname, propolis_zone_name(&propolis_id));
+
+        // The zone's logs must have been archived *before* the zone began
+        // halting, since uninstalling the zone removes its root filesystem.
+        let archived = archived_zone_roots.lock().unwrap().clone();
+        assert_eq!(
+            archived.iter().map(|path| path.file_name()).collect::<Vec<_>>(),
+            [Some(zname.as_str())],
+            "expected the Propolis zone's dataset root to be archived exactly \
+             once before the zone is halted. instead, we archived: {archived:?}",
+        );
 
         // We should still have no response on the instance state channel.
         match put_rx.try_recv() {
@@ -4631,7 +4622,7 @@ mod tests {
             illumos_utils::fakes::zone::Zones::new_with_halt_control();
 
         // Create an instance but don't start it.
-        let (inst, _metrics_rx) = timeout(
+        let (inst, _metrics_rx, _archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
