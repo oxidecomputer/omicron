@@ -17,6 +17,7 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
+use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -60,6 +61,7 @@ use slog::{Logger, debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::atomic::AtomicUsize;
@@ -70,7 +72,8 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
-use tokio::task::{self, JoinHandle};
+use tokio::task;
+use tokio_util::task::AbortOnDropHandle;
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
@@ -102,20 +105,14 @@ impl From<GimletPowerState> for PowerState {
     }
 }
 
+// This is a Vec of (component ID, serial console task).
+type SerialConsoleTasks = Vec<(String, AbortOnDropHandle<Infallible>)>;
+
 pub struct Gimlet {
     sp: sp::Handle<Handler>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    serial_console_tasks: Vec<JoinHandle<()>>,
+    tasks: SpTasks<SerialConsoleTasks>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
-}
-
-impl Drop for Gimlet {
-    fn drop(&mut self) {
-        // default join handle drop behavior is to detach; we want to abort
-        for task in &self.serial_console_tasks {
-            task.abort();
-        }
-    }
 }
 
 #[async_trait]
@@ -196,7 +193,6 @@ impl Gimlet {
 
         let mut incoming_console_tx = HashMap::new();
         let mut serial_console_addrs = HashMap::new();
-        let mut serial_console_tasks = Vec::new();
 
         // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
@@ -205,10 +201,12 @@ impl Gimlet {
             return Ok(Self {
                 sp: sp::Handle::rot_only(),
                 serial_console_addrs,
-                serial_console_tasks,
+                tasks: SpTasks::RotOnly,
                 power_state_rx: None,
             });
         };
+
+        let mut serial_console_tasks = Vec::new();
 
         // bind to our two local "KSZ" ports
         let servers = UdpServer::bind_pair(network_config, &log).await?;
@@ -276,9 +274,12 @@ impl Gimlet {
                     Arc::clone(&attached_mgs),
                     log.new(slog::o!("serial-console" => id.to_string())),
                 );
-                serial_console_tasks.push(task::spawn(async move {
-                    serial_console.run().await
-                }));
+                serial_console_tasks.push((
+                    id.to_owned(),
+                    AbortOnDropHandle::new(task::spawn(async move {
+                        serial_console.run().await
+                    })),
+                ));
             }
         }
         let (power_state, power_state_rx) =
@@ -289,18 +290,27 @@ impl Gimlet {
             attached_mgs,
             incoming_console_tx,
             power_state,
-            log,
+            log.clone(),
             update_state,
         );
-        let sp =
-            sp::Handle::spawn(servers, ereport_servers, ereport_state, handler);
+        let (sp, udp_task) = sp::Handle::spawn(
+            servers,
+            ereport_servers,
+            ereport_state,
+            handler,
+            &log,
+        );
 
         Ok(Self {
             sp,
             serial_console_addrs,
-            serial_console_tasks,
+            tasks: SpTasks::Running { udp_task, extra: serial_console_tasks },
             power_state_rx: Some(power_state_rx),
         })
+    }
+
+    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<SerialConsoleTasks> {
+        &mut self.tasks
     }
 
     pub fn power_state_rx(&self) -> Option<watch::Receiver<GimletPowerState>> {
@@ -417,7 +427,7 @@ impl SerialConsoleTcpTask {
         Ok(())
     }
 
-    async fn run(mut self) {
+    async fn run(mut self) -> Infallible {
         loop {
             // wait for incoming connections, discarding any serial console
             // packets received while we don't have one
