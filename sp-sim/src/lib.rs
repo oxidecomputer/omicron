@@ -148,13 +148,17 @@ pub struct SimRack {
 
 impl SimRack {
     pub async fn start(config: &Config, log: &Logger) -> Result<Self> {
+        let rack_ignition_state =
+            sidecar::RackIgnitionState::new(&config.simulated_sps);
+
         let mut sidecars =
             Vec::with_capacity(config.simulated_sps.sidecar.len());
         for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
             sidecars.push(
                 Sidecar::spawn(
-                    config,
                     sidecar,
+                    i,
+                    rack_ignition_state.clone(),
                     log.new(slog::o!("slot" => format!("sidecar {}", i))),
                 )
                 .await?,
