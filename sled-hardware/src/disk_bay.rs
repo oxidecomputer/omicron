@@ -27,6 +27,7 @@
 use crate::DiskFirmware;
 use crate::DiskHealthMap;
 use crate::DiskLocation;
+use crate::NvmeHealthLogPage;
 use crate::UnparsedDisk;
 use crate::nvme_instance::NvmeInstance;
 use camino::Utf8PathBuf;
@@ -34,7 +35,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
-use sled_agent_types::inventory::{NvmeHealth, NvmeHealthError};
+use sled_agent_types::inventory::NvmeHealthError;
 use slog::{Logger, warn};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -403,7 +404,7 @@ impl ObservedNvmeBay<'_> {
 pub(crate) struct PolledDisk {
     pub disk: UnparsedDisk,
     /// The disk's health, or why it could not be read.
-    pub health: Result<NvmeHealth, NvmeHealthError>,
+    pub health: Result<NvmeHealthLogPage, NvmeHealthError>,
 }
 
 /// One bay from a single hardware poll.
@@ -504,7 +505,7 @@ pub(crate) fn resolve_bays(
         bay: DiskBay,
         disk: Option<UnparsedDisk>,
         // Only for a disk read on this poll.
-        health: Option<Result<NvmeHealth, NvmeHealthError>>,
+        health: Option<Result<NvmeHealthLogPage, NvmeHealthError>>,
         disk_source: DiskSource,
     }
 
@@ -926,7 +927,7 @@ mod tests {
     fn described_with_health(
         observed: &ObservedBay,
         facts: Option<&NvmeFacts>,
-        health: Result<NvmeHealth, NvmeHealthError>,
+        health: Result<NvmeHealthLogPage, NvmeHealthError>,
     ) -> PolledBay {
         let (bay, disk) = match describe_bay_from_topology(observed).unwrap() {
             BayDescription::Complete(bay) => (bay, None),
@@ -939,8 +940,8 @@ mod tests {
         PolledBay::Described { bay, disk }
     }
 
-    fn fake_health() -> NvmeHealth {
-        NvmeHealth::new_fake(chrono::DateTime::UNIX_EPOCH)
+    fn fake_health() -> NvmeHealthLogPage {
+        NvmeHealthLogPage::new_fake(chrono::DateTime::UNIX_EPOCH)
     }
 
     fn unreadable(location: &str) -> PolledBay {
@@ -1163,9 +1164,10 @@ mod tests {
         let first = nvme_bay(vec![namespace()]);
         let mut second = nvme_bay(vec![namespace()]);
         second.location = loc("N4");
-        let first_health = NvmeHealth { read_only: true, ..fake_health() };
+        let first_health =
+            NvmeHealthLogPage { media_errors: 3, ..fake_health() };
         let second_health =
-            NvmeHealth { reliability_degraded: true, ..fake_health() };
+            NvmeHealthLogPage { media_errors: 4, ..fake_health() };
         // The bay that loses the disk is polled first.
         let ((disks, _bays), health) = poll_with_health(
             Ok(vec![

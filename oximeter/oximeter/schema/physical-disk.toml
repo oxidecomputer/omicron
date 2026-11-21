@@ -1,0 +1,297 @@
+format_version = 1
+
+[target]
+name = "physical_disk"
+description = "A physical NVMe disk in a sled"
+authz_scope = "fleet"
+versions = [
+  { version = 1, fields = [ "disk_vendor", "disk_model", "disk_serial", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+]
+
+[fields.disk_vendor]
+type = "string"
+description = "Vendor of the disk"
+
+[fields.disk_model]
+type = "string"
+description = "Model number of the disk"
+
+[fields.disk_serial]
+type = "string"
+description = "Serial number of the disk"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the rack the disk was in when sampled"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the sled the disk was in when sampled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled the disk was in when sampled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled the disk was in when sampled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled the disk was in when sampled"
+
+[fields.sensor_number]
+type = "u8"
+description = "Number of the temperature sensor, from 1 to 8"
+
+[fields.level]
+type = "u8"
+description = """\
+Which of the controller's two thermal management temperatures this is \
+about, 1 or 2\
+"""
+
+[fields.warning]
+type = "string"
+description = """\
+Name of the warning. For `critical_warning`, one of 'available_spare_low', \
+'temperature', 'reliability_degraded', 'read_only', \
+'volatile_memory_backup_failed', 'persistent_memory_region_read_only' or \
+'indeterminate_personality_state'. For `endurance_group_critical_warning`, \
+one of 'available_spare_low', 'reliability_degraded' or 'read_only'.\
+"""
+
+[[metrics]]
+name = "temperature"
+description = "Composite temperature of the disk's controller"
+units = "degrees_celsius"
+datum_type = "f32"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "sensor_temperature"
+description = "Temperature reported by one of the disk's temperature sensors"
+units = "degrees_celsius"
+datum_type = "f32"
+versions = [
+  { added_in = 1, fields = [ "sensor_number" ] }
+]
+
+[[metrics]]
+name = "available_spare"
+description = "Remaining spare capacity, as a normalized percentage"
+units = "none"
+datum_type = "u8"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "available_spare_threshold"
+description = """\
+Percentage below which `available_spare` raises the 'available_spare_low' \
+critical warning\
+"""
+units = "none"
+datum_type = "u8"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "life_used"
+description = """\
+Vendor's estimate of the percentage of the disk's rated life that has been \
+used. This may exceed 100.\
+"""
+units = "none"
+datum_type = "u8"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "data_read"
+description = """\
+Bytes the host has read from the disk over its life. The disk counts these \
+in units of 512,000 bytes, rounded up.\
+"""
+units = "bytes"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "data_written"
+description = """\
+Bytes the host has written to the disk over its life. The disk counts these \
+in units of 512,000 bytes, rounded up.\
+"""
+units = "bytes"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "host_read_commands"
+description = "Read commands the disk has completed over its life"
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "host_write_commands"
+description = "Write commands the disk has completed over its life"
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "controller_busy_time"
+description = """\
+Time the disk's controller has been busy with I/O commands over its life. \
+The disk counts this in minutes.\
+"""
+units = "seconds"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "power_cycles"
+description = "Power cycles of the disk over its life"
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "power_on_time"
+description = """\
+Time the disk has been powered on over its life. The disk counts this in \
+hours.\
+"""
+units = "seconds"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "unsafe_shutdowns"
+description = """\
+Times the disk has lost power without first being told to shut down, over \
+its life\
+"""
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "media_errors"
+description = """\
+Times the disk's controller has detected an unrecovered data integrity \
+error, over its life\
+"""
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "error_log_entries"
+description = """\
+Entries written to the controller's Error Information log over the disk's \
+life\
+"""
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "warning_temperature_time"
+description = """\
+Time the composite temperature has been above the controller's warning \
+threshold, over the disk's life. The disk counts this in minutes.\
+"""
+units = "seconds"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "critical_temperature_time"
+description = """\
+Time the composite temperature has been above the controller's critical \
+threshold, over the disk's life. The disk counts this in minutes.\
+"""
+units = "seconds"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "thermal_management_transitions"
+description = """\
+Times the controller has begun throttling to reduce its temperature, \
+because it reached one of its thermal management temperatures\
+"""
+units = "count"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ "level" ] }
+]
+
+[[metrics]]
+name = "thermal_management_time"
+description = """\
+Time the controller has spent throttling to reduce its temperature, because \
+it reached one of its thermal management temperatures\
+"""
+units = "seconds"
+datum_type = "u64"
+versions = [
+  { added_in = 1, fields = [ "level" ] }
+]
+
+[[metrics]]
+name = "critical_warning"
+description = """\
+Whether the disk's controller is raising one of the warnings in the Critical \
+Warning field of its SMART / Health Information log page\
+"""
+units = "none"
+datum_type = "bool"
+versions = [
+  { added_in = 1, fields = [ "warning" ] }
+]
+
+[[metrics]]
+name = "endurance_group_critical_warning"
+description = """\
+Whether the disk's controller is raising one of the warnings in the \
+Endurance Group Critical Warning Summary field of its SMART / Health \
+Information log page, for one or more Endurance Groups\
+"""
+units = "none"
+datum_type = "bool"
+versions = [
+  { added_in = 1, fields = [ "warning" ] }
+]
