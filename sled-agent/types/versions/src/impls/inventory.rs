@@ -518,6 +518,20 @@ impl NvmeHealth {
             read_only: false,
         }
     }
+
+    /// Names the warnings this reading raises, for display.
+    pub fn warning_names(&self) -> Vec<&'static str> {
+        let NvmeHealth { time_collected: _, reliability_degraded, read_only } =
+            self;
+        let mut names = Vec::new();
+        if *reliability_degraded {
+            names.push("reliability degraded");
+        }
+        if *read_only {
+            names.push("read-only");
+        }
+        names
+    }
 }
 
 impl OmicronFileSourceResolverInventory {

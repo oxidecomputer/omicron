@@ -49,6 +49,9 @@ use sled_agent_types_versions::latest::inventory::InstanceManagerStatus;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
+use sled_agent_types_versions::latest::inventory::NvmeHealth;
+use sled_agent_types_versions::latest::inventory::NvmeHealthError;
+use sled_agent_types_versions::latest::inventory::NvmeHealthErrorKind;
 use sled_agent_types_versions::latest::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
@@ -1166,6 +1169,25 @@ pub struct PhysicalDisk {
     #[serde(default)]
     pub location: Option<String>,
     pub firmware: PhysicalDiskFirmware,
+    /// The disk's health as its NVMe controller reported it to sled-agent, or
+    /// why there is no reading of it.
+    //
+    // Older serialized state had no such field.
+    #[serde(default = "PhysicalDisk::nvme_health_not_recorded")]
+    pub nvme_health: Result<NvmeHealth, NvmeHealthError>,
+}
+
+impl PhysicalDisk {
+    /// The `nvme_health` of a disk whose inventory was recorded before
+    /// sled-agent reported NVMe health.
+    pub fn nvme_health_not_recorded() -> Result<NvmeHealth, NvmeHealthError> {
+        Err(NvmeHealthError {
+            kind: NvmeHealthErrorKind::NotPolled,
+            message: "this inventory was recorded before NVMe health was \
+                      collected"
+                .to_string(),
+        })
+    }
 }
 
 impl From<InventoryDisk> for PhysicalDisk {
@@ -1175,6 +1197,7 @@ impl From<InventoryDisk> for PhysicalDisk {
             variant: disk.variant.into(),
             pcie_slot: disk.pcie_slot,
             location: disk.location,
+            nvme_health: disk.nvme_health,
             firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
                 active_slot: disk.active_firmware_slot,
                 next_active_slot: disk.next_active_firmware_slot,
@@ -1414,7 +1437,8 @@ mod tests {
     use super::*;
 
     // Reconfigurator state files written before `PhysicalDisk` gained
-    // `location` (and renamed `slot` to `pcie_slot`) must still deserialize.
+    // `location` and `nvme_health` (and renamed `slot` to `pcie_slot`) must
+    // still deserialize.
     #[test]
     fn physical_disk_loads_older_serialized_form() {
         let disk = PhysicalDisk {
@@ -1427,6 +1451,7 @@ mod tests {
             pcie_slot: 5,
             location: Some("N5".to_string()),
             firmware: PhysicalDiskFirmware::Unknown,
+            nvme_health: Ok(NvmeHealth::new_fake(Utc::now())),
         };
 
         // The current form round-trips and uses the new field name.
@@ -1439,14 +1464,22 @@ mod tests {
         );
 
         // Rewrite it into the older form: `slot` instead of `pcie_slot`, and
-        // no `location` at all.
+        // no `location` or `nvme_health` at all.
         let object = current.as_object_mut().unwrap();
         let slot = object.remove("pcie_slot").unwrap();
         object.insert("slot".to_string(), slot);
         object.remove("location").unwrap();
+        object.remove("nvme_health").unwrap();
 
         let loaded: PhysicalDisk = serde_json::from_value(current).unwrap();
-        assert_eq!(loaded, PhysicalDisk { location: None, ..disk });
+        assert_eq!(
+            loaded,
+            PhysicalDisk {
+                location: None,
+                nvme_health: PhysicalDisk::nvme_health_not_recorded(),
+                ..disk
+            }
+        );
     }
 
     #[test]

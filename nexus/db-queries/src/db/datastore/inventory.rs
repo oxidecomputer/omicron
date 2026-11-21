@@ -3486,6 +3486,7 @@ impl DataStore {
                         .and_then(|lookup| lookup.get(&disk.pcie_slot))
                         .unwrap_or(&nexus_types::inventory::PhysicalDiskFirmware::Unknown);
 
+                    let nvme_health = disk.nvme_health();
                     disks.entry(sled_id).or_default().push(
                         nexus_types::inventory::PhysicalDisk {
                             identity: DiskIdentity {
@@ -3497,6 +3498,7 @@ impl DataStore {
                             pcie_slot: disk.pcie_slot,
                             location: disk.location,
                             firmware: firmware.clone(),
+                            nvme_health,
                         },
                     );
                 }

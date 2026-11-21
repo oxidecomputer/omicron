@@ -69,6 +69,8 @@ use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::NvmeHealth;
+use sled_agent_types::inventory::NvmeHealthError;
+use sled_agent_types::inventory::NvmeHealthErrorKind;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
@@ -567,7 +569,11 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
-            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
+            nvme_health: Ok(NvmeHealth {
+                reliability_degraded: true,
+                read_only: true,
+                ..NvmeHealth::new_fake(now_db_precision())
+            }),
         },
         InventoryDisk {
             identity: DiskIdentity {
@@ -583,7 +589,10 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
-            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
+            nvme_health: Err(NvmeHealthError {
+                kind: NvmeHealthErrorKind::LogPageReadFailed,
+                message: "example read failure".to_string(),
+            }),
         },
         // ... and one manufacturer for our M.2.
         InventoryDisk {
@@ -600,7 +609,10 @@ pub fn representative() -> Representative {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
-            nvme_health: Ok(NvmeHealth::new_fake(now_db_precision())),
+            nvme_health: Err(NvmeHealthError {
+                kind: NvmeHealthErrorKind::NotPolled,
+                message: "example unpolled disk".to_string(),
+            }),
         },
     ];
     let mut zpools = Vec::new();

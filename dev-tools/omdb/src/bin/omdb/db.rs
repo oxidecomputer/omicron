@@ -7607,6 +7607,7 @@ async fn cmd_db_inventory_physical_disks(
         variant: String,
         firmware: String,
         next_firmware: String,
+        nvme_health: String,
     }
 
     use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl as firmware_dsl;
@@ -7650,6 +7651,18 @@ async fn cmd_db_inventory_physical_disks(
                 (None, None)
             };
 
+        let nvme_health = match disk.nvme_health() {
+            Ok(health) => {
+                let warnings = health.warning_names();
+                if warnings.is_empty() {
+                    "ok".to_string()
+                } else {
+                    warnings.join(", ")
+                }
+            }
+            Err(error) => format!("unknown ({:?})", error.kind),
+        };
+
         DiskRow {
             inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
             sled_id: disk.sled_id.into_untyped_uuid(),
@@ -7661,6 +7674,7 @@ async fn cmd_db_inventory_physical_disks(
             variant: format!("{:?}", disk.variant),
             firmware: active_firmware.unwrap_or("UNKNOWN").to_string(),
             next_firmware: next_firmware.unwrap_or("").to_string(),
+            nvme_health,
         }
     });
 

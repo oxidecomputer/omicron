@@ -91,6 +91,7 @@ define_enums! {
     MulticastGroupStateEnum => "multicast_group_state",
     MulticastGroupMemberStateEnum => "multicast_group_member_state",
     NetworkInterfaceKindEnum => "network_interface_kind",
+    NvmeHealthErrorKindEnum => "nvme_health_error_kind",
     OximeterReadModeEnum => "oximeter_read_mode",
     PhysicalDiskKindEnum => "physical_disk_kind",
     PhysicalDiskPolicyEnum => "physical_disk_policy",

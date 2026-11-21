@@ -851,10 +851,29 @@ fn display_sleds(
             writeln!(indented, "physical disks:")?;
         }
         for disk in disks {
-            let PhysicalDisk { identity, variant, location, .. } = disk;
+            let PhysicalDisk {
+                identity, variant, location, nvme_health, ..
+            } = disk;
             let loc = location.as_deref().unwrap_or("unknown location");
             let mut indent2 = IndentWriter::new("  ", &mut indented);
             writeln!(indent2, "{variant:?}: {identity:?} in {loc}")?;
+            // A disk with nothing to report gets no line.
+            let mut indent3 = IndentWriter::new("  ", &mut indent2);
+            match nvme_health {
+                Ok(health) => {
+                    let warnings = health.warning_names();
+                    if !warnings.is_empty() {
+                        writeln!(
+                            indent3,
+                            "NVMe health warnings: {}",
+                            warnings.join(", ")
+                        )?;
+                    }
+                }
+                Err(error) => {
+                    writeln!(indent3, "NVMe health unknown: {error}")?;
+                }
+            }
         }
 
         if !zpools.is_empty() {
