@@ -691,50 +691,44 @@ impl DataStore {
         // only be performed after we are sure we didn't read a sitrep that was
         // being deleted (which is ensured by the metadata read).
         let problems = {
-            let mut problems = IdOrdMap::with_capacity(problem_requests.len());
-            for problem in problem_requests {
-                let model::fm::FmProblemRequest {
-                    id: problem_id,
-                    sitrep_id: _,
-                    requested_sitrep_id,
-                    comment,
-                } = problem;
-                let problem_id = ProblemUuid::from(problem_id);
-                let revisions = revisions_by_problem
-                    .remove(&problem_id)
-                    .filter(|revisions| !revisions.is_empty())
-                    .ok_or_else(|| {
-                        let internal_message = format!(
-                            "problem {problem_id} in sitrep {id} has no \
-                             revisions. every problem in a sitrep must have \
-                             at least one revision",
-                        );
-                        Error::InternalError { internal_message }
-                    })?;
-                // Unlike revisions, a problem need not have any links.
-                let alerts =
-                    alerts_by_problem.remove(&problem_id).unwrap_or_default();
-                let support_bundles = support_bundles_by_problem
-                    .remove(&problem_id)
-                    .unwrap_or_default();
-                problems
-                    .insert_unique(SitrepProblem {
-                        id: problem_id,
-                        requested_sitrep_id: requested_sitrep_id.into(),
-                        comment,
-                        revisions,
-                        alerts,
-                        support_bundles,
-                    })
-                    .map_err(|_| {
-                        let internal_message = format!(
-                            "encountered problem {problem_id} multiple times \
-                             in sitrep {id}. this should really not be \
-                             possible, as the ID is a primary key!",
-                        );
-                        Error::InternalError { internal_message }
-                    })?;
-            }
+            let problems = fm::AllProblems::try_from_iter(
+                problem_requests.into_iter().map(
+                    |model::fm::FmProblemRequest {
+                         id,
+                         sitrep_id: _,
+                         requested_sitrep_id,
+                         comment,
+                     }| {
+                        let id = ProblemUuid::from(id);
+                        // A problem may not have 0 revisions. However, this is
+                        // validated by `AllProblems::try_from_iter`, so we need
+                        // not check it here...which is good because we can't
+                        // quite `collect` into an `AllProblems` and the
+                        // iterator must therefore be infallible.
+                        let revisions = revisions_by_problem
+                            .remove(&id)
+                            .unwrap_or_default();
+                        // Unlike revisions, a problem need not have any alert or
+                        // support-bundle links.
+                        let alerts =
+                            alerts_by_problem.remove(&id).unwrap_or_default();
+                        let support_bundles = support_bundles_by_problem
+                            .remove(&id)
+                            .unwrap_or_default();
+                        SitrepProblem {
+                            id,
+                            requested_sitrep_id: requested_sitrep_id.into(),
+                            comment,
+                            revisions,
+                            alerts,
+                            support_bundles,
+                        }
+                    },
+                ),
+            )
+            .map_err(|e| {
+                Error::internal_error(format!("invalid sitrep {id}: {e:#}"))
+            })?;
 
             fn check_for_orphaned_problem_records<T>(
                 sitrep_id: &SitrepUuid,
@@ -3810,7 +3804,14 @@ mod tests {
             },
             cases,
             ereports_by_id,
-            problems: [resolved_problem, shared_problem].into_iter().collect(),
+            problems: fm::AllProblems::try_from_iter([
+                resolved_problem,
+                shared_problem,
+            ])
+            .expect(
+                "test problems have distinct IDs and at least one revision \
+                 each",
+            ),
         }
     }
 
