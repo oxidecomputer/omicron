@@ -47,6 +47,12 @@ pub struct DiskBay {
     pub occupant: DiskBayOccupant,
 }
 
+impl DiskBay {
+    fn new(bay: &ObservedBay, occupant: DiskBayOccupant) -> Self {
+        Self { location: bay.location.clone(), kind: bay.kind, occupant }
+    }
+}
+
 impl IdOrdItem for DiskBay {
     type Key<'a> = &'a DiskLocation;
 
@@ -294,11 +300,7 @@ impl<'a> BayDescription<'a> {
                 }));
             }
         };
-        Ok(BayDescription::Complete(DiskBay {
-            location: bay.location.clone(),
-            kind: bay.kind,
-            occupant,
-        }))
+        Ok(BayDescription::Complete(DiskBay::new(bay, occupant)))
     }
 }
 
@@ -331,11 +333,6 @@ impl ObservedNvmeBay<'_> {
             devfs_path,
             namespaces,
         } = self;
-        let describe = |occupant| DiskBay {
-            location: bay.location.clone(),
-            kind: bay.kind,
-            occupant,
-        };
 
         // The topology creates one `disk` node per usable namespace. If it
         // has none but the controller says it has some, the topology's
@@ -346,7 +343,7 @@ impl ObservedNvmeBay<'_> {
                     reason: UnusableReason::NoUsableNamespace,
                     devfs_path: devfs_path.clone(),
                 };
-                return Ok((describe(device), None));
+                return Ok((DiskBay::new(bay, device), None));
             }
             [] => {
                 return Err(DescribeError::MissingNamespace {
@@ -364,7 +361,7 @@ impl ObservedNvmeBay<'_> {
                     },
                     devfs_path: devfs_path.clone(),
                 };
-                return Ok((describe(device), None));
+                return Ok((DiskBay::new(bay, device), None));
             }
         };
 
@@ -398,7 +395,7 @@ impl ObservedNvmeBay<'_> {
             nvme_facts.firmware.clone(),
             bay.location.clone(),
         );
-        Ok((describe(DiskBayOccupant::Disk { identity }), Some(disk)))
+        Ok((DiskBay::new(bay, DiskBayOccupant::Disk { identity }), Some(disk)))
     }
 }
 
