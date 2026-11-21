@@ -30,15 +30,21 @@ use oximeter_instruments::zfs::usage::ZfsUsageProducer;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::inventory::NetworkInterfaceKind;
+use sled_hardware::DiskHealthMap;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::watch;
 use uuid::Uuid;
+
+mod disk_health;
+use disk_health::DiskHealthProducer;
 
 type TrackedLinks = HashMap<String, Target>;
 type TrackedOptePorts = HashMap<String, TargetOptePort>;
@@ -184,6 +190,7 @@ async fn metrics_task(
     sled_identifiers: SledIdentifiers,
     kstat_sampler: KstatSampler,
     server: ProducerServer,
+    disk_health: watch::Receiver<Arc<DiskHealthMap>>,
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
@@ -340,6 +347,16 @@ async fn metrics_task(
                     server
                         .registry()
                         .register_producer(zfs_producer.clone())
+                        .expect("actually infallible");
+
+                    let disk_health_producer = DiskHealthProducer::new(
+                        log.clone(),
+                        sled_identifiers.clone(),
+                        disk_health.clone(),
+                    );
+                    server
+                        .registry()
+                        .register_producer(disk_health_producer)
                         .expect("actually infallible");
                 }
             }
@@ -750,6 +767,7 @@ impl MetricsManager {
         log: &Logger,
         identifiers: SledIdentifiers,
         address: Ipv6Addr,
+        disk_health: watch::Receiver<Arc<DiskHealthMap>>,
     ) -> Result<Self, Error> {
         let sampler = KstatSampler::new(log).map_err(Error::Kstat)?;
         let server = start_producer_server(&log, identifiers.sled_id, address)?;
@@ -782,6 +800,7 @@ impl MetricsManager {
             identifiers,
             sampler,
             server,
+            disk_health,
             task_log,
             rx,
         ));

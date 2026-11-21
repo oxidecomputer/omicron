@@ -663,8 +663,12 @@ impl SledAgent {
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
         };
-        let metrics_manager =
-            MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
+        let metrics_manager = MetricsManager::new(
+            &log,
+            identifiers.clone(),
+            *sled_address.ip(),
+            long_running_task_handles.hardware_manager.subscribe_disk_health(),
+        )?;
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links).await? {

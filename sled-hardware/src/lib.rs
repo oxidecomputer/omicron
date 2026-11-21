@@ -8,7 +8,7 @@ use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
-use sled_agent_types::inventory::{NvmeHealth, NvmeHealthError};
+use sled_agent_types::inventory::NvmeHealthError;
 use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 
@@ -27,6 +27,11 @@ pub mod disk;
 pub use disk::*;
 pub mod disk_bay;
 pub use disk_bay::{DiskBay, DiskBayOccupant, UnusableReason};
+pub mod nvme_health;
+pub use nvme_health::{
+    NvmeCriticalWarnings, NvmeEnduranceGroupWarnings, NvmeHealthLogPage,
+    NvmeThermalManagement,
+};
 pub mod nvme_instance;
 pub mod softnpu;
 mod topo_bays;
@@ -41,7 +46,7 @@ pub mod underlay;
 /// are not updated together: a disk in one may briefly be missing from the
 /// other.
 pub type DiskHealthMap =
-    HashMap<DiskIdentity, Result<NvmeHealth, NvmeHealthError>>;
+    HashMap<DiskIdentity, Result<NvmeHealthLogPage, NvmeHealthError>>;
 
 /// Failure while probing for switch hardware at startup.
 #[derive(Debug, thiserror::Error)]

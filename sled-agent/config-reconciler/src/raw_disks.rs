@@ -124,17 +124,18 @@ impl RawDisksSender {
                 let firmware = disk.firmware();
                 let nvme_health = match disk {
                     RawDisk::Synthetic(_) => Ok(NvmeHealth::new_fake(now)),
-                    RawDisk::Real(_) => disk_health
-                        .get(disk.identity())
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            Err(NvmeHealthError {
+                    RawDisk::Real(_) => {
+                        match disk_health.get(disk.identity()) {
+                            Some(Ok(page)) => Ok(page.inventory_health()),
+                            Some(Err(error)) => Err(error.clone()),
+                            None => Err(NvmeHealthError {
                                 kind: NvmeHealthErrorKind::NotPolled,
                                 message: "the latest hardware poll did not \
-                                          read this disk"
+                                      read this disk"
                                     .to_string(),
-                            })
-                        }),
+                            }),
+                        }
+                    }
                 };
                 InventoryDisk {
                     identity: disk.identity().clone(),
@@ -181,6 +182,7 @@ mod tests {
     use sled_agent_types::disk::DiskVariant;
     use sled_hardware::DiskFirmware;
     use sled_hardware::DiskLocation;
+    use sled_hardware::NvmeHealthLogPage;
     use sled_hardware::UnparsedDisk;
     use sled_storage::disk::RawSyntheticDisk;
     use std::collections::BTreeMap;
@@ -429,15 +431,15 @@ mod tests {
         );
 
         // A reading that could not be mistaken for a fake one.
-        let polled_health =
-            NvmeHealth { read_only: true, ..NvmeHealth::new_fake(Utc::now()) };
+        let mut polled_page = NvmeHealthLogPage::new_fake(Utc::now());
+        polled_page.critical_warnings.read_only = true;
         let read_error = NvmeHealthError {
             kind: NvmeHealthErrorKind::LogPageReadFailed,
             message: "controller is on fire".to_string(),
         };
         let (_health_tx, health_rx) =
             watch::channel(Arc::new(DiskHealthMap::from([
-                (polled.identity().clone(), Ok(polled_health.clone())),
+                (polled.identity().clone(), Ok(polled_page.clone())),
                 (unreadable.identity().clone(), Err(read_error.clone())),
             ])));
 
@@ -451,7 +453,14 @@ mod tests {
                 .clone()
         };
 
-        assert_eq!(health_of(&polled), Ok(polled_health));
+        assert_eq!(
+            health_of(&polled),
+            Ok(NvmeHealth {
+                time_collected: polled_page.time_collected,
+                reliability_degraded: false,
+                read_only: true,
+            })
+        );
         assert_eq!(health_of(&unreadable), Err(read_error));
         // A real disk the poll did not read is an error, not healthy.
         assert_eq!(
