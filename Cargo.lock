@@ -4602,6 +4602,7 @@ dependencies = [
 name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "camino",
  "dropshot 0.18.0",
  "gateway-client",
