@@ -162,13 +162,14 @@ pub(crate) fn assemble_bays(
             }
         }
 
-        // The bay names a driver for the device behind the bridge, but no
-        // occupant was found under it.
-        let empty = matches!(
+        // No occupant was found under the bay. An empty bay has no
+        // `binding/driver` and stays `Empty`. A bay that names a driver has
+        // a device in it that the topology did not enumerate.
+        let no_occupant = matches!(
             &bay.contents,
             Ok(BayContents { occupant: ObservedOccupant::Empty, .. })
         );
-        if empty {
+        if no_occupant {
             match bay.binding_driver.clone() {
                 // The disk enumerator produced nothing.
                 Some(driver) if driver == "nvme" => {
@@ -178,6 +179,7 @@ pub(crate) fn assemble_bays(
                     driver: Some(driver),
                     devfs_path: None,
                 }),
+                // The bay is empty.
                 None => {}
             }
         }
