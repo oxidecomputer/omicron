@@ -5,7 +5,9 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
+use crate::db::pagination::{
+    Paginator, paginated, paginated_multicolumn, paginated_multicolumn3,
+};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -3257,13 +3259,15 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
+                // TODO: errors_by_collection is not a UNIQUE INDEX, and idx is
+                // unique per collection only due to an application-level
+                // invariant. This should be a database-level invariant.
                 let batch = paginated(
                     dsl::inv_collection_error,
                     dsl::idx,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
-                .order_by(dsl::idx)
                 .select(InvCollectionError::as_select())
                 .load_async(&*conn)
                 .await
@@ -4218,9 +4222,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_omicron_sled_config_zone_nic,
-                    dsl::id,
+                    (dsl::sled_config_id, dsl::id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4230,7 +4234,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_config_id, row.id));
                 nics.extend(batch.into_iter().map(|found_zone_nic| {
                     (
                         (found_zone_nic.sled_config_id, found_zone_nic.id),
@@ -4256,9 +4261,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated_multicolumn(
+                let batch = paginated_multicolumn3(
                     dsl::inv_omicron_sled_config_zone_external_ip,
-                    (dsl::zone_id, dsl::ip),
+                    (dsl::sled_config_id, dsl::zone_id, dsl::ip),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4268,7 +4273,9 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| (row.zone_id, row.ip));
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_config_id, row.zone_id, row.ip)
+                });
                 for row in batch {
                     external_ips
                         .entry((row.sled_config_id, row.zone_id))
@@ -4291,9 +4298,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_omicron_sled_config_zone,
-                    dsl::id,
+                    (dsl::sled_config_id, dsl::id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4303,7 +4310,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_config_id, row.id));
                 zones.extend(batch);
             }
 
@@ -4373,9 +4381,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_omicron_sled_config_dataset,
-                    dsl::id,
+                    (dsl::sled_config_id, dsl::id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4385,7 +4393,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_config_id, row.id));
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
@@ -4414,9 +4423,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_omicron_sled_config_disk,
-                    dsl::id,
+                    (dsl::sled_config_id, dsl::id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4426,7 +4435,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_config_id, row.id));
 
                 for row in batch {
                     let mut config_with_id = omicron_sled_configs
@@ -4533,9 +4543,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_last_reconciliation_disk_result,
-                    dsl::disk_id,
+                    (dsl::sled_id, dsl::disk_id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4545,7 +4555,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.disk_id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.disk_id));
 
                 for row in batch {
                     let sled_map =
@@ -4572,9 +4583,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_last_reconciliation_dataset_result,
-                    dsl::dataset_id,
+                    (dsl::sled_id, dsl::dataset_id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4584,7 +4595,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.dataset_id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.dataset_id));
 
                 for row in batch {
                     let sled_map =
@@ -4647,15 +4659,17 @@ impl DataStore {
                 IdOrdMap<SingleMeasurementInventory>,
             > = BTreeMap::new();
 
-            // TODO-performance This ought to be paginated like the other
-            // queries in this method, but
-            //
-            // (a) this table's primary key is 3 columns, and we don't have
-            //     `paginated` support that wide
-            // (b) we expect a very small number of reconciled measurements
-            //
-            // so we just do the lazy thing and load all the rows at once.
-            let rows = dsl::inv_single_measurements
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_single_measurements,
+                    (dsl::sled_id, dsl::path),
+                    &p.current_pagparams(),
+                )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSingleMeasurements::as_select())
                 .load_async(&*conn)
@@ -4663,6 +4677,11 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.path.clone())
+                });
+                rows.extend(batch);
+            }
 
             for row in rows {
                 measurements
@@ -4670,8 +4689,9 @@ impl DataStore {
                     .or_default()
                     .insert_unique(row.into())
                     .map_err(|err| {
-                        // We should never get duplicates: the table's primary
-                        // key is the path
+                        // The primary key is (inv_collection_id, sled_id,
+                        // path), so (given that the query filters by the
+                        // collection ID) the path is unique for each sled.
                         Error::internal_error(&format!(
                             "unexpected duplicate path: {}",
                             InlineErrorChain::new(&err)
@@ -4798,9 +4818,9 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::inv_last_reconciliation_zone_result,
-                    dsl::zone_id,
+                    (dsl::sled_id, dsl::zone_id),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
@@ -4810,7 +4830,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.zone_id);
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.zone_id));
 
                 for row in batch {
                     let sled_map =
@@ -6074,6 +6095,7 @@ mod test {
         SingleMeasurementInventory,
     };
     use sled_hardware_types::BaseboardId;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZeroU32;
@@ -6831,6 +6853,102 @@ mod test {
             "second external IP survived the round trip: {ips:?}",
         );
         assert_eq!(ips.len(), 2, "expected two external IPs, got {ips:?}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sled_configs_sharing_child_ids_read_back_batched() {
+        let logctx = dev::test_setup_log(
+            "sled_configs_sharing_child_ids_read_back_batched",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+
+        let mut modified_sled_id = None;
+        for mut sa in collection.sled_agents.iter_mut() {
+            let Some(ledgered) = sa.ledgered_sled_config.as_ref() else {
+                continue;
+            };
+            let has_networking_zone = ledgered
+                .zones
+                .iter()
+                .any(|zone| zone.zone_type.service_vnic().is_some());
+            if !has_networking_zone
+                || ledgered.datasets.is_empty()
+                || ledgered.disks.is_empty()
+            {
+                continue;
+            }
+            let mut last_reconciled = ledgered.clone();
+            let Some(last_reconciliation) = sa.last_reconciliation.as_mut()
+            else {
+                continue;
+            };
+            last_reconciled.generation = last_reconciled.generation.next();
+            last_reconciliation.last_reconciled_config = last_reconciled;
+            modified_sled_id = Some(sa.sled_id);
+            break;
+        }
+        let modified_sled_id = modified_sled_id.expect(
+            "representative collection has a sled with a reconciled config \
+             containing a zone with a NIC and external IP, datasets, and disks",
+        );
+
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("inserted collection");
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let config_count: i64 = {
+            use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
+            dsl::inv_omicron_sled_config
+                .filter(
+                    dsl::inv_collection_id.eq(to_db_typed_uuid(collection.id)),
+                )
+                .count()
+                .get_result_async(&*conn)
+                .await
+                .expect("counted sled configs")
+        };
+        let sleds_with_ledgered_config = collection
+            .sled_agents
+            .iter()
+            .filter(|sa| sa.ledgered_sled_config.is_some())
+            .count();
+        assert_eq!(
+            usize::try_from(config_count).expect("count fits in usize"),
+            sleds_with_ledgered_config + 1,
+            "sled {modified_sled_id} has its last-reconciled config stored \
+             separately from its ledgered config",
+        );
+
+        for batch_size in [1, 2, 3] {
+            let read = datastore
+                .inventory_collection_read_batched(
+                    &opctx,
+                    collection.id,
+                    NonZeroU32::new(batch_size).unwrap(),
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "read back collection with batch size {batch_size}: \
+                         {}",
+                        InlineErrorChain::new(&error),
+                    )
+                });
+            assert_eq!(
+                collection, read,
+                "collection read with batch size {batch_size} matches what \
+                 was written",
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
