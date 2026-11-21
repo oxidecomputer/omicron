@@ -38,7 +38,6 @@ use omicron_common::api::external::{DataPageParams, Error};
 use omicron_uuid_kinds::{GenericUuid, SledUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-use sled_hardware_types::BaseboardId;
 use slog::KV;
 use slog::Record;
 use slog::Serializer;
@@ -809,15 +808,7 @@ impl super::Nexus {
             )
             .await?
             .iter()
-            .map(|sled| {
-                (
-                    BaseboardId {
-                        part_number: sled.part_number().to_string(),
-                        serial_number: sled.serial_number().to_string(),
-                    },
-                    sled.id(),
-                )
-            })
+            .map(|sled| (sled.baseboard_id(), sled.id()))
             .collect();
 
         // It's weird to use the internal view this way. It would feel more
@@ -922,6 +913,7 @@ mod test {
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::inventory::SvcsError;
     use sled_agent_types::inventory::ZpoolHealth;
+    use sled_hardware_types::BaseboardId;
     use slog::Logger;
     use slog::o;
     use tufaceous_artifact::ArtifactHash;
