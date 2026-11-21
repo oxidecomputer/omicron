@@ -25,7 +25,7 @@ use rand::{Rng, distr::Alphanumeric};
 use regex::Regex;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map};
 use zip::{result::ZipError, write::FullFileOptions};
 
 // The name of the snapshot created from the zone root filesystem.
@@ -619,7 +619,7 @@ impl LogsHandle {
         mut zip: zip::ZipWriter<W>,
     ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
-            let SmfLogs { in_zone, mut archived } = SmfLogs::new(&service_logs);
+            let SmfLogs { in_zone, archived } = SmfLogs::new(&service_logs);
 
             //  - Grab all of the service's SMF logs in the zone -
 
@@ -634,30 +634,40 @@ impl LogsHandle {
             //  - Grab all of the service's archived logs -
 
             // Debug datasets can hold copies of a log under the same name,
-            // and the zip can hold only one. Keep the largest, since an
-            // interrupted archive leaves a partial copy.
-            let mut largest: HashMap<_, &LogFile> = HashMap::new();
-            for &log in &archived {
-                largest
-                    .entry(log.path.file_name())
-                    .and_modify(|kept| {
-                        if log.size > kept.size {
-                            *kept = log;
-                        }
-                    })
-                    .or_insert(log);
-            }
-            archived.retain(|&log| {
-                let keep = std::ptr::eq(log, largest[&log.path.file_name()]);
-                if !keep {
+            // and the zip can hold only one. Keep the largest, based on the
+            // guess that the other is a partial copy from an interrupted
+            // archive.
+            let mut by_name: BTreeMap<&str, &LogFile> = BTreeMap::new();
+            for log in archived {
+                let Some(name) = log.path.file_name() else {
                     warn!(
                         self.log,
-                        "skipping archived log with the same name as another";
+                        "sled-diagnostics unable to determine filename for \
+                        logfile";
                         "logfile" => %log.path,
                     );
-                }
-                keep
-            });
+                    continue;
+                };
+                let skipped = match by_name.entry(name) {
+                    btree_map::Entry::Vacant(entry) => {
+                        entry.insert(log);
+                        continue;
+                    }
+                    btree_map::Entry::Occupied(mut entry) => {
+                        if log.size > entry.get().size {
+                            entry.insert(log)
+                        } else {
+                            log
+                        }
+                    }
+                };
+                warn!(
+                    self.log,
+                    "skipping archived log with the same name as another";
+                    "logfile" => %skipped.path,
+                );
+            }
+            let mut archived: Vec<&LogFile> = by_name.into_values().collect();
 
             // Since these logs can be spread out across multiple U.2 devices
             // we need to sort them by timestamp.
