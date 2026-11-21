@@ -20,7 +20,7 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_default_subnet_pool;
 use nexus_test_utils::resource_helpers::create_external_subnet_in_pool;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_stopped;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
@@ -360,19 +360,7 @@ async fn attach_test_impl(
             instance
         }
         InstanceState::Stopped => {
-            create_instance_with(
-                client,
-                PROJECT_NAME,
-                INSTANCE_NAME,
-                &Default::default(),
-                vec![],
-                vec![],
-                /* start = */ false,
-                None,
-                None,
-                vec![],
-            )
-            .await
+            create_instance_stopped(client, PROJECT_NAME, INSTANCE_NAME).await
         }
         _ => panic!("this test should only use a stopped or running instance"),
     };
@@ -782,19 +770,7 @@ async fn cannot_delete_attached_external_subnet(
     assert!(member_subnet.is_supernet_of(&external_subnet.subnet));
 
     // Create a stopped instance, and attach the subnet.
-    let _ = create_instance_with(
-        client,
-        PROJECT_NAME,
-        INSTANCE_NAME,
-        &Default::default(),
-        vec![],
-        vec![],
-        /* start = */ false,
-        None,
-        None,
-        vec![],
-    )
-    .await;
+    let _ = create_instance_stopped(client, PROJECT_NAME, INSTANCE_NAME).await;
     let _ = attach_external_subnet(client, INSTANCE_NAME, EXTERNAL_SUBNET_NAME)
         .await;
 
@@ -1052,19 +1028,7 @@ async fn test_limited_collaborator_external_subnet_lifecycle(
     assert_eq!(updated.identity.description.as_str(), "updated description");
 
     // Create a stopped instance to attach the subnet to.
-    create_instance_with(
-        client,
-        PROJECT_NAME,
-        INSTANCE_NAME,
-        &Default::default(),
-        vec![],
-        vec![],
-        /* start = */ false,
-        None,
-        None,
-        vec![],
-    )
-    .await;
+    create_instance_stopped(client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // Attach the subnet.
     let attach_url =
