@@ -236,6 +236,9 @@ impl Sidecar {
     /// * Entry 1 is the other sidecar, if one is configured.
     /// * Further entries are gimlets and PSCs, each in config order.
     /// * All remaining entries have `target: None`.
+    ///
+    /// See [`FakeIgnition::rack_target`] for how switch targets are mapped to
+    /// rack targets.
     pub async fn current_ignition_state(
         &self,
     ) -> [IgnitionState; NUM_IGNITION_TARGETS] {
@@ -1266,10 +1269,9 @@ impl FakeIgnition {
         let switch_target = usize::from(target);
         if switch_target >= NUM_IGNITION_TARGETS {
             Err(SpError::Ignition(IgnitionError::InvalidPort))
-        }
-        // For sidecar 1, swap entries 0 and 1. For more information, see
-        // Sidecar::current_ignition_state.
-        else if switch_target == 0 {
+        } else if switch_target == 0 {
+            // For sidecar 1, swap entries 0 and 1. For more information, see
+            // Sidecar::current_ignition_state.
             Ok(self.local_sidecar)
         } else if switch_target == self.local_sidecar {
             Ok(0)
