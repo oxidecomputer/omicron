@@ -9,6 +9,7 @@ use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
@@ -707,6 +708,16 @@ impl DataStore {
         opctx: &OpContext,
         authz_blueprint: &authz::Blueprint,
     ) -> Result<Blueprint, Error> {
+        self.blueprint_read_batched(opctx, authz_blueprint, SQL_BATCH_SIZE)
+            .await
+    }
+
+    async fn blueprint_read_batched(
+        &self,
+        opctx: &OpContext,
+        authz_blueprint: &authz::Blueprint,
+        batch_size: NonZeroU32,
+    ) -> Result<Blueprint, Error> {
         opctx.authorize(authz::Action::Read, authz_blueprint).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let blueprint_id =
@@ -745,7 +756,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -797,7 +808,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -826,7 +837,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -856,7 +867,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -899,7 +910,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -930,7 +941,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -977,13 +988,13 @@ impl DataStore {
                     use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
                     let mut rows = Vec::new();
                     let mut paginator = Paginator::new(
-                        SQL_BATCH_SIZE,
+                        batch_size,
                         dropshot::PaginationOrder::Ascending,
                     );
                     while let Some(p) = paginator.next() {
-                        let batch = paginated(
+                        let batch = paginated_multicolumn(
                             dsl::bp_clickhouse_keeper_zone_id_to_node_id,
-                            dsl::omicron_zone_id,
+                            (dsl::omicron_zone_id, dsl::keeper_id),
                             &p.current_pagparams(),
                         )
                         .filter(
@@ -997,8 +1008,9 @@ impl DataStore {
                             public_error_from_diesel(e, ErrorHandler::Server)
                         })?;
 
-                        paginator =
-                            p.found_batch(&batch, &|k| k.omicron_zone_id);
+                        paginator = p.found_batch(&batch, &|k| {
+                            (k.omicron_zone_id, k.keeper_id)
+                        });
                         rows.extend(batch);
                     }
                     rows
@@ -1008,13 +1020,13 @@ impl DataStore {
                     use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
                     let mut rows = Vec::new();
                     let mut paginator = Paginator::new(
-                        SQL_BATCH_SIZE,
+                        batch_size,
                         dropshot::PaginationOrder::Ascending,
                     );
                     while let Some(p) = paginator.next() {
-                        let batch = paginated(
+                        let batch = paginated_multicolumn(
                             dsl::bp_clickhouse_server_zone_id_to_node_id,
-                            dsl::omicron_zone_id,
+                            (dsl::omicron_zone_id, dsl::server_id),
                             &p.current_pagparams(),
                         )
                         .filter(
@@ -1028,8 +1040,9 @@ impl DataStore {
                             public_error_from_diesel(e, ErrorHandler::Server)
                         })?;
 
-                        paginator =
-                            p.found_batch(&batch, &|s| s.omicron_zone_id);
+                        paginator = p.found_batch(&batch, &|s| {
+                            (s.omicron_zone_id, s.server_id)
+                        });
                         rows.extend(batch);
                     }
                     rows
@@ -1061,7 +1074,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -1090,7 +1103,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -1119,7 +1132,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -1149,7 +1162,7 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -1188,7 +1201,7 @@ impl DataStore {
             let mut bbs = BTreeMap::new();
 
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
@@ -1224,13 +1237,13 @@ impl DataStore {
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
+                batch_size,
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let batch = paginated(
+                let batch = paginated_multicolumn(
                     dsl::bp_single_measurements,
-                    dsl::image_artifact_sha256,
+                    (dsl::sled_id, dsl::image_artifact_sha256),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
@@ -1252,8 +1265,9 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator =
-                    p.found_batch(&batch, &|(z, _)| z.image_artifact_sha256);
+                paginator = p.found_batch(&batch, &|(m, _)| {
+                    (m.sled_id, m.image_artifact_sha256)
+                });
                 rows.extend(batch);
             }
             rows
@@ -3912,14 +3926,11 @@ mod tests {
         let artifacts = BlueprintArtifactMeasurements::new(measurements)
             .expect("this is non-zero");
 
+        let artifacts_measurements =
+            BlueprintMeasurements::Artifacts { artifacts: artifacts.clone() };
         for (s, _) in planning_input.all_sleds(SledFilter::InService) {
             builder
-                .sled_set_measurements(
-                    s,
-                    BlueprintMeasurements::Artifacts {
-                        artifacts: artifacts.clone(),
-                    },
-                )
+                .sled_set_measurements(s, artifacts_measurements.clone())
                 .expect("set measurements");
         }
 
@@ -3934,6 +3945,38 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
+
+        let sleds_with_measurements = blueprint2
+            .sleds
+            .values()
+            .filter(|s| s.measurements == artifacts_measurements)
+            .count();
+        assert!(
+            sleds_with_measurements >= 2,
+            "at least two sleds share the same measurement hashes, \
+             found {sleds_with_measurements}",
+        );
+        for batch_size in [1, 2] {
+            let batched_read = datastore
+                .blueprint_read_batched(
+                    &opctx,
+                    &authz_blueprint2,
+                    NonZeroU32::new(batch_size).unwrap(),
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "read back blueprint with batch size {batch_size}: \
+                         {}",
+                        InlineErrorChain::new(&error),
+                    )
+                });
+            assert_eq!(
+                blueprint2, batched_read,
+                "blueprint read with batch size {batch_size} matches what \
+                 was written",
+            );
+        }
 
         for (_, s) in blueprint_read.sleds {
             match s.measurements {
