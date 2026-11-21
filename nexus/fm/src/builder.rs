@@ -254,9 +254,11 @@ impl<'a> SitrepBuilder<'a> {
             },
             cases,
             ereports_by_id,
-            // TODO(eliza): figure out what resolved problems need no longer be
-            // carried forward!
-            problems: Default::default(),
+            // TODO(eliza): resolved problems are currently carried forward
+            // forever. We need to track when they have been completely
+            // rendezvoused and stop carrying those forward (and bump
+            // `problem_generation` when we do).
+            problems,
         };
         Ok((sitrep, report))
     }
