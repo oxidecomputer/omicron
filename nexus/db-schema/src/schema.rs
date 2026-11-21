@@ -3484,6 +3484,8 @@ table! {
         last_seen_health -> Nullable<crate::enums::InvZpoolHealthEnum>,
         observed_in_inv -> Nullable<Uuid>,
         time_observed -> Nullable<Timestamptz>,
+        nvme_reliability_degraded -> Nullable<Bool>,
+        nvme_read_only -> Nullable<Bool>,
     }
 }
 

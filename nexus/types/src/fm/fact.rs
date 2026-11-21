@@ -146,6 +146,8 @@ impl FactPayload {
 pub enum DiskFact {
     /// The zpool's most recently observed health is non-`Online`.
     ZpoolUnhealthy(ZpoolUnhealthyFactPayload),
+    /// The disk's NVMe controller most recently reported a critical warning.
+    NvmeHealthWarning(NvmeHealthWarningFactPayload),
 }
 
 impl DiskFact {
@@ -155,6 +157,7 @@ impl DiskFact {
     pub fn physical_disk_id(&self) -> PhysicalDiskUuid {
         match self {
             DiskFact::ZpoolUnhealthy(p) => p.physical_disk_id,
+            DiskFact::NvmeHealthWarning(p) => p.physical_disk_id,
         }
     }
 }
@@ -175,6 +178,29 @@ pub struct ZpoolUnhealthyFactPayload {
     /// back up (it may well have been GC'd by the time anyone reads the
     /// fact). If multiple `ZpoolUnhealthy` facts ever end up on the same
     /// case, this lets a human reader see which inventory each came from.
+    pub observed_in_inv: CollectionUuid,
+    /// `time_done` of `observed_in_inv`.
+    pub time_observed: DateTime<Utc>,
+}
+
+/// Payload of a [`DiskFact::NvmeHealthWarning`] fact.
+///
+/// The warnings are bits of the Critical Warning field of the controller's
+/// SMART / Health Information log page. The diagnosis engine records this
+/// fact only while at least one of them is raised.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NvmeHealthWarningFactPayload {
+    /// The physical disk this fact (and its parent case) is about.
+    /// Every fact on a Disk case must agree on this value.
+    pub physical_disk_id: PhysicalDiskUuid,
+    /// The controller warns that its reliability is degraded, due to media
+    /// errors or an internal error.
+    pub reliability_degraded: bool,
+    /// The controller warns that its media has been placed in read-only
+    /// mode.
+    pub read_only: bool,
+    /// Inventory collection that produced this observation. Recorded for
+    /// provenance only, as in [`ZpoolUnhealthyFactPayload::observed_in_inv`].
     pub observed_in_inv: CollectionUuid,
     /// `time_done` of `observed_in_inv`.
     pub time_observed: DateTime<Utc>,

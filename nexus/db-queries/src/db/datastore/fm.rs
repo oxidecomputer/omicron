@@ -2872,6 +2872,29 @@ mod tests {
             }
 
             let mut facts = iddqd::IdOrdMap::new();
+            let physical_disk_id =
+                omicron_uuid_kinds::PhysicalDiskUuid::new_v4();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "another fact for case 1".to_string(),
+                    },
+                    payload: fm::FactPayload::PhysicalDisk(
+                        fm::DiskFact::NvmeHealthWarning(
+                            fm::NvmeHealthWarningFactPayload {
+                                physical_disk_id,
+                                reliability_degraded: true,
+                                read_only: false,
+                                observed_in_inv: CollectionUuid::new_v4(),
+                                time_observed: omicron_common::now_db_precision(
+                                ),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
             facts
                 .insert_unique(fm::case::Fact {
                     metadata: fm::FactMetadata {
@@ -2882,9 +2905,7 @@ mod tests {
                     payload: fm::FactPayload::PhysicalDisk(
                         fm::DiskFact::ZpoolUnhealthy(
                             fm::ZpoolUnhealthyFactPayload {
-                                physical_disk_id:
-                                    omicron_uuid_kinds::PhysicalDiskUuid::new_v4(
-                                    ),
+                                physical_disk_id,
                                 zpool_id:
                                     omicron_uuid_kinds::ZpoolUuid::new_v4(),
                                 last_seen_health:

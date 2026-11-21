@@ -3,15 +3,28 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Disk diagnosis engine.
+//!
+//! A Disk case is opened for an in-service disk when the latest inventory
+//! reports a problem with it, and closed once inventory shows the problem
+//! gone. Two signals are read, each tracked by its own kind of fact:
+//!
+//! - the health of the disk's zpool, when it is not `Online`
+//! - the critical warnings of the disk's NVMe controller, when it reports
+//!   that its reliability is degraded or that its media is read-only
 
 use crate::SitrepBuilder;
 use iddqd::{BiHashItem, BiHashMap, IdOrdItem, IdOrdMap, bi_upcast, id_upcast};
 use nexus_types::fm;
 use nexus_types::fm::DiagnosisEngineKind;
-use nexus_types::fm::{DiskFact, ZpoolUnhealthyFactPayload};
+use nexus_types::fm::{
+    DiskFact, NvmeHealthWarningFactPayload, ZpoolUnhealthyFactPayload,
+};
 use nexus_types::inventory::ZpoolHealth;
-use omicron_uuid_kinds::{CaseUuid, FactUuid, PhysicalDiskUuid, ZpoolUuid};
+use omicron_uuid_kinds::{
+    CaseUuid, FactUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
+};
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// A [`DiskFact::ZpoolUnhealthy`] payload paired with the `FactUuid` it
 /// lives under.
@@ -29,14 +42,93 @@ impl IdOrdItem for ZpoolUnhealthyFact {
     id_upcast!();
 }
 
-/// One in-service disk paired with the current observed health of its zpool.
-/// `zpool_health` is `None` when the disk's zpool was not seen in the current
-/// inventory (e.g., sled down, lossy collection).
+/// A [`DiskFact::NvmeHealthWarning`] payload paired with the `FactUuid` it
+/// lives under.
+#[derive(Clone, Copy, Debug)]
+struct NvmeHealthWarningFact {
+    fact_id: FactUuid,
+    payload: NvmeHealthWarningFactPayload,
+}
+
+impl IdOrdItem for NvmeHealthWarningFact {
+    type Key<'a> = FactUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.fact_id
+    }
+    id_upcast!();
+}
+
+/// The NVMe critical warnings this engine acts on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct NvmeWarnings {
+    reliability_degraded: bool,
+    read_only: bool,
+}
+
+impl NvmeWarnings {
+    fn any(self) -> bool {
+        self.reliability_degraded || self.read_only
+    }
+}
+
+impl fmt::Display for NvmeWarnings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let names = [
+            (self.reliability_degraded, "reliability degraded"),
+            (self.read_only, "read-only"),
+        ]
+        .into_iter()
+        .filter_map(|(raised, name)| raised.then_some(name))
+        .collect::<Vec<_>>();
+        if names.is_empty() {
+            write!(f, "none")
+        } else {
+            write!(f, "{}", names.join(", "))
+        }
+    }
+}
+
+/// What the current inventory says about one of a disk's health signals.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Signal<T> {
+    /// The inventory has no observation. This is not evidence either way:
+    /// the sled could be powered off, or the collection could be lossy.
+    Unknown,
+    Healthy,
+    Faulty(T),
+}
+
+/// One in-service disk paired with what the current inventory observed of
+/// it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DiskHealthSnapshot {
     physical_disk_id: PhysicalDiskUuid,
     zpool_id: ZpoolUuid,
+    /// `None` when the disk's zpool was not seen in the current inventory
+    /// (e.g., sled down, lossy collection).
     zpool_health: Option<ZpoolHealth>,
+    /// `None` when the current inventory has no NVMe health reading for the
+    /// disk: its sled reported no such disk, or reported an error in place
+    /// of the reading.
+    nvme_warnings: Option<NvmeWarnings>,
+}
+
+impl DiskHealthSnapshot {
+    fn zpool_signal(&self) -> Signal<ZpoolHealth> {
+        match self.zpool_health {
+            None => Signal::Unknown,
+            Some(ZpoolHealth::Online) => Signal::Healthy,
+            Some(health) => Signal::Faulty(health),
+        }
+    }
+
+    fn nvme_signal(&self) -> Signal<NvmeWarnings> {
+        match self.nvme_warnings {
+            None => Signal::Unknown,
+            Some(warnings) if warnings.any() => Signal::Faulty(warnings),
+            Some(_) => Signal::Healthy,
+        }
+    }
 }
 
 impl IdOrdItem for DiskHealthSnapshot {
@@ -55,10 +147,13 @@ struct ParsedDiskCase {
     case_id: CaseUuid,
     /// The physical disk this case is about.
     physical_disk_id: PhysicalDiskUuid,
-    /// All `ZpoolUnhealthy` facts on this case. Normally one; pathological
-    /// cases may have multiple. Regardless, the diagnosis engine keeps all of
-    /// them.
+    /// All `ZpoolUnhealthy` facts on this case. Normally at most one;
+    /// pathological cases may have more. Regardless, the diagnosis engine
+    /// keeps all of them.
     unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact>,
+    /// All `NvmeHealthWarning` facts on this case. As with
+    /// `unhealthy_facts`, normally at most one.
+    nvme_warning_facts: IdOrdMap<NvmeHealthWarningFact>,
 }
 
 /// A `ParsedDiskCase` is indexed by both the case it came from and the disk it
@@ -99,26 +194,36 @@ enum UninterpretableCase {
 /// why it cannot be interpreted.
 fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     let mut unhealthy_facts: IdOrdMap<ZpoolUnhealthyFact> = IdOrdMap::new();
+    let mut nvme_warning_facts: IdOrdMap<NvmeHealthWarningFact> =
+        IdOrdMap::new();
     let mut case_disk_id: Option<PhysicalDiskUuid> = None;
     for fact in case.facts.iter() {
         // Every fact on a physical-disk case must carry a physical-disk
         // payload; a foreign payload is a data-model violation.
         let disk_fact = fact.as_physical_disk()?;
+        let fact_disk_id = disk_fact.physical_disk_id();
+        let disk_id = *case_disk_id.get_or_insert(fact_disk_id);
+        if disk_id != fact_disk_id {
+            return Err(UninterpretableCase::DisagreeingDisks {
+                expected: disk_id,
+                found: fact_disk_id,
+            });
+        }
+        let fact_id = fact.metadata.id;
         match disk_fact {
             DiskFact::ZpoolUnhealthy(payload) => {
-                let payload = *payload;
-                let disk_id =
-                    *case_disk_id.get_or_insert(payload.physical_disk_id);
-                if disk_id != payload.physical_disk_id {
-                    return Err(UninterpretableCase::DisagreeingDisks {
-                        expected: disk_id,
-                        found: payload.physical_disk_id,
-                    });
-                }
                 unhealthy_facts
                     .insert_unique(ZpoolUnhealthyFact {
-                        fact_id: fact.metadata.id,
-                        payload,
+                        fact_id,
+                        payload: *payload,
+                    })
+                    .expect("fact ids are unique within a case");
+            }
+            DiskFact::NvmeHealthWarning(payload) => {
+                nvme_warning_facts
+                    .insert_unique(NvmeHealthWarningFact {
+                        fact_id,
+                        payload: *payload,
                     })
                     .expect("fact ids are unique within a case");
             }
@@ -127,7 +232,12 @@ fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     let Some(physical_disk_id) = case_disk_id else {
         return Err(UninterpretableCase::NoFacts);
     };
-    Ok(ParsedDiskCase { case_id: case.id, physical_disk_id, unhealthy_facts })
+    Ok(ParsedDiskCase {
+        case_id: case.id,
+        physical_disk_id,
+        unhealthy_facts,
+        nvme_warning_facts,
+    })
 }
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
@@ -146,6 +256,35 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         .map(|z| (z.id, z.health))
         .collect();
 
+    // Likewise, index every NVMe health reading in this inventory by the
+    // sled that reported it and the disk's (vendor, model, serial). A disk
+    // whose sled reported an error instead of a reading is left out, just as
+    // a disk the sled did not report at all is.
+    let observed_nvme_warnings: BTreeMap<
+        (SledUuid, &str, &str, &str),
+        NvmeWarnings,
+    > = input
+        .inventory()
+        .sled_agents
+        .iter()
+        .flat_map(|sa| {
+            sa.disks.iter().filter_map(move |disk| {
+                let health = disk.nvme_health.as_ref().ok()?;
+                let key = (
+                    sa.sled_id,
+                    disk.identity.vendor.as_str(),
+                    disk.identity.model.as_str(),
+                    disk.identity.serial.as_str(),
+                );
+                let warnings = NvmeWarnings {
+                    reliability_degraded: health.reliability_degraded,
+                    read_only: health.read_only,
+                };
+                Some((key, warnings))
+            })
+        })
+        .collect();
+
     // The current health snapshot for every in-service disk, keyed by
     // physical_disk_id. Absence from this index is a positive signal that
     // the control plane has moved on from the disk (expungement /
@@ -157,6 +296,14 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             physical_disk_id: d.physical_disk_id,
             zpool_id: d.zpool_id,
             zpool_health: observed_zpool_health.get(&d.zpool_id).copied(),
+            nvme_warnings: observed_nvme_warnings
+                .get(&(
+                    d.sled_id,
+                    d.vendor.as_str(),
+                    d.model.as_str(),
+                    d.serial.as_str(),
+                ))
+                .copied(),
         })
         .collect();
 
@@ -209,100 +356,165 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         }
     }
 
-    // Close the surviving parent case for any disk that has recovered or left
-    // service. A still-faulty disk's facts are reconciled in the next loop; a
-    // disk in service but absent from this inventory is left alone (absence is
-    // NOT a recovery signal: the sled could be powered off, or the collection
-    // could be lossy).
+    // Close the surviving parent case for any disk that has left service.
     for parsed_case in cases.iter() {
-        let mut case_mut = builder
+        if in_service_health.contains_key(&parsed_case.physical_disk_id) {
+            continue;
+        }
+        builder
             .cases
             .case_mut(&parsed_case.case_id)
-            .expect("case_id came from builder's open cases");
-        match in_service_health.get(&parsed_case.physical_disk_id) {
-            None => {
-                case_mut.close(format!(
-                    "disk {} no longer in service",
-                    parsed_case.physical_disk_id,
-                ));
-            }
-            Some(snap) if snap.zpool_health == Some(ZpoolHealth::Online) => {
-                case_mut
-                    .close(format!("zpool {} back to Online", snap.zpool_id));
-            }
-            // Faulty or absent from inventory: leave open; the next loop
-            // reconciles the faulty ones and leaves the absent ones untouched.
-            Some(_) => {}
-        }
+            .expect("case_id came from builder's open cases")
+            .close(format!(
+                "disk {} no longer in service",
+                parsed_case.physical_disk_id,
+            ));
     }
 
-    // For each currently-faulty in-service disk, ensure its case carries
-    // exactly one fact matching the current observation: reuse the
-    // parent-forwarded case if any (dropping any stale facts), otherwise open
-    // a fresh case.
+    // For each in-service disk, make its case carry exactly the facts that
+    // match the current observations: reuse the parent-forwarded case if any
+    // (dropping its stale facts), open a fresh case if the disk is newly
+    // faulty, and close the case once nothing on it still holds.
+    //
+    // A signal absent from this inventory changes nothing. Its facts stay,
+    // and keep their case open: absence is NOT a recovery signal.
     for disk in in_service_health.iter() {
-        // Only modify "facts" for disk cases where the zpool health is known,
-        // and it's not "Online" already.
-        //
-        // For all other cases, the zpool is healthy, so we don't have
-        // a case anymore.
-        let Some(current_health) = disk.zpool_health else {
-            continue;
-        };
-        if current_health == ZpoolHealth::Online {
+        let parsed_case = cases.get2(&disk.physical_disk_id);
+        let zpool = disk.zpool_signal();
+        let nvme = disk.nvme_signal();
+
+        // Sort the parent's facts into those to keep and those to remove,
+        // and work out which signals still need a fact added.
+        let mut kept_facts = 0;
+        let mut stale_facts: Vec<(FactUuid, &'static str)> = Vec::new();
+        let mut zpool_fact_needed = matches!(zpool, Signal::Faulty(_));
+        let mut nvme_fact_needed = matches!(nvme, Signal::Faulty(_));
+        // Although we expect at most one fact of each kind on a case, the
+        // schema allows more. We look at all of them, so that every
+        // out-of-date fact is removed.
+        for fact in parsed_case.iter().flat_map(|c| c.unhealthy_facts.iter()) {
+            match zpool {
+                Signal::Unknown => kept_facts += 1,
+                Signal::Healthy => {
+                    stale_facts.push((fact.fact_id, "zpool is back to Online"));
+                }
+                Signal::Faulty(health)
+                    if fact.payload.zpool_id == disk.zpool_id
+                        && fact.payload.last_seen_health == health =>
+                {
+                    // An accurate fact is already present; keep it.
+                    kept_facts += 1;
+                    zpool_fact_needed = false;
+                }
+                Signal::Faulty(_) => stale_facts.push((
+                    fact.fact_id,
+                    "stale zpool observation, superseded by current \
+                     inventory",
+                )),
+            }
+        }
+        for fact in parsed_case.iter().flat_map(|c| c.nvme_warning_facts.iter())
+        {
+            let fact_warnings = NvmeWarnings {
+                reliability_degraded: fact.payload.reliability_degraded,
+                read_only: fact.payload.read_only,
+            };
+            match nvme {
+                Signal::Unknown => kept_facts += 1,
+                Signal::Healthy => stale_facts
+                    .push((fact.fact_id, "NVMe health warnings have cleared")),
+                Signal::Faulty(warnings) if fact_warnings == warnings => {
+                    kept_facts += 1;
+                    nvme_fact_needed = false;
+                }
+                Signal::Faulty(_) => stale_facts.push((
+                    fact.fact_id,
+                    "stale NVMe health observation, superseded by current \
+                     inventory",
+                )),
+            }
+        }
+
+        if kept_facts == 0 && !zpool_fact_needed && !nvme_fact_needed {
+            // Nothing is known to be wrong with this disk. If it has a case,
+            // every fact on that case was just found to no longer hold.
+            if let Some(parsed_case) = parsed_case {
+                let mut recovered = Vec::new();
+                if !parsed_case.unhealthy_facts.is_empty() {
+                    recovered.push(format!(
+                        "zpool {} back to Online",
+                        disk.zpool_id
+                    ));
+                }
+                if !parsed_case.nvme_warning_facts.is_empty() {
+                    recovered.push(format!(
+                        "NVMe health warnings on disk {} cleared",
+                        disk.physical_disk_id
+                    ));
+                }
+                builder
+                    .cases
+                    .case_mut(&parsed_case.case_id)
+                    .expect("case_id came from builder's open cases")
+                    .close(recovered.join("; "));
+            }
             continue;
         }
 
-        let mut case_mut = match cases.get2(&disk.physical_disk_id) {
-            Some(parsed_case) => {
-                let mut case_mut = builder
-                    .cases
-                    .case_mut(&parsed_case.case_id)
-                    .expect("case_id came from builder's open cases");
-                let mut has_match = false;
-                // Although we currently expect only one unhealthy fact for
-                // each case, the schema does allow for more than one.
-                // We iterate over all facts of these type to invalidate
-                // all the facts which are out-of-date.
-                for fact in parsed_case.unhealthy_facts.iter() {
-                    if fact.payload.zpool_id == disk.zpool_id
-                        && fact.payload.last_seen_health == current_health
-                    {
-                        // An accurate fact is already present; keep it.
-                        has_match = true;
-                    } else {
-                        // Stale observation; drop it.
-                        case_mut.remove_fact(
-                            fact.fact_id,
-                            "stale zpool observation, superseded by current \
-                             inventory",
-                        );
-                    }
+        let mut case_mut = match parsed_case {
+            Some(parsed_case) => builder
+                .cases
+                .case_mut(&parsed_case.case_id)
+                .expect("case_id came from builder's open cases"),
+            None => {
+                let mut problems = Vec::new();
+                if let Signal::Faulty(health) = zpool {
+                    problems
+                        .push(format!("zpool {} was {health}", disk.zpool_id));
                 }
-                if has_match {
-                    continue;
+                if let Signal::Faulty(warnings) = nvme {
+                    problems.push(format!(
+                        "it reported NVMe health warnings: {warnings}"
+                    ));
                 }
-                case_mut
+                builder.cases.open_case(
+                    DiagnosisEngineKind::PhysicalDisk,
+                    format!(
+                        "opened for disk {} because {}",
+                        disk.physical_disk_id,
+                        problems.join(" and ")
+                    ),
+                )
             }
-            None => builder.cases.open_case(
-                DiagnosisEngineKind::PhysicalDisk,
-                format!(
-                    "opened because zpool {} on disk {} was {current_health}",
-                    disk.zpool_id, disk.physical_disk_id
-                ),
-            ),
         };
 
-        case_mut.add_fact(
-            DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
-                physical_disk_id: disk.physical_disk_id,
-                zpool_id: disk.zpool_id,
-                last_seen_health: current_health,
-                observed_in_inv: inv_collection_id,
-                time_observed: inv_time_done,
-            }),
-            format!("zpool {} health={current_health}", disk.zpool_id),
-        );
+        for (fact_id, comment) in stale_facts {
+            case_mut.remove_fact(fact_id, comment);
+        }
+        if let (true, Signal::Faulty(health)) = (zpool_fact_needed, zpool) {
+            case_mut.add_fact(
+                DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+                    physical_disk_id: disk.physical_disk_id,
+                    zpool_id: disk.zpool_id,
+                    last_seen_health: health,
+                    observed_in_inv: inv_collection_id,
+                    time_observed: inv_time_done,
+                }),
+                format!("zpool {} health={health}", disk.zpool_id),
+            );
+        }
+        if let (true, Signal::Faulty(warnings)) = (nvme_fact_needed, nvme) {
+            case_mut.add_fact(
+                DiskFact::NvmeHealthWarning(NvmeHealthWarningFactPayload {
+                    physical_disk_id: disk.physical_disk_id,
+                    reliability_degraded: warnings.reliability_degraded,
+                    read_only: warnings.read_only,
+                    observed_in_inv: inv_collection_id,
+                    time_observed: inv_time_done,
+                }),
+                format!("NVMe health warnings: {warnings}"),
+            );
+        }
     }
 
     Ok(())
@@ -315,11 +527,16 @@ mod tests {
         FmTest, build_input, make_disk_case, make_in_service_disks,
         make_parent_sitrep, make_zpool_degraded_fact, run_analyze, set_health,
     };
+    use chrono::Utc;
+    use nexus_types::external_api::physical_disk::PhysicalDiskKind;
     use nexus_types::fm::{self, Sitrep};
     use nexus_types::in_service_disk::InServiceDisk;
     use nexus_types::inventory;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{PhysicalDiskUuid, SitrepUuid};
+    use sled_agent_types::inventory::{
+        NvmeHealth, NvmeHealthError, NvmeHealthErrorKind,
+    };
 
     /// Find the `physical_disk_id` for the given `zpool_id` in the
     /// in-service set, or fabricate a fresh one if not present (e.g., when
@@ -439,6 +656,7 @@ mod tests {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
+            other => panic!("expected a ZpoolUnhealthy fact, got {other:?}"),
         }
         logctx.cleanup_successful();
     }
@@ -488,6 +706,7 @@ mod tests {
             }) => {
                 assert_eq!(*zpool_id, target);
             }
+            other => panic!("expected a ZpoolUnhealthy fact, got {other:?}"),
         }
         logctx.cleanup_successful();
     }
@@ -760,6 +979,7 @@ mod tests {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
+            other => panic!("expected a ZpoolUnhealthy fact, got {other:?}"),
         }
         let report_str = format!("{}", report.display_multiline(0));
         assert!(
@@ -808,6 +1028,7 @@ mod tests {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
+            other => panic!("expected a ZpoolUnhealthy fact, got {other:?}"),
         }
         logctx.cleanup_successful();
     }
@@ -854,6 +1075,7 @@ mod tests {
                 assert_eq!(*zpool_id, target);
                 assert_eq!(*last_seen_health, ZpoolHealth::Faulted);
             }
+            other => panic!("expected a ZpoolUnhealthy fact, got {other:?}"),
         }
         // The case itself should still be the same one that was carried
         // forward; only the fact rotated.
@@ -911,6 +1133,7 @@ mod tests {
                 );
                 assert_eq!(*last_seen_health, ZpoolHealth::Degraded);
             }
+            other => panic!("expected a ZpoolUnhealthy fact, got {other:?}"),
         }
         assert!(open[0].case.is_open());
         logctx.cleanup_successful();
@@ -959,6 +1182,436 @@ mod tests {
         assert!(
             report_str.contains("cannot interpret case"),
             "close comment should say the case was uninterpretable, got: \
+             {report_str}",
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// Make an in-service disk for every disk in `collection` that has a
+    /// zpool, with the identity and sled the inventory reports for it, so
+    /// that the engine can find each disk's NVMe health.
+    fn in_service_disks_in_inventory(
+        collection: &inventory::Collection,
+    ) -> IdOrdMap<InServiceDisk> {
+        let in_service: IdOrdMap<InServiceDisk> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sa| {
+                // Inventory does not say which zpool is on which disk, and
+                // these tests do not care.
+                sa.disks.iter().zip(sa.zpools.iter()).map(
+                    move |(disk, zpool)| InServiceDisk {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        zpool_id: zpool.id,
+                        sled_id: sa.sled_id,
+                        vendor: disk.identity.vendor.clone(),
+                        serial: disk.identity.serial.clone(),
+                        model: disk.identity.model.clone(),
+                        variant: PhysicalDiskKind::U2,
+                    },
+                )
+            })
+            .collect();
+        assert!(
+            !in_service.is_empty(),
+            "example system should have at least one disk with a zpool"
+        );
+        in_service
+    }
+
+    /// Set what `collection` reports as the NVMe health of `disk`, panicking
+    /// if the disk is not found.
+    fn set_nvme_health(
+        collection: &mut inventory::Collection,
+        disk: &InServiceDisk,
+        nvme_health: Result<NvmeHealth, NvmeHealthError>,
+    ) {
+        for mut sa in collection.sled_agents.iter_mut() {
+            if sa.sled_id != disk.sled_id {
+                continue;
+            }
+            for inv_disk in sa.disks.iter_mut() {
+                if inv_disk.identity.serial == disk.serial {
+                    inv_disk.nvme_health = nvme_health;
+                    return;
+                }
+            }
+        }
+        panic!("disk {} not found in collection", disk.serial);
+    }
+
+    fn nvme_health(reliability_degraded: bool, read_only: bool) -> NvmeHealth {
+        NvmeHealth {
+            reliability_degraded,
+            read_only,
+            ..NvmeHealth::new_fake(Utc::now())
+        }
+    }
+
+    /// Make a parent sitrep with one open Disk case for `disk`, carrying an
+    /// `NvmeHealthWarning` fact with the given warnings.
+    fn make_parent_with_nvme_case(
+        collection: &inventory::Collection,
+        disk: &InServiceDisk,
+        reliability_degraded: bool,
+        read_only: bool,
+    ) -> Sitrep {
+        let parent_sitrep_id = SitrepUuid::new_v4();
+        let fact = make_nvme_warning_fact(
+            parent_sitrep_id,
+            collection,
+            disk,
+            reliability_degraded,
+            read_only,
+        );
+        let case = make_disk_case(
+            omicron_uuid_kinds::CaseUuid::new_v4(),
+            parent_sitrep_id,
+            [fact],
+        );
+        make_parent_sitrep(parent_sitrep_id, collection.id, [case])
+    }
+
+    /// Make a parent sitrep with one open Disk case for `disk`, carrying
+    /// both a degraded `ZpoolUnhealthy` fact and an `NvmeHealthWarning` fact.
+    fn make_parent_with_zpool_and_nvme_case(
+        collection: &inventory::Collection,
+        disk: &InServiceDisk,
+    ) -> Sitrep {
+        let parent_sitrep_id = SitrepUuid::new_v4();
+        let zpool_fact = make_zpool_degraded_fact(
+            parent_sitrep_id,
+            collection.id,
+            disk.physical_disk_id,
+            disk.zpool_id,
+        );
+        let nvme_fact = make_nvme_warning_fact(
+            parent_sitrep_id,
+            collection,
+            disk,
+            true,
+            false,
+        );
+        let case = make_disk_case(
+            omicron_uuid_kinds::CaseUuid::new_v4(),
+            parent_sitrep_id,
+            [zpool_fact, nvme_fact],
+        );
+        make_parent_sitrep(parent_sitrep_id, collection.id, [case])
+    }
+
+    fn make_nvme_warning_fact(
+        parent_sitrep_id: SitrepUuid,
+        collection: &inventory::Collection,
+        disk: &InServiceDisk,
+        reliability_degraded: bool,
+        read_only: bool,
+    ) -> fm::case::Fact {
+        fm::case::Fact {
+            metadata: fm::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_sitrep_id,
+                comment: "NVMe health warnings".to_string(),
+            },
+            payload: DiskFact::NvmeHealthWarning(
+                NvmeHealthWarningFactPayload {
+                    physical_disk_id: disk.physical_disk_id,
+                    reliability_degraded,
+                    read_only,
+                    observed_in_inv: collection.id,
+                    time_observed: Utc::now(),
+                },
+            )
+            .into(),
+        }
+    }
+
+    /// The (reliability_degraded, read_only) of an `NvmeHealthWarning` fact
+    /// about `disk`. Panics if the fact is anything else.
+    #[track_caller]
+    fn nvme_warnings_of(
+        fact: &DiskFactRef<'_>,
+        disk: &InServiceDisk,
+    ) -> (bool, bool) {
+        match &fact.disk_fact {
+            DiskFact::NvmeHealthWarning(payload) => {
+                assert_eq!(payload.physical_disk_id, disk.physical_disk_id);
+                (payload.reliability_degraded, payload.read_only)
+            }
+            other => {
+                panic!("expected an NvmeHealthWarning fact, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn opens_on_nvme_warning() {
+        for (reliability_degraded, read_only) in
+            [(true, false), (false, true), (true, true)]
+        {
+            let (logctx, mut collection, _zpools) =
+                setup("disk_open_nvme_warning");
+            let in_service = in_service_disks_in_inventory(&collection);
+            let target = in_service.iter().next().unwrap().clone();
+            set_nvme_health(
+                &mut collection,
+                &target,
+                Ok(nvme_health(reliability_degraded, read_only)),
+            );
+            let input = build_input(collection, None, in_service);
+
+            let (sitrep, _report) = run_analyze(&logctx.log, &input);
+            let facts = disk_facts(&sitrep, true);
+            assert_eq!(facts.len(), 1);
+            assert_eq!(
+                nvme_warnings_of(&facts[0], &target),
+                (reliability_degraded, read_only)
+            );
+            logctx.cleanup_successful();
+        }
+    }
+
+    #[test]
+    fn no_case_without_nvme_warning() {
+        let (logctx, mut collection, _zpools) =
+            setup("disk_no_case_without_nvme_warning");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let mut disks = in_service.iter();
+        // One disk has a reading with no warnings, and another has no
+        // reading at all. Neither is evidence of a problem.
+        let healthy = disks.next().unwrap().clone();
+        let unread = disks.next().unwrap().clone();
+        set_nvme_health(
+            &mut collection,
+            &healthy,
+            Ok(nvme_health(false, false)),
+        );
+        set_nvme_health(
+            &mut collection,
+            &unread,
+            Err(NvmeHealthError {
+                kind: NvmeHealthErrorKind::LogPageReadFailed,
+                message: "test read failure".to_string(),
+            }),
+        );
+        let input = build_input(collection, None, in_service);
+
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, false);
+        assert!(facts.is_empty(), "no Disk cases expected, got: {facts:?}");
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nvme_fact_stable_when_warnings_unchanged() {
+        let (logctx, mut collection, _zpools) = setup("disk_nvme_fact_stable");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let target = in_service.iter().next().unwrap().clone();
+        set_nvme_health(&mut collection, &target, Ok(nvme_health(false, true)));
+        let parent =
+            make_parent_with_nvme_case(&collection, &target, false, true);
+        let parent_fact_id = sole_disk_fact_id(&parent);
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].fact.metadata.id, parent_fact_id);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nvme_fact_rotates_when_warnings_change() {
+        let (logctx, mut collection, _zpools) = setup("disk_nvme_fact_rotates");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let target = in_service.iter().next().unwrap().clone();
+        // The parent saw only `read_only`; now both warnings are raised.
+        set_nvme_health(&mut collection, &target, Ok(nvme_health(true, true)));
+        let parent =
+            make_parent_with_nvme_case(&collection, &target, false, true);
+        let parent_fact_id = sole_disk_fact_id(&parent);
+        let parent_case_id = parent.cases.iter().next().unwrap().id;
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].case.id, parent_case_id);
+        assert_ne!(facts[0].fact.metadata.id, parent_fact_id);
+        assert_eq!(nvme_warnings_of(&facts[0], &target), (true, true));
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn closes_when_nvme_warnings_clear() {
+        let (logctx, mut collection, _zpools) =
+            setup("disk_close_nvme_warnings_clear");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let target = in_service.iter().next().unwrap().clone();
+        set_nvme_health(
+            &mut collection,
+            &target,
+            Ok(nvme_health(false, false)),
+        );
+        let parent =
+            make_parent_with_nvme_case(&collection, &target, true, false);
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, report) = run_analyze(&logctx.log, &input);
+        let all = disk_facts(&sitrep, false);
+        assert_eq!(all.len(), 1);
+        assert!(
+            !all[0].case.is_open(),
+            "case should be closed when the NVMe warnings clear",
+        );
+        let report_str = format!("{}", report.display_multiline(0));
+        assert!(
+            report_str.contains("NVMe health warnings on disk"),
+            "close comment should call out the recovery cause, got: \
+             {report_str}",
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn keeps_nvme_case_open_without_a_reading() {
+        // Sled-agent reported an error in place of the disk's health. The
+        // case should stay open with its fact: a missing reading is not a
+        // recovery signal.
+        let (logctx, mut collection, _zpools) =
+            setup("disk_keep_nvme_case_open_without_reading");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let target = in_service.iter().next().unwrap().clone();
+        set_nvme_health(
+            &mut collection,
+            &target,
+            Err(NvmeHealthError {
+                kind: NvmeHealthErrorKind::NotPolled,
+                message: "test unpolled disk".to_string(),
+            }),
+        );
+        let parent =
+            make_parent_with_nvme_case(&collection, &target, true, false);
+        let parent_fact_id = sole_disk_fact_id(&parent);
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].fact.metadata.id, parent_fact_id);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn zpool_and_nvme_problems_share_a_case() {
+        let (logctx, mut collection, _zpools) =
+            setup("disk_zpool_and_nvme_share_case");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let target = in_service.iter().next().unwrap().clone();
+        set_health(&mut collection, target.zpool_id, ZpoolHealth::Degraded);
+        set_nvme_health(&mut collection, &target, Ok(nvme_health(true, false)));
+
+        // Both problems appear at once: one case, with a fact for each.
+        let input = build_input(collection.clone(), None, in_service.clone());
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, true);
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0].case.id, facts[1].case.id);
+        let nvme_fact = facts
+            .iter()
+            .find(|f| matches!(f.disk_fact, DiskFact::NvmeHealthWarning(_)))
+            .expect("an NvmeHealthWarning fact");
+        assert_eq!(nvme_warnings_of(nvme_fact, &target), (true, false));
+        assert!(
+            facts
+                .iter()
+                .any(|f| matches!(f.disk_fact, DiskFact::ZpoolUnhealthy(_)))
+        );
+
+        // The zpool is degraded while the parent case only knows about the
+        // NVMe warning: the zpool fact joins the existing case.
+        let parent =
+            make_parent_with_nvme_case(&collection, &target, true, false);
+        let parent_case_id = parent.cases.iter().next().unwrap().id;
+        let parent_fact_id = sole_disk_fact_id(&parent);
+        let input = build_input(
+            collection.clone(),
+            Some(parent.clone()),
+            in_service.clone(),
+        );
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, true);
+        assert_eq!(facts.len(), 2);
+        assert!(facts.iter().all(|f| f.case.id == parent_case_id));
+        assert!(facts.iter().any(|f| f.fact.metadata.id == parent_fact_id));
+
+        // The NVMe warning clears while the zpool is still degraded: the
+        // case stays open, carrying only a zpool fact.
+        set_nvme_health(
+            &mut collection,
+            &target,
+            Ok(nvme_health(false, false)),
+        );
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+        let facts = disk_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].case.id, parent_case_id);
+        assert!(matches!(facts[0].disk_fact, DiskFact::ZpoolUnhealthy(_)));
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn zpool_recovery_leaves_nvme_fact_on_open_case() {
+        // The parent case has both kinds of fact, and the zpool is back to
+        // Online. Whether the NVMe warning is still raised or the disk has
+        // no reading at all, the case stays open with only its NVMe fact.
+        for nvme_reading in [
+            Ok(nvme_health(true, false)),
+            Err(NvmeHealthError {
+                kind: NvmeHealthErrorKind::NotPolled,
+                message: "test unpolled disk".to_string(),
+            }),
+        ] {
+            let (logctx, mut collection, _zpools) =
+                setup("disk_zpool_recovery_leaves_nvme_fact");
+            let in_service = in_service_disks_in_inventory(&collection);
+            let target = in_service.iter().next().unwrap().clone();
+            set_nvme_health(&mut collection, &target, nvme_reading);
+            let parent =
+                make_parent_with_zpool_and_nvme_case(&collection, &target);
+            let parent_case_id = parent.cases.iter().next().unwrap().id;
+
+            let input = build_input(collection, Some(parent), in_service);
+            let (sitrep, _report) = run_analyze(&logctx.log, &input);
+            let facts = disk_facts(&sitrep, true);
+            assert_eq!(facts.len(), 1);
+            assert_eq!(facts[0].case.id, parent_case_id);
+            assert_eq!(nvme_warnings_of(&facts[0], &target), (true, false));
+            logctx.cleanup_successful();
+        }
+    }
+
+    #[test]
+    fn closes_when_zpool_and_nvme_both_recover() {
+        let (logctx, mut collection, _zpools) =
+            setup("disk_close_zpool_and_nvme_recover");
+        let in_service = in_service_disks_in_inventory(&collection);
+        let target = in_service.iter().next().unwrap().clone();
+        set_nvme_health(
+            &mut collection,
+            &target,
+            Ok(nvme_health(false, false)),
+        );
+        let parent = make_parent_with_zpool_and_nvme_case(&collection, &target);
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, report) = run_analyze(&logctx.log, &input);
+        assert!(disk_facts(&sitrep, true).is_empty());
+        let report_str = format!("{}", report.display_multiline(0));
+        assert!(
+            report_str.contains("back to Online; NVMe health warnings on disk"),
+            "close comment should call out both recoveries, got: \
              {report_str}",
         );
         logctx.cleanup_successful();

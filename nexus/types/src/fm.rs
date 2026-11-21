@@ -21,8 +21,8 @@ pub use config::{
 pub mod fact;
 pub use fact::{
     CertificateExpiryFactPayload, CertificateFact, DiskFact, FactMetadata,
-    FactPayload, SagaAbandonedFactPayload, SagaFact,
-    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    FactPayload, NvmeHealthWarningFactPayload, SagaAbandonedFactPayload,
+    SagaFact, SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
     SmfServiceFact, SmfServiceFactPayload, ZpoolUnhealthyFactPayload,
 };
 pub mod display;
