@@ -212,33 +212,33 @@ impl LogFile {
     /// is an archived live log, which is probably newer than a rotated archived
     /// log).
     ///
-    /// Yes, this is all quite complex. I'm sorry i nadvance.
+    /// Yes, this is all quite complex. I'm sorry in advance.
     fn archived_file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // First, compare the file name prefixes, ignoring any extensions (i.e.
+        // We expect both paths to be files, so it would be weird if these ever
+        // returned `None`, but rather than panicking, let's just do the rest of
+        // the comparison with emptystring, which will compare similarly to
+        // `None` anyway.
+        let my_filename = self.path.file_name().unwrap_or("");
+        let other_filename = other.path.file_name().unwrap_or("");
+
+        // First, compare the SMF series names, ignoring any extensions (i.e.
         // both '.log' and '.<epoch>'). If we are comparing log files from the
         // same SMF service, these will likely be the same. This comparison
         // ignores the presence or absence of a '.log' extension.
-        self.path
-            .file_prefix()
-            .cmp(&other.path.file_prefix())
+        smf_series(my_filename)
+            .cmp(smf_series(other_filename))
             // Then, order based on the epoch suffix.
             .then_with(|| {
-                let my_epoch =
-                    self.path.file_name().and_then(epoch_from_filename);
-                let other_epoch =
-                    other.path.file_name().and_then(epoch_from_filename);
-                my_epoch.cmp(&other_epoch)
+                epoch_from_filename(my_filename)
+                    .cmp(&epoch_from_filename(other_filename))
             })
             // If the epochs are the same, tie-break based on the presence of
             // '.log'. If a file has been rotated, it should compare less than
             // one that was not rotated before it was archived.
             .then_with(|| {
-                let my_log_extension =
-                    self.path.file_name().unwrap_or("").contains(".log");
-                let other_log_extension =
-                    other.path.file_name().unwrap_or("").contains(".log");
-                my_log_extension
-                    .cmp(&other_log_extension)
+                my_filename
+                    .contains(".log")
+                    .cmp(&other_filename.contains(".log"))
                     // `true` compares as "greater than" `false`, so we must
                     // flip the ordering so that the file which has a '.log' is
                     // less than the one which does not.
