@@ -34,9 +34,8 @@ use nexus_types::identity::Resource;
 use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult,
-    IdentityMetadataCreateParams, IpVersion, ListResultVec, LookupResult,
-    LookupType, ResourceType, UpdateResult,
+    self, CreateResult, DeleteResult, IdentityMetadataCreateParams, IpVersion,
+    ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
@@ -44,11 +43,13 @@ use super::EnsureUnderlayResult;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::DataStore;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model::{
     ExternalMulticastGroup, IncompleteExternalMulticastGroup,
     IncompleteExternalMulticastGroupParams, IpPoolType, MulticastGroup,
     MulticastGroupState, Name, SqlU8, UnderlayMulticastGroup, Vni,
 };
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::external_multicast_group::NextExternalMulticastGroup;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
@@ -114,56 +115,45 @@ impl std::fmt::Display for MulticastIpAllocation {
 }
 
 impl DataStore {
-    /// List multicast groups by state.
-    ///
-    /// Used by RPW reconciler. For "Deleting" state, this includes groups with
-    /// `time_deleted` set so the RPW can clean them up.
-    pub async fn multicast_groups_list_by_state(
-        &self,
-        opctx: &OpContext,
-        state: MulticastGroupState,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<MulticastGroup> {
-        use nexus_db_schema::schema::multicast_group::dsl;
-
-        let mut query = paginated(dsl::multicast_group, dsl::id, pagparams)
-            .filter(dsl::state.eq(state));
-
-        if state != MulticastGroupState::Deleting {
-            query = query.filter(dsl::time_deleted.is_null());
-        }
-
-        query
-            .select(MulticastGroup::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     /// List multicast groups matching any of the provided states.
     ///
     /// Used by RPW reconciler. For "Deleting" state, includes groups with
     /// `time_deleted` set so the RPW can clean them up.
-    pub async fn multicast_groups_list_by_states(
+    pub async fn multicast_groups_list_by_states_batched(
         &self,
         opctx: &OpContext,
         states: &[MulticastGroupState],
-        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<MulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
-        let mut query = paginated(dsl::multicast_group, dsl::id, pagparams)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let mut groups = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let mut query = paginated(
+                dsl::multicast_group,
+                dsl::id,
+                &p.current_pagparams(),
+            )
             .filter(dsl::state.eq_any(states.to_vec()));
-
-        if !states.contains(&MulticastGroupState::Deleting) {
-            query = query.filter(dsl::time_deleted.is_null());
+            if !states.contains(&MulticastGroupState::Deleting) {
+                query = query.filter(dsl::time_deleted.is_null());
+            }
+            let batch = query
+                .select(MulticastGroup::as_select())
+                .get_results_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            paginator =
+                p.found_batch(&batch, &|group: &MulticastGroup| group.id());
+            groups.extend(batch);
         }
-
-        query
-            .select(MulticastGroup::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        Ok(groups)
     }
 
     /// Transition multicast group to "Active" state.
@@ -925,6 +915,7 @@ mod tests {
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
     use omicron_common::address::{IpRange, Ipv4Range};
+    use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
@@ -1213,26 +1204,19 @@ mod tests {
         assert_eq!(updated_group.state, MulticastGroupState::Active);
 
         // Test list by state functionality
-        let pagparams = &DataPageParams {
-            marker: None,
-            limit: std::num::NonZeroU32::new(100).unwrap(),
-            direction: dropshot::PaginationOrder::Ascending,
-        };
         let active_groups = datastore
-            .multicast_groups_list_by_state(
+            .multicast_groups_list_by_states_batched(
                 &opctx,
-                MulticastGroupState::Active,
-                pagparams,
+                &[MulticastGroupState::Active],
             )
             .await
             .expect("Should list active groups");
         assert!(active_groups.iter().any(|g| g.id() == group_default.id()));
 
         let creating_groups = datastore
-            .multicast_groups_list_by_state(
+            .multicast_groups_list_by_states_batched(
                 &opctx,
-                MulticastGroupState::Creating,
-                pagparams,
+                &[MulticastGroupState::Creating],
             )
             .await
             .expect("Should list creating groups");
@@ -1930,10 +1914,9 @@ mod tests {
         // so it won't show up in regular fetch (which filters `time_deleted IS NULL`).
         // We can verify by listing groups in Deleting state which includes deleted groups.
         let deleting_groups = datastore
-            .multicast_groups_list_by_state(
+            .multicast_groups_list_by_states_batched(
                 &opctx,
-                MulticastGroupState::Deleting,
-                &DataPageParams::max_page(),
+                &[MulticastGroupState::Deleting],
             )
             .await
             .expect("Should list deleting groups");
