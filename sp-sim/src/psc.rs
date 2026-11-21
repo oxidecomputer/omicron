@@ -16,7 +16,7 @@ use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
-use crate::sidecar::SpIgnitionPower;
+use crate::sidecar::SpIgnitionHandle;
 use crate::sp;
 use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
@@ -150,7 +150,7 @@ impl SimulatedSp for Psc {
 impl Psc {
     pub(crate) async fn spawn(
         psc: &PscConfig,
-        ignition_power: SpIgnitionPower,
+        ignition_handle: SpIgnitionHandle,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated PSC");
@@ -198,7 +198,7 @@ impl Psc {
                 servers,
                 ereport_servers,
                 ereport_state,
-                ignition_power,
+                ignition_handle,
                 handler,
                 &log,
             );

@@ -434,6 +434,9 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoUpload, HttpError> {
+        // `tuf_repo_insert` checks this too, but check it here so we don't
+        // stream and verify the whole repo before refusing the request.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let mut loader = RepositoryLoader::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,

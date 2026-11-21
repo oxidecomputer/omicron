@@ -178,7 +178,7 @@ impl SpClient {
     }
 }
 
-/// Represents connections both ports of an SP client.
+/// Connections to both ports of a simulated SP.
 pub(crate) struct DualPortSpClient {
     port1: SpClient,
     port2: SpClient,
@@ -211,8 +211,8 @@ impl DualPortSpClient {
         target: u8,
         command: IgnitionCommand,
     ) {
-        // We arbitrarily choose port 1 for ignition commands, but either port
-        // could be used.
+        // Both ports share the same ignition state, so it doesn't matter which
+        // port we use. We arbitrarily choose port 1 here.
         self.port1.ignition_command(target, command).await;
     }
 
@@ -222,8 +222,8 @@ impl DualPortSpClient {
         system_type: SystemType,
         expected: SystemPowerState,
     ) {
-        // We arbitrarily choose port 1 for ignition power state assertions, but
-        // either port could be used.
+        // Both ports share the same ignition state, so it doesn't matter which
+        // port we use. We arbitrarily choose port 1 here.
         self.port1.assert_power(target, system_type, expected).await;
     }
 }
