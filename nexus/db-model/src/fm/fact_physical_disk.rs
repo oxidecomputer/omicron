@@ -16,7 +16,8 @@ use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_physical_disk;
 use nexus_types::fm;
 use nexus_types::fm::{
-    DiskFact, FactMetadata, FactPayload, ZpoolUnhealthyFactPayload,
+    DiskFact, FactMetadata, FactPayload, NvmeHealthWarningFactPayload,
+    ZpoolUnhealthyFactPayload,
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
@@ -31,6 +32,7 @@ impl_enum_type!(
     pub enum FmFactPhysicalDiskKind;
 
     ZpoolUnhealthy => b"zpool_unhealthy"
+    NvmeHealthWarning => b"nvme_health_warning"
 );
 
 /// Diesel row for the `fm_fact_physical_disk` table.
@@ -60,8 +62,14 @@ pub struct FmFactPhysicalDisk {
     // Columns for the `ZpoolUnhealthy` kind.
     pub zpool_id: Option<DbTypedUuid<ZpoolKind>>,
     pub last_seen_health: Option<InvZpoolHealth>,
+
+    // Columns for both the `ZpoolUnhealthy` and `NvmeHealthWarning` kinds.
     pub observed_in_inv: Option<DbTypedUuid<CollectionKind>>,
     pub time_observed: Option<DateTime<Utc>>,
+
+    // Columns for the `NvmeHealthWarning` kind.
+    pub nvme_reliability_degraded: Option<bool>,
+    pub nvme_read_only: Option<bool>,
 }
 
 impl FmFactRow for FmFactPhysicalDisk {
@@ -88,6 +96,8 @@ impl FmFactRow for FmFactPhysicalDisk {
             last_seen_health: None,
             observed_in_inv: None,
             time_observed: None,
+            nvme_reliability_degraded: None,
+            nvme_read_only: None,
         };
         // Each arm populates the columns belonging to its `kind` and leaves
         // every other payload column `None`. A column missed here is caught
@@ -96,6 +106,12 @@ impl FmFactRow for FmFactPhysicalDisk {
             DiskFact::ZpoolUnhealthy(p) => {
                 row.zpool_id = Some(p.zpool_id.into());
                 row.last_seen_health = Some(p.last_seen_health.into());
+                row.observed_in_inv = Some(p.observed_in_inv.into());
+                row.time_observed = Some(p.time_observed);
+            }
+            DiskFact::NvmeHealthWarning(p) => {
+                row.nvme_reliability_degraded = Some(p.reliability_degraded);
+                row.nvme_read_only = Some(p.read_only);
                 row.observed_in_inv = Some(p.observed_in_inv.into());
                 row.time_observed = Some(p.time_observed);
             }
@@ -142,6 +158,33 @@ impl FmFactRow for FmFactPhysicalDisk {
                     },
                 ))
             }
+            FmFactPhysicalDiskKind::NvmeHealthWarning => {
+                FactPayload::PhysicalDisk(DiskFact::NvmeHealthWarning(
+                    NvmeHealthWarningFactPayload {
+                        physical_disk_id: self.physical_disk_id.into(),
+                        reliability_degraded: self
+                            .nvme_reliability_degraded
+                            .ok_or_else(|| {
+                                missing_column(
+                                    kind,
+                                    "nvme_reliability_degraded",
+                                )
+                            })?,
+                        read_only: self.nvme_read_only.ok_or_else(|| {
+                            missing_column(kind, "nvme_read_only")
+                        })?,
+                        observed_in_inv: self
+                            .observed_in_inv
+                            .ok_or_else(|| {
+                                missing_column(kind, "observed_in_inv")
+                            })?
+                            .into(),
+                        time_observed: self.time_observed.ok_or_else(|| {
+                            missing_column(kind, "time_observed")
+                        })?,
+                    },
+                ))
+            }
         };
         Ok(fm::case::Fact {
             metadata: FactMetadata {
@@ -161,6 +204,9 @@ impl FmFactRow for FmFactPhysicalDisk {
 fn db_kind(disk_fact: &DiskFact) -> FmFactPhysicalDiskKind {
     match disk_fact {
         DiskFact::ZpoolUnhealthy(_) => FmFactPhysicalDiskKind::ZpoolUnhealthy,
+        DiskFact::NvmeHealthWarning(_) => {
+            FmFactPhysicalDiskKind::NvmeHealthWarning
+        }
     }
 }
 

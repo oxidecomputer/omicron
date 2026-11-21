@@ -8639,7 +8639,8 @@ ON omicron.public.fm_case (sitrep_id);
 -- represented as typed columns. The `fm_fact_physical_disk` table below holds
 -- the physical-disk engine's facts.
 CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_physical_disk_kind AS ENUM (
-    'zpool_unhealthy'
+    'zpool_unhealthy',
+    'nvme_health_warning'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
@@ -8669,8 +8670,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
     -- Columns for a 'zpool_unhealthy' fact. NULL for any other kind.
     zpool_id UUID,
     last_seen_health omicron.public.inv_zpool_health,
+
+    -- Columns for both a 'zpool_unhealthy' and an 'nvme_health_warning' fact.
     observed_in_inv UUID,
     time_observed TIMESTAMPTZ,
+
+    -- Columns for an 'nvme_health_warning' fact. NULL for any other kind.
+    nvme_reliability_degraded BOOL,
+    nvme_read_only BOOL,
 
     PRIMARY KEY (sitrep_id, id),
 
@@ -8680,6 +8687,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
         kind != 'zpool_unhealthy' OR (
             zpool_id IS NOT NULL
             AND last_seen_health IS NOT NULL
+            AND observed_in_inv IS NOT NULL
+            AND time_observed IS NOT NULL
+        )
+    ),
+    CONSTRAINT nvme_health_warning_columns_present CHECK (
+        kind != 'nvme_health_warning' OR (
+            nvme_reliability_degraded IS NOT NULL
+            AND nvme_read_only IS NOT NULL
             AND observed_in_inv IS NOT NULL
             AND time_observed IS NOT NULL
         )
@@ -10029,7 +10044,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '322.0.0', NULL)
+    (TRUE, NOW(), NOW(), '323.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
