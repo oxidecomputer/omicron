@@ -14,18 +14,17 @@ use crate::disk_bay::{
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use gethostname::gethostname;
 use iddqd::IdOrdMap;
 use illumos_devinfo::{DevInfo, Node, Property};
-use libnvme::health::{HealthLogPage, HealthLogPageError};
+use libnvme::health::HealthLogPageError;
 use libnvme::namespace::NamespaceDiscoveryLevel;
 use libnvme::{Nvme, controller::Controller};
 use libtopo::{Snapshot, TopoHdl};
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::inventory::{
-    NvmeCriticalWarnings, NvmeEnduranceGroupWarnings, NvmeHealth,
-    NvmeHealthError, NvmeHealthErrorKind, NvmeThermalManagement,
+    NvmeHealth, NvmeHealthError, NvmeHealthErrorKind,
 };
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
@@ -485,92 +484,13 @@ fn nvme_facts(
         firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
     );
 
-    let health = controller_lock
-        .get_health_log_page()
-        .map(|page| nvme_health_from_log_page(page, Utc::now()));
+    let health = controller_lock.get_health_log_page().map(|page| NvmeHealth {
+        time_collected: Utc::now(),
+        reliability_degraded: page.critical_warnings.reliability_degraded,
+        read_only: page.critical_warnings.read_only,
+    });
 
     Ok((NvmeFacts { pci_vid, usable_namespaces, firmware }, health))
-}
-
-fn nvme_health_from_log_page(
-    page: HealthLogPage,
-    time_collected: DateTime<Utc>,
-) -> NvmeHealth {
-    // No controller can plausibly reach a count this large, so there is
-    // nothing better to do with one than clamp it.
-    let saturate = |count: u128| u64::try_from(count).unwrap_or(u64::MAX);
-
-    let HealthLogPage {
-        critical_warnings,
-        endurance_group_warnings,
-        temperature,
-        available_spare_percent,
-        available_spare_threshold_percent,
-        life_used_percent,
-        data_read_bytes,
-        data_written_bytes,
-        host_read_commands,
-        host_write_commands,
-        controller_busy_minutes,
-        power_cycles,
-        power_on_hours,
-        unsafe_shutdowns,
-        media_errors,
-        error_log_entries,
-        warning_temperature_minutes,
-        critical_temperature_minutes,
-        temperature_sensors,
-        thermal_management,
-    } = page;
-
-    NvmeHealth {
-        time_collected,
-        critical_warnings: NvmeCriticalWarnings {
-            available_spare_low: critical_warnings.available_spare_low,
-            temperature: critical_warnings.temperature,
-            reliability_degraded: critical_warnings.reliability_degraded,
-            read_only: critical_warnings.read_only,
-            volatile_memory_backup_failed: critical_warnings
-                .volatile_memory_backup_failed,
-            persistent_memory_region_read_only: critical_warnings
-                .persistent_memory_region_read_only,
-            indeterminate_personality_state: critical_warnings
-                .indeterminate_personality_state,
-        },
-        endurance_group_warnings: endurance_group_warnings.map(|warnings| {
-            NvmeEnduranceGroupWarnings {
-                available_spare_low: warnings.available_spare_low,
-                reliability_degraded: warnings.reliability_degraded,
-                read_only: warnings.read_only,
-            }
-        }),
-        temperature_kelvin: temperature.map(|t| t.kelvin()),
-        available_spare_percent,
-        available_spare_threshold_percent,
-        life_used_percent,
-        data_read_bytes: saturate(data_read_bytes),
-        data_written_bytes: saturate(data_written_bytes),
-        host_read_commands: saturate(host_read_commands),
-        host_write_commands: saturate(host_write_commands),
-        controller_busy_minutes: saturate(controller_busy_minutes),
-        power_cycles: saturate(power_cycles),
-        power_on_hours: saturate(power_on_hours),
-        unsafe_shutdowns: saturate(unsafe_shutdowns),
-        media_errors: saturate(media_errors),
-        error_log_entries: saturate(error_log_entries),
-        warning_temperature_minutes,
-        critical_temperature_minutes,
-        temperature_sensors_kelvin: temperature_sensors
-            .map(|sensor| sensor.map(|t| t.kelvin())),
-        thermal_management: thermal_management.map(|thermal| {
-            NvmeThermalManagement {
-                temp1_transitions: thermal.temp1_transitions,
-                temp2_transitions: thermal.temp2_transitions,
-                temp1_seconds: thermal.temp1_seconds,
-                temp2_seconds: thermal.temp2_seconds,
-            }
-        }),
-    }
 }
 
 // Poll just enough of the device info tree to get the Baseboard. We really
@@ -1116,114 +1036,5 @@ dfadfasdfasdfdf  Manufacturer: a4x2
 
         assert!(parse_smbios_output(&logctx.log, output).is_none());
         logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn nvme_health_from_log_page_converts_fields() {
-        use crate::illumos::nvme_health_from_log_page;
-        use chrono::Utc;
-        use libnvme::health::{
-            CriticalWarnings, EnduranceGroupWarnings, HealthLogPage,
-            ThermalManagement,
-        };
-        use libnvme::temperature::Temperature;
-        use sled_agent_types::inventory::{
-            NvmeCriticalWarnings, NvmeEnduranceGroupWarnings,
-        };
-
-        let kelvin = |k| Temperature::from_kelvin(k);
-        let mut temperature_sensors = [None; 8];
-        temperature_sensors[0] = kelvin(321);
-        temperature_sensors[7] = kelvin(328);
-        let page = HealthLogPage {
-            critical_warnings: CriticalWarnings {
-                available_spare_low: true,
-                temperature: false,
-                reliability_degraded: true,
-                read_only: false,
-                volatile_memory_backup_failed: Some(true),
-                persistent_memory_region_read_only: Some(false),
-                indeterminate_personality_state: None,
-            },
-            endurance_group_warnings: Some(EnduranceGroupWarnings {
-                available_spare_low: false,
-                reliability_degraded: true,
-                read_only: false,
-            }),
-            temperature: kelvin(320),
-            available_spare_percent: 99,
-            available_spare_threshold_percent: 10,
-            life_used_percent: 3,
-            data_read_bytes: 512_000,
-            // Too large for a u64.
-            data_written_bytes: u128::from(u64::MAX) + 1,
-            host_read_commands: 1,
-            host_write_commands: 2,
-            controller_busy_minutes: 3,
-            power_cycles: 4,
-            power_on_hours: 5,
-            unsafe_shutdowns: 6,
-            media_errors: 7,
-            error_log_entries: 8,
-            warning_temperature_minutes: Some(9),
-            critical_temperature_minutes: None,
-            temperature_sensors,
-            thermal_management: Some(ThermalManagement {
-                temp1_transitions: 10,
-                temp2_transitions: 11,
-                temp1_seconds: 12,
-                temp2_seconds: 13,
-            }),
-        };
-
-        let time_collected = Utc::now();
-        let health = nvme_health_from_log_page(page, time_collected);
-
-        assert_eq!(health.time_collected, time_collected);
-        assert_eq!(
-            health.critical_warnings,
-            NvmeCriticalWarnings {
-                available_spare_low: true,
-                temperature: false,
-                reliability_degraded: true,
-                read_only: false,
-                volatile_memory_backup_failed: Some(true),
-                persistent_memory_region_read_only: Some(false),
-                indeterminate_personality_state: None,
-            }
-        );
-        assert_eq!(
-            health.endurance_group_warnings,
-            Some(NvmeEnduranceGroupWarnings {
-                available_spare_low: false,
-                reliability_degraded: true,
-                read_only: false,
-            })
-        );
-        assert_eq!(health.temperature_kelvin, Some(320));
-        assert_eq!(health.available_spare_percent, 99);
-        assert_eq!(health.available_spare_threshold_percent, 10);
-        assert_eq!(health.life_used_percent, 3);
-        assert_eq!(health.data_read_bytes, 512_000);
-        assert_eq!(health.data_written_bytes, u64::MAX);
-        assert_eq!(health.host_read_commands, 1);
-        assert_eq!(health.host_write_commands, 2);
-        assert_eq!(health.controller_busy_minutes, 3);
-        assert_eq!(health.power_cycles, 4);
-        assert_eq!(health.power_on_hours, 5);
-        assert_eq!(health.unsafe_shutdowns, 6);
-        assert_eq!(health.media_errors, 7);
-        assert_eq!(health.error_log_entries, 8);
-        assert_eq!(health.warning_temperature_minutes, Some(9));
-        assert_eq!(health.critical_temperature_minutes, None);
-        assert_eq!(
-            health.temperature_sensors_kelvin,
-            [Some(321), None, None, None, None, None, None, Some(328)]
-        );
-        let thermal = health.thermal_management.unwrap();
-        assert_eq!(thermal.temp1_transitions, 10);
-        assert_eq!(thermal.temp2_transitions, 11);
-        assert_eq!(thermal.temp1_seconds, 12);
-        assert_eq!(thermal.temp2_seconds, 13);
     }
 }

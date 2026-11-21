@@ -1163,8 +1163,9 @@ mod tests {
         let first = nvme_bay(vec![namespace()]);
         let mut second = nvme_bay(vec![namespace()]);
         second.location = loc("N4");
-        let first_health = NvmeHealth { media_errors: 3, ..fake_health() };
-        let second_health = NvmeHealth { media_errors: 4, ..fake_health() };
+        let first_health = NvmeHealth { read_only: true, ..fake_health() };
+        let second_health =
+            NvmeHealth { reliability_degraded: true, ..fake_health() };
         // The bay that loses the disk is polled first.
         let ((disks, _bays), health) = poll_with_health(
             Ok(vec![

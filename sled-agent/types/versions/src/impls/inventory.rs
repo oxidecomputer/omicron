@@ -28,7 +28,7 @@ use crate::latest::inventory::{
     HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
     ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    NetworkInterface, NexusExternalIps, NvmeCriticalWarnings, NvmeHealth,
+    NetworkInterface, NexusExternalIps, NvmeHealth,
     OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
     OmicronZoneType, OmicronZonesConfig,
@@ -509,39 +509,13 @@ impl BootPartitionContents {
 }
 
 impl NvmeHealth {
-    /// Returns the health of an unused disk with no problems, for disks that
-    /// are not backed by a real NVMe controller.
+    /// Returns the health of a disk with no warnings, for disks that are not
+    /// backed by a real NVMe controller.
     pub fn new_fake(time_collected: DateTime<Utc>) -> NvmeHealth {
         NvmeHealth {
             time_collected,
-            critical_warnings: NvmeCriticalWarnings {
-                available_spare_low: false,
-                temperature: false,
-                reliability_degraded: false,
-                read_only: false,
-                volatile_memory_backup_failed: None,
-                persistent_memory_region_read_only: None,
-                indeterminate_personality_state: None,
-            },
-            endurance_group_warnings: None,
-            temperature_kelvin: None,
-            available_spare_percent: 100,
-            available_spare_threshold_percent: 10,
-            life_used_percent: 0,
-            data_read_bytes: 0,
-            data_written_bytes: 0,
-            host_read_commands: 0,
-            host_write_commands: 0,
-            controller_busy_minutes: 0,
-            power_cycles: 0,
-            power_on_hours: 0,
-            unsafe_shutdowns: 0,
-            media_errors: 0,
-            error_log_entries: 0,
-            warning_temperature_minutes: None,
-            critical_temperature_minutes: None,
-            temperature_sensors_kelvin: [None; 8],
-            thermal_management: None,
+            reliability_degraded: false,
+            read_only: false,
         }
     }
 }

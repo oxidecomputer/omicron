@@ -430,7 +430,7 @@ mod tests {
 
         // A reading that could not be mistaken for a fake one.
         let polled_health =
-            NvmeHealth { media_errors: 7, ..NvmeHealth::new_fake(Utc::now()) };
+            NvmeHealth { read_only: true, ..NvmeHealth::new_fake(Utc::now()) };
         let read_error = NvmeHealthError {
             kind: NvmeHealthErrorKind::LogPageReadFailed,
             message: "controller is on fire".to_string(),
