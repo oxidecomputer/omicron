@@ -504,6 +504,7 @@ impl Restart {
                                 ereport.class(),
                             ),
                         )
+                        .map(|_| ())
                     } else {
                         Ok(())
                     }
@@ -527,6 +528,7 @@ impl Restart {
                                 ereport.class(),
                             ),
                         )
+                        .map(|_| ())
                     } else {
                         Ok(())
                     }
