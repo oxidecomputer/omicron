@@ -188,47 +188,61 @@ impl LogFile {
         }
     }
 
-    pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Yet again, we must unfortunately do something somewhat janky due to
-        // the existence of archived live log files that lack the '.log'
-        // extension (see https://github.com/oxidecomputer/omicron/pull/11889).
-        fn file_stem_and_epoch(filename: &str) -> (&str, Option<&str>) {
-            let (name, mtime) = split_numeric_suffix(filename);
-            // Trim any '.log' extension from the filename, so that archived
-            // live logs don't sort before earlier archived log files, and are
-            // instead ordered by mtime.
-            let stem = name.trim_end_matches(".log");
-            (stem, mtime)
-        }
+    /// Compares the file name of two log files, ignoring the path.
+    ///
+    /// For archived log files from a SMF service, prefer
+    /// [`LogFile::archived_file_name_cmp`].
+    fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.path.file_name().cmp(&other.path.file_name())
+    }
 
-        // These paths should always have a file name, as they are never
-        // directory paths, but if we don't have one for whatever reason,
-        // emptystring will always compare lower lexicographically...
-        let my_name = self.path.file_name().unwrap_or("");
-        let other_name = other.path.file_name().unwrap_or("");
-        let (my_stem, my_epoch) = file_stem_and_epoch(my_name);
-        let (other_stem, other_epoch) = file_stem_and_epoch(other_name);
-
-        // First, compare the file stems themselves. If we are comparing log
-        // files from the same SMF service, these will likely be the same. This
-        // comparison ignores the presence or absence of a '.log' extension.
-        my_stem
-            .cmp(&other_stem)
+    /// A special file-name comparison for archived log files.
+    ///
+    /// We must, yet again, unfortunately do something somewhat janky due to the
+    /// existence of archived live log files that lack the '.log' extension (see
+    /// https://github.com/oxidecomputer/omicron/pull/11889). This comparison
+    /// tries to preferentially order files with the same file prefix (i.e. the
+    /// part prior to any extensions) based on the numeric value of the
+    /// `.<epoch>` extension, ignoring whether or not there is a `.log`
+    /// extension. If the epoch is the same (which it really oughtn't be), we
+    /// tie-break based on the presence of the `.log` extension, with
+    /// `<svc>.log.1234` comparing *lower* than `<svc>.1234` (since the latter
+    /// is an archived live log, which is probably newer than a rotated archived
+    /// log).
+    ///
+    /// Yes, this is all quite complex. I'm sorry i nadvance.
+    fn archived_file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // First, compare the file name prefixes, ignoring any extensions (i.e.
+        // both '.log' and '.<epoch>'). If we are comparing log files from the
+        // same SMF service, these will likely be the same. This comparison
+        // ignores the presence or absence of a '.log' extension.
+        self.path
+            .file_prefix()
+            .cmp(&other.path.file_prefix())
             // Then, order based on the epoch suffix.
-            .then_with(|| my_epoch.cmp(&other_epoch))
-            // Finally, if the mtimes are the same, tie-break based on the
-            // presence of '.log'. If a file has been rotated, it should
-            // compare less than one that was not rotated before it was
-            // archived.
             .then_with(|| {
-                my_name
-                    .contains(".log")
-                    .cmp(&other_name.contains(".log"))
+                let my_epoch =
+                    self.path.file_name().and_then(epoch_from_filename);
+                let other_epoch =
+                    other.path.file_name().and_then(epoch_from_filename);
+                my_epoch.cmp(&other_epoch)
+            })
+            // If the epochs are the same, tie-break based on the presence of
+            // '.log'. If a file has been rotated, it should compare less than
+            // one that was not rotated before it was archived.
+            .then_with(|| {
+                let my_log_extension =
+                    self.path.file_name().unwrap_or("").contains(".log");
+                let other_log_extension =
+                    other.path.file_name().unwrap_or("").contains(".log");
+                my_log_extension
+                    .cmp(&other_log_extension)
                     // `true` compares as "greater than" `false`, so we must
                     // flip the ordering so that the file which has a '.log' is
                     // less than the one which does not.
                     .reverse()
             })
+            .then_with(|| self.file_name_cmp(other))
     }
 
     /// Returns true if the file's content may overlap `date_range`
@@ -292,7 +306,7 @@ impl SvcLogs {
     /// scattered across several different directories -- and we care more
     /// about filename than which directory they are in.
     pub fn sort_by_file_name(&mut self) {
-        self.archived.sort_unstable_by(LogFile::file_name_cmp);
+        self.archived.sort_unstable_by(LogFile::archived_file_name_cmp);
         self.extra.sort_unstable_by(LogFile::file_name_cmp);
     }
 }
@@ -1196,7 +1210,7 @@ mod tests {
     // the live log when the zone was archived (`<svc>.<epoch>`). See
     // https://github.com/oxidecomputer/omicron/issues/9271 for details.
     #[test]
-    fn test_sort_by_file_name_archived_live_logs() {
+    fn test_sort_by_archived_file_name() {
         // The log files in the expected sorting order.
         let expected = [
             "/pool/a/oxide-blah:default.log.1600000000",
