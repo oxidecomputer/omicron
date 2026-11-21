@@ -33,7 +33,6 @@ use nexus_types::observed_saga::{
     SagaOwnerState,
 };
 use omicron_certificates::TlsCertificate;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -419,11 +418,10 @@ impl InputLoader {
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .certificate_list_for(
+                .certificate_list_all(
                     opctx,
                     Some(ServiceKind::Nexus),
-                    &PaginatedBy::Id(p.current_pagparams()),
-                    None,
+                    &p.current_pagparams(),
                 )
                 .await
                 .context("failed to list certificates")?;
