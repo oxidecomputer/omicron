@@ -308,11 +308,11 @@ impl ObservedBay {
             (devfs_path, "io/devfs-path"),
             (logical_disk, "storage/logical-disk"),
         ];
-        if let Some(error) =
-            props.iter().find_map(|(prop, _)| prop.as_ref().err())
-        {
-            self.record_problem(topology_problem(&node.key, error));
-            return;
+        for (prop, _) in props {
+            if let Err(error) = prop {
+                self.record_problem(topology_problem(&node.key, error));
+                return;
+            }
         }
 
         let value = |prop: &Prop<String>| prop.clone().ok().flatten();
