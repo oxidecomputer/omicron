@@ -298,23 +298,27 @@ impl FmAnalysis {
         let mut sitrep_builder = fm::SitrepBuilder::new(&opctx.log, &inputs);
         let result = fm::diagnosis::analyze(&mut sitrep_builder);
         let end_time = Utc::now();
-        let (sitrep, report) = sitrep_builder.build(self.nexus_id, end_time);
+        let built = sitrep_builder.build(self.nexus_id, end_time);
 
-        // Did it work?
-        if let Err(e) = result {
-            let error = InlineErrorChain::new(&*e);
-            slog::error!(
-                &opctx.log,
-                "fault management analysis failed";
-                &error,
-            );
-            return status::AnalysisStatus {
-                start_time,
-                end_time,
-                capacity: None,
-                outcome: status::AnalysisOutcome::Error(e.to_string()),
-            };
-        }
+        // Did it work? Either the diagnosis engines or building the sitrep
+        // from their output may have failed.
+        let (sitrep, report) = match result.and_then(|()| built) {
+            Ok(built) => built,
+            Err(e) => {
+                let error = InlineErrorChain::new(&*e);
+                slog::error!(
+                    &opctx.log,
+                    "fault management analysis failed";
+                    &error,
+                );
+                return status::AnalysisStatus {
+                    start_time,
+                    end_time,
+                    capacity: None,
+                    outcome: status::AnalysisOutcome::Error(e.to_string()),
+                };
+            }
+        };
 
         // Is the new sitrep identical to the parent sitrep? If so, we're done.
         if let Some(parent) = inputs.parent_sitrep() {

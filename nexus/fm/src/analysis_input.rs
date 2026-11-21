@@ -1007,8 +1007,9 @@ mod tests {
             .close("i'm closing it because i want to");
 
         // Build the final sitrep
-        let (output_sitrep, report) =
-            sitrep_builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now());
+        let (output_sitrep, report) = sitrep_builder
+            .build(OmicronZoneUuid::new_v4(), chrono::Utc::now())
+            .expect("sitrep should build");
         eprintln!("{}", report.display_multiline(0));
 
         let open_case1 = output_sitrep

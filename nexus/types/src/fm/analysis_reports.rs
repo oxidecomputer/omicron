@@ -12,10 +12,11 @@ use super::ereport::EreportId;
 use crate::observed_saga::{ObservedSagaState, SagaOwnerState};
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use omicron_generation_kinds::ProblemRevNum;
 use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
-    AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
-    SledUuid, SupportBundleUuid,
+    AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, ProblemUuid,
+    SitrepUuid, SledUuid, SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -31,6 +32,8 @@ pub struct AnalysisReport {
     pub cases: IdOrdMap<CaseReport>,
     #[serde(default)]
     pub log: DebugLog,
+    #[serde(default)]
+    pub active_problems: IdOrdMap<ActiveProblemReport>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +42,51 @@ pub struct CaseReport {
     #[serde(flatten)]
     pub metadata: case::Metadata,
     pub log: DebugLog,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveProblemReport {
+    pub id: ProblemUuid,
+    /// The sitrep in which a diagnosis engine first requested this problem.
+    pub requested_sitrep_id: SitrepUuid,
+    /// The ID of the sitrep in which the most recent revision of this problem
+    /// was made.
+    pub revised_sitrep_id: SitrepUuid,
+    /// Whether the problem is active or resolved as of its latest revision.
+    pub state: ProblemState,
+    /// The (operator-facing) summary of this problem, as of its latest
+    /// revision.
+    pub summary: String,
+    /// A human-readable comment explaining why the diagnosis engine created
+    /// this problem.
+    pub comment: String,
+    pub current_problem_code: u32,
+    pub revision: ProblemRevNum,
+    pub total_alerts: usize,
+    pub new_alerts: usize,
+    pub total_support_bundles: usize,
+    pub new_support_bundles: usize,
+    pub log: DebugLog,
+}
+
+/// The state of a problem as of its latest revision, as recorded in an
+/// [`ActiveProblemReport`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemState {
+    Active,
+    Resolved {
+        /// The sitrep ID of the revision that resolved the problem.
+        sitrep_id: SitrepUuid,
+        /// The `time_resolved` value of that revision.
+        time_resolved: DateTime<Utc>,
+    },
+}
+
+impl ProblemState {
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, Self::Resolved { .. })
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -158,7 +206,8 @@ impl AnalysisReportDisplayer<'_> {
 impl fmt::Display for AnalysisReportDisplayer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let &Self {
-            report: AnalysisReport { cases, sitrep_id, comment, log },
+            report:
+                AnalysisReport { cases, sitrep_id, comment, log, active_problems },
             indent,
             colored,
         } = self;
@@ -197,6 +246,30 @@ impl fmt::Display for AnalysisReportDisplayer<'_> {
             )?;
             for case in cases {
                 case.display_multiline(indent + 2, Some(*sitrep_id))
+                    .colored(colored)
+                    .fmt(f)?;
+            }
+        }
+        if active_problems.is_empty() {
+            writeln!(
+                f,
+                "{:indent$}{}",
+                "",
+                styles
+                    .heading()
+                    .style("no active problems changed in this analysis step")
+            )?;
+        } else {
+            writeln!(
+                f,
+                "{:indent$}{} ({} with activity):",
+                "",
+                styles.heading().style("active problems"),
+                active_problems.len(),
+            )?;
+            for problem in active_problems {
+                problem
+                    .display_multiline(indent + 2, Some(*sitrep_id))
                     .colored(colored)
                     .fmt(f)?;
             }
@@ -267,6 +340,195 @@ impl fmt::Display for CaseReportDisplayer<'_> {
     }
 }
 
+impl iddqd::IdOrdItem for ActiveProblemReport {
+    type Key<'a> = &'a ProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
+impl ActiveProblemReport {
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+        this_sitrep: Option<SitrepUuid>,
+    ) -> ActiveProblemReportDisplayer<'_> {
+        ActiveProblemReportDisplayer {
+            report: self,
+            indent,
+            this_sitrep,
+            colored: false,
+        }
+    }
+}
+
+/// Displays an [`ActiveProblemReport`], as returned by
+/// [`ActiveProblemReport::display_multiline`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct ActiveProblemReportDisplayer<'a> {
+    report: &'a ActiveProblemReport,
+    indent: usize,
+    this_sitrep: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl ActiveProblemReportDisplayer<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+impl fmt::Display for ActiveProblemReportDisplayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { report, indent, this_sitrep, colored } = self;
+        let styles = display::Styles::new(colored);
+        let bullet = if indent > 0 { "* " } else { "" };
+
+        let ActiveProblemReport {
+            id,
+            requested_sitrep_id,
+            revised_sitrep_id,
+            state,
+            comment,
+            summary,
+            current_problem_code,
+            revision,
+            log,
+            total_alerts,
+            new_alerts,
+            total_support_bundles,
+            new_support_bundles,
+        } = report;
+        let sitrep_id = this_sitrep.as_ref();
+        let this_sitrep = move |s| {
+            styles.annotation_if(Some(s) == sitrep_id, " <-- this sitrep")
+        };
+
+        let state_name = match state {
+            ProblemState::Active => "active",
+            ProblemState::Resolved { .. } => "resolved",
+        };
+        writeln!(
+            f,
+            "{:indent$}{bullet}{}",
+            "",
+            styles.heading().style(format_args!("{state_name} problem {id}"))
+        )?;
+
+        const SUMMARY: &str = "operator summary:";
+        const PROBLEM_CODE: &str = "problem code:";
+        const REVISION: &str = "latest revision:";
+        const REVISED_IN: &str = "  revised in sitrep:";
+        const REQUESTED_IN: &str = "requested in sitrep:";
+        const RESOLVED_IN: &str = "  in sitrep:";
+        const TIME_RESOLVED: &str = "time resolved:";
+        const TOTAL_ALERTS: &str = "total alerts:";
+        const TOTAL_SUPPORT_BUNDLES: &str = "total support bundles:";
+        const NEW_ALERTS_OR_BUNDLES: &str = "  added in this sitrep:";
+        const WIDTH: usize = display::const_max_len(&[
+            SUMMARY,
+            PROBLEM_CODE,
+            REVISION,
+            REQUESTED_IN,
+            RESOLVED_IN,
+            TIME_RESOLVED,
+            REVISED_IN,
+            TOTAL_ALERTS,
+            TOTAL_SUPPORT_BUNDLES,
+            NEW_ALERTS_OR_BUNDLES,
+        ]);
+
+        let indent = indent + 2;
+
+        display::Comment::from(comment)
+            .indent(indent)
+            .colored(colored)
+            .fmt(f)?;
+
+        writeln!(
+            f,
+            "{:>indent$}{} {requested_sitrep_id}{}",
+            "",
+            styles.label(REQUESTED_IN, WIDTH),
+            this_sitrep(requested_sitrep_id)
+        )?;
+        if let ProblemState::Resolved { sitrep_id, time_resolved } = state {
+            writeln!(
+                f,
+                "{:>indent$}{} {time_resolved}",
+                "",
+                styles.label(TIME_RESOLVED, WIDTH),
+            )?;
+            writeln!(
+                f,
+                "{:>indent$}{} {sitrep_id}{}",
+                "",
+                styles.label(RESOLVED_IN, WIDTH),
+                this_sitrep(sitrep_id)
+            )?;
+        }
+        writeln!(
+            f,
+            "{:>indent$}{} {revision}",
+            "",
+            styles.label(REVISION, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {revised_sitrep_id}{}",
+            "",
+            styles.label(REVISED_IN, WIDTH),
+            this_sitrep(revised_sitrep_id)
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {current_problem_code:04} (as of rev {revision})",
+            "",
+            styles.label(PROBLEM_CODE, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {summary}",
+            "",
+            styles.label(SUMMARY, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {total_alerts}",
+            "",
+            styles.label(TOTAL_ALERTS, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {new_alerts}",
+            "",
+            styles.label(NEW_ALERTS_OR_BUNDLES, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {total_support_bundles}",
+            "",
+            styles.label(TOTAL_SUPPORT_BUNDLES, WIDTH),
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}{} {new_support_bundles}",
+            "",
+            styles.label(NEW_ALERTS_OR_BUNDLES, WIDTH),
+        )?;
+
+        log.display_multiline(indent)
+            .colored(colored)
+            .titled("activity in this analysis")
+            .fmt(f)?;
+        Ok(())
+    }
+}
+
 pub struct LogEntryBuilder<'log> {
     slog_log: &'log slog::Logger,
     analysis_log: &'log mut DebugLog,
@@ -298,7 +560,7 @@ impl DebugLog {
         }
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 

@@ -9,9 +9,12 @@ use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::alert::AlertPayload;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::FactUuid;
+use omicron_uuid_kinds::ProblemUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -161,7 +164,7 @@ impl CaseBuilder {
         &mut self,
         alert: &A,
         comment: impl ToString,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<AlertUuid> {
         let class = A::CLASS;
         let version = A::VERSION;
         let payload_type = std::any::type_name::<A>();
@@ -199,14 +202,14 @@ impl CaseBuilder {
             .comment(comment)
             .finish();
         self.new_alerts_requested = true;
-        Ok(())
+        Ok(id)
     }
 
     pub fn request_support_bundle(
         &mut self,
         data_selection: BundleDataSelection,
         comment: impl ToString,
-    ) {
+    ) -> SupportBundleUuid {
         let id = loop {
             let id = self.rng.next_support_bundle();
             if !self.case.support_bundles_requested.contains_key(&id) {
@@ -228,6 +231,48 @@ impl CaseBuilder {
             .kv("support_bundle_id", id)
             .comment(comment);
         self.new_support_bundles_requested = true;
+        id
+    }
+
+    /// Associates the problem with ID `problem_id` with this case.
+    ///
+    /// A problem may be associated with any number of cases, and a case with
+    /// any number of problems. If the problem is already associated with this
+    /// case, either in the parent sitrep or earlier in the current one, the
+    /// existing association is left unchanged and a warning is recorded in
+    /// the debug log.
+    ///
+    /// The problem being linked to the case must exist in the current sitrep.
+    /// This function does not check that it exists.
+    pub fn link_active_problem(
+        &mut self,
+        problem_id: ProblemUuid,
+        comment: impl ToString,
+    ) {
+        let comment = comment.to_string();
+        if let Some(existing) = self.case.problems.get(&problem_id) {
+            let linked_sitrep_id = existing.linked_sitrep_id;
+            self.log_warning(
+                "attempted to link an active problem to a case twice",
+            )
+            .kv("problem_id", problem_id)
+            .kv("existing_link_sitrep_id", linked_sitrep_id)
+            .comment(comment)
+            .finish();
+            return;
+        }
+        self.case
+            .problems
+            .insert_unique(fm::case::CaseProblem {
+                problem_id,
+                linked_sitrep_id: self.sitrep_id,
+                comment: comment.clone(),
+            })
+            .expect("we just checked that the problem is not already linked");
+        self.log_event("linked active problem to case")
+            .kv("problem_id", problem_id)
+            .comment(comment)
+            .finish();
     }
 
     pub fn close(&mut self, comment: impl ToString) {
