@@ -31,6 +31,7 @@ use nexus_test_utils::resource_helpers::{
     link_ip_pool, object_create, object_delete, object_get,
 };
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::instance::{InstanceCpuCount, InstanceState};
 use nexus_types::external_api::instance::{
     InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
@@ -43,9 +44,9 @@ use nexus_types::external_api::multicast::{
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types::identity::{Asset, Resource};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
     ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
-    Instance, InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -172,7 +173,13 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     object_create::<_, IpPoolRange>(client, &range_url, &asm_range).await;
 
     // Link the pool to the silo so it can be found by multicast group creation
-    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
 
     pool
 }
@@ -211,7 +218,13 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     object_create::<_, IpPoolRange>(client, &range_url, &ipv6_range).await;
 
     // Link the pool to the silo so it can be found by multicast group creation
-    link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+    link_ip_pool(
+        client,
+        pool_name,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        false,
+    )
+    .await;
 
     pool
 }
@@ -1189,6 +1202,7 @@ pub(crate) async fn instance_for_multicast_groups(
             start,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await

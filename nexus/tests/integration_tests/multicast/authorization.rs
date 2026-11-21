@@ -20,6 +20,7 @@ use nexus_test_utils::resource_helpers::{
     create_project, grant_iam, link_ip_pool, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::instance::{
     InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
@@ -31,9 +32,9 @@ use nexus_types::external_api::project::ProjectCreate;
 use nexus_types::external_api::silo::{
     Silo, SiloCreate, SiloIdentityMode, SiloQuotasCreate,
 };
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount,
+    ByteCount, Hostname, IdentityMetadataCreateParams,
 };
 use omicron_uuid_kinds::SiloUserUuid;
 
@@ -95,6 +96,7 @@ async fn create_group_via_instance_join(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -263,6 +265,7 @@ async fn test_silo_user_multicast_permissions(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance2: Instance = NexusRequest::new(
@@ -442,6 +445,7 @@ async fn test_silo_user_multicast_permissions(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let project_instance: Instance = NexusRequest::new(
@@ -512,6 +516,7 @@ async fn test_silo_user_multicast_permissions(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
         multicast_groups: Vec::new(),
     };
     let instance2: Instance = NexusRequest::objects_post(
@@ -1118,6 +1123,7 @@ async fn test_cross_silo_multicast_isolation(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_a: Instance = NexusRequest::new(
@@ -1156,6 +1162,7 @@ async fn test_cross_silo_multicast_isolation(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_b: Instance = NexusRequest::new(
@@ -1357,6 +1364,7 @@ async fn test_cross_silo_multicast_isolation(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     NexusRequest::new(
@@ -1488,6 +1496,7 @@ async fn test_both_member_endpoints_have_same_permissions(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let instance_url =
         format!("/v1/instances?project={}", project_a.identity.name);

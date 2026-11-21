@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Integration tests for multicast groups with other networking features.
+//! Integration tests for multicast groups alongside external networking.
 //!
-//! Tests multicast + networking feature interactions:
+//! Tests how multicast membership interacts with external IPs:
 //!
 //! - External IPs: Instances with ephemeral/floating IPs can join multicast groups
 //! - Floating IP attach/detach: Multicast membership unaffected by IP changes
@@ -21,14 +21,15 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip::{
     AddressAllocator, FloatingIp, FloatingIpAttach,
 };
+use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::instance::{
     EphemeralIpCreate, ExternalIpCreate, InstanceCreate,
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    NameOrId,
+    ByteCount, IdentityMetadataCreateParams, NameOrId,
 };
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -97,6 +98,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true, // Start the instance
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -243,6 +245,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -406,6 +409,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -529,6 +533,7 @@ async fn test_multicast_with_floating_ip_basic(
         start: true, // Start the instance
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
