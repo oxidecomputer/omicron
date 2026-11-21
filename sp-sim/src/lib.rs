@@ -157,8 +157,7 @@ impl SimRack {
             sidecars.push(
                 Sidecar::spawn(
                     sidecar,
-                    i,
-                    rack_ignition_state.clone(),
+                    rack_ignition_state.sidecar_handle(i),
                     log.new(slog::o!("slot" => format!("sidecar {}", i))),
                 )
                 .await?,
@@ -175,6 +174,7 @@ impl SimRack {
                     // For now, just use the fastest version (assume contents
                     // are always hashed).
                     HostFlashHashPolicy::assume_already_hashed(),
+                    rack_ignition_state.gimlet_handle(i),
                     log.new(slog::o!("slot" => format!("gimlet {}", i))),
                 )
                 .await?,
@@ -184,7 +184,9 @@ impl SimRack {
         let mut pscs = Vec::with_capacity(config.simulated_sps.psc.len());
         for (i, psc) in config.simulated_sps.psc.iter().enumerate() {
             let log = log.new(slog::o!("slot" => format!("PSC {i}")));
-            pscs.push(Psc::spawn(psc, log).await?);
+            pscs.push(
+                Psc::spawn(psc, rack_ignition_state.psc_handle(i), log).await?,
+            );
         }
 
         Ok(Self { sidecars, gimlets, pscs })

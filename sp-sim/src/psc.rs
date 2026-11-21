@@ -16,6 +16,7 @@ use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::sidecar::SpIgnitionHandle;
 use crate::sp;
 use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
@@ -147,7 +148,11 @@ impl SimulatedSp for Psc {
 }
 
 impl Psc {
-    pub async fn spawn(psc: &PscConfig, log: Logger) -> Result<Self> {
+    pub(crate) async fn spawn(
+        psc: &PscConfig,
+        ignition_handle: SpIgnitionHandle,
+        log: Logger,
+    ) -> Result<Self> {
         info!(log, "setting up simulated PSC");
 
         let baseboard_vpd =
@@ -193,6 +198,7 @@ impl Psc {
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_handle,
                 handler,
                 &log,
             );
