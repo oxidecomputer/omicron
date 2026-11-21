@@ -1131,7 +1131,51 @@ mod tests {
             },
         );
 
+        // CockroachDB log files come in two two series, `cockroach` and
+        // `cockroach-health`. Each series has a `<prefix>.log` symlink to
+        // its current file. Each series' files, including its symlink, should
+        // stay together.
+        let crdb_zone = "oxz_cockroachdb_8bbea076-ff60-4330-8302-383e18140ef3";
+        let crdb_expected = [
+            "cockroach-health.log".to_string(),
+            format!(
+                "cockroach-health.{crdb_zone}.root.2026-09-22T03_29_59Z.003419.log"
+            ),
+            format!(
+                "cockroach-health.{crdb_zone}.root.2026-09-22T03_44_19Z.015495.log"
+            ),
+            "cockroach.log".to_string(),
+            format!(
+                "cockroach.{crdb_zone}.root.2026-09-28T20_25_39Z.016211.log"
+            ),
+            format!(
+                "cockroach.{crdb_zone}.root.2026-09-29T09_44_35Z.006190.log"
+            ),
+        ];
+        logs.insert(
+            "cockroachdb".to_string(),
+            SvcLogs {
+                current: None,
+                archived: Vec::new(),
+                // Insert in reverse, so that the files must be sorted.
+                extra: crdb_expected
+                    .iter()
+                    .rev()
+                    .map(|name| {
+                        LogFile::new(format!("/data/logs/{name}").into())
+                    })
+                    .collect(),
+            },
+        );
+
         super::sort_logs(&mut logs);
+
+        let crdb_sorted: Vec<&str> = logs["cockroachdb"]
+            .extra
+            .iter()
+            .map(|f| f.path.file_name().unwrap())
+            .collect();
+        assert_eq!(crdb_sorted, crdb_expected);
 
         let svc_logs = logs.get("blah").unwrap();
         assert_eq!(
