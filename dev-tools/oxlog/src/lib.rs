@@ -31,7 +31,9 @@
 //!
 //! - for one instance of an SMF service in one zone: its live file
 //!   `foo.log`, the rotated `foo.log.0` beside it, and the archived
-//!   `foo.log.<epoch>` files in each of the zone's debug datasets;
+//!   `foo.log.<epoch>` files  in each of the zone's debug datasets (and, if the
+//!   zone was destroyed, the archived `foo.<epoch>`, which was the live log
+//!   file at the time the zone was archived);
 //! - for one CockroachDB log: all of its `<prefix>.<...>.log` files.
 //!
 //! Which files form a series is decided by the naming rules of whatever
@@ -53,7 +55,7 @@ use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use glob::Pattern;
 use jiff::Timestamp;
 use rayon::prelude::*;
-use std::borrow::Cow;
+
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use uuid::Uuid;
@@ -597,28 +599,31 @@ fn split_numeric_suffix(filename: &str) -> (&str, Option<&str>) {
 }
 
 /// Returns the name of the series that an SMF log file belongs to: its live
-/// file's name.
+/// file's name, without the `.log` extension.
 ///
 /// SMF log files are named `<service>.log` (live), `<service>.log.<N>` (rotated
 /// by logadm(8)), `<service>.log.<epoch>` (rotated logs archived by
 /// sled-agent's debug collector), or, (unfortunately, see omicron#9271),
 /// `<service>.<epoch>` (the live log from a zone that was being destroyed,
-/// archived by sled-agent's debug collector).
+/// archived by sled-agent's debug collector). All of these belong to the series
+/// `<service>`.
 ///
-/// Keying on the full live file name, rather than the service name, keeps the
+/// Placing `<service>.<epoch>` in the same series as the rest relies on
+/// sled-agent archiving live logs only when their zone is destroyed, after the
+/// last write to them: the archived file is then the last file of its series up
+/// to that point. Its last-written time can therefore be the earliest bound on
+/// the oldest writes to files that follow it. If live logs are ever archived
+/// while still being written, the series would no longer be free of overlap.
+///
+/// Keying on the live file's name, rather than the service name, keeps the
 /// series of separate instances of a service apart.
-fn smf_series(filename: &str) -> Cow<'_, str> {
-    match split_numeric_suffix(filename) {
-        // If there is an epoch, but no `.log` before it, this was the live log
-        // in a destroyed zone when it was being archived by the sled-agent's
-        // debug collector. It should be treated as part of the `<service>.log`
-        // series,so we must, regretfully, munge it into the correct live log
-        // file name.
-        (name, Some(_)) if !name.ends_with(".log") => {
-            Cow::Owned(format!("{name}.log"))
-        }
-        (name, _) => Cow::Borrowed(name),
-    }
+fn smf_series(filename: &str) -> &str {
+    let (name, _) = split_numeric_suffix(filename);
+    // Live SMF log files end in `.log`. Using `strip_suffix` removes exactly
+    // one instance of that pattern, unlike `trim_end_matches`, which would
+    // remove any number of `.log`s. This probably doesn't matter in practice
+    // but it feels better to be more conservative in what we trim, I guess...
+    name.strip_suffix(".log").unwrap_or(name)
 }
 
 /// A directory of log files kept outside SMF's log directories.
@@ -869,7 +874,7 @@ fn load_svc_logs(
         undated.push(UndatedLogFile {
             service: svc_name.to_string(),
             kind,
-            series: series.map(Cow::into_owned),
+            series: series.map(str::to_string),
             symlink_target: None,
             newest_write,
             path,
@@ -1300,13 +1305,21 @@ mod tests {
             "oxide-nexus:default.log.0",
             "oxide-nexus:default.log.12",
             "oxide-nexus:default.log.1790585101",
+            // The live log, archived when its zone was destroyed.
+            "oxide-nexus:default.1790585101",
         ] {
-            assert_eq!(smf_series(filename), "oxide-nexus:default.log");
+            assert_eq!(smf_series(filename), "oxide-nexus:default");
         }
         // Separate instances of a service are separate series.
         assert_eq!(
             smf_series("oxide-foo:instance2.log.0"),
-            "oxide-foo:instance2.log"
+            "oxide-foo:instance2"
+        );
+        // Only one `.log` is stripped. `.log.log` is not a case we particularly
+        // expect in practice, but we may as well treat it as distinct?
+        assert_eq!(
+            smf_series("oxide-foo:default.log.log.0"),
+            "oxide-foo:default.log"
         );
     }
 
