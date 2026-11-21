@@ -117,6 +117,8 @@ use sled_agent_types::inventory::MupdateOverrideInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NexusExternalIps;
+use sled_agent_types::inventory::NvmeHealth;
+use sled_agent_types::inventory::NvmeHealthError;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
@@ -2676,6 +2678,14 @@ pub struct InvPhysicalDisk {
     pub variant: PhysicalDiskKind,
     /// The location of the disk in the chassis, as identified by libtopo.
     pub location: Option<String>,
+    // The `nvme_health_*` columns hold either a reading (the first three) or
+    // an error (the last two). All are NULL in rows written before sled-agent
+    // reported NVMe health. See [`InvPhysicalDisk::nvme_health`].
+    pub nvme_health_time_collected: Option<DateTime<Utc>>,
+    pub nvme_health_reliability_degraded: Option<bool>,
+    pub nvme_health_read_only: Option<bool>,
+    pub nvme_health_error_kind: Option<NvmeHealthErrorKind>,
+    pub nvme_health_error_message: Option<String>,
 }
 
 impl InvPhysicalDisk {
@@ -2684,6 +2694,10 @@ impl InvPhysicalDisk {
         sled_id: SledUuid,
         disk: nexus_types::inventory::PhysicalDisk,
     ) -> Self {
+        let (reading, error) = match disk.nvme_health {
+            Ok(health) => (Some(health), None),
+            Err(error) => (None, Some(error)),
+        };
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
@@ -2693,6 +2707,92 @@ impl InvPhysicalDisk {
             serial: disk.identity.serial,
             variant: disk.variant.into(),
             location: disk.location,
+            nvme_health_time_collected: reading
+                .as_ref()
+                .map(|health| health.time_collected),
+            nvme_health_reliability_degraded: reading
+                .as_ref()
+                .map(|health| health.reliability_degraded),
+            nvme_health_read_only: reading
+                .as_ref()
+                .map(|health| health.read_only),
+            nvme_health_error_kind: error
+                .as_ref()
+                .map(|error| error.kind.into()),
+            nvme_health_error_message: error.map(|error| error.message),
+        }
+    }
+
+    /// See [`nexus_types::inventory::PhysicalDisk::nvme_health`].
+    pub fn nvme_health(&self) -> Result<NvmeHealth, NvmeHealthError> {
+        match (
+            self.nvme_health_time_collected,
+            self.nvme_health_reliability_degraded,
+            self.nvme_health_read_only,
+            self.nvme_health_error_kind,
+            &self.nvme_health_error_message,
+        ) {
+            (
+                Some(time_collected),
+                Some(reliability_degraded),
+                Some(read_only),
+                None,
+                None,
+            ) => Ok(NvmeHealth {
+                time_collected,
+                reliability_degraded,
+                read_only,
+            }),
+            (None, None, None, Some(kind), Some(message)) => {
+                Err(NvmeHealthError {
+                    kind: kind.into(),
+                    message: message.clone(),
+                })
+            }
+            // The row predates NVMe health. A CHECK constraint rules out
+            // every other combination.
+            _ => {
+                nexus_types::inventory::PhysicalDisk::nvme_health_not_recorded()
+            }
+        }
+    }
+}
+
+impl_enum_type!(
+    NvmeHealthErrorKindEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum NvmeHealthErrorKind;
+
+    // Enum values
+    LogPageReadFailed => b"log_page_read_failed"
+    NotPolled => b"not_polled"
+);
+
+impl From<sled_agent_types::inventory::NvmeHealthErrorKind>
+    for NvmeHealthErrorKind
+{
+    fn from(value: sled_agent_types::inventory::NvmeHealthErrorKind) -> Self {
+        use sled_agent_types::inventory::NvmeHealthErrorKind as ApiKind;
+        match value {
+            ApiKind::LogPageReadFailed => {
+                NvmeHealthErrorKind::LogPageReadFailed
+            }
+            ApiKind::NotPolled => NvmeHealthErrorKind::NotPolled,
+        }
+    }
+}
+
+impl From<NvmeHealthErrorKind>
+    for sled_agent_types::inventory::NvmeHealthErrorKind
+{
+    fn from(value: NvmeHealthErrorKind) -> Self {
+        use sled_agent_types::inventory::NvmeHealthErrorKind as ApiKind;
+        match value {
+            NvmeHealthErrorKind::LogPageReadFailed => {
+                ApiKind::LogPageReadFailed
+            }
+            NvmeHealthErrorKind::NotPolled => ApiKind::NotPolled,
         }
     }
 }
@@ -4730,5 +4830,65 @@ mod test {
         row.last_start_error_seen = Some("oof ouch owie my sled".to_string());
         DiscoveredSled::try_from(row)
             .expect_err("started sled with an error should be rejected");
+    }
+
+    #[test]
+    fn physical_disk_nvme_health_round_trips() {
+        use crate::InvPhysicalDisk;
+        use nexus_types::external_api::physical_disk::PhysicalDiskKind;
+        use nexus_types::inventory::PhysicalDisk;
+        use nexus_types::inventory::PhysicalDiskFirmware;
+        use sled_agent_types::disk::DiskIdentity;
+        use sled_agent_types::inventory::NvmeHealth;
+        use sled_agent_types::inventory::NvmeHealthError;
+        use sled_agent_types::inventory::NvmeHealthErrorKind;
+
+        let row_with = |nvme_health| {
+            InvPhysicalDisk::new(
+                CollectionUuid::new_v4(),
+                SledUuid::new_v4(),
+                PhysicalDisk {
+                    identity: DiskIdentity {
+                        vendor: "vendor".to_string(),
+                        model: "model".to_string(),
+                        serial: "serial".to_string(),
+                    },
+                    variant: PhysicalDiskKind::U2,
+                    pcie_slot: 5,
+                    location: Some("N5".to_string()),
+                    firmware: PhysicalDiskFirmware::Unknown,
+                    nvme_health,
+                },
+            )
+        };
+
+        let reading = Ok(NvmeHealth {
+            time_collected: omicron_common::now_db_precision(),
+            reliability_degraded: true,
+            read_only: false,
+        });
+        assert_eq!(row_with(reading.clone()).nvme_health(), reading);
+
+        for kind in [
+            NvmeHealthErrorKind::LogPageReadFailed,
+            NvmeHealthErrorKind::NotPolled,
+        ] {
+            let error = Err(NvmeHealthError {
+                kind,
+                message: "no reading".to_string(),
+            });
+            assert_eq!(row_with(error.clone()).nvme_health(), error);
+        }
+
+        // A row written before the health columns existed has all of them
+        // NULL.
+        let mut old_row = row_with(reading);
+        old_row.nvme_health_time_collected = None;
+        old_row.nvme_health_reliability_degraded = None;
+        old_row.nvme_health_read_only = None;
+        assert_eq!(
+            old_row.nvme_health(),
+            PhysicalDisk::nvme_health_not_recorded()
+        );
     }
 }

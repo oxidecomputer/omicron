@@ -1161,7 +1161,9 @@ mod test {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("TEST1".to_string())],
-            nvme_health: Ok(NvmeHealth::new_fake(Utc::now())),
+            nvme_health: Ok(NvmeHealth::new_fake(
+                omicron_common::now_db_precision(),
+            )),
         }
     }
 
@@ -1186,6 +1188,7 @@ mod test {
             variant: inv_phys_disk.variant.into(),
             pcie_slot: inv_phys_disk.pcie_slot,
             location: inv_phys_disk.location.clone(),
+            nvme_health: inv_phys_disk.nvme_health(),
             firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
                 active_slot: inv_disk.active_firmware_slot,
                 next_active_slot: inv_disk.next_active_firmware_slot,

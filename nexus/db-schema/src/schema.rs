@@ -2152,6 +2152,12 @@ table! {
         variant -> crate::enums::PhysicalDiskKindEnum,
 
         location -> Nullable<Text>,
+
+        nvme_health_time_collected -> Nullable<Timestamptz>,
+        nvme_health_reliability_degraded -> Nullable<Bool>,
+        nvme_health_read_only -> Nullable<Bool>,
+        nvme_health_error_kind -> Nullable<crate::enums::NvmeHealthErrorKindEnum>,
+        nvme_health_error_message -> Nullable<Text>,
     }
 }
 

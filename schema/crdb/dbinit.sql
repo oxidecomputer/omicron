@@ -4825,6 +4825,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_boot_partition (
     PRIMARY KEY (inv_collection_id, sled_id, boot_disk_slot)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.nvme_health_error_kind AS ENUM (
+    -- The sled reached the disk's controller, but could not read the SMART /
+    -- Health Information log page from it.
+    'log_page_read_failed',
+    -- The sled's latest poll of its hardware did not read the disk at all.
+    'not_polled'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4852,11 +4860,41 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     -- if the sled did not report one.
     location STRING(63),
 
+    -- The disk's NVMe health, as reported by the sled. This is either a
+    -- reading (`nvme_health_time_collected`, `nvme_health_reliability_degraded`
+    -- and `nvme_health_read_only` are set) or an error
+    -- (`nvme_health_error_kind` and `nvme_health_error_message` are set). All
+    -- five are NULL in rows written before sleds reported NVMe health.
+
+    -- When the sled read the disk's SMART / Health Information log page.
+    nvme_health_time_collected TIMESTAMPTZ,
+    -- Bits of the log page's Critical Warning field.
+    nvme_health_reliability_degraded BOOL,
+    nvme_health_read_only BOOL,
+
+    -- Why the sled had no reading for the disk.
+    nvme_health_error_kind omicron.public.nvme_health_error_kind,
+    -- Informational only, do not parse.
+    nvme_health_error_message TEXT,
+
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The PCIe slot in which this disk was found
-    PRIMARY KEY (inv_collection_id, sled_id, slot)
+    PRIMARY KEY (inv_collection_id, sled_id, slot),
+
+    CONSTRAINT nvme_health_reading_or_error CHECK (
+        (nvme_health_time_collected IS NULL)
+            = (nvme_health_reliability_degraded IS NULL)
+        AND (nvme_health_time_collected IS NULL)
+            = (nvme_health_read_only IS NULL)
+        AND (nvme_health_error_kind IS NULL)
+            = (nvme_health_error_message IS NULL)
+        AND (
+            nvme_health_time_collected IS NULL
+            OR nvme_health_error_kind IS NULL
+        )
+    )
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
@@ -9991,7 +10029,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '321.0.0', NULL)
+    (TRUE, NOW(), NOW(), '322.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
