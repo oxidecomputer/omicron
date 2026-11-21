@@ -562,9 +562,10 @@ pub(crate) fn resolve_bays(
                         "kept" => %kept_in,
                         "ignored" => %bay.location,
                     );
-                    // This bay does not keep the disk. If it read the disk
-                    // on this poll, report the duplicate; an unreadable bay
-                    // stays unreadable.
+                    // This disk was already reported in another bay. If we
+                    // read the disk in this bay on this poll, report the
+                    // duplicate. A bay that was unreadable on this poll stays
+                    // unreadable.
                     if disk_source == DiskSource::ThisPoll {
                         bay.occupant = DiskBayOccupant::UnusableDevice {
                             reason: UnusableReason::DuplicateIdentity {
