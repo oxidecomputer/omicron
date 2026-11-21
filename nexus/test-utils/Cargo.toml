@@ -54,6 +54,7 @@ oximeter.workspace = true
 oximeter-collector.workspace = true
 oximeter-db.workspace = true
 oximeter-producer.workspace = true
+oxide-update-engine-types.workspace = true  # for merge_anyhow_list
 oxnet.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
