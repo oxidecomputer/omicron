@@ -20,7 +20,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::support_bundle::SupportBundleSizeLimit;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -251,12 +250,10 @@ impl SupportBundleCollector {
         &self,
         opctx: &OpContext,
     ) -> anyhow::Result<SupportBundleCleanupReport> {
-        let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
-            .support_bundle_list_assigned_to_nexus(
+            .support_bundle_list_assigned_to_nexus_batched(
                 opctx,
-                &pagparams,
                 self.nexus_id,
                 vec![
                     SupportBundleState::Destroying,
@@ -350,36 +347,29 @@ impl SupportBundleCollector {
         &self,
         opctx: &OpContext,
     ) -> anyhow::Result<Option<SupportBundleActivationReport>> {
-        let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
-            .support_bundle_list_assigned_to_nexus(
-                opctx,
-                &pagparams,
-                self.nexus_id,
-                vec![SupportBundleState::Collecting],
-            )
+            .support_bundle_next_to_collect(opctx, self.nexus_id)
             .await;
 
         let bundle = match result {
-            Ok(bundles) => {
-                if let Some(bundle) = bundles.get(0) {
-                    info!(
-                        &opctx.log,
-                        "SupportBundleCollector: Found bundle to collect";
-                        "bundle" => %bundle.id,
-                        "bundles_in_queue" => bundles.len()
-                    );
-                    bundle.clone()
-                } else {
-                    info!(&opctx.log, "No bundles to collect");
-                    return Ok(None);
-                }
+            Ok(Some((bundle, bundles_in_queue))) => {
+                info!(
+                    &opctx.log,
+                    "SupportBundleCollector: Found bundle to collect";
+                    "bundle" => %bundle.id,
+                    "bundles_in_queue" => bundles_in_queue,
+                );
+                bundle
+            }
+            Ok(None) => {
+                info!(&opctx.log, "No bundles to collect");
+                return Ok(None);
             }
             Err(err) => {
                 warn!(
                     &opctx.log,
-                    "SupportBundleCollector: Failed to list collecting bundles";
+                    "SupportBundleCollector: Failed to find a bundle to collect";
                     "err" => %err
                 );
                 anyhow::bail!("failed to query database: {:#}", err);
