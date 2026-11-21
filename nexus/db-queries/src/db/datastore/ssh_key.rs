@@ -175,6 +175,13 @@ impl DataStore {
         Ok(())
     }
 
+    /// Returns a page of SSH keys for the given instance.
+    ///
+    /// Note: SSH key names are unique per silo user, and `instance_ssh_key` has
+    /// no user column. Paginating by name relies on the application-level
+    /// invariant that all of an instance's keys belong to one user. This
+    /// violates the key invariant in `docs/db-pagination.adoc` (see "Paging on
+    /// a non-unique key"). Internal callers should page by ID.
     pub async fn instance_ssh_keys_list(
         &self,
         opctx: &OpContext,

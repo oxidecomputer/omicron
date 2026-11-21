@@ -7614,7 +7614,13 @@ async fn cmd_db_inventory_physical_disks(
     use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl as firmware_dsl;
     use nexus_db_schema::schema::inv_physical_disk::dsl as disk_dsl;
 
-    let mut query = disk_dsl::inv_physical_disk.into_boxed();
+    let mut query = disk_dsl::inv_physical_disk
+        .order_by((
+            disk_dsl::inv_collection_id,
+            disk_dsl::sled_id,
+            disk_dsl::slot,
+        ))
+        .into_boxed();
     query = query.limit(i64::from(u32::from(limit)));
 
     if let Some(collection_id) = args.collection_id {
@@ -7643,6 +7649,7 @@ async fn cmd_db_inventory_physical_disks(
         .load_async(&**conn)
         .await
         .context("loading physical disks")?;
+    check_limit(&disks, limit, || "loading physical disks");
 
     let rows = disks.into_iter().map(|(disk, firmware)| {
         let (active_firmware, next_firmware) =

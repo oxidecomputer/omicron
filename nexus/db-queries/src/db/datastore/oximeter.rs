@@ -12,6 +12,7 @@ use crate::db::model::OximeterInfo;
 use crate::db::model::ProducerEndpoint;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::queries;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
@@ -224,7 +225,6 @@ impl DataStore {
         use nexus_db_schema::schema::metric_producer::dsl;
         paginated(dsl::metric_producer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
-            .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -245,17 +245,28 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         expiration: DateTime<Utc>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<ProducerEndpoint> {
         use nexus_db_schema::schema::metric_producer::dsl;
 
-        paginated(dsl::metric_producer, dsl::id, pagparams)
-            .filter(dsl::time_modified.lt(expiration))
-            .order_by((dsl::oximeter_id, dsl::id))
-            .select(ProducerEndpoint::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        // Paging on (time_modified, id) matches the
+        // lookup_producer_by_time_modified unique index, so that each page
+        // reads only expired rows. time_modified is mutable, but every write
+        // sets it to the current time, which is always later than expiration.
+        // This means that a producer that changes mid-scan can only drop out of
+        // the results, which is fine for our use case. For more details, see
+        // "Paging on a column that changes concurrently" in
+        // docs/db-pagination.adoc.
+        paginated_multicolumn(
+            dsl::metric_producer,
+            (dsl::time_modified, dsl::id),
+            pagparams,
+        )
+        .filter(dsl::time_modified.lt(expiration))
+        .select(ProducerEndpoint::as_select())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List all producer endpoint records with a `time_modified` date older
@@ -284,7 +295,9 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .await?;
-            paginator = p.found_batch(&batch, &|p: &ProducerEndpoint| p.id());
+            paginator = p.found_batch(&batch, &|p: &ProducerEndpoint| {
+                (p.time_modified(), p.id())
+            });
             producers.extend(batch);
         }
 
