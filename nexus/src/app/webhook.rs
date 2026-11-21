@@ -205,7 +205,7 @@ impl Nexus {
         rx: lookup::AlertReceiver<'_>,
         params: alert::AlertReceiverProbe,
     ) -> Result<alert::AlertProbeResult, Error> {
-        let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
+        let (authz_rx, rx) = rx.fetch_for(authz::Action::Modify).await?;
         let rx_id = authz_rx.id();
         let datastore = self.datastore();
         let secrets =
