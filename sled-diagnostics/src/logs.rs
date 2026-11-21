@@ -543,7 +543,8 @@ impl LogsHandle {
     /// files), and a file that may hold any content from within the window
     /// is included in full, so the output may contain data from outside the
     /// window. Rotated logs are additionally limited to `max_rotated` files
-    /// when a count cap is supplied.
+    /// when a count cap is supplied. Archived logs that share a name are
+    /// collected once.
     ///
     /// Note that this log retrieval will automatically take and cleanup
     /// necessary zfs snapshots along the way. The logs are listed, dated, and
@@ -631,6 +632,23 @@ impl LogsHandle {
             }
 
             //  - Grab all of the service's archived logs -
+
+            // Debug datasets can hold copies of a log under the same name,
+            // and the zip can hold only one. Keep the largest, since an
+            // interrupted archive leaves a partial copy.
+            archived.sort_by_key(|log| std::cmp::Reverse(log.size));
+            let mut names = HashSet::new();
+            archived.retain(|log| {
+                let first = names.insert(log.path.file_name());
+                if !first {
+                    warn!(
+                        self.log,
+                        "skipping archived log with the same name as another";
+                        "logfile" => %log.path,
+                    );
+                }
+                first
+            });
 
             // Since these logs can be spread out across multiple U.2 devices
             // we need to sort them by timestamp.
@@ -1009,6 +1027,8 @@ mod test {
     use std::collections::HashMap;
 
     use camino::Utf8PathBuf;
+    use omicron_test_utils::dev::TestTempDir;
+    use omicron_test_utils::dev::test_setup_log;
 
     use super::*;
 
@@ -1170,6 +1190,70 @@ mod test {
             names(archived),
             vec!["oxide-mg-ddm:default.log.1790585101"]
         );
+    }
+
+    // Regression test for omicron#11891.
+    #[test]
+    fn test_archived_logs_with_same_name() {
+        let logctx = test_setup_log("test_archived_logs_with_same_name");
+        let tempdir = TestTempDir::new(&logctx.log);
+
+        let newer = "oxide-foo:default.log.1761000001";
+        let older = "oxide-foo:default.log.1761000000";
+        let archived = [
+            ("a", newer, "partial"),
+            ("b", newer, "the complete log"),
+            ("a", older, "an older log"),
+        ]
+        .into_iter()
+        .map(|(pool, name, contents)| {
+            let dir = tempdir.path().join(pool).join("crypt/debug/oxz_foo");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(name);
+            std::fs::write(&path, contents).unwrap();
+            oxlog::LogFile {
+                path,
+                size: Some(contents.len() as u64),
+                modified: None,
+                age: None,
+            }
+        })
+        .collect();
+        let zone_logs = BTreeMap::from([(
+            "foo".to_string(),
+            SvcLogs { current: None, archived, extra: vec![] },
+        )]);
+
+        // The copies of the newer log count once towards the cap.
+        let mut zipfile = std::io::Cursor::new(Vec::new());
+        LogsHandle::new(logctx.log.clone())
+            .get_zone_logs_inner(
+                zone_logs,
+                Some(2),
+                zip::ZipWriter::new(&mut zipfile),
+            )
+            .unwrap();
+
+        let mut archive = zip::ZipArchive::new(zipfile).unwrap();
+        let mut entries: Vec<(String, String)> = (0..archive.len())
+            .map(|i| {
+                let entry = archive.by_index(i).unwrap();
+                let name = entry.name().to_string();
+                let contents = zstd::decode_all(entry).unwrap();
+                (name, String::from_utf8(contents).unwrap())
+            })
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            [
+                (format!("foo/archive/{older}.zst"), "an older log".into()),
+                (format!("foo/archive/{newer}.zst"), "the complete log".into()),
+            ]
+        );
+
+        tempdir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 }
 
