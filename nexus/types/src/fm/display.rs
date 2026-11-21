@@ -132,7 +132,24 @@ impl Styles {
             Style::new().style("")
         }
     }
+
+    pub fn added_marker(&self) -> Styled<char> {
+        self.added().style(GUTTER_ADDED)
+    }
+
+    pub fn modified_marker(&self) -> Styled<char> {
+        self.modified().style(GUTTER_MODIFIED)
+    }
+
+    pub fn removed_marker(&self) -> Styled<char> {
+        self.removed().style(GUTTER_REMOVED)
+    }
 }
+
+// Gutter diff markers for displaying activity in a sitrep.
+const GUTTER_ADDED: char = '+';
+const GUTTER_MODIFIED: char = '*';
+const GUTTER_REMOVED: char = '-';
 
 /// Displays a field label such as `diagnosis engine:`, as returned by
 /// [`Styles::label`]: the label text bold, the trailing `:` and alignment
