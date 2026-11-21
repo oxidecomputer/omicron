@@ -189,7 +189,46 @@ impl LogFile {
     }
 
     pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.path.file_name().cmp(&other.path.file_name())
+        // Yet again, we must unfortunately do something somewhat janky due to
+        // the existence of archived live log files that lack the '.log'
+        // extension (see https://github.com/oxidecomputer/omicron/pull/11889).
+        fn file_stem_and_epoch(filename: &str) -> (&str, Option<&str>) {
+            let (name, mtime) = split_numeric_suffix(filename);
+            // Trim any '.log' extension from the filename, so that archived
+            // live logs don't sort before earlier archived log files, and are
+            // instead ordered by mtime.
+            let stem = name.trim_end_matches(".log");
+            (stem, mtime)
+        }
+
+        // These paths should always have a file name, as they are never
+        // directory paths, but if we don't have one for whatever reason,
+        // emptystring will always compare lower lexicographically...
+        let my_name = self.path.file_name().unwrap_or("");
+        let other_name = other.path.file_name().unwrap_or("");
+        let (my_stem, my_epoch) = file_stem_and_epoch(my_name);
+        let (other_stem, other_epoch) = file_stem_and_epoch(other_name);
+
+        // First, compare the file stems themselves. If we are comparing log
+        // files from the same SMF service, these will likely be the same. This
+        // comparison ignores the presence or absence of a '.log' extension.
+        my_stem
+            .cmp(&other_stem)
+            // Then, order based on the epoch suffix.
+            .then_with(|| my_epoch.cmp(&other_epoch))
+            // Finally, if the mtimes are the same, tie-break based on the
+            // presence of '.log'. If a file has been rotated, it should
+            // compare less than one that was not rotated before it was
+            // archived.
+            .then_with(|| {
+                my_name
+                    .contains(".log")
+                    .cmp(&other_name.contains(".log"))
+                    // `true` compares as "greater than" `false`, so we must
+                    // flip the ordering so that the file which has a '.log' is
+                    // less than the one which does not.
+                    .reverse()
+            })
     }
 
     /// Returns true if the file's content may overlap `date_range`
@@ -975,6 +1014,7 @@ fn date_files(files: Vec<UndatedLogFile>) -> Vec<DatedLogFile> {
 mod tests {
     pub use super::is_oxide_smf_log_file;
     pub use super::oxide_smf_service_name_from_log_file_name;
+    use super::{LogFile, SvcLogs};
 
     #[test]
     fn test_is_oxide_smf_log_file() {
@@ -1049,7 +1089,6 @@ mod tests {
 
     #[test]
     fn test_sort_logs() {
-        use super::{LogFile, SvcLogs};
         use std::collections::BTreeMap;
 
         let mut logs = BTreeMap::new();
