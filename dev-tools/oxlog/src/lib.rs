@@ -501,7 +501,7 @@ pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
     // will always end with an mtime (see
     // https://github.com/oxidecomputer/omicron/issues/9271).
     //
-    // On the other hand,the live log file inside a running zone will have the
+    // On the other hand, the live log file inside a running zone will have the
     // `.log` extension, but no numeric suffix. Therefore, we consider it a log
     // file if it has a numeric suffix OR if its name includes `.log`.
     filename.contains(".log") || numeric_suffix.is_some()
