@@ -234,8 +234,8 @@ impl Sidecar {
     /// * Further entries are gimlets and PSCs, each in config order.
     /// * All remaining entries have `target: None`.
     ///
-    /// See [`FakeIgnition::rack_target`] for how switch targets are mapped to
-    /// rack targets.
+    /// See `FakeIgnition::rack_target` for how switch targets are mapped to rack
+    /// targets.
     pub async fn current_ignition_state(
         &self,
     ) -> [IgnitionState; NUM_IGNITION_TARGETS] {
