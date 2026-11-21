@@ -1045,7 +1045,7 @@ impl InstanceRunner {
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
                                 if let VmmStateRequested::Stopped { method } = state {
-                                    force_stop_timer.set_stop_timeout(method);
+                                    force_stop_timer.update(method);
                                 }
 
                                 let propolis_result = self
@@ -1056,7 +1056,8 @@ impl InstanceRunner {
                                 // timeout is running that was initiated by an
                                 // ACPI shutdown, disarm the timeout, but only
                                 // if Propolis was still there and honored the
-                                // request.
+                                // request (`force_stop_timer.disarm()` checks
+                                // that it had been set for an ACPI shutdown).
                                 if let (
                                     VmmStateRequested::Reboot { method: _ },
                                     Ok(sled_vmm_state),
@@ -3077,14 +3078,16 @@ async fn zpool_monitor(
 /// while a prior ACPI shutdown timeout is running, the timeout becomes
 /// the shorter of itself or `STOP_GRACE_PERIOD`.
 #[derive(Default)]
-struct UngracefulTermGraceTime {
+struct UngracefulTermGraceTime(Option<UngracefulTermGraceTimeInner>);
+
+struct UngracefulTermGraceTimeInner {
     timeout_duration: std::time::Duration,
-    stop_req_method: InstanceShutdownPolicy,
-    stop_timeout: Option<Pin<Box<tokio::time::Sleep>>>,
+    stop_timeout: Pin<Box<tokio::time::Sleep>>,
+    method: InstanceShutdownPolicy,
 }
 
 impl UngracefulTermGraceTime {
-    fn set_stop_timeout(&mut self, method: InstanceShutdownPolicy) {
+    fn update(&mut self, method: InstanceShutdownPolicy) {
         let acpi_timeout = match method {
             InstanceShutdownPolicy::HardOff => 0u64,
             InstanceShutdownPolicy::PowerButton { timeout_secs } => {
@@ -3101,8 +3104,13 @@ impl UngracefulTermGraceTime {
         // additional requests to stop coming in don't reset the clock,
         // *unless* the prior timeout was for an ACPI shutdown and this is
         // a hard-stop request that would terminate sooner.
-        if let Some(old_sleep) = &self.stop_timeout {
-            if self.stop_req_method == InstanceShutdownPolicy::HardOff
+        if let Some(UngracefulTermGraceTimeInner {
+            stop_timeout: old_sleep,
+            method: old_method,
+            ..
+        }) = &self.0
+        {
+            if *old_method == InstanceShutdownPolicy::HardOff
                 || method != InstanceShutdownPolicy::HardOff
                 || new_sleep.deadline() > old_sleep.deadline()
             {
@@ -3110,21 +3118,32 @@ impl UngracefulTermGraceTime {
             }
         }
 
-        self.stop_timeout = Some(new_sleep);
-        self.timeout_duration = duration;
-        self.stop_req_method = method;
+        self.0 = Some(UngracefulTermGraceTimeInner {
+            method,
+            stop_timeout: new_sleep,
+            timeout_duration: duration,
+        });
     }
 
     fn disarm(&mut self) {
-        if self.stop_req_method != InstanceShutdownPolicy::HardOff {
-            self.stop_timeout = None;
+        if let Some(UngracefulTermGraceTimeInner {
+            method: InstanceShutdownPolicy::PowerButton { .. },
+            ..
+        }) = &self.0
+        {
+            self.0 = None;
         }
     }
 
     async fn stop_timeout_completed(&mut self) -> Duration {
-        if let Some(timeout) = &mut self.stop_timeout {
-            timeout.await;
-            self.timeout_duration
+        if let Some(UngracefulTermGraceTimeInner {
+            stop_timeout,
+            timeout_duration,
+            ..
+        }) = &mut self.0
+        {
+            stop_timeout.await;
+            *timeout_duration
         } else {
             std::future::pending().await
         }

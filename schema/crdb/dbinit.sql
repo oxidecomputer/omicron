@@ -1562,7 +1562,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
             (shutdown_policy_action = 'power_button')
             AND (shutdown_policy_timeout IS NOT NULL)
             AND (shutdown_policy_timeout >= INTERVAL '1' SECOND)
-            AND (shutdown_policy_timeout <= INTERVAL '3600' SECOND)
+            AND (shutdown_policy_timeout <= INTERVAL '900' SECOND)
         ) OR (
             (shutdown_policy_action = 'hard_off')
             AND (shutdown_policy_timeout IS NULL)

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::v1::instance::InstanceMigrationTargetParams;
 use crate::v1::instance::VmmStateRequested as VmmStateRequestedV1;
 
-/// Instance-stopping method choices
+/// The method by which the instance will be powered down when transitioning
+/// to the stopped state or when rebooting: either forcefully or by giving
+/// the guest an ACPI power button signal first.
 #[derive(
     Clone,
     Copy,
