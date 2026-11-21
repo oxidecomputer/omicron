@@ -1,0 +1,73 @@
+AtRest
+    summary: No changes in progress
+
+Busy
+    summary: System is busy
+
+WaitingForMupdateResolution
+    summary: Waiting for MUPdate resolution
+
+WaitingForUpdate(ServiceRecovery { service: InternalDns })
+    summary: Waiting for internal services to recover after recent changes
+    support details: Internal service awaiting recovery: internal_dns
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Starting })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+    support details: marking sled for evacuation
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(MissingFromInventory) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+    support details: sled is missing from inventory
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(MissingLedgeredSledConfig) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+    support details: ledgered sled config is not available from inventory
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(WaitingForSledConfigGeneration { desired: 3 (sled_config), current: 2 (sled_config) }) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+    support details: waiting for ledgered sled config generation to be 3 (currently 2)
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(InstanceManagerNoConfig) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+    support details: instance manager has not received its config
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(InstanceManagerAvailable) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+    support details: instance manager is still available
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(InstanceManagerRegisteredVmms { num_registered_vmms: 1 }) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0): 1 instance remaining
+
+WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Waiting(InstanceManagerRegisteredVmms { num_registered_vmms: 3 }) })
+    summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0): 3 instances remaining
+
+WaitingForUpdate(SledAvailable { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" } })
+    summary: Waiting for sled to be returned to service after update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)
+
+WaitingForUpdate(Mgs { baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, component: RotBootloader })
+    summary: Waiting for update of RoT Bootloader on 913-0000019:serial0
+
+WaitingForUpdate(Zones { kinds: {} })
+    summary: Waiting for a control plane zone update to finish
+
+WaitingForUpdate(Zones { kinds: {Nexus} })
+    summary: Waiting for a control plane zone update to finish
+    support details: Control plane service being updated: nexus
+
+WaitingForUpdate(Zones { kinds: {Crucible, Nexus} })
+    summary: Waiting for a control plane zone update to finish
+    support details: Control plane services being updated: crucible, nexus
+
+WaitingForUpdate(HandoffSagas)
+    summary: Waiting for in-progress control plane operations (sagas) to finish before handing off to the new control plane
+
+WaitingForUpdate(HandoffFinal)
+    summary: Waiting for the new control plane to take over
+
+Unknown(PlannerNotYetRun)
+    summary: Unknown: the system is determining next steps
+
+Unknown(PlannerFailed { error: "blueprint planning is disabled" })
+    summary: Unknown: planner error
+    support details: planner error: blueprint planning is disabled
+

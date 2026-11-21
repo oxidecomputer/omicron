@@ -102,6 +102,7 @@ INFO updating target release minimum generation based on new set-override action
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: remove_mupdate_override is set in the blueprint (11111111-1111-1111-1111-111111111111)
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -268,6 +269,7 @@ INFO inventory override no longer exists, but blueprint override could not be cl
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:

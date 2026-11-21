@@ -186,6 +186,7 @@ external DNS:
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: inventory stale: inventory reported generation (2) that is older than the generation in the parent blueprint (3)
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -244,6 +245,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO current sled measurements are in an unknown state, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 blueprint source: planner with report:
+operator status: summary: System is busy
 planning report:
 * noop converting 17/17 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * zone updates waiting on reference measurement changes
