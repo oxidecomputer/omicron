@@ -13,6 +13,7 @@ use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_hardware::DiskHealthMap;
 use sled_storage::config::MountConfig;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
@@ -554,9 +555,12 @@ impl ConfigReconcilerHandle {
     }
 
     /// Collect inventory fields relevant to config reconciliation.
+    ///
+    /// `disk_health` supplies the health reported for each disk.
     pub async fn inventory(
         &self,
         log: &Logger,
+        disk_health: &watch::Receiver<Arc<DiskHealthMap>>,
     ) -> Result<ReconcilerInventory, InventoryError> {
         let ledgered_sled_config = self.ledgered_sled_config()?;
         let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
@@ -570,7 +574,7 @@ impl ConfigReconcilerHandle {
             self.reconciler_result_rx.borrow().to_inventory();
 
         Ok(ReconcilerInventory {
-            disks: self.raw_disks_tx.to_inventory(),
+            disks: self.raw_disks_tx.to_inventory(disk_health),
             zpools: zpools
                 .into_iter()
                 .map(|(name, total_size, health)| InventoryZpool {

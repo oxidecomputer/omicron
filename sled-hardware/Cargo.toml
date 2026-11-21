@@ -12,6 +12,7 @@ workspace = true
 anyhow.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
+chrono.workspace = true
 futures.workspace = true
 gethostname.workspace = true
 iddqd.workspace = true

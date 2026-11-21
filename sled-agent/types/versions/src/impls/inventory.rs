@@ -8,7 +8,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 
 use camino::Utf8PathBuf;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use omicron_common::address::Ip;
@@ -28,9 +28,10 @@ use crate::latest::inventory::{
     HostPhase2DesiredSlots, InstanceManagerStatus, ManifestBootInventory,
     ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    NetworkInterface, NexusExternalIps, OmicronFileSourceResolverInventory,
-    OmicronSledConfig, OmicronSledUpdateDisposition, OmicronZoneConfig,
-    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
+    NetworkInterface, NexusExternalIps, NvmeHealth,
+    OmicronFileSourceResolverInventory, OmicronSledConfig,
+    OmicronSledUpdateDisposition, OmicronZoneConfig, OmicronZoneImageSource,
+    OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
     SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
@@ -503,6 +504,18 @@ impl BootPartitionContents {
                 artifact_hash: ArtifactHash([0x0b; 32]),
                 artifact_size: 1000,
             }),
+        }
+    }
+}
+
+impl NvmeHealth {
+    /// Returns the health of a disk with no warnings, for disks that are not
+    /// backed by a real NVMe controller.
+    pub fn new_fake(time_collected: DateTime<Utc>) -> NvmeHealth {
+        NvmeHealth {
+            time_collected,
+            reliability_degraded: false,
+            read_only: false,
         }
     }
 }

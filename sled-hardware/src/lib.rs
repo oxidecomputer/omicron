@@ -8,6 +8,7 @@ use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::inventory::{NvmeHealth, NvmeHealthError};
 use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 
@@ -31,6 +32,16 @@ pub mod softnpu;
 mod topo_bays;
 mod topo_nodes;
 pub mod underlay;
+
+/// What the latest hardware poll read from each disk's SMART / Health
+/// Information log page.
+///
+/// This is published separately from [`HardwareView`] because it changes on
+/// nearly every poll, and nothing needs to be notified when it does. The two
+/// are not updated together: a disk in one may briefly be missing from the
+/// other.
+pub type DiskHealthMap =
+    HashMap<DiskIdentity, Result<NvmeHealth, NvmeHealthError>>;
 
 /// Failure while probing for switch hardware at startup.
 #[derive(Debug, thiserror::Error)]

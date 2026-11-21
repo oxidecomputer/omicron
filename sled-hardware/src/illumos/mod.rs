@@ -3,23 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DiskFirmware;
+use crate::DiskHealthMap;
 use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
 use crate::disk_bay::{
     BayDescription, DescribeError, NvmeFacts, ObservedBay, PolledBay,
-    collect_polled_bays, describe_bay_from_topology, resolve_bays,
+    PolledDisk, collect_polled_bays, describe_bay_from_topology, resolve_bays,
 };
 use crate::nvme_instance::NvmeInstance;
 use crate::{DendriteAsic, DiskBay, DiskBayOccupant, SledMode, UnparsedDisk};
+use chrono::Utc;
 use gethostname::gethostname;
 use iddqd::IdOrdMap;
 use illumos_devinfo::{DevInfo, Node, Property};
+use libnvme::health::HealthLogPageError;
 use libnvme::namespace::NamespaceDiscoveryLevel;
 use libnvme::{Nvme, controller::Controller};
 use libtopo::{Snapshot, TopoHdl};
 use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::inventory::{
+    NvmeHealth, NvmeHealthError, NvmeHealthErrorKind,
+};
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
 use slog::Logger;
 use slog::debug;
@@ -29,6 +35,7 @@ use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -196,6 +203,7 @@ impl HardwareSnapshot {
 
             // These stand in for real hardware, so give each one a bay.
             ExternalDisks::Hardcoded { vdevs: _, disks } => {
+                let now = Utc::now();
                 let bays = disks.iter().map(|disk| PolledBay::Described {
                     bay: DiskBay {
                         location: disk.location().clone(),
@@ -204,7 +212,10 @@ impl HardwareSnapshot {
                             identity: disk.identity().clone(),
                         },
                     },
-                    disk: Some(Box::new(disk.clone())),
+                    disk: Some(Box::new(PolledDisk {
+                        disk: disk.clone(),
+                        health: Ok(NvmeHealth::new_fake(now)),
+                    })),
                 });
                 Ok(collect_polled_bays(log, bays))
             }
@@ -388,7 +399,7 @@ fn poll_bay(
     };
 
     let instance = nvme_bay.instance();
-    let facts = match nvme_facts(nvme, instance) {
+    let (facts, health) = match nvme_facts(nvme, instance) {
         Ok(facts) => facts,
         Err(err) => {
             let err = InlineErrorChain::new(&err);
@@ -408,7 +419,24 @@ fn poll_bay(
         pcie_slot_is_boot_disk(sled, nvme_bay.pcie_slot(), boot_storage_unit);
     match nvme_bay.combine_with_nvme_facts(&facts, is_boot_disk) {
         Ok((bay, disk)) => {
-            PolledBay::Described { bay, disk: disk.map(Box::new) }
+            let disk = disk.map(|disk| {
+                let health = health.map_err(|err| {
+                    let err = InlineErrorChain::new(&err);
+                    warn!(
+                        log,
+                        "Failed to read NVMe health log page";
+                        "location" => %bay.location,
+                        "nvme_instance" => %instance,
+                        &err,
+                    );
+                    NvmeHealthError {
+                        kind: NvmeHealthErrorKind::LogPageReadFailed,
+                        message: err.to_string(),
+                    }
+                });
+                Box::new(PolledDisk { disk, health })
+            });
+            PolledBay::Described { bay, disk }
         }
         Err(err) => could_not_describe(err),
     }
@@ -417,7 +445,14 @@ fn poll_bay(
 /// Asks libnvme for the controller details that the topology does not report:
 /// its PCI vendor id, how many namespaces it has that are not ignored by the
 /// nvme driver, and its firmware slots.
-fn nvme_facts(nvme: &Nvme, instance: NvmeInstance) -> Result<NvmeFacts, Error> {
+///
+/// Also reads the controller's SMART / Health Information log page. A failure
+/// to read it is returned alongside the other details, rather than in place
+/// of them.
+fn nvme_facts(
+    nvme: &Nvme,
+    instance: NvmeInstance,
+) -> Result<(NvmeFacts, Result<NvmeHealth, HealthLogPageError>), Error> {
     let controller = Controller::init_by_instance(nvme, instance.as_i32())?;
     let pci_vid = controller.get_info()?.pci_vid()?;
 
@@ -449,7 +484,13 @@ fn nvme_facts(nvme: &Nvme, instance: NvmeInstance) -> Result<NvmeFacts, Error> {
         firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
     );
 
-    Ok(NvmeFacts { pci_vid, usable_namespaces, firmware })
+    let health = controller_lock.get_health_log_page().map(|page| NvmeHealth {
+        time_collected: Utc::now(),
+        reliability_degraded: page.critical_warnings.reliability_degraded,
+        read_only: page.critical_warnings.read_only,
+    });
+
+    Ok((NvmeFacts { pci_vid, usable_namespaces, firmware }, health))
 }
 
 // Poll just enough of the device info tree to get the Baseboard. We really
@@ -489,9 +530,13 @@ fn learn_baseboard(log: &Logger) -> Result<Baseboard, Error> {
 
 // Performs a single walk of the device info tree, updating the view of hardware
 // kept in the `hardware_view_tx` watch channel if anything has changed.
+//
+// The disk health readings in `disk_health_tx` are replaced on every poll,
+// with only what this poll read.
 fn poll_device_tree(
     log: &Logger,
     hardware_view_tx: &watch::Sender<HardwareView>,
+    disk_health_tx: &watch::Sender<Arc<DiskHealthMap>>,
     external_disks: &ExternalDisks,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
@@ -500,6 +545,22 @@ fn poll_device_tree(
         Ok(polled_hw) => polled_hw,
 
         Err(e) => {
+            // No hardware was read, but hardcoded disks are not hardware.
+            let disk_health = match external_disks {
+                ExternalDisks::Hardcoded { vdevs: _, disks } => {
+                    let now = Utc::now();
+                    disks
+                        .iter()
+                        .map(|disk| {
+                            let health = Ok(NvmeHealth::new_fake(now));
+                            (disk.identity().clone(), health)
+                        })
+                        .collect()
+                }
+                ExternalDisks::DetectPhysical => DiskHealthMap::new(),
+            };
+            disk_health_tx.send_replace(Arc::new(disk_health));
+
             if let Error::NotAnOxideSled(_) = &e {
                 hardware_view_tx.send_if_modified(|inner| {
                     let mut did_modify = false;
@@ -539,10 +600,15 @@ fn poll_device_tree(
     });
     // Disks in bays this poll could not describe, or did not find, stay in
     // the view.
-    let (polled_disks, polled_bays) = {
+    let (polled_disks, polled_bays, polled_disk_health) = {
         let previous = hardware_view_tx.borrow();
         resolve_bays(log, polled_bays, &previous.disk_bays, &previous.disks)
     };
+
+    // Health is published before the disks it describes, so that a reader
+    // which looks up disks and then their health finds a reading for any
+    // disk this poll added.
+    disk_health_tx.send_replace(Arc::new(polled_disk_health));
 
     // Check for any changes since the last view.
     let mut did_modify_tofino = false;
@@ -728,10 +794,16 @@ fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
 fn hardware_tracking_task(
     log: Logger,
     hardware_view_tx: watch::Sender<HardwareView>,
+    disk_health_tx: watch::Sender<Arc<DiskHealthMap>>,
     external_disks: ExternalDisks,
 ) {
     loop {
-        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
+        match poll_device_tree(
+            &log,
+            &hardware_view_tx,
+            &disk_health_tx,
+            &external_disks,
+        ) {
             // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
@@ -752,6 +824,7 @@ fn hardware_tracking_task(
 #[derive(Clone)]
 pub struct HardwareManager {
     hardware_view_rx: watch::Receiver<HardwareView>,
+    disk_health_rx: watch::Receiver<Arc<DiskHealthMap>>,
 }
 
 impl HardwareManager {
@@ -820,12 +893,18 @@ impl HardwareManager {
             }
             .map_err(|e| e.to_string())?;
         let (hardware_view_tx, hardware_view_rx) = watch::channel(hw);
+        let (disk_health_tx, disk_health_rx) = watch::channel(Arc::default());
 
         // Force the device tree to be polled at least once before returning.
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
+        match poll_device_tree(
+            &log,
+            &hardware_view_tx,
+            &disk_health_tx,
+            &external_disks,
+        ) {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -852,10 +931,15 @@ impl HardwareManager {
         });
 
         std::thread::spawn(move || {
-            hardware_tracking_task(log, hardware_view_tx, external_disks);
+            hardware_tracking_task(
+                log,
+                hardware_view_tx,
+                disk_health_tx,
+                external_disks,
+            );
         });
 
-        Ok(Self { hardware_view_rx })
+        Ok(Self { hardware_view_rx, disk_health_rx })
     }
 
     pub fn baseboard(&self) -> Baseboard {
@@ -892,6 +976,14 @@ impl HardwareManager {
 
     pub fn subscribe(&self) -> watch::Receiver<HardwareView> {
         self.hardware_view_rx.clone()
+    }
+
+    /// Returns the disk health readings from the latest hardware poll.
+    ///
+    /// Unlike [`HardwareManager::subscribe`], this changes on nearly every
+    /// poll, so it is not useful to wait on.
+    pub fn subscribe_disk_health(&self) -> watch::Receiver<Arc<DiskHealthMap>> {
+        self.disk_health_rx.clone()
     }
 }
 

@@ -1408,7 +1408,11 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-        } = self.inner.config_reconciler.inventory(&self.log).await?;
+        } = self
+            .inner
+            .config_reconciler
+            .inventory(&self.log, &self.inner.hardware.subscribe_disk_health())
+            .await?;
 
         Ok(Inventory {
             sled_id,

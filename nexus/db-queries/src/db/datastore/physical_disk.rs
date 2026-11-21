@@ -776,8 +776,9 @@ mod test {
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::inventory::{
         ConfigReconcilerInventoryStatus, FmdInventory, InstanceManagerStatus,
-        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-        SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+        Inventory, InventoryDisk, NvmeHealth,
+        OmicronFileSourceResolverInventory, SledCpuFamily, SledRole,
+        SvcsEnabledNotOnlineResult,
     };
     use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
@@ -1160,6 +1161,7 @@ mod test {
             number_of_firmware_slots: 1,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("TEST1".to_string())],
+            nvme_health: Ok(NvmeHealth::new_fake(Utc::now())),
         }
     }
 

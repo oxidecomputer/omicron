@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "65.0.0"
+    "version": "66.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6603,6 +6603,46 @@
             "format": "uint8",
             "minimum": 0
           },
+          "nvme_health": {
+            "description": "The disk's health as its NVMe controller reports it, or why sled-agent has no reading of it. A reading's `time_collected` says how old it is.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/NvmeHealth"
+                },
+                {
+                  "$ref": "#/components/schemas/NvmeHealthError"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/NvmeHealth"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "$ref": "#/components/schemas/NvmeHealthError"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
           "pcie_slot": {
             "description": "PCIe physical slot number of the bridge above this disk.\n\nThis is the `physical-slot#` of the parent `pcieb` device. It is internal to the board's PCIe topology and board-specific: the same U.2 bay is numbered differently on Gimlet and Cosmo. It is not the location label printed on the chassis; see `location` for that. Nothing guarantees the numbering stays the same across host OS versions either, so anything that needs a stable identifier should use `location`.",
             "type": "integer",
@@ -6626,6 +6666,7 @@
           "active_firmware_slot",
           "identity",
           "number_of_firmware_slots",
+          "nvme_health",
           "pcie_slot",
           "slot1_is_read_only",
           "slot_firmware_versions",
@@ -7727,6 +7768,65 @@
           "serial_number"
         ],
         "additionalProperties": false
+      },
+      "NvmeHealth": {
+        "description": "The health of an NVMe disk, from the Critical Warning field of its controller's SMART / Health Information log page.",
+        "type": "object",
+        "properties": {
+          "read_only": {
+            "description": "The controller warns that its media has been placed in read-only mode.",
+            "type": "boolean"
+          },
+          "reliability_degraded": {
+            "description": "The controller warns that its reliability is degraded, due to media errors or an internal error.",
+            "type": "boolean"
+          },
+          "time_collected": {
+            "description": "When sled-agent read the log page from the controller.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "read_only",
+          "reliability_degraded",
+          "time_collected"
+        ]
+      },
+      "NvmeHealthError": {
+        "description": "An error reported by sled-agent in place of an [`NvmeHealth`].\n\n`message` is informational only and should not be parsed.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/NvmeHealthErrorKind"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ]
+      },
+      "NvmeHealthErrorKind": {
+        "description": "Why sled-agent has no [`NvmeHealth`] for a disk.",
+        "oneOf": [
+          {
+            "description": "Sled-agent reached the disk's controller, but could not read the SMART / Health Information log page from it.",
+            "type": "string",
+            "enum": [
+              "log_page_read_failed"
+            ]
+          },
+          {
+            "description": "Sled-agent's latest poll of its hardware did not read this disk at all. Among other reasons, this happens while the controller is locked for a format or a firmware update.",
+            "type": "string",
+            "enum": [
+              "not_polled"
+            ]
+          }
+        ]
       },
       "OmicronFileSourceResolverInventory": {
         "description": "Inventory representation of zone image resolver and measurement resolver status and health. Previously known as `ZoneImageResolverInventory`",

@@ -3,9 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
-use crate::{DiskBay, ExternalDisks, HardwareView, SledMode};
+use crate::{DiskBay, DiskHealthMap, ExternalDisks, HardwareView, SledMode};
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::DiskIdentity;
@@ -73,6 +74,10 @@ impl HardwareManager {
     }
 
     pub fn subscribe(&self) -> watch::Receiver<HardwareView> {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn subscribe_disk_health(&self) -> watch::Receiver<Arc<DiskHealthMap>> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 }

@@ -5,8 +5,13 @@
 //! Provides thin wrappers around a watch channel managing the set of
 //! [`RawDisk`]s sled-agent is aware of.
 
+use chrono::Utc;
 use iddqd::IdOrdMap;
 use sled_agent_types::inventory::InventoryDisk;
+use sled_agent_types::inventory::NvmeHealth;
+use sled_agent_types::inventory::NvmeHealthError;
+use sled_agent_types::inventory::NvmeHealthErrorKind;
+use sled_hardware::DiskHealthMap;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog::info;
@@ -102,12 +107,35 @@ impl RawDisksSender {
         })
     }
 
-    pub(crate) fn to_inventory(&self) -> Vec<InventoryDisk> {
-        self.0
-            .borrow()
+    /// Describes each raw disk, with its health from `disk_health`.
+    pub(crate) fn to_inventory(
+        &self,
+        disk_health: &watch::Receiver<Arc<DiskHealthMap>>,
+    ) -> Vec<InventoryDisk> {
+        // Health is published before the disks it describes, so reading
+        // the disks first means a disk is only missing from `disk_health`
+        // if the latest hardware poll did not read it.
+        let disks = Arc::clone(&*self.0.borrow());
+        let disk_health = Arc::clone(&*disk_health.borrow());
+        let now = Utc::now();
+        disks
             .iter()
             .map(|disk| {
                 let firmware = disk.firmware();
+                let nvme_health = match disk {
+                    RawDisk::Synthetic(_) => Ok(NvmeHealth::new_fake(now)),
+                    RawDisk::Real(_) => disk_health
+                        .get(disk.identity())
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            Err(NvmeHealthError {
+                                kind: NvmeHealthErrorKind::NotPolled,
+                                message: "the latest hardware poll did not \
+                                          read this disk"
+                                    .to_string(),
+                            })
+                        }),
+                };
                 InventoryDisk {
                     identity: disk.identity().clone(),
                     variant: disk.variant(),
@@ -118,6 +146,7 @@ impl RawDisksSender {
                     number_of_firmware_slots: firmware.number_of_slots(),
                     slot1_is_read_only: firmware.slot1_read_only(),
                     slot_firmware_versions: firmware.slots().to_vec(),
+                    nvme_health,
                 }
             })
             .collect()
@@ -369,6 +398,72 @@ mod tests {
                 }
             }
         }
+
+        logctx.cleanup_successful();
+    }
+
+    fn raw_disk(serial: &str, kind: ArbitraryDiskKind) -> RawDisk {
+        ArbitraryRawDisks {
+            by_serial: BTreeMap::from([(serial.to_string(), kind)]),
+        }
+        .into_all_disks()
+        .pop()
+        .unwrap()
+    }
+
+    #[test]
+    fn inventory_reports_disk_health() {
+        let logctx = dev::test_setup_log("inventory_reports_disk_health");
+
+        let polled = raw_disk("polled", ArbitraryDiskKind::Real);
+        let unreadable = raw_disk("unreadable", ArbitraryDiskKind::Real);
+        let not_polled = raw_disk("not-polled", ArbitraryDiskKind::Real);
+        let synthetic = raw_disk("synthetic", ArbitraryDiskKind::Synthetic);
+
+        let (tx, _rx) = super::new();
+        tx.set_raw_disks(
+            [&polled, &unreadable, &not_polled, &synthetic]
+                .into_iter()
+                .cloned(),
+            &logctx.log,
+        );
+
+        // A reading that could not be mistaken for a fake one.
+        let polled_health =
+            NvmeHealth { read_only: true, ..NvmeHealth::new_fake(Utc::now()) };
+        let read_error = NvmeHealthError {
+            kind: NvmeHealthErrorKind::LogPageReadFailed,
+            message: "controller is on fire".to_string(),
+        };
+        let (_health_tx, health_rx) =
+            watch::channel(Arc::new(DiskHealthMap::from([
+                (polled.identity().clone(), Ok(polled_health.clone())),
+                (unreadable.identity().clone(), Err(read_error.clone())),
+            ])));
+
+        let inventory = tx.to_inventory(&health_rx);
+        let health_of = |disk: &RawDisk| {
+            inventory
+                .iter()
+                .find(|inv| &inv.identity == disk.identity())
+                .expect("disk should be in inventory")
+                .nvme_health
+                .clone()
+        };
+
+        assert_eq!(health_of(&polled), Ok(polled_health));
+        assert_eq!(health_of(&unreadable), Err(read_error));
+        // A real disk the poll did not read is an error, not healthy.
+        assert_eq!(
+            health_of(&not_polled).unwrap_err().kind,
+            NvmeHealthErrorKind::NotPolled
+        );
+        // A synthetic disk is healthy without the poll reading it.
+        let synthetic_health = health_of(&synthetic).unwrap();
+        assert_eq!(
+            synthetic_health,
+            NvmeHealth::new_fake(synthetic_health.time_collected),
+        );
 
         logctx.cleanup_successful();
     }

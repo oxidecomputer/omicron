@@ -65,9 +65,9 @@ use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
     ConfigReconcilerInventoryStatus, CurrentUpdateDisposition, FmdInventory,
     InstanceManagerStatus, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronSledUpdateDisposition, SingleMeasurementInventory,
-    SledRegistrationInfo, ZpoolHealth,
+    InventoryZpool, NvmeHealth, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, OmicronSledUpdateDisposition,
+    SingleMeasurementInventory, SledRegistrationInfo, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -1360,6 +1360,7 @@ impl SledAgent {
                     number_of_firmware_slots: 1,
                     slot1_is_read_only: true,
                     slot_firmware_versions: vec![Some("SIMUL1".to_string())],
+                    nvme_health: Ok(NvmeHealth::new_fake(Utc::now())),
                 })
                 .collect(),
             zpools: storage
