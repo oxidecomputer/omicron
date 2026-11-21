@@ -298,8 +298,9 @@ impl ObservedBay {
             return;
         };
 
-        // A property that cannot be read makes the bay unreadable before one
-        // that is missing does.
+        // If any of these properties could not be read, mark the bay as
+        // unreadable. This takes priority over the error we will report
+        // in the next step if a property is readable but unset.
         let props = [
             (manufacturer, "storage/manufacturer"),
             (model, "storage/model"),
