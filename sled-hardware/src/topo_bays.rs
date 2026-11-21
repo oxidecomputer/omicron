@@ -301,20 +301,20 @@ impl ObservedBay {
         // If any of these properties could not be read, mark the bay as
         // unreadable. This takes priority over the error we will report
         // in the next step if a property is readable but unset.
-        let props = [
-            (manufacturer, "storage/manufacturer"),
-            (model, "storage/model"),
-            (serial, "storage/serial-number"),
-            (devfs_path, "io/devfs-path"),
-            (logical_disk, "storage/logical-disk"),
-        ];
-        for (prop, _) in props {
+        for prop in [manufacturer, model, serial, devfs_path, logical_disk] {
             if let Err(error) = prop {
                 self.record_problem(topology_problem(&node.key, error));
                 return;
             }
         }
 
+        // Only the logical disk name is optional.
+        let required_props = [
+            (manufacturer, "storage/manufacturer"),
+            (model, "storage/model"),
+            (serial, "storage/serial-number"),
+            (devfs_path, "io/devfs-path"),
+        ];
         let value = |prop: &Prop<String>| prop.clone().ok().flatten();
         let (Some(manufacturer), Some(model), Some(serial), Some(devfs_path)) = (
             value(manufacturer),
@@ -322,8 +322,7 @@ impl ObservedBay {
             value(serial),
             value(devfs_path),
         ) else {
-            // Only the logical disk name is optional.
-            let missing = props[..4]
+            let missing = required_props
                 .iter()
                 .find(|(prop, _)| value(prop).is_none())
                 .map(|(_, name)| name.to_string())
