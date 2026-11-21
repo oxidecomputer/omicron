@@ -24,6 +24,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
@@ -116,37 +117,19 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
     let instance_name = "base-instance";
 
-    let instance: Instance = object_create(
-        client,
-        &instances_url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: instance::InstanceCpuCount(2),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "base-instance".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::None,
-            boot_disk: Some(instance::InstanceDiskAttachment::Attach(
-                instance::InstanceDiskAttach { name: base_disk_name.clone() },
-            )),
-            cpu_platform: None,
-            disks: Vec::new(),
-            external_ips: vec![],
-            start: true,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-        },
-    )
-    .await;
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_ncpus(instance::InstanceCpuCount(2))
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name)
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
+        .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: base_disk_name.clone() },
+        )))
+        .with_start(true)
+        .finish();
+
+    let instance: Instance =
+        object_create(client, &instances_url, &instance_params).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // cannot snapshot attached disk for instance in state starting
@@ -299,37 +282,19 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
     let instance_name = "base-instance";
 
-    let instance: Instance = object_create(
-        client,
-        &instances_url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: instance::InstanceCpuCount(2),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "base-instance".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::None,
-            boot_disk: Some(instance::InstanceDiskAttachment::Attach(
-                instance::InstanceDiskAttach { name: base_disk_name.clone() },
-            )),
-            cpu_platform: None,
-            disks: Vec::new(),
-            external_ips: vec![],
-            start: false,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-        },
-    )
-    .await;
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_ncpus(instance::InstanceCpuCount(2))
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name)
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
+        .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: base_disk_name.clone() },
+        )))
+        .with_start(false)
+        .finish();
+
+    let instance: Instance =
+        object_create(client, &instances_url, &instance_params).await;
 
     assert_eq!(instance.runtime.run_state, instance::InstanceState::Stopped);
 

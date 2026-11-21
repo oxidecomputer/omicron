@@ -273,6 +273,8 @@ pub struct SitrepVersion {
     serde::Serialize,
     serde::Deserialize,
     strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantNames,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -282,4 +284,13 @@ pub enum DiagnosisEngineKind {
     Saga,
     Certificate,
     SmfService,
+}
+
+impl DiagnosisEngineKind {
+    pub const MAX_WIDTH: usize =
+        display::const_max_len(<Self as strum::VariantNames>::VARIANTS);
+
+    pub fn as_str(&self) -> &'static str {
+        self.into()
+    }
 }
