@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::config::NetworkConfig;
 use crate::ereport;
 use crate::ereport::EreportState;
-use crate::sidecar::SpIgnitionPower;
+use crate::sidecar::SpIgnitionHandle;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
@@ -241,7 +241,7 @@ pub(crate) struct UdpTask<H> {
     udp1: UdpServer,
     ereport_servers: Option<[UdpServer; 2]>,
     ereport_state: EreportState,
-    ignition_power: SpIgnitionPower,
+    ignition_handle: SpIgnitionHandle,
     handler: Arc<TokioMutex<H>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
@@ -258,7 +258,7 @@ where
         servers: [UdpServer; 2],
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
-        ignition_power: SpIgnitionPower,
+        ignition_handle: SpIgnitionHandle,
         handler: Arc<TokioMutex<H>>,
         commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
@@ -272,7 +272,7 @@ where
                 udp1,
                 ereport_servers,
                 ereport_state,
-                ignition_power,
+                ignition_handle,
                 handler,
                 commands,
                 responses_sent_count,
@@ -314,20 +314,11 @@ where
                     let (data, addr) = recv0
                         .with_context(|| format!("recv on {:?}", SpPort::One))?;
 
-                    // If an SP doesn't have ignition power, it won't be able to
-                    // answer any requests. Simulate that here by dropping the
-                    // request (regardless of the responsiveness).
-                    //
-                    // There is a small, relatively benign, race between
-                    // checking is_powered and acquiring the lock below. It
-                    // doesn't really matter for our tests at the moment.
-                    if !self.ignition_power.is_powered() {
-                        debug!(
-                            self.log,
-                            "ignition power is off; dropping request";
-                            "port" => ?SpPort::One,
-                            "src_addr" => %addr,
-                        );
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Mgs(SpPort::One),
+                        addr,
+                    ) {
                         continue;
                     }
                     if let Some((resp, addr)) = handle_request(
@@ -351,20 +342,11 @@ where
                     let (data, addr) = recv1
                         .with_context(|| format!("recv on {:?}", SpPort::Two))?;
 
-                    // If an SP doesn't have ignition power, it won't be able to
-                    // answer any requests. Simulate that here by dropping the
-                    // request (regardless of the responsiveness).
-                    //
-                    // There is a small, relatively benign, race between
-                    // checking is_powered and acquiring the lock below. It
-                    // doesn't really matter for our tests at the moment.
-                    if !self.ignition_power.is_powered() {
-                        debug!(
-                            self.log,
-                            "ignition power is off; dropping request";
-                            "port" => ?SpPort::Two,
-                            "src_addr" => %addr,
-                        );
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Mgs(SpPort::Two),
+                        addr,
+                    ) {
                         continue;
                     }
                     if let Some((resp, addr)) = handle_request(
@@ -383,31 +365,30 @@ where
 
                 recv = self.ereport_state.recv_request(ereport0) => {
                     let (req, addr, sock) = recv?;
-                    // If an SP doesn't have ignition power, it won't be able to
-                    // answer any requests. Simulate that here by dropping the
-                    // request.
-                    if !self.ignition_power.is_powered() {
-                        debug!(
-                            self.log,
-                            "ignition power is off; dropping ereport request";
-                            "src_addr" => %addr,
-                        );
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Ereport,
+                        addr,
+                    ) {
                         continue;
                     }
-                    // EreportState survives power-off, so ereports queued
-                    // before power-off are served after power-on.
+                    // Note a divergence here: when a real SP is powered off,
+                    // its buffered ereports are lost, and it comes back with a
+                    // new restart ID. Our simulated SP retains ereport state
+                    // across a power cycle, though.
+                    //
+                    // TODO: Resolve this divergence.
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
                 recv = self.ereport_state.recv_request(ereport1) => {
                     let (req, addr, sock) = recv?;
-                    if !self.ignition_power.is_powered() {
-                        debug!(
-                            self.log,
-                            "ignition power is off; dropping ereport request";
-                            "src_addr" => %addr,
-                        );
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Ereport,
+                        addr,
+                    ) {
                         continue;
                     }
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
@@ -448,5 +429,46 @@ where
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RequestKind {
+    Mgs(SpPort),
+    Ereport,
+}
+
+impl SpIgnitionHandle {
+    fn drop_if_powered_off(
+        &self,
+        log: &Logger,
+        kind: RequestKind,
+        src_addr: SocketAddrV6,
+    ) -> bool {
+        // If an SP is powered off by Ignition, it won't be able to answer any
+        // requests. Simulate that here by dropping the request.
+        //
+        // There's a small race here: Ignition can power the SP off just after
+        // this check passes, so a request that arrived just before the
+        // power-off might still be answered. It doesn't matter for our tests,
+        // though.
+        if self.is_powered() {
+            return false;
+        }
+        match kind {
+            RequestKind::Mgs(port) => debug!(
+                log,
+                "SP powered off by Ignition controller; dropping request";
+                "port" => ?port,
+                "src_addr" => %src_addr,
+            ),
+            RequestKind::Ereport => debug!(
+                log,
+                "SP powered off by Ignition controller; \
+                 dropping ereport request";
+                "src_addr" => %src_addr,
+            ),
+        }
+        true
     }
 }
