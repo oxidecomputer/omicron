@@ -636,18 +636,27 @@ impl LogsHandle {
             // Debug datasets can hold copies of a log under the same name,
             // and the zip can hold only one. Keep the largest, since an
             // interrupted archive leaves a partial copy.
-            archived.sort_by_key(|log| std::cmp::Reverse(log.size));
-            let mut names = HashSet::new();
-            archived.retain(|log| {
-                let first = names.insert(log.path.file_name());
-                if !first {
+            let mut largest: HashMap<_, &LogFile> = HashMap::new();
+            for &log in &archived {
+                largest
+                    .entry(log.path.file_name())
+                    .and_modify(|kept| {
+                        if log.size > kept.size {
+                            *kept = log;
+                        }
+                    })
+                    .or_insert(log);
+            }
+            archived.retain(|&log| {
+                let keep = std::ptr::eq(log, largest[&log.path.file_name()]);
+                if !keep {
                     warn!(
                         self.log,
                         "skipping archived log with the same name as another";
                         "logfile" => %log.path,
                     );
                 }
-                first
+                keep
             });
 
             // Since these logs can be spread out across multiple U.2 devices
