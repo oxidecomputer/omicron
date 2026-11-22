@@ -404,3 +404,7 @@ pub struct ProbePathParam {
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
 }
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub mod anchor_stub;

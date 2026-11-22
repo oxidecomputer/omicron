@@ -1,0 +1,114 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_6(DataStore::ip_pools_list_paginated);
+    anchor_async_fn_3(DataStore::ip_pools_list);
+    anchor_async_fn_3(DataStore::ip_pools_list_multicast);
+    anchor_async_fn_3(DataStore::ip_pools_list_unicast);
+    anchor_async_fn_3(DataStore::ip_pool_fetch_link);
+    anchor_async_fn_2(DataStore::ip_pools_service_lookup_both_versions);
+    anchor_async_fn_4(DataStore::ip_pools_service_lookup_by_version);
+    anchor_async_fn_2(DataStore::ip_pools_fetch_all_unicast_defaults);
+    anchor_async_fn_3(DataStore::ip_pools_fetch_default_by_version);
+    anchor_async_fn_5(DataStore::resolve_pool_for_allocation);
+    anchor_async_fn_4(DataStore::ip_pool_fetch_containing_address_in_current_silo);
+    anchor_async_fn_3(DataStore::ip_pool_fetch_containing_address_for_services);
+    anchor_async_fn_3(DataStore::ip_pool_create);
+    anchor_async_fn_4(DataStore::ip_pool_delete);
+    anchor_async_fn_4(DataStore::ip_pool_update);
+    anchor_async_fn_5(DataStore::ip_pool_assign);
+    anchor_async_fn_3(DataStore::ip_pool_utilization);
+    anchor_async_fn_4(DataStore::ip_pool_silo_list);
+    anchor_async_fn_6(DataStore::silo_ip_pool_list);
+    anchor_async_fn_3(DataStore::ip_pool_link_silo);
+    anchor_async_fn_5(DataStore::ip_pool_set_default);
+    anchor_async_fn_4(DataStore::ip_pool_unlink_silo);
+    anchor_async_fn_4(DataStore::ip_pool_list_ranges);
+    anchor_async_fn_3(DataStore::ip_pool_list_ranges_batched);
+    anchor_async_fn_5(DataStore::ip_pool_add_range);
+    anchor_async_fn_4(DataStore::ip_pool_delete_range);
+    anchor_async_fn_3(DataStore::multicast_pool_is_ssm);
+    anchor_async_fn_3(DataStore::ip_pools_fetch_ssm_multicast);
+    anchor_async_fn_3(DataStore::ip_pools_fetch_asm_multicast);
+    anchor_async_fn_4(DataStore::multicast_groups_list_by_state);
+    anchor_async_fn_4(DataStore::multicast_groups_list_by_states);
+    anchor_async_fn_3(DataStore::multicast_group_set_active);
+    anchor_async_fn_4(DataStore::multicast_group_set_underlay_salt);
+    anchor_async_fn_3(DataStore::multicast_group_create);
+    anchor_async_fn_3(DataStore::multicast_group_fetch);
+    anchor_async_fn_3(DataStore::multicast_group_fetch_on_conn);
+    anchor_async_fn_3(DataStore::multicast_group_fetch_with_sources);
+    anchor_async_fn_3(DataStore::multicast_group_lookup_by_ip);
+    anchor_async_fn_3(DataStore::multicast_groups_list);
+    anchor_async_fn_3(DataStore::mark_multicast_group_for_removal_if_no_members);
+    anchor_async_fn_3(DataStore::multicast_group_delete);
+    anchor_async_fn_3(DataStore::deallocate_external_multicast_group);
+    anchor_async_fn_4(DataStore::ensure_underlay_multicast_group);
+    anchor_async_fn_3(DataStore::underlay_multicast_group_fetch);
+    anchor_async_fn_3(DataStore::underlay_multicast_group_fetch_on_conn);
+    anchor_async_fn_3(DataStore::underlay_multicast_group_delete);
+    anchor_async_fn_3(DataStore::bgp_config_create);
+    anchor_async_fn_4(DataStore::bgp_config_update);
+    anchor_async_fn_3(DataStore::bgp_config_delete);
+    anchor_async_fn_3(DataStore::bgp_config_get);
+    anchor_async_fn_3(DataStore::bgp_config_list);
+    anchor_async_fn_3(DataStore::bgp_announce_set_list);
+    anchor_async_fn_3(DataStore::bgp_announcement_list);
+    anchor_async_fn_3(DataStore::bgp_update_announce_set);
+    anchor_async_fn_3(DataStore::bgp_create_announce_set);
+    anchor_async_fn_3(DataStore::bgp_delete_announce_set);
+    anchor_async_fn_5(DataStore::communities_for_peer);
+    anchor_async_fn_5(DataStore::allow_export_for_peer);
+    anchor_async_fn_5(DataStore::allow_import_for_peer);
+    anchor_async_fn_3(DataStore::silo_user_create);
+    anchor_async_fn_3(DataStore::silo_user_delete);
+    anchor_async_fn_4(DataStore::silo_user_fetch);
+    anchor_async_fn_4(DataStore::silo_users_list);
+    anchor_async_fn_5(DataStore::silo_group_users_list);
+    anchor_async_fn_6(DataStore::silo_user_password_hash_set);
+    anchor_async_fn_3(DataStore::silo_user_password_hash_fetch);
+    anchor_async_fn_3(DataStore::users_builtin_list_by_name);
+    anchor_async_fn_2(DataStore::load_builtin_users);
+    anchor_async_fn_2(DataStore::load_silo_users);
+    anchor_async_fn_2(DataStore::load_silo_user_role_assignments);
+    anchor_async_fn_2(DataStore::fm_current_sitrep_version);
+    anchor_async_fn_3(DataStore::fm_sitrep_metadata_read);
+    anchor_async_fn_2(DataStore::fm_sitrep_read_current);
+    anchor_async_fn_3(DataStore::fm_sitrep_read);
+    anchor_async_fn_4(DataStore::fm_sitrep_insert);
+    anchor_async_fn_3(DataStore::fm_sitrep_gc_orphans);
+    anchor_async_fn_3(DataStore::fm_sitrep_version_list);
+    anchor_async_fn_3(DataStore::fm_sitrep_check_limit_reached);
+    anchor_async_fn_3(DataStore::fm_sitrep_history_prune);
+    anchor_async_fn_5(DataStore::new);
+    anchor_async_fn_6(DataStore::new_with_timeout);
+    anchor_async_fn_3(DataStore::new_failfast);
+    anchor_async_fn_1(DataStore::wait_for_quiesced);
+    anchor_async_fn_1(DataStore::terminate);
+    anchor_async_fn_1(DataStore::pool_connection_for_tests);
+    anchor_async_fn_3(DataStore::next_ipv6_address);
+    anchor_async_fn_4(DataStore::probe_list);
+    anchor_async_fn_4(DataStore::probe_get);
+    anchor_async_fn_6(DataStore::probe_create);
+    anchor_async_fn_3(DataStore::list_all_probe_create_params_for_sled_batched);
+    anchor_async_fn_4(DataStore::probe_delete);
+    anchor_async_fn_3(DataStore::migration_insert);
+    anchor_async_fn_4(DataStore::instance_list_migrations);
+    anchor_async_fn_3(DataStore::migration_mark_failed);
+    anchor_async_fn_3(DataStore::migration_mark_deleted);
+    anchor_async_fn_4(DataStore::certificate_create);
+    anchor_async_fn_5(DataStore::certificate_list_for);
+    anchor_async_fn_3(DataStore::certificate_delete);
+    anchor_async_fn_4(DataStore::volume_repair_lock);
+    anchor_async_fn_4(DataStore::volume_repair_unlock);
+    anchor_async_fn_3(DataStore::volume_repair_get);
+}

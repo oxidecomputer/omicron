@@ -1,0 +1,115 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_4(DataStore::project_create_instance);
+    anchor_async_fn_4(DataStore::instance_list);
+    anchor_async_fn_3(DataStore::find_instances_by_active_vmm_state);
+    anchor_async_fn_2(DataStore::find_instances_with_terminated_active_migrations);
+    anchor_async_fn_4(DataStore::find_reincarnatable_instances);
+    anchor_async_fn_3(DataStore::instance_refetch);
+    anchor_async_fn_3(DataStore::instance_fetch_with_vmm);
+    anchor_async_fn_3(DataStore::instance_fetch_all);
+    anchor_async_fn_3(DataStore::instance_fetch_all_on_connection);
+    anchor_async_fn_3(DataStore::instance_and_vmm_batch_fetch);
+    anchor_async_fn_3(DataStore::instance_update_runtime);
+    anchor_async_fn_4(DataStore::instance_set_intended_state);
+    anchor_async_fn_6(DataStore::instance_set_migration_ids);
+    anchor_async_fn_5(DataStore::instance_unset_migration_ids);
+    anchor_async_fn_3(DataStore::instance_and_vmm_list_by_sled_agent);
+    anchor_async_fn_4(DataStore::instance_reconfigure);
+    anchor_async_fn_4(DataStore::instance_set_boot_disk);
+    anchor_async_fn_3(DataStore::project_delete_instance);
+    anchor_async_fn_4(DataStore::project_delete_instance_in_states);
+    anchor_async_fn_4(DataStore::instance_updater_lock);
+    anchor_async_fn_5(DataStore::instance_updater_inherit_lock);
+    anchor_async_fn_4(DataStore::instance_updater_unlock);
+    anchor_async_fn_5(DataStore::instance_commit_update);
+    anchor_async_fn_4(DataStore::instance_set_auto_restart_cooldown);
+    anchor_async_fn_3(DataStore::instance_get_state);
+    anchor_async_fn_3(DataStore::instance_get_sled_id);
+    anchor_async_fn_3(DataStore::disk_get);
+    anchor_async_fn_3(DataStore::disk_get_with_model);
+    anchor_async_fn_5(DataStore::disks_get_matching_volumes);
+    anchor_async_fn_4(DataStore::instance_list_disks);
+    anchor_async_fn_4(DataStore::instance_list_disks_on_conn);
+    anchor_async_fn_4(DataStore::project_create_disk);
+    anchor_async_fn_4(DataStore::disk_list);
+    anchor_async_fn_5(DataStore::instance_attach_disk);
+    anchor_async_fn_4(DataStore::instance_detach_disk);
+    anchor_async_fn_4(DataStore::disk_update_runtime);
+    anchor_async_fn_4(DataStore::disk_set_pantry);
+    anchor_async_fn_3(DataStore::disk_clear_pantry);
+    anchor_async_fn_3(DataStore::project_delete_disk_no_auth);
+    anchor_async_fn_2(DataStore::project_undelete_disk_set_faulted_no_auth);
+    anchor_async_fn_1(DataStore::find_phantom_disks);
+    anchor_async_fn_2(DataStore::disk_for_volume_id);
+    anchor_async_fn_5(DataStore::project_create_read_only_disk);
+    anchor_async_fn_4(DataStore::user_data_export_create_for_snapshot);
+    anchor_async_fn_4(DataStore::user_data_export_create_for_image);
+    anchor_async_fn_3(DataStore::user_data_export_lookup_by_id);
+    anchor_async_fn_3(DataStore::user_data_export_lookup_by_volume_id);
+    anchor_async_fn_3(DataStore::user_data_export_lookup_for_snapshot);
+    anchor_async_fn_3(DataStore::user_data_export_lookup_for_image);
+    anchor_async_fn_2(DataStore::compute_user_data_export_changeset);
+    anchor_async_fn_3(DataStore::user_data_export_mark_expunged_deleted);
+    anchor_async_fn_2(DataStore::user_data_export_mark_deleted);
+    anchor_async_fn_5(DataStore::set_user_data_export_requested_to_assigning);
+    anchor_async_fn_5(DataStore::unset_user_data_export_requested_to_assigning);
+    anchor_async_fn_7(DataStore::set_user_data_export_assigning_to_live);
+    anchor_async_fn_5(DataStore::set_user_data_export_live_to_deleting);
+    anchor_async_fn_5(DataStore::unset_user_data_export_live_to_deleting);
+    anchor_async_fn_5(DataStore::set_user_data_export_deleting_to_deleted);
+    anchor_async_fn_3(DataStore::set_user_data_export_requested_to_deleted);
+    anchor_async_fn_3(DataStore::zpool_insert);
+    anchor_async_fn_3(DataStore::zpool_insert_on_connection);
+    anchor_async_fn_2(DataStore::zpool_list_all_external_batched);
+    anchor_async_fn_3(DataStore::zpool_on_decommissioned_disk_list);
+    anchor_async_fn_3(DataStore::zpool_delete_self_and_all_datasets);
+    anchor_async_fn_3(DataStore::check_zpool_in_service);
+    anchor_async_fn_3(DataStore::zpool_get_sled_if_in_service);
+    anchor_async_fn_4(DataStore::zpool_set_control_plane_storage_buffer);
+    anchor_async_fn_3(DataStore::zpool_get_for_sled_reservation);
+    anchor_async_fn_3(DataStore::zpool_get_for_sled_reservation_on_conn);
+    anchor_async_fn_3(DataStore::zpools_that_can_fit_local_storage_allocation);
+    anchor_async_fn_3(DataStore::ensure_nat_entry);
+    anchor_async_fn_3(DataStore::nat_delete);
+    anchor_async_fn_3(DataStore::nat_delete_by_external_ip);
+    anchor_async_fn_3(DataStore::nat_find_by_values);
+    anchor_async_fn_4(DataStore::nat_list_since_version);
+    anchor_async_fn_4(DataStore::nat_changeset);
+    anchor_async_fn_2(DataStore::nat_current_version);
+    anchor_async_fn_4(DataStore::nat_cleanup);
+    anchor_async_fn_3(DataStore::inventory_insert_collection);
+    anchor_async_fn_3(DataStore::inventory_prune_collections);
+    anchor_async_fn_3(DataStore::find_hw_baseboard_id);
+    anchor_async_fn_2(DataStore::inventory_get_latest_collection_id);
+    anchor_async_fn_2(DataStore::inventory_get_latest_collection);
+    anchor_async_fn_3(DataStore::inventory_collection_read);
+    anchor_async_fn_3(DataStore::inventory_collections_latest);
+    anchor_async_fn_3(DataStore::address_lot_create);
+    anchor_async_fn_3(DataStore::address_lot_delete);
+    anchor_async_fn_3(DataStore::address_lot_list);
+    anchor_async_fn_4(DataStore::address_lot_block_list);
+    anchor_async_fn_3(DataStore::address_lot_id_for_block_id);
+    anchor_async_fn_2(DataStore::region_snapshot_create);
+    anchor_async_fn_4(DataStore::region_snapshot_get);
+    anchor_async_fn_4(DataStore::region_snapshot_remove);
+    anchor_async_fn_2(DataStore::find_region_snapshots_on_expunged_physical_disks);
+    anchor_async_fn_3(DataStore::find_non_expunged_region_snapshots);
+    anchor_async_fn_2(DataStore::fm_config_get_latest);
+    anchor_async_fn_3(DataStore::fm_config_get);
+    anchor_async_fn_3(DataStore::fm_config_insert_latest_version);
+    anchor_async_fn_3(DataStore::cockroachdb_node_id);
+    anchor_async_fn_4(DataStore::set_cockroachdb_node_id);
+    anchor_async_fn_2(DataStore::switch_upsert);
+    anchor_async_fn_3(DataStore::switch_list);
+}

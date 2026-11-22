@@ -10360,3 +10360,7 @@ pub type TimeseriesSchemaPaginationParams = PaginationParams<
     EmptyScanParams,
     oximeter_types_versions::latest::schema::TimeseriesName,
 >;
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub mod anchor_stub;

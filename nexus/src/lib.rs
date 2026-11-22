@@ -17,6 +17,14 @@ mod lockstep_api;
 mod populate;
 mod saga_interface;
 
+use nexus_db_queries_anchors_0 as _;
+use nexus_db_queries_anchors_1 as _;
+use nexus_db_queries_anchors_2 as _;
+use nexus_db_queries_anchors_3 as _;
+use nexus_db_queries_anchors_4 as _;
+use nexus_db_queries_anchors_5 as _;
+use nexus_db_queries_anchors_6 as _;
+use nexus_db_queries_anchors_7 as _;
 use crate::internal_api::params::ServiceIpPoolConfig;
 use crate::internal_api::params::ServiceIpPoolError;
 pub use app::Nexus;

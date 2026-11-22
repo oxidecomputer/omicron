@@ -1,0 +1,115 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_2(DataStore::load_builtin_vpcs);
+    anchor_async_fn_4(DataStore::vpc_list);
+    anchor_async_fn_4(DataStore::project_create_vpc);
+    anchor_async_fn_4(DataStore::project_update_vpc);
+    anchor_async_fn_4(DataStore::project_delete_vpc);
+    anchor_async_fn_3(DataStore::vpc_list_firewall_rules);
+    anchor_async_fn_3(DataStore::vpc_delete_all_firewall_rules);
+    anchor_async_fn_4(DataStore::vpc_update_firewall_rules);
+    anchor_async_fn_2(DataStore::nexus_inbound_icmp_view);
+    anchor_async_fn_3(DataStore::nexus_inbound_icmp_update);
+    anchor_async_fn_3(DataStore::vpc_resolve_to_sleds);
+    anchor_async_fn_4(DataStore::vpc_subnet_list);
+    anchor_async_fn_4(DataStore::vpc_create_subnet);
+    anchor_async_fn_4(DataStore::vpc_delete_subnet);
+    anchor_async_fn_4(DataStore::vpc_delete_subnet_raw);
+    anchor_async_fn_5(DataStore::vpc_create_subnet_route);
+    anchor_async_fn_3(DataStore::vpc_delete_subnet_route);
+    anchor_async_fn_5(DataStore::vpc_update_subnet);
+    anchor_async_fn_4(DataStore::vpc_subnet_set_custom_router);
+    anchor_async_fn_3(DataStore::vpc_subnet_unset_custom_router);
+    anchor_async_fn_4(DataStore::subnet_list_instance_network_interfaces);
+    anchor_async_fn_4(DataStore::vpc_router_list);
+    anchor_async_fn_4(DataStore::internet_gateway_list);
+    anchor_async_fn_3(DataStore::internet_gateway_has_ip_pools);
+    anchor_async_fn_3(DataStore::internet_gateway_has_ip_addresses);
+    anchor_async_fn_4(DataStore::internet_gateway_list_ip_pools);
+    anchor_async_fn_4(DataStore::internet_gateway_list_ip_addresses);
+    anchor_async_fn_4(DataStore::vpc_create_router);
+    anchor_async_fn_4(DataStore::vpc_create_internet_gateway);
+    anchor_async_fn_3(DataStore::vpc_delete_router);
+    anchor_async_fn_5(DataStore::vpc_delete_internet_gateway);
+    anchor_async_fn_3(DataStore::vpc_delete_internet_gateway_no_cascade);
+    anchor_async_fn_3(DataStore::vpc_delete_internet_gateway_cascade);
+    anchor_async_fn_4(DataStore::vpc_update_router);
+    anchor_async_fn_4(DataStore::vpc_router_route_list);
+    anchor_async_fn_4(DataStore::router_create_route);
+    anchor_async_fn_2(DataStore::router_create_route_on_connection);
+    anchor_async_fn_4(DataStore::internet_gateway_attach_ip_pool);
+    anchor_async_fn_4(DataStore::internet_gateway_attach_ip_address);
+    anchor_async_fn_3(DataStore::router_delete_route);
+    anchor_async_fn_7(DataStore::internet_gateway_detach_ip_pool);
+    anchor_async_fn_6(DataStore::internet_gateway_detach_ip_pool_no_cascade);
+    anchor_async_fn_3(DataStore::internet_gateway_detach_ip_pool_cascade);
+    anchor_async_fn_7(DataStore::internet_gateway_detach_ip_address);
+    anchor_async_fn_3(DataStore::internet_gateway_detach_ip_address_cascade);
+    anchor_async_fn_6(DataStore::internet_gateway_detach_ip_address_no_cascade);
+    anchor_async_fn_4(DataStore::router_update_route);
+    anchor_async_fn_3(DataStore::resolve_vni_to_vpc);
+    anchor_async_fn_3(DataStore::resolve_vpc_to_vni);
+    anchor_async_fn_3(DataStore::vpc_get_system_router);
+    anchor_async_fn_3(DataStore::vpc_get_active_custom_routers_with_associated_subnets);
+    anchor_async_fn_3(DataStore::vpc_get_custom_routers);
+    anchor_async_fn_3(DataStore::vpc_resolve_sled_external_ips_to_gateways);
+    anchor_async_fn_3(DataStore::vpc_resolve_router_rules);
+    anchor_async_fn_3(DataStore::vpc_router_increment_rpw_version);
+    anchor_async_fn_3(DataStore::vpc_increment_rpw_version);
+    anchor_async_fn_3(DataStore::get_db_metadata_nexus_in_state);
+    anchor_async_fn_3(DataStore::check_schema_and_access);
+    anchor_async_fn_3(DataStore::update_schema);
+    anchor_async_fn_3(DataStore::database_nexus_access_all);
+    anchor_async_fn_4(DataStore::database_nexus_access_update_blueprint);
+    anchor_async_fn_2(DataStore::database_nexus_access_update_quiesced);
+    anchor_async_fn_3(DataStore::database_nexus_access_delete);
+    anchor_async_fn_5(DataStore::database_nexus_access_create);
+    anchor_async_fn_3(DataStore::initialize_nexus_access_from_blueprint_on_connection);
+    anchor_async_fn_2(DataStore::attempt_handoff);
+    anchor_async_fn_1(DataStore::database_schema_version);
+    anchor_async_fn_3(DataStore::virtual_provisioning_collection_create);
+    anchor_async_fn_3(DataStore::virtual_provisioning_collection_get);
+    anchor_async_fn_3(DataStore::virtual_provisioning_collection_delete);
+    anchor_async_fn_5(DataStore::virtual_provisioning_collection_insert_disk);
+    anchor_async_fn_5(DataStore::virtual_provisioning_collection_insert_snapshot);
+    anchor_async_fn_5(DataStore::virtual_provisioning_collection_delete_disk);
+    anchor_async_fn_5(DataStore::virtual_provisioning_collection_delete_snapshot);
+    anchor_async_fn_6(DataStore::virtual_provisioning_collection_insert_instance);
+    anchor_async_fn_6(DataStore::virtual_provisioning_collection_delete_instance);
+    anchor_async_fn_2(DataStore::load_builtin_fleet_virtual_provisioning_collection);
+    anchor_async_fn_3(DataStore::alert_create);
+    anchor_async_fn_5(DataStore::fm_rendezvous_alert_create);
+    anchor_async_fn_2(DataStore::alert_select_next_for_dispatch);
+    anchor_async_fn_4(DataStore::alert_mark_dispatched);
+    anchor_async_fn_3(DataStore::fm_rendezvous_existing_alert_markers);
+    anchor_async_fn_3(DataStore::alert_fetch_fm_rendezvous_gen);
+    anchor_async_fn_4(DataStore::alert_list_matching);
+    anchor_async_fn_4(DataStore::project_ensure_snapshot);
+    anchor_async_fn_5(DataStore::project_snapshot_update_state);
+    anchor_async_fn_4(DataStore::snapshot_list);
+    anchor_async_fn_5(DataStore::project_delete_snapshot);
+    anchor_async_fn_3(DataStore::find_snapshot_by_volume_id);
+    anchor_async_fn_3(DataStore::find_snapshot_by_destination_volume_id);
+    anchor_async_fn_3(DataStore::snapshot_get);
+    anchor_async_fn_4(DataStore::external_service_ip_pool_assign);
+    anchor_async_fn_4(DataStore::external_service_ip_pool_unassign);
+    anchor_async_fn_3(DataStore::external_service_ip_pool_list);
+    anchor_async_fn_4(DataStore::external_service_ip_pool_pools_for_service);
+    anchor_async_fn_4(DataStore::try_bump_bootstore_generation);
+    anchor_async_fn_3(DataStore::ensure_bootstore_config);
+    anchor_async_fn_3(DataStore::get_latest_bootstore_config);
+    anchor_async_fn_3(DataStore::silo_utilization_view);
+    anchor_async_fn_3(DataStore::silo_utilization_list);
+    anchor_async_fn_3(DataStore::project_utilization_list);
+    anchor_async_fn_4(DataStore::sled_instance_list);
+}

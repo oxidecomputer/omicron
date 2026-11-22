@@ -102,6 +102,14 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-queries-anchors/shard0",
+    "nexus/db-queries-anchors/shard1",
+    "nexus/db-queries-anchors/shard2",
+    "nexus/db-queries-anchors/shard3",
+    "nexus/db-queries-anchors/shard4",
+    "nexus/db-queries-anchors/shard5",
+    "nexus/db-queries-anchors/shard6",
+    "nexus/db-queries-anchors/shard7",
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
@@ -304,6 +312,14 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-queries-anchors/shard0",
+    "nexus/db-queries-anchors/shard1",
+    "nexus/db-queries-anchors/shard2",
+    "nexus/db-queries-anchors/shard3",
+    "nexus/db-queries-anchors/shard4",
+    "nexus/db-queries-anchors/shard5",
+    "nexus/db-queries-anchors/shard6",
+    "nexus/db-queries-anchors/shard7",
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
@@ -662,6 +678,14 @@ nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
+nexus-db-queries-anchors-0 = { path = "nexus/db-queries-anchors/shard0" }
+nexus-db-queries-anchors-1 = { path = "nexus/db-queries-anchors/shard1" }
+nexus-db-queries-anchors-2 = { path = "nexus/db-queries-anchors/shard2" }
+nexus-db-queries-anchors-3 = { path = "nexus/db-queries-anchors/shard3" }
+nexus-db-queries-anchors-4 = { path = "nexus/db-queries-anchors/shard4" }
+nexus-db-queries-anchors-5 = { path = "nexus/db-queries-anchors/shard5" }
+nexus-db-queries-anchors-6 = { path = "nexus/db-queries-anchors/shard6" }
+nexus-db-queries-anchors-7 = { path = "nexus/db-queries-anchors/shard7" }
 nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }

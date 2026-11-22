@@ -1,0 +1,115 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_3(DataStore::list_subnet_pools);
+    anchor_async_fn_3(DataStore::create_subnet_pool);
+    anchor_async_fn_4(DataStore::delete_subnet_pool);
+    anchor_async_fn_4(DataStore::update_subnet_pool);
+    anchor_async_fn_5(DataStore::link_subnet_pool_to_silo);
+    anchor_async_fn_5(DataStore::unlink_subnet_pool_from_silo);
+    anchor_async_fn_5(DataStore::update_subnet_pool_silo_link);
+    anchor_async_fn_4(DataStore::list_silos_linked_to_subnet_pool);
+    anchor_async_fn_4(DataStore::silo_subnet_pool_list);
+    anchor_async_fn_4(DataStore::silo_subnet_pool_fetch);
+    anchor_async_fn_5(DataStore::add_subnet_pool_member);
+    anchor_async_fn_4(DataStore::list_subnet_pool_members);
+    anchor_async_fn_4(DataStore::delete_subnet_pool_member);
+    anchor_async_fn_3(DataStore::subnet_pool_utilization);
+    anchor_async_fn_5(DataStore::create_external_subnet);
+    anchor_async_fn_4(DataStore::update_external_subnet);
+    anchor_async_fn_3(DataStore::delete_external_subnet);
+    anchor_async_fn_3(DataStore::instance_lookup_external_subnets);
+    anchor_async_fn_3(DataStore::instance_detach_external_subnets);
+    anchor_async_fn_4(DataStore::list_external_subnets);
+    anchor_async_fn_3(DataStore::instance_lookup_attached_subnets);
+    anchor_async_fn_2(DataStore::list_all_attached_subnets_batched);
+    anchor_async_fn_3(DataStore::list_attached_external_subnets);
+    anchor_async_fn_5(DataStore::begin_attach_subnet);
+    anchor_async_fn_4(DataStore::begin_detach_subnet);
+    anchor_async_fn_5(DataStore::external_subnet_complete_op);
+    anchor_async_fn_5(DataStore::instance_create_network_interface);
+    anchor_async_fn_3(DataStore::probe_create_network_interface);
+    anchor_async_fn_3(DataStore::service_list_network_interfaces_on_connection);
+    anchor_async_fn_3(DataStore::service_network_interfaces_all_list);
+    anchor_async_fn_2(DataStore::service_network_interfaces_all_list_batched);
+    anchor_async_fn_3(DataStore::service_create_network_interface);
+    anchor_async_fn_3(DataStore::instance_delete_all_network_interfaces);
+    anchor_async_fn_3(DataStore::probe_delete_all_network_interfaces);
+    anchor_async_fn_4(DataStore::instance_delete_network_interface);
+    anchor_async_fn_3(DataStore::derive_guest_network_interface_info);
+    anchor_async_fn_3(DataStore::derive_probe_network_interface_info);
+    anchor_async_fn_3(DataStore::derive_vpc_network_interface_info);
+    anchor_async_fn_3(DataStore::derive_subnet_network_interface_info);
+    anchor_async_fn_4(DataStore::instance_list_network_interfaces);
+    anchor_async_fn_3(DataStore::instance_get_primary_network_interface);
+    anchor_async_fn_3(DataStore::probe_get_network_interface);
+    anchor_async_fn_5(DataStore::instance_update_network_interface);
+    anchor_async_fn_2(DataStore::instance_network_interfaces_all_list_batched);
+    anchor_async_fn_3(DataStore::instance_network_interfaces_all_list);
+    anchor_async_fn_3(DataStore::tuf_repo_insert);
+    anchor_async_fn_3(DataStore::tuf_repo_get_by_id);
+    anchor_async_fn_3(DataStore::tuf_repo_get_by_version);
+    anchor_async_fn_3(DataStore::tuf_repo_get_version);
+    anchor_async_fn_3(DataStore::tuf_list_repos_unpruned);
+    anchor_async_fn_2(DataStore::tuf_list_repos_unpruned_batched);
+    anchor_async_fn_2(DataStore::tuf_list_artifacts_unpruned_batched);
+    anchor_async_fn_5(DataStore::tuf_repo_mark_pruned);
+    anchor_async_fn_3(DataStore::tuf_list_repo_artifacts);
+    anchor_async_fn_2(DataStore::tuf_get_generation);
+    anchor_async_fn_3(DataStore::tuf_repo_list);
+    anchor_async_fn_3(DataStore::tuf_trust_root_list);
+    anchor_async_fn_3(DataStore::tuf_trust_root_insert);
+    anchor_async_fn_3(DataStore::tuf_trust_root_delete);
+    anchor_async_fn_2(DataStore::tq_get_all_active_rack_id_and_latest_epoch);
+    anchor_async_fn_5(DataStore::tq_insert_rss_config_after_handoff);
+    anchor_async_fn_3(DataStore::tq_get_latest_config);
+    anchor_async_fn_4(DataStore::tq_list_config);
+    anchor_async_fn_4(DataStore::tq_get_config);
+    anchor_async_fn_3(DataStore::tq_load_latest_possible_committed_config);
+    anchor_async_fn_3(DataStore::tq_get_committed_members_without_active_sled);
+    anchor_async_fn_3(DataStore::tq_insert_latest_config);
+    anchor_async_fn_4(DataStore::tq_update_prepare_status);
+    anchor_async_fn_5(DataStore::tq_update_commit_status);
+    anchor_async_fn_5(DataStore::tq_abort_config);
+    anchor_async_fn_4(DataStore::project_image_list);
+    anchor_async_fn_4(DataStore::silo_image_list);
+    anchor_async_fn_4(DataStore::silo_image_create);
+    anchor_async_fn_4(DataStore::project_image_create);
+    anchor_async_fn_5(DataStore::project_image_promote);
+    anchor_async_fn_5(DataStore::silo_image_demote);
+    anchor_async_fn_4(DataStore::silo_image_delete);
+    anchor_async_fn_4(DataStore::project_image_delete);
+    anchor_async_fn_2(DataStore::crucible_dataset_get);
+    anchor_async_fn_2(DataStore::crucible_dataset_upsert);
+    anchor_async_fn_2(DataStore::crucible_dataset_insert_if_not_exists);
+    anchor_async_fn_2(DataStore::crucible_dataset_list_all_batched);
+    anchor_async_fn_2(DataStore::crucible_dataset_physical_disk_in_service);
+    anchor_async_fn_3(DataStore::mark_crucible_dataset_not_provisionable);
+    anchor_async_fn_3(DataStore::mark_crucible_dataset_provisionable);
+    anchor_async_fn_3(DataStore::ereport_fetch);
+    anchor_async_fn_5(DataStore::ereport_fetch_matching);
+    anchor_async_fn_4(DataStore::ereport_list_by_restart);
+    anchor_async_fn_3(DataStore::ereporter_restart_list);
+    anchor_async_fn_3(DataStore::latest_ereport_id);
+    anchor_async_fn_4(DataStore::ereports_list_unmarked);
+    anchor_async_fn_3(DataStore::reconfigurator_config_list);
+    anchor_async_fn_2(DataStore::reconfigurator_config_get_latest);
+    anchor_async_fn_3(DataStore::reconfigurator_config_get);
+    anchor_async_fn_3(DataStore::reconfigurator_config_insert_latest_version);
+    anchor_async_fn_3(DataStore::clickhouse_policy_list);
+    anchor_async_fn_2(DataStore::clickhouse_policy_get_latest);
+    anchor_async_fn_3(DataStore::clickhouse_policy_insert_latest_version);
+    anchor_async_fn_2(DataStore::allow_list_view);
+    anchor_async_fn_3(DataStore::allow_list_upsert);
+    anchor_async_fn_2(DataStore::rendezvous_sled_bp_availability_list_all_batched);
+    anchor_async_fn_4(DataStore::rendezvous_sled_bp_availability_write);
+}

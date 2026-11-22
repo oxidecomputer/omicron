@@ -687,3 +687,7 @@ pub struct VersionPathParam {
 pub struct TrustQuorumEpochQueryParam {
     pub epoch: Option<Epoch>,
 }
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub mod anchor_stub;

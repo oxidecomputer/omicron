@@ -1,0 +1,115 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_3(DataStore::create_region_replacement_request_for_region);
+    anchor_async_fn_3(DataStore::insert_region_replacement_request);
+    anchor_async_fn_3(DataStore::get_region_replacement_request_by_id);
+    anchor_async_fn_2(DataStore::get_requested_region_replacements);
+    anchor_async_fn_2(DataStore::get_running_region_replacements);
+    anchor_async_fn_2(DataStore::get_done_region_replacements);
+    anchor_async_fn_4(DataStore::set_region_replacement_allocating);
+    anchor_async_fn_4(DataStore::undo_set_region_replacement_allocating);
+    anchor_async_fn_6(DataStore::set_region_replacement_running);
+    anchor_async_fn_3(DataStore::lookup_in_progress_region_replacement_request_by_new_region_id);
+    anchor_async_fn_3(DataStore::lookup_region_replacement_request_by_old_region_id);
+    anchor_async_fn_4(DataStore::set_region_replacement_driving);
+    anchor_async_fn_4(DataStore::undo_set_region_replacement_driving);
+    anchor_async_fn_4(DataStore::set_region_replacement_from_driving_to_done);
+    anchor_async_fn_3(DataStore::current_region_replacement_request_step);
+    anchor_async_fn_3(DataStore::region_replacement_request_steps);
+    anchor_async_fn_3(DataStore::add_region_replacement_request_step);
+    anchor_async_fn_4(DataStore::set_region_replacement_completing);
+    anchor_async_fn_4(DataStore::undo_set_region_replacement_completing);
+    anchor_async_fn_4(DataStore::set_region_replacement_complete);
+    anchor_async_fn_3(DataStore::set_region_replacement_complete_from_requested);
+    anchor_async_fn_3(DataStore::mark_region_replacement_as_done);
+    anchor_async_fn_3(DataStore::request_has_matching_successful_finish_notification);
+    anchor_async_fn_4(DataStore::anti_affinity_groups_batch_lookup);
+    anchor_async_fn_4(DataStore::instance_list_affinity_groups);
+    anchor_async_fn_4(DataStore::instance_list_anti_affinity_groups);
+    anchor_async_fn_4(DataStore::affinity_group_list);
+    anchor_async_fn_4(DataStore::anti_affinity_group_list);
+    anchor_async_fn_4(DataStore::affinity_group_create);
+    anchor_async_fn_4(DataStore::anti_affinity_group_create);
+    anchor_async_fn_4(DataStore::affinity_group_update);
+    anchor_async_fn_3(DataStore::affinity_group_delete);
+    anchor_async_fn_4(DataStore::anti_affinity_group_update);
+    anchor_async_fn_3(DataStore::anti_affinity_group_delete);
+    anchor_async_fn_4(DataStore::affinity_group_member_list);
+    anchor_async_fn_4(DataStore::anti_affinity_group_member_list);
+    anchor_async_fn_4(DataStore::affinity_group_member_instance_view);
+    anchor_async_fn_4(DataStore::anti_affinity_group_member_instance_view);
+    anchor_async_fn_4(DataStore::affinity_group_member_instance_add);
+    anchor_async_fn_4(DataStore::anti_affinity_group_member_instance_add);
+    anchor_async_fn_3(DataStore::instance_affinity_group_memberships_delete);
+    anchor_async_fn_3(DataStore::instance_anti_affinity_group_memberships_delete);
+    anchor_async_fn_4(DataStore::affinity_group_member_instance_delete);
+    anchor_async_fn_4(DataStore::anti_affinity_group_member_instance_delete);
+    anchor_async_fn_2(DataStore::sled_upsert);
+    anchor_async_fn_3(DataStore::check_sled_in_service);
+    anchor_async_fn_2(DataStore::check_sled_in_service_on_connection);
+    anchor_async_fn_2(DataStore::sled_get_rack_id_if_commissioned_conn);
+    anchor_async_fn_4(DataStore::sled_get_in_service_by_baseboard_and_rack_id);
+    anchor_async_fn_2(DataStore::sled_list_in_service_baseboards_in_rack_conn);
+    anchor_async_fn_4(DataStore::sled_list);
+    anchor_async_fn_3(DataStore::sled_list_all_batched);
+    anchor_async_fn_7(DataStore::sled_reservation_create);
+    anchor_async_fn_3(DataStore::sled_reservation_update_for_migrate_success);
+    anchor_async_fn_3(DataStore::sled_reservation_delete);
+    anchor_async_fn_4(DataStore::sled_set_provision_policy);
+    anchor_async_fn_3(DataStore::sled_set_policy_to_expunged);
+    anchor_async_fn_5(DataStore::sled_set_policy_to_expunged_if_trust_quorum_allows);
+    anchor_async_fn_3(DataStore::sled_set_state_to_decommissioned);
+    anchor_async_fn_3(DataStore::oximeter_lookup);
+    anchor_async_fn_3(DataStore::oximeter_create);
+    anchor_async_fn_3(DataStore::oximeter_expunge);
+    anchor_async_fn_3(DataStore::oximeter_list);
+    anchor_async_fn_3(DataStore::oximeter_reassign_all_producers);
+    anchor_async_fn_3(DataStore::producer_endpoint_upsert_and_assign);
+    anchor_async_fn_3(DataStore::producer_endpoint_delete);
+    anchor_async_fn_4(DataStore::producers_list_by_oximeter_id);
+    anchor_async_fn_4(DataStore::producers_list_expired);
+    anchor_async_fn_3(DataStore::producers_list_expired_batched);
+    anchor_async_fn_3(DataStore::vmm_insert);
+    anchor_async_fn_3(DataStore::vmm_mark_deleted);
+    anchor_async_fn_2(DataStore::vmm_bulk_mark_stop_for_update);
+    anchor_async_fn_3(DataStore::vmm_fetch);
+    anchor_async_fn_3(DataStore::vmm_update_runtime);
+    anchor_async_fn_5(DataStore::vmm_and_migration_update_runtime);
+    anchor_async_fn_3(DataStore::vmm_mark_saga_unwound);
+    anchor_async_fn_4(DataStore::vmm_overwrite_addr_for_test);
+    anchor_async_fn_3(DataStore::vmm_list_abandoned);
+    anchor_async_fn_3(DataStore::vmm_list_stoppable_for_update_by_sled_id);
+    anchor_async_fn_2(DataStore::load_builtin_silos);
+    anchor_async_fn_6(DataStore::silo_create);
+    anchor_async_fn_8(DataStore::silo_create_conn);
+    anchor_async_fn_3(DataStore::silos_list_by_id);
+    anchor_async_fn_4(DataStore::silos_list);
+    anchor_async_fn_3(DataStore::silo_list_all_batched);
+    anchor_async_fn_6(DataStore::silo_delete);
+    anchor_async_fn_2(DataStore::load_builtin_projects);
+    anchor_async_fn_3(DataStore::project_create);
+    anchor_async_fn_4(DataStore::project_delete);
+    anchor_async_fn_3(DataStore::projects_list);
+    anchor_async_fn_4(DataStore::project_update);
+    anchor_async_fn_5(DataStore::loopback_address_create);
+    anchor_async_fn_3(DataStore::loopback_address_delete);
+    anchor_async_fn_3(DataStore::loopback_address_get);
+    anchor_async_fn_3(DataStore::loopback_address_list);
+    anchor_async_fn_4(DataStore::identity_provider_lookup);
+    anchor_async_fn_4(DataStore::identity_provider_list);
+    anchor_async_fn_4(DataStore::saml_identity_provider_create);
+    anchor_async_fn_2(DataStore::cockroachdb_settings);
+    anchor_async_fn_5(DataStore::cockroachdb_setting_set_string);
+    anchor_async_fn_2(DataStore::system_networking_settings_view);
+    anchor_async_fn_3(DataStore::system_networking_settings_update);
+}

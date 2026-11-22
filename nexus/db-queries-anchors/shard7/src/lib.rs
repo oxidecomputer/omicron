@@ -1,0 +1,114 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_5(DataStore::allocate_instance_snat_ip);
+    anchor_async_fn_6(DataStore::allocate_probe_ephemeral_ip);
+    anchor_async_fn_7(DataStore::allocate_instance_ephemeral_ip);
+    anchor_async_fn_3(DataStore::external_ip_list_service_on_connection);
+    anchor_async_fn_5(DataStore::allocate_floating_ip);
+    anchor_async_fn_5(DataStore::external_ip_allocate_omicron_zone);
+    anchor_async_fn_3(DataStore::external_ip_list_service_all);
+    anchor_async_fn_2(DataStore::external_ip_list_service_all_batched);
+    anchor_async_fn_3(DataStore::deallocate_external_ip);
+    anchor_async_fn_4(DataStore::begin_deallocate_ephemeral_ip);
+    anchor_async_fn_3(DataStore::deallocate_external_ip_by_instance_id);
+    anchor_async_fn_3(DataStore::deallocate_external_ip_by_probe_id);
+    anchor_async_fn_3(DataStore::detach_floating_ips_by_instance_id);
+    anchor_async_fn_3(DataStore::instance_lookup_external_ips);
+    anchor_async_fn_3(DataStore::instance_lookup_ephemeral_ips);
+    anchor_async_fn_3(DataStore::probe_lookup_external_ips);
+    anchor_async_fn_4(DataStore::floating_ips_list);
+    anchor_async_fn_4(DataStore::floating_ip_update);
+    anchor_async_fn_3(DataStore::floating_ip_delete);
+    anchor_async_fn_6(DataStore::floating_ip_begin_attach);
+    anchor_async_fn_5(DataStore::floating_ip_begin_detach);
+    anchor_async_fn_6(DataStore::external_ip_complete_op);
+    anchor_async_fn_4(DataStore::multicast_group_members_list);
+    anchor_async_fn_5(DataStore::multicast_group_member_attach_to_instance);
+    anchor_async_fn_3(DataStore::multicast_group_members_delete_by_group);
+    anchor_async_fn_4(DataStore::multicast_group_member_delete_by_group_and_instance);
+    anchor_async_fn_5(DataStore::multicast_group_member_set_state);
+    anchor_async_fn_6(DataStore::multicast_group_member_set_state_if_current);
+    anchor_async_fn_5(DataStore::multicast_group_member_left_to_joining_if_current);
+    anchor_async_fn_5(DataStore::multicast_group_member_to_left_if_current);
+    anchor_async_fn_4(DataStore::multicast_group_members_list_by_id);
+    anchor_async_fn_4(DataStore::multicast_group_members_list_by_instance);
+    anchor_async_fn_3(DataStore::multicast_groups_source_filter_state);
+    anchor_async_fn_6(DataStore::multicast_group_member_reconcile_joining);
+    anchor_async_fn_3(DataStore::multicast_group_members_detach_by_instance);
+    anchor_async_fn_4(DataStore::multicast_group_member_get_by_group_and_instance);
+    anchor_async_fn_4(DataStore::multicast_group_member_get_by_id);
+    anchor_async_fn_4(DataStore::multicast_group_member_detach_by_group_and_instance);
+    anchor_async_fn_4(DataStore::multicast_group_member_update_sled_id);
+    anchor_async_fn_5(DataStore::multicast_group_member_update_sled_id_if_current);
+    anchor_async_fn_4(DataStore::multicast_group_member_set_instance_sled);
+    anchor_async_fn_3(DataStore::multicast_group_members_mark_for_removal);
+    anchor_async_fn_3(DataStore::multicast_group_member_delete_by_id);
+    anchor_async_fn_2(DataStore::multicast_group_members_complete_delete);
+    anchor_async_fn_3(DataStore::webhook_rx_create);
+    anchor_async_fn_3(DataStore::webhook_rx_config_fetch);
+    anchor_async_fn_4(DataStore::webhook_rx_delete);
+    anchor_async_fn_4(DataStore::webhook_rx_update);
+    anchor_async_fn_3(DataStore::alert_rx_list);
+    anchor_async_fn_4(DataStore::alert_rx_is_subscribed_to_alert);
+    anchor_async_fn_4(DataStore::alert_subscription_add);
+    anchor_async_fn_4(DataStore::alert_subscription_remove);
+    anchor_async_fn_3(DataStore::alert_rx_list_subscribed_to_event);
+    anchor_async_fn_3(DataStore::alert_glob_list_reprocessable);
+    anchor_async_fn_3(DataStore::alert_glob_reprocess);
+    anchor_async_fn_3(DataStore::webhook_rx_secret_list);
+    anchor_async_fn_4(DataStore::webhook_rx_secret_create);
+    anchor_async_fn_4(DataStore::webhook_rx_secret_delete);
+    anchor_async_fn_3(DataStore::rack_id_list);
+    anchor_async_fn_3(DataStore::rack_list);
+    anchor_async_fn_3(DataStore::rack_list_initialized);
+    anchor_async_fn_3(DataStore::rack_insert);
+    anchor_async_fn_3(DataStore::update_rack_subnet);
+    anchor_async_fn_3(DataStore::rack_subnet);
+    anchor_async_fn_4(DataStore::allocate_sled_underlay_subnet_octets);
+    anchor_async_fn_3(DataStore::rack_subnet_allocations);
+    anchor_async_fn_3(DataStore::sled_subnet_allocation_insert);
+    anchor_async_fn_3(DataStore::rack_set_initialized);
+    anchor_async_fn_3(DataStore::load_builtin_rack_data);
+    anchor_async_fn_4(DataStore::dns_zones_list);
+    anchor_async_fn_3(DataStore::dns_zones_list_all);
+    anchor_async_fn_3(DataStore::dns_group_latest_version);
+    anchor_async_fn_4(DataStore::dns_group_latest_version_conn);
+    anchor_async_fn_5(DataStore::dns_names_list);
+    anchor_async_fn_3(DataStore::dns_config_read);
+    anchor_async_fn_2(DataStore::load_dns_data);
+    anchor_async_fn_4(DataStore::dns_update_from_version);
+    anchor_async_fn_4(DataStore::dns_update_incremental);
+    anchor_async_fn_2(DataStore::local_storage_dataset_list_all_batched);
+    anchor_async_fn_3(DataStore::local_storage_dataset_insert_if_not_exists);
+    anchor_async_fn_4(DataStore::local_storage_dataset_tombstone);
+    anchor_async_fn_3(DataStore::delete_local_storage_dataset_allocations);
+    anchor_async_fn_2(DataStore::local_storage_unencrypted_dataset_list_all_batched);
+    anchor_async_fn_3(DataStore::local_storage_unencrypted_dataset_insert_if_not_exists);
+    anchor_async_fn_4(DataStore::local_storage_unencrypted_dataset_tombstone);
+    anchor_async_fn_5(DataStore::audit_log_list);
+    anchor_async_fn_3(DataStore::audit_log_entry_init);
+    anchor_async_fn_4(DataStore::audit_log_entry_complete);
+    anchor_async_fn_4(DataStore::audit_log_cleanup);
+    anchor_async_fn_4(DataStore::audit_log_timeout_incomplete);
+    anchor_async_fn_3(DataStore::scim_idp_get_tokens);
+    anchor_async_fn_3(DataStore::scim_idp_create_token);
+    anchor_async_fn_4(DataStore::scim_idp_get_token_by_id);
+    anchor_async_fn_4(DataStore::scim_idp_delete_token_by_id);
+    anchor_async_fn_3(DataStore::scim_lookup_token_by_bearer);
+    anchor_async_fn_3(DataStore::oximeter_read_policy_list);
+    anchor_async_fn_2(DataStore::oximeter_read_policy_get_latest);
+    anchor_async_fn_3(DataStore::oximeter_read_policy_insert_latest_version);
+    anchor_async_fn_4(DataStore::fm_rendezvous_alert_marker_gc);
+    anchor_async_fn_4(DataStore::fm_rendezvous_support_bundle_marker_gc);
+    anchor_async_fn_2(DataStore::load_builtin_role_asgns);
+}

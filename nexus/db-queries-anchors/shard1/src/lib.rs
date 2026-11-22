@@ -1,0 +1,115 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_3(DataStore::create_region_snapshot_replacement_request);
+    anchor_async_fn_3(DataStore::insert_region_snapshot_replacement_request);
+    anchor_async_fn_4(DataStore::insert_region_snapshot_replacement_request_with_volume_id);
+    anchor_async_fn_3(DataStore::get_region_snapshot_replacement_request_by_id);
+    anchor_async_fn_3(DataStore::lookup_region_snapshot_replacement_request);
+    anchor_async_fn_2(DataStore::get_requested_region_snapshot_replacements);
+    anchor_async_fn_2(DataStore::get_running_region_snapshot_replacements);
+    anchor_async_fn_2(DataStore::get_replacement_done_region_snapshot_replacements);
+    anchor_async_fn_4(DataStore::set_region_snapshot_replacement_allocating);
+    anchor_async_fn_4(DataStore::undo_set_region_snapshot_replacement_allocating);
+    anchor_async_fn_7(DataStore::set_region_snapshot_replacement_replacement_done);
+    anchor_async_fn_4(DataStore::set_region_snapshot_replacement_deleting_old_volume);
+    anchor_async_fn_4(DataStore::undo_set_region_snapshot_replacement_deleting_old_volume);
+    anchor_async_fn_4(DataStore::set_region_snapshot_replacement_running);
+    anchor_async_fn_4(DataStore::set_region_snapshot_replacement_completing);
+    anchor_async_fn_4(DataStore::undo_set_region_snapshot_replacement_completing);
+    anchor_async_fn_4(DataStore::set_region_snapshot_replacement_complete);
+    anchor_async_fn_3(DataStore::set_region_snapshot_replacement_complete_from_requested);
+    anchor_async_fn_4(DataStore::create_region_snapshot_replacement_step);
+    anchor_async_fn_3(DataStore::insert_region_snapshot_replacement_step);
+    anchor_async_fn_3(DataStore::get_region_snapshot_replacement_step_by_id);
+    anchor_async_fn_2(DataStore::get_requested_region_snapshot_replacement_steps);
+    anchor_async_fn_4(DataStore::set_region_snapshot_replacement_step_running);
+    anchor_async_fn_4(DataStore::undo_set_region_snapshot_replacement_step_running);
+    anchor_async_fn_5(DataStore::set_region_snapshot_replacement_step_complete);
+    anchor_async_fn_3(DataStore::in_progress_region_snapshot_replacement_steps);
+    anchor_async_fn_2(DataStore::region_snapshot_replacement_steps_requiring_garbage_collection);
+    anchor_async_fn_3(DataStore::set_region_snapshot_replacement_step_volume_deleted);
+    anchor_async_fn_3(DataStore::set_region_snapshot_replacement_step_volume_deleted_from_requested);
+    anchor_async_fn_2(DataStore::read_only_target_deleted);
+    anchor_async_fn_2(DataStore::read_only_target_addr);
+    anchor_async_fn_3(DataStore::create_read_only_region_replacement_request);
+    anchor_async_fn_3(DataStore::insert_read_only_region_replacement_request);
+    anchor_async_fn_3(DataStore::lookup_read_only_region_replacement_request);
+    anchor_async_fn_3(DataStore::switch_port_settings_exist);
+    anchor_async_fn_3(DataStore::switch_ports_using_settings);
+    anchor_async_fn_5(DataStore::switch_port_settings_create);
+    anchor_async_fn_3(DataStore::switch_port_settings_delete);
+    anchor_async_fn_4(DataStore::switch_port_settings_update);
+    anchor_async_fn_3(DataStore::switch_port_settings_list);
+    anchor_async_fn_3(DataStore::switch_port_settings_get);
+    anchor_async_fn_2(DataStore::switch_config_read);
+    anchor_async_fn_5(DataStore::switch_port_create);
+    anchor_async_fn_4(DataStore::switch_port_delete);
+    anchor_async_fn_3(DataStore::switch_port_list);
+    anchor_async_fn_3(DataStore::switch_port_get);
+    anchor_async_fn_5(DataStore::switch_port_set_settings_id);
+    anchor_async_fn_5(DataStore::switch_port_get_id);
+    anchor_async_fn_3(DataStore::switch_port_settings_get_id);
+    anchor_async_fn_2(DataStore::switch_ports_with_uplinks);
+    anchor_async_fn_2(DataStore::get_allocated_regions);
+    anchor_async_fn_2(DataStore::get_region);
+    anchor_async_fn_2(DataStore::get_region_optional);
+    anchor_async_fn_6(DataStore::disk_region_allocate);
+    anchor_async_fn_6(DataStore::arbitrary_region_allocate);
+    anchor_async_fn_3(DataStore::regions_hard_delete);
+    anchor_async_fn_2(DataStore::regions_total_reserved_size);
+    anchor_async_fn_2(DataStore::find_read_write_regions_on_expunged_physical_disks);
+    anchor_async_fn_2(DataStore::find_read_only_regions_on_expunged_physical_disks);
+    anchor_async_fn_3(DataStore::region_set_port);
+    anchor_async_fn_2(DataStore::region_addr);
+    anchor_async_fn_2(DataStore::regions_missing_ports);
+    anchor_async_fn_3(DataStore::find_non_expunged_regions);
+    anchor_async_fn_2(DataStore::saga_create);
+    anchor_async_fn_2(DataStore::saga_create_event);
+    anchor_async_fn_4(DataStore::saga_update_state);
+    anchor_async_fn_3(DataStore::saga_list_recovery_candidates_batched);
+    anchor_async_fn_3(DataStore::saga_list_running_or_unwinding_older_than);
+    anchor_async_fn_2(DataStore::saga_list_unfinished_batched);
+    anchor_async_fn_3(DataStore::saga_latest_node_event_times);
+    anchor_async_fn_3(DataStore::saga_fetch_log_batched);
+    anchor_async_fn_4(DataStore::sagas_reassign_sec);
+    anchor_async_fn_4(DataStore::sagas_abandon_orphans);
+    anchor_async_fn_4(DataStore::ssh_keys_batch_lookup);
+    anchor_async_fn_4(DataStore::ssh_keys_batch_fetch);
+    anchor_async_fn_5(DataStore::ssh_keys_batch_assign);
+    anchor_async_fn_4(DataStore::instance_ssh_keys_list);
+    anchor_async_fn_3(DataStore::instance_ssh_keys_delete);
+    anchor_async_fn_4(DataStore::ssh_keys_list);
+    anchor_async_fn_4(DataStore::ssh_key_create);
+    anchor_async_fn_3(DataStore::ssh_key_delete);
+    anchor_async_fn_4(DataStore::silo_group_ensure);
+    anchor_async_fn_4(DataStore::silo_group_optional_lookup);
+    anchor_async_fn_4(DataStore::silo_group_membership_for_user);
+    anchor_async_fn_4(DataStore::silo_group_membership_for_group);
+    anchor_async_fn_3(DataStore::silo_groups_for_self);
+    anchor_async_fn_4(DataStore::silo_group_membership_replace_for_user);
+    anchor_async_fn_4(DataStore::silo_groups_list_by_id);
+    anchor_async_fn_4(DataStore::silo_quotas_create);
+    anchor_async_fn_4(DataStore::silo_quotas_delete);
+    anchor_async_fn_4(DataStore::silo_update_quota);
+    anchor_async_fn_3(DataStore::silo_quotas_view);
+    anchor_async_fn_3(DataStore::fleet_list_quotas);
+    anchor_async_fn_3(DataStore::bfd_session_list);
+    anchor_async_fn_3(DataStore::bfd_session_create);
+    anchor_async_fn_3(DataStore::bfd_session_delete);
+    anchor_async_fn_2(DataStore::debug_dataset_list_all_batched);
+    anchor_async_fn_3(DataStore::debug_dataset_insert_if_not_exists);
+    anchor_async_fn_4(DataStore::debug_dataset_tombstone);
+    anchor_async_fn_5(DataStore::lldp_config_get);
+    anchor_async_fn_6(DataStore::lldp_config_update);
+    anchor_async_fn_2(DataStore::v2p_mappings);
+}

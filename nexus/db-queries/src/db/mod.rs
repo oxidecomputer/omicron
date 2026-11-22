@@ -7,6 +7,8 @@
 pub(crate) mod check_if_limit_reached;
 // This is not intended to be public, but this is necessary to use it from
 // doctests
+#[doc(hidden)]
+pub mod anchor;
 pub mod collection_attach;
 pub mod collection_detach;
 pub mod collection_detach_many;

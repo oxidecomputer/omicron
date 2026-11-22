@@ -1,0 +1,114 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+#![allow(clippy::all)]
+
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[inline(never)]
+pub fn anchor() {
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::anchor::*;
+    anchor_async_fn_3(DataStore::volume_create);
+    anchor_async_fn_2(DataStore::volume_get);
+    anchor_async_fn_2(DataStore::volume_hard_delete);
+    anchor_async_fn_2(DataStore::volume_usage_records_for_resource);
+    anchor_async_fn_4(DataStore::swap_volume_usage_records_for_resources);
+    anchor_async_fn_3(DataStore::volume_checkout);
+    anchor_async_fn_4(DataStore::volume_checkout_randomize_ids);
+    anchor_async_fn_1(DataStore::find_deleted_volume_regions);
+    anchor_async_fn_2(DataStore::read_only_resources_associated_with_volume);
+    anchor_async_fn_2(DataStore::soft_delete_volume);
+    anchor_async_fn_3(DataStore::volume_remove_rop);
+    anchor_async_fn_4(DataStore::get_dataset_rw_regions_in_volume);
+    anchor_async_fn_3(DataStore::upstairs_repair_notification);
+    anchor_async_fn_5(DataStore::upstairs_repair_progress);
+    anchor_async_fn_5(DataStore::downstairs_client_stop_request_notification);
+    anchor_async_fn_5(DataStore::downstairs_client_stopped_notification);
+    anchor_async_fn_3(DataStore::most_recent_started_repair_notification);
+    anchor_async_fn_3(DataStore::repair_notifications_for_region);
+    anchor_async_fn_3(DataStore::most_recent_repair_progress);
+    anchor_async_fn_2(DataStore::volume_deleted);
+    anchor_async_fn_2(DataStore::regions_to_delete);
+    anchor_async_fn_2(DataStore::snapshots_to_delete);
+    anchor_async_fn_3(DataStore::volume_replace_region);
+    anchor_async_fn_5(DataStore::volume_replace_snapshot);
+    anchor_async_fn_3(DataStore::find_volumes_referencing_socket_addr);
+    anchor_async_fn_3(DataStore::find_volumes_referencing_ipv6_addr);
+    anchor_async_fn_3(DataStore::find_volumes_referencing_ipv6_net);
+    anchor_async_fn_3(DataStore::volume_references_read_only_target);
+    anchor_async_fn_3(DataStore::volume_cooked);
+    anchor_async_fn_4(DataStore::physical_disk_and_zpool_insert);
+    anchor_async_fn_3(DataStore::physical_disk_enable_adoption);
+    anchor_async_fn_3(DataStore::physical_disk_insert);
+    anchor_async_fn_2(DataStore::physical_disk_insert_on_connection);
+    anchor_async_fn_4(DataStore::physical_disk_update_policy);
+    anchor_async_fn_4(DataStore::physical_disk_update_state);
+    anchor_async_fn_3(DataStore::physical_disk_enable_adoption_for_all_new_disks_in_inventory);
+    anchor_async_fn_3(DataStore::physical_disk_list_new_inventory_on_connection);
+    anchor_async_fn_3(DataStore::physical_disk_adoptable_list);
+    anchor_async_fn_3(DataStore::physical_disk_unadopted_list);
+    anchor_async_fn_4(DataStore::physical_disk_list);
+    anchor_async_fn_3(DataStore::physical_disk_adoption_request_list);
+    anchor_async_fn_4(DataStore::sled_list_physical_disks);
+    anchor_async_fn_3(DataStore::physical_disk_decommission);
+    anchor_async_fn_3(DataStore::physical_disk_delete);
+    anchor_async_fn_3(DataStore::physical_disk_adoption_request_delete);
+    anchor_async_fn_3(DataStore::blueprints_list);
+    anchor_async_fn_3(DataStore::blueprint_insert);
+    anchor_async_fn_3(DataStore::check_blueprint_limit_reached);
+    anchor_async_fn_3(DataStore::blueprint_read);
+    anchor_async_fn_3(DataStore::blueprint_delete);
+    anchor_async_fn_3(DataStore::blueprint_ensure_external_networking_resources);
+    anchor_async_fn_3(DataStore::blueprint_target_set_current);
+    anchor_async_fn_3(DataStore::blueprint_target_set_current_enabled);
+    anchor_async_fn_2(DataStore::blueprint_target_get_current_full);
+    anchor_async_fn_2(DataStore::blueprint_target_get_current_on_connection);
+    anchor_async_fn_2(DataStore::blueprint_target_get_current);
+    anchor_async_fn_3(DataStore::bp_target_list_page);
+    anchor_async_fn_3(DataStore::bp_target_determine_pruneable);
+    anchor_async_fn_4(DataStore::bp_target_delete_up_to);
+    anchor_async_fn_3(DataStore::support_bundle_create);
+    anchor_async_fn_6(DataStore::fm_rendezvous_support_bundle_create);
+    anchor_async_fn_3(DataStore::support_bundle_data_selection_get);
+    anchor_async_fn_3(DataStore::support_bundle_get);
+    anchor_async_fn_3(DataStore::support_bundle_list);
+    anchor_async_fn_5(DataStore::support_bundle_list_assigned_to_nexus);
+    anchor_async_fn_4(DataStore::support_bundle_fail_expunged);
+    anchor_async_fn_4(DataStore::support_bundle_update);
+    anchor_async_fn_4(DataStore::support_bundle_update_user_comment);
+    anchor_async_fn_3(DataStore::support_bundle_delete);
+    anchor_async_fn_3(DataStore::fm_rendezvous_existing_support_bundle_markers);
+    anchor_async_fn_3(DataStore::device_token_lookup_by_token);
+    anchor_async_fn_3(DataStore::device_auth_request_create);
+    anchor_async_fn_5(DataStore::device_access_token_create);
+    anchor_async_fn_4(DataStore::device_access_token_fetch);
+    anchor_async_fn_3(DataStore::current_user_token_list);
+    anchor_async_fn_4(DataStore::silo_user_token_list);
+    anchor_async_fn_3(DataStore::current_user_token_delete);
+    anchor_async_fn_3(DataStore::silo_user_tokens_delete);
+    anchor_async_fn_3(DataStore::session_lookup_by_token);
+    anchor_async_fn_3(DataStore::session_create);
+    anchor_async_fn_3(DataStore::session_update_last_used);
+    anchor_async_fn_3(DataStore::session_hard_delete_by_token);
+    anchor_async_fn_6(DataStore::silo_user_session_list);
+    anchor_async_fn_3(DataStore::silo_user_sessions_delete);
+    anchor_async_fn_4(DataStore::session_cleanup_batch);
+    anchor_async_fn_3(DataStore::webhook_delivery_create_batch);
+    anchor_async_fn_3(DataStore::webhook_rx_list_resendable_alerts);
+    anchor_async_fn_6(DataStore::webhook_rx_delivery_list);
+    anchor_async_fn_4(DataStore::webhook_rx_delivery_list_ready);
+    anchor_async_fn_5(DataStore::webhook_delivery_start_attempt);
+    anchor_async_fn_5(DataStore::webhook_delivery_finish_attempt);
+    anchor_async_fn_4(DataStore::webhook_delivery_list);
+    anchor_async_fn_2(DataStore::target_release_get_current);
+    anchor_async_fn_3(DataStore::target_release_get_generation);
+    anchor_async_fn_3(DataStore::target_release_insert);
+    anchor_async_fn_3(DataStore::target_release_fetch_recent_distinct);
+    anchor_async_fn_4(DataStore::silo_auth_settings_create);
+    anchor_async_fn_4(DataStore::silo_auth_settings_update);
+    anchor_async_fn_3(DataStore::silo_auth_settings_view);
+    anchor_async_fn_4(DataStore::problem_fetch_current_revision);
+    anchor_async_fn_4(DataStore::problem_list);
+}
