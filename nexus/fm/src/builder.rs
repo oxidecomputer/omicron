@@ -353,6 +353,84 @@ mod tests {
         input
     }
 
+    /// A diagnosis engine can request an alert from a case, request a problem,
+    /// link the alert to the problem and the problem to the case, and all of it
+    /// ends up in the built sitrep. Creating the problem bumps
+    /// `problem_generation`. A child sitrep in which nothing is modified
+    /// carries the problem forward unchanged, without bumping the generation.
+    #[test]
+    fn test_new_active_problem() {
+        let logctx = dev::test_setup_log("test_new_active_problem");
+        const DE: fm::DiagnosisEngineKind = fm::DiagnosisEngineKind::PowerShelf;
+        let inv = make_collection();
+        let (inputs, _) = Input::builder(None, inv.clone())
+            .expect("no parent sitrep, so builder should succeed")
+            .with_empty_defaults()
+            .build()
+            .expect("all inputs provided");
+        let mut builder = SitrepBuilder::new(&logctx.log, &inputs);
+        let (case_id, problem_id, alert_id) = {
+            let mut case = builder.cases.open_case(DE, "test case");
+            let alert_id = case
+                .request_alert(&test_alerts::Foo(serde_json::json!({})), "")
+                .unwrap();
+            let mut problem = builder.active_problems.request_active_problem(
+                DE,
+                ActiveProblemRequest {
+                    code: fm::problem::ProblemCode::UnhealthyZpool,
+                    summary: "summary".to_string(),
+                    description: "description".to_string(),
+                    action_required: "action".to_string(),
+                },
+                "test problem",
+            );
+            problem.attach_alert(alert_id, "an alert for this problem");
+            let problem_id = problem.id();
+            case.link_active_problem(problem_id, "this case found the problem");
+            (case.id, problem_id, alert_id)
+        };
+        let sitrep = build_sitrep(builder);
+
+        assert_eq!(
+            sitrep.metadata.problem_generation,
+            SitrepProblemGeneration::new().next()
+        );
+        let problem =
+            sitrep.problems.by_id().get(&problem_id).expect("problem built");
+        assert!(problem.alerts.contains_key(&alert_id));
+        let case = sitrep.cases.get(&case_id).expect("case built");
+        assert!(case.alerts_requested.contains_key(&alert_id));
+        assert!(case.problems.contains_key(&problem_id));
+
+        let parent_version = SitrepVersion {
+            id: sitrep.metadata.id,
+            version: 1,
+            time_made_current: chrono::Utc::now(),
+        };
+        let (child_inputs, _) = Input::builder(
+            Some(Arc::new((parent_version, sitrep.clone()))),
+            inv,
+        )
+        .expect("parent and child share an inventory")
+        .with_empty_defaults()
+        .build()
+        .expect("all inputs provided");
+        let child =
+            build_sitrep(SitrepBuilder::new(&logctx.log, &child_inputs));
+        assert_eq!(
+            child.problems.by_id().get(&problem_id),
+            sitrep.problems.by_id().get(&problem_id),
+            "the problem is carried forward unchanged"
+        );
+        assert_eq!(
+            child.metadata.problem_generation,
+            sitrep.metadata.problem_generation
+        );
+        let child_case = child.cases.get(&case_id).expect("case carried");
+        assert!(child_case.problems.contains_key(&problem_id));
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn first_sitrep_with_no_requests_stamps_initial_generation() {
         let logctx = dev::test_setup_log(
