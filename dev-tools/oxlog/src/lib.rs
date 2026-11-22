@@ -202,10 +202,10 @@ impl LogFile {
     ///
     /// We must, yet again, unfortunately do something somewhat janky due to the
     /// existence of archived live log files that lack the '.log' extension (see
-    /// https://github.com/oxidecomputer/omicron/pull/11889). This comparison
-    /// tries to preferentially order files with the same file prefix (i.e. the
-    /// part prior to any extensions) based on the numeric value of the
-    /// `.<epoch>` extension, ignoring whether or not there is a `.log`
+    /// [#9271](https://github.com/oxidecomputer/omicron/issues/9271)). This
+    /// comparison tries to preferentially order files with the same file prefix
+    /// (i.e. the part prior to any extensions) based on the numeric value of
+    /// the `.<epoch>` extension, ignoring whether or not there is a `.log`
     /// extension. If the epoch is the same (which it really oughtn't be), we
     /// tie-break based on the presence of the `.log` extension, with
     /// `<svc>.log.1234` comparing *lower* than `<svc>.1234` (since the latter
