@@ -945,7 +945,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -968,6 +968,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxnet",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -1245,12 +1246,6 @@ dependencies = [
  "subprocess",
  "tokio",
 ]
-
-[[package]]
-name = "cesu8"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cexpr"
@@ -1531,7 +1526,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1548,7 +1543,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1565,7 +1560,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1651,7 +1646,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 
 [[package]]
 name = "clipboard-win"
@@ -1730,7 +1725,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -1784,7 +1779,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2736,12 +2731,13 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
+ "ddm-api-types",
  "ddm-api-types-versions",
  "oxnet",
- "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor 0.16.1",
+ "progenitor-extras 0.4.0",
  "reqwest",
  "serde",
  "slog",
@@ -2751,7 +2747,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
  "ddm-api-types-versions",
 ]
@@ -2759,9 +2755,10 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
  "ddm-protocol",
+ "oxnet",
  "schemars 0.8.22",
  "serde",
  "serde_repr",
@@ -2771,7 +2768,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -3286,7 +3283,7 @@ dependencies = [
  "oxide-tokio-rt",
  "pretty-hex",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -3324,7 +3321,7 @@ dependencies = [
  "internal-dns-types-versions",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -4031,7 +4028,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4517,7 +4514,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "rand 0.9.2",
  "regress 0.10.5",
  "reqwest",
@@ -5620,7 +5617,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -6153,7 +6150,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-update-engine-types",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -6242,7 +6239,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "qorb",
  "reqwest",
  "semver 1.0.28",
@@ -6355,7 +6352,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6484,22 +6481,6 @@ dependencies = [
 
 [[package]]
 name = "jni"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97"
-dependencies = [
- "cesu8",
- "cfg-if",
- "combine",
- "jni-sys 0.3.0",
- "log",
- "thiserror 1.0.69",
- "walkdir",
- "windows-sys 0.45.0",
-]
-
-[[package]]
-name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
@@ -6507,7 +6488,7 @@ dependencies = [
  "cfg-if",
  "combine",
  "jni-macros",
- "jni-sys 0.4.1",
+ "jni-sys",
  "log",
  "simd_cesu8",
  "thiserror 2.0.18",
@@ -6527,12 +6508,6 @@ dependencies = [
  "simd_cesu8",
  "syn 2.0.117",
 ]
-
-[[package]]
-name = "jni-sys"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
 
 [[package]]
 name = "jni-sys"
@@ -7302,15 +7277,15 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
  "chrono",
  "client-common",
  "colored 3.1.1",
  "mg-api-types-versions",
  "oxnet",
- "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor 0.16.1",
+ "progenitor-extras 0.4.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -7323,7 +7298,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -7331,7 +7306,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6fee306970763d27025c408cbbf690d6e30a9593#6fee306970763d27025c408cbbf690d6e30a9593"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=trey%2Frack-prefixes-rewrite#ed2146ce36fc877780b4bfed789350c7da1ca87b"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -7665,7 +7640,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -8172,7 +8147,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -8951,7 +8926,7 @@ dependencies = [
  "chrono",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -8981,7 +8956,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9146,7 +9121,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -9400,7 +9375,7 @@ dependencies = [
  "oxnet",
  "parse-display",
  "progenitor-client 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "proptest",
  "rand 0.9.2",
  "regress 0.10.5",
@@ -9835,7 +9810,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "propolis-client",
  "qorb",
  "rand 0.9.2",
@@ -10604,7 +10579,7 @@ dependencies = [
  "predicates",
  "primeorder 0.14.0",
  "proc-macro2",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "quote",
  "rand 0.10.1",
  "rand 0.8.6",
@@ -11117,7 +11092,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "serde",
  "slog",
@@ -12640,6 +12615,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "progenitor-extras"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf70fd39ab9e9cbf6cfddcd7da96f36aed98c0ef85226d9a0b7d369f7f1f3472"
+dependencies = [
+ "progenitor-client 0.16.1",
+ "reqwest",
+ "slog",
+]
+
+[[package]]
 name = "progenitor-impl"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13002,7 +12988,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -13041,9 +13027,9 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13625,7 +13611,7 @@ version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "reqwest",
  "schemars 0.8.22",
  "serde",
@@ -13661,7 +13647,7 @@ dependencies = [
  "quinn",
  "rustls",
  "rustls-pki-types",
- "rustls-platform-verifier 0.6.2",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -14022,7 +14008,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14073,51 +14059,24 @@ dependencies = [
 
 [[package]]
 name = "rustls-platform-verifier"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d99feebc72bae7ab76ba994bb5e121b8d83d910ca40b36e0921f53becc41784"
-dependencies = [
- "core-foundation 0.10.1",
- "core-foundation-sys",
- "jni 0.21.1",
- "log",
- "once_cell",
- "rustls",
- "rustls-native-certs",
- "rustls-platform-verifier-android 0.1.1",
- "rustls-webpki",
- "security-framework",
- "security-framework-sys",
- "webpki-root-certs",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rustls-platform-verifier"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1167586491e2b18b8bfbb293e8180ec17c201c4f076d7cb3070ca964e7598f98"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
- "jni 0.22.4",
+ "jni",
  "log",
  "once_cell",
  "rustls",
  "rustls-native-certs",
- "rustls-platform-verifier-android 0.2.0",
+ "rustls-platform-verifier-android",
  "rustls-webpki",
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
-
-[[package]]
-name = "rustls-platform-verifier-android"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-platform-verifier-android"
@@ -15166,7 +15125,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "propolis-client",
  "regress 0.10.5",
  "reqwest",
@@ -15902,7 +15861,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -16833,7 +16792,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16853,7 +16812,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -17513,7 +17472,7 @@ dependencies = [
  "percent-encoding",
  "reqwest",
  "rustls",
- "rustls-platform-verifier 0.7.1",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "serde_plain",
@@ -19116,7 +19075,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-update-engine-types",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -19154,7 +19113,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.15.1",
- "progenitor-extras",
+ "progenitor-extras 0.3.0",
  "regress 0.10.5",
  "reqwest",
  "schemars 0.8.22",
@@ -19227,7 +19186,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -19350,15 +19309,6 @@ dependencies = [
 
 [[package]]
 name = "windows-sys"
-version = "0.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75283be5efb2831d37ea142365f009c02ec203cd29a3ebecbc093d52315b66d0"
-dependencies = [
- "windows-targets 0.42.2",
-]
-
-[[package]]
-name = "windows-sys"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "677d2418bec65e3338edb076e806bc1ec15693c5d0104683f2efe857f61056a9"
@@ -19400,21 +19350,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
-]
-
-[[package]]
-name = "windows-targets"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e5180c00cd44c9b1c88adb3693291f1cd93605ded80c250a75d472756b4d071"
-dependencies = [
- "windows_aarch64_gnullvm 0.42.2",
- "windows_aarch64_msvc 0.42.2",
- "windows_i686_gnu 0.42.2",
- "windows_i686_msvc 0.42.2",
- "windows_x86_64_gnu 0.42.2",
- "windows_x86_64_gnullvm 0.42.2",
- "windows_x86_64_msvc 0.42.2",
 ]
 
 [[package]]
@@ -19476,12 +19411,6 @@ dependencies = [
 
 [[package]]
 name = "windows_aarch64_gnullvm"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "597a5118570b68bc08d8d59125332c54f1ba9d9adeedeef5b99b02ba2b0698f8"
-
-[[package]]
-name = "windows_aarch64_gnullvm"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b38e32f0abccf9987a4e3079dfb67dcd799fb61361e53e2882c3cbaf0d905d8"
@@ -19500,12 +19429,6 @@ checksum = "a9d8416fa8b42f5c947f8482c43e7d89e73a173cead56d044f6a56104a6d1b53"
 
 [[package]]
 name = "windows_aarch64_msvc"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e08e8864a60f06ef0d0ff4ba04124db8b0fb3be5776a5cd47641e942e58c4d43"
-
-[[package]]
-name = "windows_aarch64_msvc"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc35310971f3b2dbbf3f0690a219f40e2d9afcf64f9ab7cc1be722937c26b4bc"
@@ -19521,12 +19444,6 @@ name = "windows_aarch64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9d782e804c2f632e395708e99a94275910eb9100b2114651e04744e9b125006"
-
-[[package]]
-name = "windows_i686_gnu"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c61d927d8da41da96a81f029489353e68739737d3beca43145c8afec9a31a84f"
 
 [[package]]
 name = "windows_i686_gnu"
@@ -19560,12 +19477,6 @@ checksum = "fa7359d10048f68ab8b09fa71c3daccfb0e9b559aed648a8f95469c27057180c"
 
 [[package]]
 name = "windows_i686_msvc"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44d840b6ec649f480a41c8d80f9c65108b92d89345dd94027bfe06ac444d1060"
-
-[[package]]
-name = "windows_i686_msvc"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f55c233f70c4b27f66c523580f78f1004e8b5a8b659e05a4eb49d4166cca406"
@@ -19581,12 +19492,6 @@ name = "windows_i686_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e7ac75179f18232fe9c285163565a57ef8d3c89254a30685b57d83a38d326c2"
-
-[[package]]
-name = "windows_x86_64_gnu"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8de912b8b8feb55c064867cf047dda097f92d51efad5b491dfb98f6bbb70cb36"
 
 [[package]]
 name = "windows_x86_64_gnu"
@@ -19608,12 +19513,6 @@ checksum = "9c3842cdd74a865a8066ab39c8a7a473c0778a3f29370b5fd6b4b9aa7df4a499"
 
 [[package]]
 name = "windows_x86_64_gnullvm"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26d41b46a36d453748aedef1486d5c7a85db22e56aff34643984ea85514e94a3"
-
-[[package]]
-name = "windows_x86_64_gnullvm"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b7b52767868a23d5bab768e390dc5f5c55825b6d30b86c844ff2dc7414044cc"
@@ -19629,12 +19528,6 @@ name = "windows_x86_64_gnullvm"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ffa179e2d07eee8ad8f57493436566c7cc30ac536a3379fdf008f47f6bb7ae1"
-
-[[package]]
-name = "windows_x86_64_msvc"
-version = "0.42.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9aec5da331524158c6d1a4ac0ab1541149c0b9505fde06423b02f5ef0106b9f0"
 
 [[package]]
 name = "windows_x86_64_msvc"
