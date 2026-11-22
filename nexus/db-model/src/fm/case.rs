@@ -9,10 +9,12 @@ use super::DiagnosisEngine;
 use super::SupportBundleRequest;
 use crate::DbTypedUuid;
 use crate::ereport;
-use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
+use nexus_db_schema::schema::fm_case;
+use nexus_db_schema::schema::fm_case_problem;
+use nexus_db_schema::schema::fm_ereport_in_case;
 use nexus_types::fm;
 use omicron_uuid_kinds::{
-    CaseEreportKind, CaseKind, EreporterRestartKind, SitrepKind,
+    CaseEreportKind, CaseKind, EreporterRestartKind, ProblemKind, SitrepKind,
 };
 
 /// Metadata describing a fault management case.
@@ -65,6 +67,7 @@ impl CaseMetadata {
             support_bundles_requested: _,
             ereports: _,
             facts: _,
+            problems: _,
         } = case;
         Self {
             sitrep_id: sitrep_id.into(),
@@ -137,6 +140,74 @@ impl CaseEreport {
     }
 }
 
+/// An association between a case and a problem.
+///
+/// These are tracked for internal use by diagnosis engines, such as to determine
+/// which of their open cases have existing problems. Unlike problem revision
+/// requests, alert links, and support bundle links, these records do *not*
+/// correspond to any records in tables outside of the sitrep. They are used by
+/// diagnosis engines for internal bookkeeping only, and do not represent
+/// requests for rendezvous to perform any externally visible actions.
+///
+/// This corresponds to a record in the `fm_case_problem` table.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_case_problem)]
+pub struct CaseProblem {
+    /// The ID of the case associated with the problem.
+    pub case_id: DbTypedUuid<CaseKind>,
+    /// The ID of the problem associated with the case.
+    pub problem_id: DbTypedUuid<ProblemKind>,
+    /// The sitrep that this record is part of.
+    ///
+    /// Note that this is *not* the sitrep in which the association was first
+    /// created, which is tracked by [`Self::linked_sitrep_id`].
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    /// The sitrep in which this association between the case and the problem
+    /// was first created.
+    ///
+    /// This is *not* the sitrep in which either the case or the problem was
+    /// created, nor is it the sitrep this record is part of.
+    pub linked_sitrep_id: DbTypedUuid<SitrepKind>,
+    /// A human-readable comment explaining why the problem is associated with
+    /// the case, for debugging purposes.
+    pub comment: String,
+}
+
+impl CaseProblem {
+    pub fn from_sitrep(
+        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
+        case_id: impl Into<DbTypedUuid<CaseKind>>,
+        association: fm::case::CaseProblem,
+    ) -> Self {
+        let fm::case::CaseProblem { problem_id, linked_sitrep_id, comment } =
+            association;
+        Self {
+            case_id: case_id.into(),
+            problem_id: problem_id.into(),
+            sitrep_id: sitrep_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
+impl From<CaseProblem> for fm::case::CaseProblem {
+    fn from(association: CaseProblem) -> Self {
+        let CaseProblem {
+            case_id: _,
+            problem_id,
+            sitrep_id: _,
+            linked_sitrep_id,
+            comment,
+        } = association;
+        Self {
+            problem_id: problem_id.into(),
+            linked_sitrep_id: linked_sitrep_id.into(),
+            comment,
+        }
+    }
+}
+
 /// The complete state of a case in a particular sitrep, consisting of the
 /// [`CaseMetadata`] record and any other records belonging to the case.
 #[derive(Clone, Debug)]
@@ -145,4 +216,5 @@ pub struct Case {
     pub ereports: Vec<CaseEreport>,
     pub alerts_requested: Vec<AlertRequest>,
     pub support_bundles_requested: Vec<SupportBundleRequest>,
+    pub problems: Vec<CaseProblem>,
 }
