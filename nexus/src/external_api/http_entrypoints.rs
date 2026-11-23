@@ -27,7 +27,10 @@ use dropshot::WhichPage;
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
-use dropshot::{WebsocketChannelResult, WebsocketConnection};
+use dropshot::{
+    WebsocketChannelResult, WebsocketConnection, WebsocketEndpointResult,
+    WebsocketUpgrade,
+};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
@@ -2810,8 +2813,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_list(&opctx, &project_lookup, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|i| i.into())
-                .collect();
+                .map(|i| i.try_into())
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 instances,
@@ -2842,7 +2845,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &new_instance_params,
                 )
                 .await?;
-            Ok(HttpResponseCreated(instance.into()))
+            Ok(HttpResponseCreated(instance.try_into()?))
         })
         .await
     }
@@ -2871,7 +2874,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .datastore()
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
-            Ok(HttpResponseOk(instance_and_vmm.into()))
+            Ok(HttpResponseOk(instance_and_vmm.try_into()?))
         };
         apictx
             .context
@@ -2923,14 +2926,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &instance_config,
                 )
                 .await?;
-            Ok(HttpResponseOk(instance.into()))
+            Ok(HttpResponseOk(instance.try_into()?))
         })
         .await
     }
 
     async fn instance_reboot(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<project::OptionalProjectSelector>,
+        query_params: Query<instance::InstanceStopOrRebootParams>,
         path_params: Path<path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
@@ -2942,9 +2945,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_reboot(&opctx, &instance_lookup).await?;
-            Ok(HttpResponseAccepted(instance.into()))
+            let instance = nexus
+                .instance_reboot(
+                    &opctx,
+                    &instance_lookup,
+                    query.force.unwrap_or(false),
+                )
+                .await?;
+            Ok(HttpResponseAccepted(instance.try_into()?))
         })
         .await
     }
@@ -2970,14 +2978,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     crate::app::sagas::instance_start::Reason::User,
                 )
                 .await?;
-            Ok(HttpResponseAccepted(instance.into()))
+            Ok(HttpResponseAccepted(instance.try_into()?))
         })
         .await
     }
 
     async fn instance_stop(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<project::OptionalProjectSelector>,
+        query_params: Query<instance::InstanceStopOrRebootParams>,
         path_params: Path<path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
@@ -2989,9 +2997,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_stop(&opctx, &instance_lookup).await?;
-            Ok(HttpResponseAccepted(instance.into()))
+            let instance = nexus
+                .instance_stop(
+                    &opctx,
+                    &instance_lookup,
+                    query.force.unwrap_or(false),
+                )
+                .await?;
+            Ok(HttpResponseAccepted(instance.try_into()?))
         })
         .await
     }
@@ -4820,7 +4833,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let session = session.into_inner();
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             nexus.bfd_enable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -4833,7 +4845,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let session = session.into_inner();
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             nexus.bfd_disable(&opctx, session).await?;
             Ok(HttpResponseUpdatedNoContent {})
         })
@@ -4848,7 +4859,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             let status = nexus.bfd_status(&opctx).await?;
             Ok(HttpResponseOk(status))
         };
@@ -6635,11 +6645,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn rack_membership_abort(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<path_params::RackPath>,
+        query_params: Query<rack::RackMembershipVersionParam>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let rack_id =
                 RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
-            let status = nexus.tq_abort_latest_config(&opctx, rack_id).await?;
+            let epoch = query_params.into_inner().version.map(|v| Epoch(v.0));
+            let status = nexus.tq_abort_config(&opctx, rack_id, epoch).await?;
             Ok(HttpResponseOk(status.into()))
         })
         .await
@@ -6732,6 +6744,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
+    }
+
+    async fn rack_support_shell_tunnel(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::RackPath>,
+        upgrade: WebsocketUpgrade,
+    ) -> WebsocketEndpointResult {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            nexus
+                .support_shell_tunnel(
+                    &opctx,
+                    RackUuid::from_untyped_uuid(path.rack_id),
+                    upgrade,
+                )
+                .await
+        })
+        .await
     }
 
     // This request isn't currently paginated. The query is somewhat complex
@@ -6982,7 +7012,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into_iter()
                 .map(|d| UnadoptedPhysicalDisk {
                     sled_id: d.sled_id.into(),
-                    slot: d.slot,
+                    slot: d.pcie_slot,
                     variant: d.variant.into(),
                     disk_id: PhysicalDiskManufacturerIdentity {
                         vendor: d.vendor,
@@ -8881,19 +8911,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     async fn console_silo_access(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<Response<Body>, HttpError> {
-        console_api::console_index_or_login_redirect(rqctx).await
-    }
-
-    async fn console_silo_users(
-        rqctx: RequestContext<Self::Context>,
-        _path_params: Path<console::RestPathParam>,
-    ) -> Result<Response<Body>, HttpError> {
-        console_api::console_index_or_login_redirect(rqctx).await
-    }
-
-    async fn console_silo_groups(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<console::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {

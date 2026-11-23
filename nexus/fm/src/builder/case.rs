@@ -94,6 +94,7 @@ impl AllCases {
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
                     facts: Default::default(),
+                    problems: Default::default(),
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
@@ -263,7 +264,7 @@ impl CaseBuilder {
             .comment(comment.clone())
             .finish();
         let fact = fm::case::Fact {
-            metadata: fm::case::FactMetadata {
+            metadata: fm::FactMetadata {
                 id,
                 created_sitrep_id: self.sitrep_id,
                 comment,

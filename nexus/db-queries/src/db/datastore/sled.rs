@@ -1200,7 +1200,7 @@ impl DataStore {
             .get_result_async::<DbTypedUuid<RackKind>>(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(rack_id.map(RackUuid::from))
     }
@@ -5987,6 +5987,8 @@ pub(in crate::db::datastore) mod test {
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
                         enable_jumbo_frames: false,
+                        shutdown_policy:
+                            instance::InstanceShutdownPolicy::default(),
                     },
                 ),
             )

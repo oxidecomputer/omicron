@@ -1593,6 +1593,12 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
+        BlueprintPlannerStatus::ConfigNotYetLoaded => {
+            println!(
+                "    blueprint planning skipped because the reconfigurator \
+                 config has not been loaded yet"
+            );
+        }
         BlueprintPlannerStatus::LimitReached { limit, report } => {
             println!(
                 "    blueprint auto-planning disabled because \
@@ -4266,6 +4272,7 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
+        disabled,
         orphaned_sitreps_deleted,
         sitrep_metadata_batches,
         batch_size,
@@ -4281,6 +4288,11 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         }
         Ok(status) => status,
     };
+
+    if disabled {
+        println!("    task explicitly disabled by config!");
+        return;
+    }
 
     const BASE_WIDTH: usize = 40;
     const NUM_WIDTH: usize = 4;
@@ -4351,6 +4363,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         ereport_marking: marking,
         alert_marker_gc,
         support_bundle_marker_gc,
+        problem_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -4536,6 +4549,11 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
     print_op(
         "garbage collecting support bundle creation markers",
         &support_bundle_marker_gc,
+        print_marker_gc_details,
+    );
+    print_op(
+        "garbage collecting active problem creation markers",
+        &problem_marker_gc,
         print_marker_gc_details,
     );
 }

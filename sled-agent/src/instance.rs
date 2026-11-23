@@ -13,7 +13,7 @@ use crate::instance_manager::{
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
-use crate::zone_bundle::ZoneBundler;
+
 use omicron_common::http_client::internal_http_client_builder;
 
 use chrono::Utc;
@@ -44,11 +44,11 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::FormerZoneRootArchiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::inventory::NetworkInterface;
-use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
@@ -67,8 +67,11 @@ const QUEUE_SIZE: usize = 32;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to wait for service: {0}")]
-    Timeout(String),
+    #[error(transparent)]
+    WaitForService(#[from] illumos_utils::svc::WaitForServiceError),
+
+    #[error("Propolis HTTP server did not start within {0:?}")]
+    PropolisHttpServerTimeout(Duration),
 
     #[error("Failed to create VNIC")]
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
@@ -164,36 +167,80 @@ async fn wait_for_http_server(
     log: &Logger,
     client: &PropolisClient,
 ) -> Result<(), Error> {
-    let log_notification_failure = |error, delay| {
-        warn!(
-            log,
-            "failed to await http server ({}), will retry in {:?}", error, delay;
-            "error" => ?error
-        );
+    // Ten minutes seems like a *really* long time for Propolis to start its
+    // HTTP server, but let's try to err on the side of not giving up on a
+    // server that has a reasonable chance of starting.
+    const TIMEOUT: Duration = Duration::from_mins(10);
+
+    let log_notification_failure = |error: anyhow::Error, requests, elapsed| {
+        // Don't start spamming the log until we've waited a reasonable amount
+        // of time first.
+        const DONT_FREAK_OUT_FOR: Duration = Duration::from_mins(1);
+        let error = InlineErrorChain::new(&*error);
+        if elapsed <= DONT_FREAK_OUT_FOR {
+            debug!(
+                log,
+                "propolis HTTP server has not yet accepted a request after \
+                 {elapsed:?}, will retry...";
+                error,
+                "requests_sent" => requests,
+            )
+        } else {
+            warn!(
+                log,
+                "propolis HTTP server has still not yet accepted a request \
+                 after {elapsed:?}, will continue retrying...";
+                error,
+                "requests_sent" => requests,
+            );
+        }
     };
 
-    backoff::retry_notify(
-        backoff::retry_policy_local(),
+    backoff::retry_notify_ext(
+        backoff::retry_policy_local_timeout(TIMEOUT),
         || async {
             // This request is nonsensical - we don't expect an instance to
             // exist - but getting a response that isn't a connection-based
             // error informs us the HTTP server is alive.
-            match client.instance_get().send().await {
-                Ok(_) => return Ok(()),
-                Err(value) => {
+            let request = client.instance_get().send();
+            // Note that we wrap the request to Propolis in its own timeout
+            // here, because the client we construct in `setup_propolis_zone`
+            // uses a `reqwest` client builder without a per-request timeout (so
+            // that the HTTP long-polling in the `instance_state_monitor`
+            // endpoint can work correctly). That means that if propolis simply
+            // never responds to our request here without closing the
+            // connection, we can potentially wait forever, despite the retry
+            // policy's timeout (which does not cancel the operation future
+            // itself). Thus, we add another TIMEOUT to the timeout so you can
+            // timeout while you timeout.
+            match tokio::time::timeout(TIMEOUT, request).await {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(value)) => {
                     if value.status().is_some() {
                         // This means the propolis server responded to our
                         // request, instead of a connection error.
                         return Ok(());
                     }
-                    return Err(backoff::BackoffError::transient(value));
+                    return Err(backoff::BackoffError::transient(
+                        anyhow::anyhow!(value),
+                    ));
+                }
+                Err(timed_out) => {
+                    // Well, that's kinda wild, but let's bail identically here
+                    // and let it go through the same logging code.
+                    return Err(backoff::BackoffError::transient(
+                        anyhow::anyhow!(
+                            "a single request to propolis did not complete \
+                             within {TIMEOUT:?}: {timed_out:?}"
+                        ),
+                    ));
                 }
             }
         },
         log_notification_failure,
     )
     .await
-    .map_err(|_| Error::Timeout("Propolis".to_string()))
+    .map_err(|_| Error::PropolisHttpServerTimeout(TIMEOUT))
 }
 
 fn service_name() -> &'static str {
@@ -705,9 +752,6 @@ struct InstanceRunner {
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
 
-    // Object used to collect zone bundles from this instance when terminated.
-    zone_bundler: ZoneBundler,
-
     // Queue to notify the sled agent's metrics task about our VNICs.
     metrics_queue: MetricsRequestQueue,
 
@@ -719,6 +763,10 @@ struct InstanceRunner {
 
     // Requests that the VMM terminate and publishes the result.
     terminator: Arc<Terminator>,
+
+    // Used to archive the Propolis zone's root dataset when the VMM is
+    // terminated.
+    former_zone_root_archiver: FormerZoneRootArchiver,
 }
 
 fn classify_vmm_state_publish_error(
@@ -766,7 +814,8 @@ fn classify_vmm_state_publish_error(
 
 impl InstanceRunner {
     /// How long to wait for VMM shutdown to complete before forcefully
-    /// terminating the zone.
+    /// terminating the zone. This is added to the stop request's ACPI
+    /// shutdown timeout, if any.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
     #[expect(clippy::too_many_arguments)]
@@ -794,11 +843,11 @@ impl InstanceRunner {
             nexus_client,
             vnic_allocator,
             port_manager,
-            zone_bundler,
             zone_builder_factory,
             metrics_queue,
             available_datasets_rx,
             currently_managed_zpools_rx,
+            former_zone_root_archiver,
         } = services;
 
         let InstanceSledLocalConfig {
@@ -878,12 +927,12 @@ impl InstanceRunner {
             nexus_client,
             available_datasets_rx,
             zone_builder_factory,
-            zone_bundler,
             metrics_queue,
             delegated_zvols,
             attached_subnets,
             terminator,
             currently_managed_zpools_rx,
+            former_zone_root_archiver,
         })
     }
 
@@ -896,23 +945,9 @@ impl InstanceRunner {
         let terminator = self.terminator.clone();
         let mut state_owner = VmmStateOwner::Runner;
 
-        // Timeout for stopping the instance gracefully.
-        //
-        // When we send Propolis a put-state request to transition to
-        // Stopped`, we start this timer. If Propolis does not report back
-        // that it has stopped the instance within `STOP_GRACE_PERIOD`, we
-        // will forcibly terminate the VMM. This is to ensure that a totally
-        // stuck VMM does not prevent the Propolis zone from being cleaned up.
-        let mut stop_timeout = None;
-        async fn stop_timeout_completed(
-            stop_timeout: &mut Option<Pin<Box<tokio::time::Sleep>>>,
-        ) {
-            if let Some(timeout) = stop_timeout {
-                timeout.await
-            } else {
-                std::future::pending().await
-            }
-        }
+        // Timeout for stopping the instance gracefully before escalating to
+        // forcibly destroying the zone.
+        let mut force_stop_timer = UngracefulTermGraceTime::default();
 
         while !self.is_terminating() {
             tokio::select! {
@@ -931,11 +966,12 @@ impl InstanceRunner {
                 // instance monitor requests, as we would prefer to honor a
                 // message from the instance monitor indicating a successful
                 // stop, even if we have reached the timeout.
-                _ = stop_timeout_completed(&mut stop_timeout) => {
+                time = force_stop_timer.stop_timeout_completed() => {
                     warn!(
                         self.log,
-                        "Instance failed to stop within the grace period, \
-                         terminating it violently!",
+                        "Instance failed to stop within the {}-second \
+                        grace period, terminating it violently!",
+                        time.as_secs(),
                     );
 
                     // This looks kind of like a failure condition (the VMM
@@ -1009,19 +1045,31 @@ impl InstanceRunner {
                                 // If we're going to stop the instance, start
                                 // the timeout after which we will forcefully
                                 // terminate the VMM.
-                                if let VmmStateRequested::Stopped = state {
-                                    // Only start the stop timeout if there
-                                    // isn't one already, so that additional
-                                    // requests to stop coming in don't reset
-                                    // the clock.
-                                    if stop_timeout.is_none() {
-                                        stop_timeout = Some(Box::pin(tokio::time::sleep(
-                                            Self::STOP_GRACE_PERIOD
-                                        )));
+                                if let VmmStateRequested::Stopped { method } = state {
+                                    force_stop_timer.update(method);
+                                }
+
+                                let propolis_result = self
+                                    .put_state(state)
+                                    .await;
+
+                                // If we receive a reboot request while a stop
+                                // timeout is running that was initiated by an
+                                // ACPI shutdown, disarm the timeout, but only
+                                // if Propolis was still there and honored the
+                                // request (`force_stop_timer.disarm()` checks
+                                // that it had been set for an ACPI shutdown).
+                                if let (
+                                    VmmStateRequested::Reboot { method: _ },
+                                    Ok(sled_vmm_state),
+                                ) = (state, &propolis_result)
+                                {
+                                    if sled_vmm_state.vmm_state.state != VmmState::Failed {
+                                        force_stop_timer.disarm();
                                     }
                                 }
 
-                                tx.send(self.put_state(state).await
+                                tx.send(propolis_result
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -1589,20 +1637,21 @@ impl InstanceRunner {
             ),
         }
 
-        // Take a zone bundle whenever this instance stops.
-        if let Err(e) = self
-            .zone_bundler
-            .create(
-                &running_state.running_zone,
-                ZoneBundleCause::TerminatedInstance,
-            )
-            .await
+        // Make a best-effort attempt to archive the former zone's root dataset.
+        if let Some(zone_dataset_root) =
+            running_state.running_zone.root().parent()
         {
-            error!(
+            self.former_zone_root_archiver
+                .archive_former_zone_root(zone_dataset_root.to_owned())
+                .await
+        } else {
+            // This should be impossible.
+            warn!(
                 self.log,
-                "Failed to take zone bundle for terminated instance";
+                "Failed to archive zone root for terminated instance: \
+                 non-existent parent (this should be impossible)";
                 "zone_name" => &zname,
-                "reason" => ?e,
+                "zone_root_path" => %running_state.running_zone.root(),
             );
         }
 
@@ -2406,6 +2455,7 @@ impl InstanceRunner {
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
+        use sled_agent_types::instance::InstanceShutdownPolicy::PowerButton;
         let already_had_zone = self.running_state.is_some();
         let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
@@ -2438,7 +2488,7 @@ impl InstanceRunner {
 
                 (Some(PropolisRequest::Run), None)
             }
-            VmmStateRequested::Stopped => {
+            VmmStateRequested::Stopped { method } => {
                 // If there's no running Propolis yet, unregister this instance
                 // straightaway. Since nothing will ever send a state update in
                 // this case, force the VMM into a terminal Destroyed state,
@@ -2449,21 +2499,24 @@ impl InstanceRunner {
                     self.terminate().await;
                     (None, None)
                 } else {
-                    (
-                        Some(PropolisRequest::Stop),
-                        Some(PublishedVmmState::Stopping),
-                    )
+                    let p = if let PowerButton { timeout_secs: s } = method {
+                        PropolisRequest::AcpiStop { timeout_secs: s.into() }
+                    } else {
+                        PropolisRequest::Stop
+                    };
+                    (Some(p), Some(PublishedVmmState::Stopping))
                 }
             }
-            VmmStateRequested::Reboot => {
+            VmmStateRequested::Reboot { method } => {
                 if !already_had_zone {
                     return Err(Error::VmNotRunning(self.propolis_id));
                 }
-
-                (
-                    Some(PropolisRequest::Reboot),
-                    Some(PublishedVmmState::Rebooting),
-                )
+                let p = if let PowerButton { timeout_secs: s } = method {
+                    PropolisRequest::AcpiReboot { timeout_secs: s.into() }
+                } else {
+                    PropolisRequest::Reboot
+                };
+                (Some(p), Some(PublishedVmmState::Rebooting))
             }
         };
 
@@ -2729,8 +2782,7 @@ impl InstanceRunner {
         self.zone_builder_factory
             .zones_api()
             .wait_for_service(Some(&zname), &fmri, self.log.clone())
-            .await
-            .map_err(|_| Error::Timeout(fmri.to_string()))?;
+            .await?;
         info!(self.log, "Propolis SMF service is online");
 
         // Notify the metrics task about the instance zone's datalinks.
@@ -3010,6 +3062,96 @@ async fn zpool_monitor(
     }
 }
 
+/// Timeout for stopping the instance gracefully.
+///
+/// When we send Propolis a put-state request to transition to
+/// `Stopped`, we start this timer. If Propolis does not report back
+/// that it has stopped the instance within `STOP_GRACE_PERIOD`
+/// (plus any additional time spent waiting for the instance's configured
+/// ACPI shutdown policy, where applicable), we will forcibly terminate
+/// the VMM. This is to ensure that a totally stuck VMM does not prevent
+/// the Propolis zone from being cleaned up.
+///
+/// The timeout is abandoned if a reboot request is accepted by propolis
+/// while the instance was still gracefully stopping from a prior ACPI
+/// shutdown request.
+///
+/// If a stop request *without* an ACPI shutdown timeout is received
+/// while a prior ACPI shutdown timeout is running, the timeout becomes
+/// the shorter of itself or `STOP_GRACE_PERIOD`.
+#[derive(Default)]
+struct UngracefulTermGraceTime(Option<UngracefulTermGraceTimeInner>);
+
+struct UngracefulTermGraceTimeInner {
+    timeout_duration: std::time::Duration,
+    stop_timeout: Pin<Box<tokio::time::Sleep>>,
+    method: InstanceShutdownPolicy,
+}
+
+impl UngracefulTermGraceTime {
+    fn update(&mut self, method: InstanceShutdownPolicy) {
+        let acpi_timeout = match method {
+            InstanceShutdownPolicy::HardOff => 0u64,
+            InstanceShutdownPolicy::PowerButton { timeout_secs } => {
+                timeout_secs.into()
+            }
+        };
+
+        let duration = Duration::from_secs(acpi_timeout)
+            + InstanceRunner::STOP_GRACE_PERIOD;
+
+        let new_sleep = Box::pin(tokio::time::sleep(duration));
+
+        // Only start the stop timeout if there isn't one already, so that
+        // additional requests to stop coming in don't reset the clock,
+        // *unless* the prior timeout was for an ACPI shutdown and this is
+        // a hard-stop request that would terminate sooner.
+        if let Some(UngracefulTermGraceTimeInner {
+            stop_timeout: old_sleep,
+            method: old_method,
+            ..
+        }) = &self.0
+        {
+            if *old_method == InstanceShutdownPolicy::HardOff
+                || method != InstanceShutdownPolicy::HardOff
+                || new_sleep.deadline() > old_sleep.deadline()
+            {
+                return;
+            }
+        }
+
+        self.0 = Some(UngracefulTermGraceTimeInner {
+            method,
+            stop_timeout: new_sleep,
+            timeout_duration: duration,
+        });
+    }
+
+    fn disarm(&mut self) {
+        if let Some(UngracefulTermGraceTimeInner {
+            method: InstanceShutdownPolicy::PowerButton { .. },
+            ..
+        }) = &self.0
+        {
+            self.0 = None;
+        }
+    }
+
+    async fn stop_timeout_completed(&mut self) -> Duration {
+        if let Some(UngracefulTermGraceTimeInner {
+            stop_timeout,
+            timeout_duration,
+            ..
+        }) = &mut self.0
+        {
+            stop_timeout.await;
+            *timeout_duration
+        } else {
+            std::future::pending().await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3019,6 +3161,7 @@ mod tests {
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use assert_matches::assert_matches;
+    use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
@@ -3030,30 +3173,25 @@ mod tests {
     use omicron_generation_kinds::Generation;
 
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-    use omicron_uuid_kinds::{ExternalZpoolUuid, InternalZpoolUuid};
+    use omicron_uuid_kinds::ExternalZpoolUuid;
     use propolis_client::ClientInfo;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
+    use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
     use sled_agent_config_reconciler::UpdateDispositionReceiver;
-    use sled_agent_config_reconciler::{
-        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
-        InternalDisksReceiver,
-    };
     use sled_agent_types::attached_subnet::AttachedSubnetKind;
-    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::instance::InstanceShutdownPolicy;
     use sled_agent_types::inventory::InstanceManagerStatus;
     use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::inventory::{
         CurrentUpdateDisposition, NetworkInterfaceKind,
     };
-    use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
-    use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::net::SocketAddrV6;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
@@ -3166,7 +3304,8 @@ mod tests {
         let client = propolis_client::Client::new(&format!(
             "http://{}",
             srv.local_addr()
-        ));
+        ))
+        .expect("failed to create propolis-client for mock propolis-server");
 
         (srv, client)
     }
@@ -3201,7 +3340,7 @@ mod tests {
         nexus_client: NexusClient,
         zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
-    ) -> (Instance, MetricsRx) {
+    ) -> (Instance, MetricsRx, ArchivedZoneRoots) {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
 
@@ -3209,7 +3348,7 @@ mod tests {
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let (services, rx) =
+        let (services, rx, archived_zone_roots) =
             fake_instance_manager_services(log, nexus_client, zones, temp_dir)
                 .await;
 
@@ -3236,7 +3375,7 @@ mod tests {
             metadata,
         )
         .unwrap();
-        (instance, rx)
+        (instance, rx, archived_zone_roots)
     }
 
     fn fake_instance_initial_state(
@@ -3343,12 +3482,14 @@ mod tests {
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
+    type ArchivedZoneRoots = Arc<std::sync::Mutex<Vec<Utf8PathBuf>>>;
+
     async fn fake_instance_manager_services(
         log: &Logger,
         nexus_client: NexusClient,
         zones: Arc<illumos_utils::fakes::zone::Zones>,
         temp_dir: &str,
-    ) -> (InstanceManagerServices, MetricsRx) {
+    ) -> (InstanceManagerServices, MetricsRx, ArchivedZoneRoots) {
         let vnic_allocator = VnicAllocator::new(
             "Instance",
             Etherstub("mystub".to_string()),
@@ -3362,36 +3503,15 @@ mod tests {
         let fake_zpool = ZpoolName::External(ExternalZpoolUuid::new_v4());
         let available_datasets_rx =
             AvailableDatasetsReceiver::fake_in_tempdir_for_tests(fake_zpool);
-        let cleanup_context = CleanupContext::default();
-        let zone_bundler = ZoneBundler::new(
-            log.new(o!("component" => "ZoneBundler")),
-            InternalDisksReceiver::fake_static(
-                Arc::new(MountConfig::default()),
-                [InternalDiskDetails::fake_details(
-                    DiskIdentity {
-                        vendor: "test-vendor".to_string(),
-                        model: "test-model".to_string(),
-                        serial: "test-serial".to_string(),
-                    },
-                    InternalZpoolUuid::new_v4(),
-                    true, // is_boot_disk
-                    None,
-                    None,
-                )]
-                .into_iter(),
-            ),
-            available_datasets_rx.clone(),
-            cleanup_context,
-        )
-        .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
+        let (former_zone_root_archiver, archived_zone_roots) =
+            FormerZoneRootArchiver::recording(log);
         let services = InstanceManagerServices {
             nexus_client,
             vnic_allocator,
             port_manager,
             available_datasets_rx,
-            zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(
                 Some(temp_dir),
                 zones,
@@ -3401,8 +3521,9 @@ mod tests {
                 CurrentlyManagedZpoolsReceiver::fake_static(std::iter::once(
                     fake_zpool,
                 )),
+            former_zone_root_archiver,
         };
-        (services, rx)
+        (services, rx, archived_zone_roots)
     }
 
     /// Holds assorted objects that are needed to test an Instance and its
@@ -3432,23 +3553,24 @@ mod tests {
         ) -> Self {
             let nexus = FakeNexusParts::new(&log).await;
             let temp_guard = Utf8TempDir::new().unwrap();
-            let (services, metrics_rx) = fake_instance_manager_services(
-                log,
-                nexus.nexus_client.clone(),
-                illumos_utils::fakes::zone::Zones::new(),
-                temp_guard.path().as_str(),
-            )
-            .await;
+            let (services, metrics_rx, _archived_zone_roots) =
+                fake_instance_manager_services(
+                    log,
+                    nexus.nexus_client.clone(),
+                    illumos_utils::fakes::zone::Zones::new(),
+                    temp_guard.path().as_str(),
+                )
+                .await;
 
             let InstanceManagerServices {
                 nexus_client,
                 vnic_allocator,
                 port_manager,
                 available_datasets_rx,
-                zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
                 currently_managed_zpools_rx,
+                former_zone_root_archiver,
             } = services;
 
             let vmm_reservoir_manager =
@@ -3461,11 +3583,11 @@ mod tests {
                     port_manager,
                     currently_managed_zpools_rx,
                     available_datasets_rx,
-                    zone_bundler,
                     zone_builder_factory,
                     vmm_reservoir_manager,
                     metrics_queue,
                     update_disposition_rx,
+                    former_zone_root_archiver,
                 )
                 .unwrap();
 
@@ -3497,7 +3619,7 @@ mod tests {
 
         let temp_guard = Utf8TempDir::new().unwrap();
 
-        let (inst, mut metrics_rx) = timeout(
+        let (inst, mut metrics_rx, _archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -3596,7 +3718,7 @@ mod tests {
                 _nexus_server,
             } = FakeNexusParts::new(&log).await;
 
-            let (inst, _) = timeout(
+            let (inst, _, _) = timeout(
                 TIMEOUT_DURATION,
                 instance_struct(
                     &log,
@@ -3779,7 +3901,12 @@ mod tests {
         // Request the VMM stop
         test_objects
             .instance_manager
-            .ensure_state(propolis_id, VmmStateRequested::Stopped)
+            .ensure_state(
+                propolis_id,
+                VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
+            )
             .await
             .unwrap();
 
@@ -3829,8 +3956,140 @@ mod tests {
             ),
         )
         .await
-        .expect("timed out waiting for VmmState::Stopped in FakeNexus")
+        .expect("timed out waiting for VmmState::Destroyed in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
+
+        logctx.cleanup_successful();
+    }
+
+    // Tests a scenario in which an ACPI shutdown is followed by a Reboot.
+    // This test asserts that the sled-agent will *not* forcibly terminate
+    // the VMM process if we have made its post-shutdown fate a reboot.
+    #[tokio::test]
+    async fn test_instance_manager_disarm_acpistop_timeout_on_reboot() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_acpistop_timeout_on_reboot",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let mut test_objects = InstanceTestObjects::new(&log).await;
+
+        let (propolis_server, propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let (ensure_body, sled_identifiers) =
+            fake_instance_ensure_body(instance_id, propolis_addr);
+
+        test_objects
+            .instance_manager
+            .ensure_registered(propolis_id, ensure_body, sled_identifiers)
+            .await
+            .unwrap();
+
+        test_objects
+            .instance_manager
+            .ensure_state(propolis_id, VmmStateRequested::Running)
+            .await
+            .unwrap();
+
+        timeout(
+            TIMEOUT_DURATION,
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Running
+                    }
+                    _ => false,
+                },
+            ),
+        )
+        .await
+        .expect("timed out waiting for InstanceState::Running in FakeNexus")
+        .expect("failed to receive VmmState' InstanceState");
+
+        // Place the mock propolis in single-step mode.
+        propolis_mock_set_mode(
+            &propolis_client,
+            propolis_mock_server::MockMode::SingleStep,
+        )
+        .await;
+
+        // Request the VMM stop, with a timeout
+        test_objects
+            .instance_manager
+            .ensure_state(
+                propolis_id,
+                VmmStateRequested::Stopped {
+                    method: InstanceShutdownPolicy::PowerButton {
+                        timeout_secs: 1.try_into().unwrap(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+
+        // Single-step once.
+        propolis_mock_step(&propolis_client).await;
+
+        timeout(
+            TIMEOUT_DURATION,
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Stopping
+                    }
+                    _ => false,
+                },
+            ),
+        )
+        .await
+        .expect("timed out waiting for VmmState::Stopping in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
+
+        // NOW WE STOP ADVANCING THE MOCK PROPOLIS STATE MACHINE --- IT WILL
+        // NEVER REACH `Stopped`.
+
+        // Request the VMM reboot that should abandon the stop timeout
+        test_objects
+            .instance_manager
+            .ensure_state(
+                propolis_id,
+                VmmStateRequested::Reboot {
+                    method: InstanceShutdownPolicy::HardOff,
+                },
+            )
+            .await
+            .expect("failed to send reboot request");
+
+        // Now, pause time and advance the Tokio clock past the stop grace
+        // period. This *would* cause the stop timeout to fire, without requiring
+        // the test to actually wait for ten minutes.
+        tokio::time::pause();
+        tokio::time::advance(
+            super::InstanceRunner::STOP_GRACE_PERIOD + Duration::from_secs(2),
+        )
+        .await;
+        tokio::time::resume();
+
+        timeout(
+            TIMEOUT_DURATION,
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Destroyed
+                    }
+                    _ => false,
+                },
+            ),
+        )
+        .await
+        .expect_err(
+            "Should have timed out waiting for VmmState::Destroyed \
+            in FakeNexus (after canceled stop timeout)",
+        );
 
         logctx.cleanup_successful();
     }
@@ -4224,13 +4483,14 @@ mod tests {
             } = FakeNexusParts::new(&log).await;
 
             let temp_guard = Utf8TempDir::new().unwrap();
-            let (services, _metrics_rx) = fake_instance_manager_services(
-                &log,
-                nexus_client,
-                illumos_utils::fakes::zone::Zones::new(),
-                temp_guard.path().as_str(),
-            )
-            .await;
+            let (services, _metrics_rx, _archived_zone_roots) =
+                fake_instance_manager_services(
+                    &log,
+                    nexus_client,
+                    illumos_utils::fakes::zone::Zones::new(),
+                    temp_guard.path().as_str(),
+                )
+                .await;
             let propolis_id = PropolisUuid::new_v4();
             let instance_id = InstanceUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
@@ -4437,7 +4697,7 @@ mod tests {
             illumos_utils::fakes::zone::Zones::new_with_halt_control();
 
         // Create an instance but don't start it.
-        let (inst, _metrics_rx) = timeout(
+        let (inst, _metrics_rx, archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -4501,6 +4761,16 @@ mod tests {
             .expect("zone did not start halting");
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         assert_eq!(zname, propolis_zone_name(&propolis_id));
+
+        // The zone's logs must have been archived *before* the zone began
+        // halting, since uninstalling the zone removes its root filesystem.
+        let archived = archived_zone_roots.lock().unwrap().clone();
+        assert_eq!(
+            archived.iter().map(|path| path.file_name()).collect::<Vec<_>>(),
+            [Some(zname.as_str())],
+            "expected the Propolis zone's dataset root to be archived exactly \
+             once before the zone is halted. instead, we archived: {archived:?}",
+        );
 
         // We should still have no response on the instance state channel.
         match put_rx.try_recv() {
@@ -4585,7 +4855,7 @@ mod tests {
             illumos_utils::fakes::zone::Zones::new_with_halt_control();
 
         // Create an instance but don't start it.
-        let (inst, _metrics_rx) = timeout(
+        let (inst, _metrics_rx, _archived_zone_roots) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,

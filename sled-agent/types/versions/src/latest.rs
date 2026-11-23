@@ -110,11 +110,9 @@ pub mod instance {
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
     pub use crate::v1::instance::VmmPathParam;
-    pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmRuntimeState;
     pub use crate::v1::instance::VmmState;
-    pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
 
@@ -131,6 +129,10 @@ pub mod instance {
 
     pub use crate::v59::instance::InstanceEnsureBody;
     pub use crate::v59::instance::InstanceSledLocalConfig;
+
+    pub use crate::v66::instance::InstanceShutdownPolicy;
+    pub use crate::v66::instance::VmmPutStateBody;
+    pub use crate::v66::instance::VmmStateRequested;
 }
 
 pub mod inventory {
@@ -138,7 +140,6 @@ pub mod inventory {
     pub use crate::v1::inventory::BootImageHeader;
     pub use crate::v1::inventory::ConfigReconcilerInventoryResult;
     pub use crate::v1::inventory::InventoryDataset;
-    pub use crate::v1::inventory::InventoryDisk;
     pub use crate::v1::inventory::ManifestNonBootInventory;
     pub use crate::v1::inventory::MupdateOverrideBootInventory;
     pub use crate::v1::inventory::MupdateOverrideInventory;
@@ -214,7 +215,8 @@ pub mod inventory {
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v57::inventory::Inventory;
+    pub use crate::v65::inventory::Inventory;
+    pub use crate::v65::inventory::InventoryDisk;
 
     pub use crate::v62::inventory::SledRegistrationInfo;
 
@@ -299,8 +301,9 @@ pub mod trust_quorum {
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 
-    pub use crate::v61::trust_quorum::TrustQuorumCoordinatorStatusResponse;
     pub use crate::v61::trust_quorum::TrustQuorumNetworkConfigResponse;
+
+    pub use crate::v64::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 }
 
 pub mod uplink {

@@ -19,8 +19,10 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
 use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
+use crate::db::model::fm::FmFactRow;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
@@ -31,6 +33,7 @@ use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -39,17 +42,21 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
+use nexus_db_schema::schema::fm_case_problem::dsl as case_problem_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
-use nexus_db_schema::schema::fm_fact_certificate::dsl as fact_cert_dsl;
-use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
-use nexus_db_schema::schema::fm_fact_saga::dsl as fact_saga_dsl;
-use nexus_db_schema::schema::fm_fact_smf_service::dsl as fact_smf_dsl;
+use nexus_db_schema::schema::fm_problem_alert::dsl as problem_alert_dsl;
+use nexus_db_schema::schema::fm_problem_request::dsl as problem_dsl;
+use nexus_db_schema::schema::fm_problem_revision_request::dsl as problem_rev_dsl;
+use nexus_db_schema::schema::fm_problem_support_bundle::dsl as problem_bundle_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use nexus_types::fm::case::CaseProblem;
+use nexus_types::fm::problem::SitrepProblem;
+use nexus_types::fm::problem::SitrepRevision;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -62,12 +69,14 @@ use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::FactKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ProblemUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -136,6 +145,11 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
+    ProblemRequest => { table: "fm_problem_request" },
+    ProblemRevisionRequest => { table: "fm_problem_revision_request" },
+    ProblemAlert => { table: "fm_problem_alert" },
+    ProblemSupportBundle => { table: "fm_problem_support_bundle" },
+    CaseProblem => { table: "fm_case_problem" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
     FmFactSaga => { table: "fm_fact_saga" },
@@ -161,6 +175,143 @@ fn insert_fact_for_case(
         );
         Error::InternalError { internal_message }
     })
+}
+
+/// Convert fact rows read from one table and add them to the per-case map.
+fn add_fact_rows_to_map<R: FmFactRow>(
+    by_case: &mut HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>,
+    rows: Vec<R>,
+) -> Result<(), Error> {
+    for row in rows {
+        let case_id = row.case_id();
+        let fact_id = row.id();
+        let fact = row.into_fact().with_internal_context(|| {
+            format!("failed to read fact {fact_id} on case {case_id}")
+        })?;
+        insert_fact_for_case(by_case, case_id, fact)?;
+    }
+    Ok(())
+}
+
+/// Generates the insert and read code for the `fm_fact_*` tables.
+///
+/// Each `Variant` uses the table `fm_fact_<variant>` and the model
+/// `FmFact<Variant>`. See [`nexus_types::fm::fact`] for how to add one.
+macro_rules! fm_fact_tables {
+    ($($variant:ident),* $(,)?) => { ::paste::paste! {
+        /// A sitrep's facts, split by table for insertion.
+        #[derive(Default)]
+        struct FactRows {
+            $(
+                [<fm_fact_ $variant:snake>]:
+                    Vec<model::fm::[<FmFact $variant>]>,
+            )*
+        }
+
+        impl FactRows {
+            fn push(
+                &mut self,
+                sitrep_id: SitrepUuid,
+                case_id: CaseUuid,
+                fact: &fm::case::Fact,
+            ) {
+                match &fact.payload {
+                    $(
+                        fm::FactPayload::$variant(payload) => {
+                            self.[<fm_fact_ $variant:snake>].push(
+                                model::fm::[<FmFact $variant>]::from_sitrep(
+                                    sitrep_id,
+                                    case_id,
+                                    &fact.metadata,
+                                    payload,
+                                ),
+                            );
+                        }
+                    )*
+                }
+            }
+
+            async fn insert(
+                self,
+                conn: &async_bb8_diesel::Connection<DbConnection>,
+            ) -> Result<(), Error> {
+                $(
+                    let rows = self.[<fm_fact_ $variant:snake>];
+                    if !rows.is_empty() {
+                        use nexus_db_schema::schema::
+                            [<fm_fact_ $variant:snake>]::dsl;
+                        diesel::insert_into(dsl::[<fm_fact_ $variant:snake>])
+                            .values(rows)
+                            .execute_async(conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                                .internal_context(concat!(
+                                    "failed to insert ",
+                                    stringify!([<fm_fact_ $variant:snake>]),
+                                    " rows",
+                                ))
+                            })?;
+                    }
+                )*
+                Ok(())
+            }
+        }
+
+        /// Fetch all case facts belonging to cases in the given sitrep,
+        /// grouped by `case_id`.
+        async fn fm_facts_read(
+            conn: &async_bb8_diesel::Connection<DbConnection>,
+            sitrep_id: SitrepUuid,
+        ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error>
+        {
+            let mut by_case = HashMap::new();
+            // NOTE: Each per-DE set of facts belongs to a distinct table.
+            // This would be a reasonable spot to insert parallel_task_set
+            // and do some concurrent queries.
+            //
+            // (... gonna punt on that until we actually have a couple
+            // different tables to query from).
+            $({
+                use nexus_db_schema::schema::[<fm_fact_ $variant:snake>]::dsl;
+                let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+                    Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+                while let Some(p) = paginator.next() {
+                    let batch = paginated(
+                        dsl::[<fm_fact_ $variant:snake>],
+                        dsl::id,
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+                    .select(model::fm::[<FmFact $variant>]::as_select())
+                    .load_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(concat!(
+                                "failed to load ",
+                                stringify!([<fm_fact_ $variant:snake>]),
+                                " rows",
+                            ))
+                    })?;
+
+                    paginator = p.found_batch(&batch, &|f| f.id().into());
+                    add_fact_rows_to_map(&mut by_case, batch)?;
+                }
+            })*
+            Ok(by_case)
+        }
+    }};
+}
+
+fm_fact_tables! {
+    PhysicalDisk,
+    Saga,
+    Certificate,
+    SmfService,
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -432,7 +583,10 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
-        let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
+        let mut case_facts = fm_facts_read(conn, id).await?;
+
+        let mut case_problems =
+            self.case_problems_read_on_conn(id, conn).await?;
 
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
@@ -477,6 +631,8 @@ impl DataStore {
                     let support_bundles_requested =
                         support_bundle_requests.remove(&id).unwrap_or_default();
                     let facts = case_facts.remove(&id).unwrap_or_default();
+                    let problems =
+                        case_problems.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         metadata: fm::case::Metadata {
@@ -489,12 +645,24 @@ impl DataStore {
                         ereports,
                         support_bundles_requested,
                         facts,
+                        problems,
                     }
                 }));
             }
 
             cases
         };
+
+        // Load every problem revision, alert link, and support bundle link in
+        // this sitrep, grouped by problem.
+        let mut revisions_by_problem =
+            Self::problem_revs_read_on_conn(id, conn).await?;
+        let mut alerts_by_problem =
+            Self::problem_alerts_read_on_conn(id, conn).await?;
+        let mut support_bundles_by_problem =
+            Self::problem_support_bundles_read_on_conn(id, conn).await?;
+        // Load the problem requests themselves.
+        let problem_requests = Self::problems_read_on_conn(id, conn).await?;
 
         // Finally, fetch the sitrep's metadata from the `fm_sitrep` table. We
         // load this record last, because if a concurrent delete operation has
@@ -507,7 +675,357 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        Ok(Sitrep { metadata, cases, ereports_by_id: ereports })
+        // Once we have confirmed the sitrep metadata is valid (and we did not
+        // read a torn sitrep that was in the process of being deleted), attempt
+        // to stitch together the problems and their revisions and alert
+        // requests.
+        //
+        // It's necessary to wait to do this until we have confirmed that the
+        // metadata still exists, because we will return an internalerror if we
+        // encounter invalid foreign key relationships (such as a problem that
+        // has no revisions, revisions that have no problem, or alert/support
+        // bundle links for which the problem does not exist). Because
+        // `fm_sitrep_read_current` will retry any `NotFound` errors that
+        // indicate the sitrep we read is in the process of being deleted, but
+        // will not retry internal errors, the checking for a corrupt sitrep can
+        // only be performed after we are sure we didn't read a sitrep that was
+        // being deleted (which is ensured by the metadata read).
+        let problems = {
+            let problems = fm::AllProblems::try_from_iter(
+                problem_requests.into_iter().map(
+                    |model::fm::FmProblemRequest {
+                         id,
+                         sitrep_id: _,
+                         requested_sitrep_id,
+                         comment,
+                     }| {
+                        let id = ProblemUuid::from(id);
+                        // A problem may not have 0 revisions. However, this is
+                        // validated by `AllProblems::try_from_iter`, so we need
+                        // not check it here...which is good because we can't
+                        // quite `collect` into an `AllProblems` and the
+                        // iterator must therefore be infallible.
+                        let revisions = revisions_by_problem
+                            .remove(&id)
+                            .unwrap_or_default();
+                        // Unlike revisions, a problem need not have any alert or
+                        // support-bundle links.
+                        let alerts =
+                            alerts_by_problem.remove(&id).unwrap_or_default();
+                        let support_bundles = support_bundles_by_problem
+                            .remove(&id)
+                            .unwrap_or_default();
+                        SitrepProblem {
+                            id,
+                            requested_sitrep_id: requested_sitrep_id.into(),
+                            comment,
+                            revisions,
+                            alerts,
+                            support_bundles,
+                        }
+                    },
+                ),
+            )
+            .map_err(|e| {
+                Error::internal_error(format!("invalid sitrep {id}: {e:#}"))
+            })?;
+
+            fn check_for_orphaned_problem_records<T>(
+                sitrep_id: &SitrepUuid,
+                kind: &str,
+                records: HashMap<ProblemUuid, IdOrdMap<T>>,
+            ) -> Result<(), Error>
+            where
+                T: iddqd::IdOrdItem,
+            {
+                let len = records.len();
+                let mut orphans = records.into_iter();
+                if let Some((problem_id, items)) = orphans.next() {
+                    let mut internal_message = format!(
+                        "sitrep {sitrep_id} contains {len} {kind}s for {} \
+                         problem IDs that do not have a corresponding record \
+                         in the `fm_problem` table: {problem_id} ({} {kind}s)",
+                        len,
+                        items.len()
+                    );
+                    for (problem_id, items) in orphans {
+                        write!(
+                            &mut internal_message,
+                            ", {problem_id} ({} {kind}s)",
+                            items.len()
+                        )
+                        .expect("writing to a String always succeeds");
+                    }
+                    return Err(Error::InternalError { internal_message });
+                }
+                Ok(())
+            }
+
+            check_for_orphaned_problem_records(
+                &id,
+                "revision",
+                revisions_by_problem,
+            )?;
+            check_for_orphaned_problem_records(
+                &id,
+                "alert link",
+                alerts_by_problem,
+            )?;
+            check_for_orphaned_problem_records(
+                &id,
+                "support bundle link",
+                support_bundles_by_problem,
+            )?;
+
+            problems
+        };
+
+        Ok(Sitrep { metadata, cases, ereports_by_id: ereports, problems })
+    }
+
+    /// Fetch all revisions of problems requested in the current sitrep.
+    async fn problem_revs_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<ProblemUuid, IdOrdMap<SitrepRevision>>, Error> {
+        use nexus_db_schema::schema::fm_problem_revision_request::dsl;
+
+        let mut revisions_by_problem = HashMap::<_, iddqd::IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_problem_revision_request,
+                (dsl::problem_id, dsl::revision),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmProblemRevisionRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load problem revisions")
+            })?;
+
+            paginator = p.found_batch(&batch, &|revision| {
+                (revision.problem_id, revision.revision)
+            });
+            for revision in batch {
+                let problem_id: ProblemUuid = revision.problem_id.into();
+                let revision = SitrepRevision::try_from(revision)?;
+                let number = revision.number;
+                revisions_by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(revision)
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered revision {number} of problem \
+                             {problem_id} more than once. this should really \
+                             not be possible, as the problem ID and revision \
+                             number are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(revisions_by_problem)
+    }
+
+    async fn problems_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Vec<model::fm::FmProblemRequest>, Error> {
+        use nexus_db_schema::schema::fm_problem_request::dsl;
+
+        let mut problems = Vec::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                dsl::fm_problem_request,
+                dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmProblemRequest::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load problems")
+            })?;
+
+            paginator = p.found_batch(&batch, &|problem| problem.id);
+            problems.extend(batch);
+        }
+
+        Ok(problems)
+    }
+
+    /// Fetch all links between problems and alerts in the given sitrep,
+    /// grouped by problem.
+    async fn problem_alerts_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<ProblemUuid, IdOrdMap<fm::problem::AlertLink>>, Error>
+    {
+        use nexus_db_schema::schema::fm_problem_alert::dsl;
+
+        let mut by_problem = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_problem_alert,
+                (dsl::problem_id, dsl::alert_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmProblemAlert::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load problem alert links")
+            })?;
+
+            paginator =
+                p.found_batch(&batch, &|link| (link.problem_id, link.alert_id));
+            for link in batch {
+                let problem_id: ProblemUuid = link.problem_id.into();
+                let alert_id: AlertUuid = link.alert_id.into();
+                by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(link.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple links between \
+                             problem {problem_id} and alert {alert_id}. this \
+                             should really not be possible, as the problem ID \
+                             and alert ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_problem)
+    }
+
+    /// Fetch all links between problems and support bundles in the given
+    /// sitrep, grouped by problem.
+    async fn problem_support_bundles_read_on_conn(
+        sitrep_id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        HashMap<ProblemUuid, IdOrdMap<fm::problem::SupportBundleLink>>,
+        Error,
+    > {
+        use nexus_db_schema::schema::fm_problem_support_bundle::dsl;
+
+        let mut by_problem = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_problem_support_bundle,
+                (dsl::problem_id, dsl::support_bundle_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::FmProblemSupportBundle::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load problem support bundle links",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|link| {
+                (link.problem_id, link.support_bundle_id)
+            });
+            for link in batch {
+                let problem_id: ProblemUuid = link.problem_id.into();
+                let bundle_id: SupportBundleUuid =
+                    link.support_bundle_id.into();
+                by_problem
+                    .entry(problem_id)
+                    .or_default()
+                    .insert_unique(link.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple links between \
+                             problem {problem_id} and support bundle \
+                             {bundle_id}. this should really not be \
+                             possible, as the problem ID and support bundle \
+                             ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_problem)
+    }
+
+    /// Fetch all associations between cases and problems in the given
+    /// sitrep, grouped by case.
+    async fn case_problems_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, IdOrdMap<CaseProblem>>, Error> {
+        use nexus_db_schema::schema::fm_case_problem::dsl;
+
+        let mut by_case = HashMap::<_, IdOrdMap<_>>::new();
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated_multicolumn(
+                dsl::fm_case_problem,
+                (dsl::case_id, dsl::problem_id),
+                &p.current_pagparams(),
+            )
+            .filter(dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::CaseProblem::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to load case problem associations",
+                    )
+            })?;
+
+            paginator = p.found_batch(&batch, &|association| {
+                (association.case_id, association.problem_id)
+            });
+            for association in batch {
+                let case_id: CaseUuid = association.case_id.into();
+                let problem_id: ProblemUuid = association.problem_id.into();
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(association.into())
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple associations between case \
+                             {case_id} and problem {problem_id}. this \
+                             should really not be possible, as the case ID \
+                             and problem ID are a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
     }
 
     /// Fetch all alert requests belonging to cases in the given sitrep.
@@ -561,138 +1079,6 @@ impl DataStore {
                         );
                         Error::InternalError { internal_message }
                     })?;
-            }
-        }
-
-        Ok(by_case)
-    }
-
-    /// Fetch all case facts belonging to cases in the given sitrep, grouped
-    /// by `case_id`.
-    ///
-    /// Each diagnosis engine stores its facts in its own typed table, read by
-    /// its own paginated loop here and unioned into the same `by_case` map. A
-    /// case belongs to exactly one engine, so keys never collide across tables.
-    async fn fm_facts_read_on_conn(
-        &self,
-        id: SitrepUuid,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error> {
-        let mut by_case =
-            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
-
-        // NOTE: Each per-DE set of facts belongs to a distinct table.
-        // This would be a reasonable spot to insert parallel_task_set
-        // and do some concurrent queries.
-        //
-        // (... gonna punt on that until we actually have a couple different
-        // tables to query from).
-
-        // --- physical-disk diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_pd_dsl::fm_fact_physical_disk,
-                fact_pd_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_pd_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactPhysicalDisk::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load physical-disk case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
-            }
-        }
-
-        // --- saga diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_saga_dsl::fm_fact_saga,
-                fact_saga_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_saga_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactSaga::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load saga case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                let fact_id = row.id;
-                let fact = row.into_fact().with_internal_context(|| {
-                    format!("failed to read fact {fact_id} on case {case_id}")
-                })?;
-                insert_fact_for_case(&mut by_case, case_id, fact)?;
-            }
-        }
-
-        // --- certificate diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_cert_dsl::fm_fact_certificate,
-                fact_cert_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_cert_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactCertificate::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load certificate case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
-            }
-        }
-
-        // --- SMF service diagnosis engine facts ---
-        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
-            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
-        while let Some(p) = paginator.next() {
-            let batch = paginated(
-                fact_smf_dsl::fm_fact_smf_service,
-                fact_smf_dsl::id,
-                &p.current_pagparams(),
-            )
-            .filter(fact_smf_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-            .select(model::fm::FmFactSmfService::as_select())
-            .load_async(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to load SMF service case facts")
-            })?;
-
-            paginator = p.found_batch(&batch, &|f| f.id);
-            for row in batch {
-                let case_id: CaseUuid = row.case_id.into();
-                insert_fact_for_case(&mut by_case, case_id, row.into_fact())?;
             }
         }
 
@@ -954,13 +1340,20 @@ impl DataStore {
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
-        let mut physical_disk_facts = Vec::new();
-        let mut saga_facts = Vec::new();
-        let mut certificate_facts = Vec::new();
-        let mut smf_service_facts = Vec::new();
+        let mut facts = FactRows::default();
+        let mut case_problems = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
+            case_problems.extend(case.problems.into_iter().map(
+                |association| {
+                    model::fm::CaseProblem::from_sitrep(
+                        sitrep_id,
+                        case_id,
+                        association,
+                    )
+                },
+            ));
             case_ereports.extend(case.ereports.into_iter().map(|ereport| {
                 model::fm::CaseEreport::from_sitrep(sitrep_id, case_id, ereport)
             }));
@@ -982,47 +1375,7 @@ impl DataStore {
                 bundle_data_selections_requested.push((req_id, data_selection));
             }
             for fact in case.facts.iter() {
-                // Dispatch each fact to its diagnosis engine's typed table.
-                match &fact.payload {
-                    fm::FactPayload::PhysicalDisk(disk_fact) => {
-                        physical_disk_facts.push(
-                            model::fm::FmFactPhysicalDisk::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                disk_fact,
-                            ),
-                        );
-                    }
-                    fm::FactPayload::Saga(saga_fact) => {
-                        saga_facts.push(model::fm::FmFactSaga::from_sitrep(
-                            sitrep_id,
-                            case_id,
-                            &fact.metadata,
-                            saga_fact,
-                        ));
-                    }
-                    fm::FactPayload::Certificate(cert_fact) => {
-                        certificate_facts.push(
-                            model::fm::FmFactCertificate::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                cert_fact,
-                            ),
-                        );
-                    }
-                    fm::FactPayload::SmfService(smf_fact) => {
-                        smf_service_facts.push(
-                            model::fm::FmFactSmfService::from_sitrep(
-                                sitrep_id,
-                                case_id,
-                                &fact.metadata,
-                                smf_fact,
-                            ),
-                        );
-                    }
-                }
+                facts.push(sitrep_id, case_id, fact);
             }
         }
 
@@ -1082,55 +1435,7 @@ impl DataStore {
         )
         .await?;
 
-        if !physical_disk_facts.is_empty() {
-            diesel::insert_into(fact_pd_dsl::fm_fact_physical_disk)
-                .values(physical_disk_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert physical-disk case facts",
-                        )
-                })?;
-        }
-
-        if !saga_facts.is_empty() {
-            diesel::insert_into(fact_saga_dsl::fm_fact_saga)
-                .values(saga_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context("failed to insert saga case facts")
-                })?;
-        }
-
-        if !certificate_facts.is_empty() {
-            diesel::insert_into(fact_cert_dsl::fm_fact_certificate)
-                .values(certificate_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert certificate case facts",
-                        )
-                })?;
-        }
-
-        if !smf_service_facts.is_empty() {
-            diesel::insert_into(fact_smf_dsl::fm_fact_smf_service)
-                .values(smf_service_facts)
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to insert SMF service case facts",
-                        )
-                })?;
-        }
+        facts.insert(&conn).await?;
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -1140,6 +1445,99 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                         .internal_context("failed to insert case records")
+                })?;
+        }
+
+        if !case_problems.is_empty() {
+            diesel::insert_into(case_problem_dsl::fm_case_problem)
+                .values(case_problems)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert case problem associations",
+                        )
+                })?;
+        }
+
+        // Create problem records, and records for each of their
+        // revisions. Like case records, these are keyed on `sitrep_id`, so the
+        // ordering of these inserts relative to the others does not matter.
+        let mut problems = Vec::with_capacity(sitrep.problems.len());
+        let mut problem_revisions = Vec::new();
+        let mut problem_alerts = Vec::new();
+        let mut problem_support_bundles = Vec::new();
+        for problem in sitrep.problems {
+            problems.push(model::fm::FmProblemRequest::from_sitrep(
+                sitrep_id, &problem,
+            ));
+            problem_revisions.extend(problem.revisions.into_iter().map(
+                |revision| {
+                    model::fm::FmProblemRevisionRequest::from_sitrep(
+                        sitrep_id, problem.id, revision,
+                    )
+                },
+            ));
+            problem_alerts.extend(problem.alerts.into_iter().map(|link| {
+                model::fm::FmProblemAlert::from_sitrep(
+                    sitrep_id, problem.id, link,
+                )
+            }));
+            problem_support_bundles.extend(
+                problem.support_bundles.into_iter().map(|link| {
+                    model::fm::FmProblemSupportBundle::from_sitrep(
+                        sitrep_id, problem.id, link,
+                    )
+                }),
+            );
+        }
+
+        if !problems.is_empty() {
+            diesel::insert_into(problem_dsl::fm_problem_request)
+                .values(problems)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert problems")
+                })?;
+        }
+
+        if !problem_revisions.is_empty() {
+            diesel::insert_into(problem_rev_dsl::fm_problem_revision_request)
+                .values(problem_revisions)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert problem revisions")
+                })?;
+        }
+
+        if !problem_alerts.is_empty() {
+            diesel::insert_into(problem_alert_dsl::fm_problem_alert)
+                .values(problem_alerts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert problem alert links",
+                        )
+                })?;
+        }
+
+        if !problem_support_bundles.is_empty() {
+            diesel::insert_into(problem_bundle_dsl::fm_problem_support_bundle)
+                .values(problem_support_bundles)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert problem support bundle links",
+                        )
                 })?;
         }
 
@@ -2226,13 +2624,16 @@ mod tests {
     use crate::db::pub_test_utils::TEST_GIT_VERSION;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
+    use chrono::DateTime;
     use chrono::Utc;
     use diesel::pg::Pg;
     use ereport_types;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
+    use omicron_generation_kinds::ProblemRevNum;
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseEreportUuid;
@@ -2453,9 +2854,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
 
         datastore.fm_sitrep_insert(&opctx, sitrep.clone(), None).await.unwrap();
@@ -2506,9 +2909,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2527,9 +2932,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, sitrep2.clone(), None).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -2572,9 +2979,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2594,9 +3003,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, sitrep2, None).await;
@@ -2633,9 +3044,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -2654,9 +3067,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
@@ -2676,9 +3091,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let result =
             datastore.fm_sitrep_insert(&opctx, sitrep3.clone(), None).await;
@@ -2709,7 +3126,8 @@ mod tests {
     /// round-tripping through cockroachdb and may no longer be "equal".
     ///
     /// NOTE FOR FUTURE GENERATIONS: If we add other top-level child records
-    /// other than cases, we should also assert that they match here.
+    /// other than cases and problems, we should also assert that they
+    /// match here.
     #[track_caller]
     fn assert_sitreps_eq(this: &Sitrep, that: &Sitrep) {
         // Verify the sitrep metadata matches --- ignore the timestamp.
@@ -2720,6 +3138,11 @@ mod tests {
             this.metadata.parent_sitrep_id,
             that.metadata.parent_sitrep_id
         );
+
+        // Problems contain no timestamps other than revisions'
+        // `time_resolved`, which callers must construct at database precision,
+        // so the whole map can be compared directly.
+        assert_eq!(this.problems, that.problems);
 
         // Verify all the expected cases exist in both sitreps
         assert_eq!(this.cases.len(), that.cases.len());
@@ -2737,6 +3160,7 @@ mod tests {
                 alerts_requested,
                 support_bundles_requested,
                 facts,
+                problems,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -2822,6 +3246,10 @@ mod tests {
                 support_bundles_requested, &expected.support_bundles_requested,
                 "while checking case {case_id}"
             );
+            assert_eq!(
+                problems, &expected.problems,
+                "while checking case {case_id}"
+            );
         }
     }
 
@@ -2879,6 +3307,99 @@ mod tests {
 
         let sitrep_id = SitrepUuid::new_v4();
         let creator_id = OmicronZoneUuid::new_v4();
+
+        // Two problems, which should be sufficient to exercise the
+        // fm_problem_request, fm_problem_revision_request, fm_problem_alert,
+        // fm_problem_support_bundle, and fm_case_problem read, write, and GC
+        // paths. One problem has
+        // multiple revisions, the latest of which is resolved. The other is
+        // associated with more than one case.
+        //
+        // Both problems link the same alert, which is requested by case 1 in
+        // this sitrep. The resolved problem also links to alert which is not
+        // requested in this sitrep, as though it had been requested by a
+        // previous one, and a support bundle requested by case 1.
+        let linked_alert_id = AlertUuid::new_v4();
+        let linked_bundle_id = SupportBundleUuid::new_v4();
+        let alert_link = |alert_id: AlertUuid, revision: u32, comment: &str| {
+            fm::problem::AlertLink {
+                alert_id,
+                revision: ProblemRevNum::from_u32(revision),
+                linked_sitrep_id: sitrep_id,
+                comment: comment.to_string(),
+            }
+        };
+        let revision = |number: u32,
+                        time_resolved: Option<DateTime<Utc>>,
+                        summary: &str| {
+            fm::problem::SitrepRevision {
+                number: ProblemRevNum::from_u32(number),
+                requested_sitrep_id: sitrep_id,
+                time_resolved,
+                code: fm::problem::ProblemCode::UnhealthyZpool,
+                summary: summary.to_string(),
+                description: format!("a longer description: {summary}"),
+                action_required: "none, it's not a real problem".to_string(),
+            }
+        };
+        let resolved_problem = fm::problem::SitrepProblem {
+            id: ProblemUuid::new_v4(),
+            requested_sitrep_id: sitrep_id,
+            comment: "a problem that has since been resolved".to_string(),
+            revisions: [
+                revision(1, None, "something is wrong"),
+                revision(
+                    2,
+                    Some(omicron_common::now_db_precision()),
+                    "something was wrong, but it's fine now",
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            alerts: [
+                alert_link(linked_alert_id, 1, "requested along with it"),
+                alert_link(
+                    AlertUuid::new_v4(),
+                    2,
+                    "requested by an earlier sitrep",
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            support_bundles: [fm::problem::SupportBundleLink {
+                support_bundle_id: linked_bundle_id,
+                revision: ProblemRevNum::from_u32(2),
+                linked_sitrep_id: sitrep_id,
+                comment: "collected when the problem was resolved".to_string(),
+            }]
+            .into_iter()
+            .collect(),
+        };
+        let shared_problem = fm::problem::SitrepProblem {
+            id: ProblemUuid::new_v4(),
+            requested_sitrep_id: sitrep_id,
+            comment: "a problem shared by two cases".to_string(),
+            revisions: [revision(1, None, "two cases agree this is wrong")]
+                .into_iter()
+                .collect(),
+            alerts: [alert_link(
+                linked_alert_id,
+                1,
+                "also linked to the resolved problem",
+            )]
+            .into_iter()
+            .collect(),
+            support_bundles: iddqd::IdOrdMap::new(),
+        };
+        let case_problem = |problem: &fm::problem::SitrepProblem,
+                            comment: &str| {
+            fm::case::CaseProblem {
+                problem_id: problem.id,
+                linked_sitrep_id: sitrep_id,
+                comment: comment.to_string(),
+            }
+        };
+
         let case1 = {
             let mut ereports = iddqd::IdOrdMap::new();
             ereports
@@ -2899,7 +3420,7 @@ mod tests {
             let mut alerts_requested = iddqd::IdOrdMap::new();
             alerts_requested
                 .insert_unique(fm::case::AlertRequest {
-                    id: AlertUuid::new_v4(),
+                    id: linked_alert_id,
                     class: AlertClass::TestFoo,
                     version: 0,
                     payload: serde_json::json!({}),
@@ -2921,7 +3442,7 @@ mod tests {
             let mut support_bundles_requested = iddqd::IdOrdMap::new();
             support_bundles_requested
                 .insert_unique(fm::case::SupportBundleRequest {
-                    id: SupportBundleUuid::new_v4(),
+                    id: linked_bundle_id,
                     requested_sitrep_id: sitrep_id,
                     data_selection: BundleDataSelection::all(),
                     comment: String::new(),
@@ -2963,7 +3484,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative fact for case 1".to_string(),
@@ -2998,6 +3519,18 @@ mod tests {
                 alerts_requested,
                 support_bundles_requested,
                 facts,
+                problems: [
+                    case_problem(
+                        &resolved_problem,
+                        "case 1 found a problem, which is now resolved",
+                    ),
+                    case_problem(
+                        &shared_problem,
+                        "case 1 shares this problem with case 2",
+                    ),
+                ]
+                .into_iter()
+                .collect(),
             }
         };
 
@@ -3042,6 +3575,12 @@ mod tests {
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: [case_problem(
+                    &shared_problem,
+                    "case 2 shares this problem with case 1",
+                )]
+                .into_iter()
+                .collect(),
             }
         };
 
@@ -3052,7 +3591,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative not-progressing saga fact"
@@ -3073,7 +3612,7 @@ mod tests {
                 .unwrap();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative orphaned saga fact"
@@ -3105,6 +3644,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts,
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -3112,7 +3652,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative abandoned saga fact"
@@ -3139,6 +3679,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts,
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -3152,7 +3693,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: format!("a representative {comment} fact"),
@@ -3178,6 +3719,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts,
+                problems: iddqd::IdOrdMap::new(),
             }
         };
         let case5 = certificate_case(
@@ -3195,7 +3737,7 @@ mod tests {
             let mut facts = iddqd::IdOrdMap::new();
             facts
                 .insert_unique(fm::case::Fact {
-                    metadata: fm::case::FactMetadata {
+                    metadata: fm::FactMetadata {
                         id: FactUuid::new_v4(),
                         created_sitrep_id: sitrep_id,
                         comment: "a representative in-maintenance fact"
@@ -3228,6 +3770,7 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                problems: Default::default(),
                 facts,
             }
         };
@@ -3257,9 +3800,18 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases,
             ereports_by_id,
+            problems: fm::AllProblems::try_from_iter([
+                resolved_problem,
+                shared_problem,
+            ])
+            .expect(
+                "test problems have distinct IDs and at least one revision \
+                 each",
+            ),
         }
     }
 
@@ -3450,6 +4002,7 @@ mod tests {
             alerts_requested: iddqd::IdOrdMap::new(),
             support_bundles_requested,
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
 
         let mut cases = iddqd::IdOrdMap::new();
@@ -3465,9 +4018,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases,
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
 
         datastore
@@ -3524,9 +4079,11 @@ mod tests {
                         alert_generation: SitrepAlertGeneration::new(),
                         support_bundle_generation:
                             SitrepSupportBundleGeneration::new(),
+                        problem_generation: SitrepProblemGeneration::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
+                    problems: Default::default(),
                 },
                 None,
             )
@@ -3682,9 +4239,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let child_report = make_test_analysis_report(&child);
         datastore
@@ -3820,9 +4379,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let sitrep1_id = sitrep1.id();
         let sitrep1_report = make_test_analysis_report(&sitrep1);
@@ -4139,9 +4700,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
@@ -4269,9 +4832,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
@@ -4426,9 +4991,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         let child_report = make_test_analysis_report(&child);
         datastore

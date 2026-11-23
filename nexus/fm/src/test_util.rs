@@ -24,6 +24,7 @@ use nexus_types::inventory::ZpoolHealth;
 use nexus_types::observed_certificate::ObservedSiloCertificates;
 use nexus_types::observed_saga::ObservedSaga;
 use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepProblemGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::CaseUuid;
@@ -497,7 +498,7 @@ pub fn make_zpool_degraded_fact(
     zpool_id: ZpoolUuid,
 ) -> fm::case::Fact {
     fm::case::Fact {
-        metadata: fm::case::FactMetadata {
+        metadata: fm::FactMetadata {
             id: FactUuid::new_v4(),
             created_sitrep_id: parent_sitrep_id,
             comment: format!("zpool {zpool_id} degraded"),
@@ -520,7 +521,7 @@ pub fn make_abandoned_saga_fact(
 ) -> fm::case::Fact {
     let saga_id = steno::SagaId::from_u128(saga_n);
     fm::case::Fact {
-        metadata: fm::case::FactMetadata {
+        metadata: fm::FactMetadata {
             id: FactUuid::new_v4(),
             created_sitrep_id: parent_sitrep_id,
             comment: format!("saga {saga_id} abandoned"),
@@ -552,6 +553,7 @@ pub fn make_saga_case(
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
         facts: fact_map,
+        problems: IdOrdMap::new(),
     }
 }
 
@@ -577,6 +579,7 @@ pub fn make_disk_case(
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
         facts: fact_map,
+        problems: IdOrdMap::new(),
     }
 }
 
@@ -601,8 +604,10 @@ pub fn make_parent_sitrep(
             comment: String::new(),
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
+            problem_generation: SitrepProblemGeneration::new(),
         },
         cases: case_map,
         ereports_by_id: Default::default(),
+        problems: Default::default(),
     }
 }

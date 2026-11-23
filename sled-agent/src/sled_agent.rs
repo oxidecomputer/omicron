@@ -296,7 +296,8 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    err @ (InstanceError::Timeout(_)
+                    err @ (InstanceError::WaitForService(_)
+                    | InstanceError::PropolisHttpServerTimeout(_)
                     | InstanceError::VnicCreation(_)
                     | InstanceError::Notification(_)
                     | InstanceError::Migration(_)
@@ -354,7 +355,7 @@ impl From<Error> for dropshot::HttpError {
                 InlineErrorChain::new(&err).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
-                BundleError::NoStorage | BundleError::Unavailable { .. } => {
+                BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
                 BundleError::NoSuchZone { .. } => {
@@ -373,11 +374,8 @@ impl From<Error> for dropshot::HttpError {
                     )
                 }
                 err @ (BundleError::Command { .. }
-                | BundleError::CreateDirectory { .. }
                 | BundleError::OpenBundleFile { .. }
-                | BundleError::AddBundleData { .. }
                 | BundleError::ReadBundleData { .. }
-                | BundleError::CopyArchive { .. }
                 | BundleError::ReadDirectory { .. }
                 | BundleError::Metadata { .. }
                 | BundleError::Serialization(_)
@@ -389,14 +387,11 @@ impl From<Error> for dropshot::HttpError {
                 | BundleError::Zone(_)
                 | BundleError::PathBuf(_)
                 | BundleError::Cleanup(_)
-                | BundleError::CreateSnapshot(_)
                 | BundleError::DestroySnapshot(_)
                 | BundleError::ListSnapshot(_)
                 | BundleError::EnsureDataset(_)
                 | BundleError::DestroyDataset(_)
-                | BundleError::ListDatasets(_)
                 | BundleError::SetProperty(_)
-                | BundleError::GetProperty(_)
                 | BundleError::WalkDir(_)) => HttpError::for_internal_error(
                     InlineErrorChain::new(&err).to_string(),
                 ),
@@ -732,10 +727,10 @@ impl SledAgent {
             port_manager.clone(),
             config_reconciler.currently_managed_zpools_rx().clone(),
             config_reconciler.available_datasets_rx(),
-            long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
             config_reconciler_spawn_token.subscribe_update_disposition(),
+            config_reconciler_spawn_token.former_zone_root_archiver(),
         )?;
 
         let svc_config = services::Config::new(

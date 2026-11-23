@@ -1615,6 +1615,13 @@
   },
   "components": {
     "schemas": {
+      "AcpiTimeoutSecs": {
+        "description": "ACPI power button timeout in seconds.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 1,
+        "maximum": 900
+      },
       "ActivationReason": {
         "description": "Describes why a background task was activated\n\nThis is only used for debugging.  This is deliberately not made available to the background task itself.  See \"Design notes\" in the module-level documentation for details.",
         "type": "string",
@@ -1622,6 +1629,138 @@
           "signaled",
           "timeout",
           "dependency"
+        ]
+      },
+      "AddUpdateBlockedReason": {
+        "description": "Reason why the planner is not adding or updating zones",
+        "oneOf": [
+          {
+            "description": "The current target release generation is lower than the minimum required by the blueprint.  This means that the system has detected that a MUPdate has occurred since the last time the target release was set.",
+            "type": "object",
+            "properties": {
+              "current": {
+                "description": "current target release generation",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TargetReleaseGeneration"
+                  }
+                ]
+              },
+              "minimum": {
+                "description": "minimum target release generation required by the blueprint",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TargetReleaseGeneration"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "target_release_generation_too_low"
+                ]
+              }
+            },
+            "required": [
+              "current",
+              "minimum",
+              "type"
+            ]
+          },
+          {
+            "description": "Some sleds have `remove_mupdate_override` set in the blueprint.",
+            "type": "object",
+            "properties": {
+              "sled_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledUuid"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sleds_with_mupdate_override"
+                ]
+              }
+            },
+            "required": [
+              "sled_ids",
+              "type"
+            ]
+          },
+          {
+            "description": "Some sleds reported errors fetching their MUPdate override information.",
+            "type": "object",
+            "properties": {
+              "sled_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledUuid"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sleds_with_mupdate_override_errors"
+                ]
+              }
+            },
+            "required": [
+              "sled_ids",
+              "type"
+            ]
+          },
+          {
+            "description": "Some sleds reported zones whose image source is not an artifact.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zones_not_from_artifacts"
+                ]
+              },
+              "zone_counts_by_sled": {
+                "description": "number of such zones on each affected sled",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                }
+              }
+            },
+            "required": [
+              "type",
+              "zone_counts_by_sled"
+            ]
+          },
+          {
+            "description": "Some sleds reported measurements set to the install dataset rather than specific artifacts.",
+            "type": "object",
+            "properties": {
+              "sled_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledUuid"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurements_not_from_artifacts"
+                ]
+              }
+            },
+            "required": [
+              "sled_ids",
+              "type"
+            ]
+          }
         ]
       },
       "AllowedSourceIps": {
@@ -4854,11 +4993,15 @@
                   },
                   "details": {
                     "$ref": "#/components/schemas/WaitingOnSledEvacuationDetails"
+                  },
+                  "sled_id": {
+                    "$ref": "#/components/schemas/SledUuid"
                   }
                 },
                 "required": [
                   "component",
-                  "details"
+                  "details",
+                  "sled_id"
                 ]
               }
             },
@@ -5596,11 +5739,7 @@
             "$ref": "#/components/schemas/BaseboardId"
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           }
         },
         "required": [
@@ -5695,6 +5834,14 @@
           "run_state": {
             "$ref": "#/components/schemas/InstanceState"
           },
+          "shutdown_policy": {
+            "description": "The method by which the instance will be powered down when transitioning to the stopped state, either forcefully or by giving the guest an ACPI power button signal first.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceShutdownPolicy"
+              }
+            ]
+          },
           "time_created": {
             "description": "Timestamp when this resource was created",
             "type": "string",
@@ -5727,6 +5874,7 @@
           "ncpus",
           "project_id",
           "run_state",
+          "shutdown_policy",
           "time_created",
           "time_modified",
           "time_run_state_updated"
@@ -5832,6 +5980,45 @@
         },
         "required": [
           "destination"
+        ]
+      },
+      "InstanceShutdownPolicy": {
+        "description": "The method by which the instance will be powered down when transitioning to the stopped state or when rebooting: either forcefully or by giving the guest an ACPI power button signal first.",
+        "oneOf": [
+          {
+            "description": "Instance's VM is forcefully terminated immediately.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "$ref": "#/components/schemas/AcpiTimeoutSecs"
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
         ]
       },
       "InstanceState": {
@@ -7700,10 +7887,10 @@
         "type": "object",
         "properties": {
           "add_update_blocked_reasons": {
-            "description": "Reasons why zone adds and any updates are blocked.\n\nThis is typically a list of MUPdate-related reasons.",
+            "description": "Reasons why zone adds and any updates are blocked.",
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/AddUpdateBlockedReason"
             }
           },
           "discretionary_zones_placed": {
@@ -8010,10 +8197,22 @@
             "$ref": "#/components/schemas/PendingMgsUpdates"
           },
           "update_disposition_changes": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
-            }
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SledUpdateDispositionChange"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUpdateDispositionChange"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -9986,6 +10185,41 @@
           }
         ]
       },
+      "SledUpdateDispositionChange": {
+        "description": "Describes a change to a sled's update disposition (e.g., marking it for evacuation so that it can be updated)",
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "description": "id of the sled's baseboard",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "kind": {
+            "description": "the sled's new update disposition",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintSledUpdateDispositionKind"
+              }
+            ]
+          },
+          "sled_id": {
+            "description": "id of the sled whose update disposition is changing",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "kind",
+          "sled_id"
+        ]
+      },
       "SledUpdateRebootPolicy": {
         "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
         "oneOf": [
@@ -10456,6 +10690,16 @@
           "prepared",
           "committed"
         ]
+      },
+      "TrustQuorumMembers": {
+        "description": "The members of a trust quorum.\n\nA trust quorum has between [`TRUST_QUORUM_MIN_MEMBERS`] and [`TRUST_QUORUM_MAX_MEMBERS`] members, inclusive.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TufRepoVersion": {
         "oneOf": [
@@ -11172,6 +11416,14 @@
             "description": "Waiting on zones to propagate to inventory.",
             "type": "object",
             "properties": {
+              "kinds": {
+                "description": "kinds of the zones whose blueprint config is not yet reflected in inventory",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ZoneKind"
+                },
+                "uniqueItems": true
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -11180,6 +11432,7 @@
               }
             },
             "required": [
+              "kinds",
               "type"
             ]
           },

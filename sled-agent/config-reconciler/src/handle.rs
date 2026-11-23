@@ -110,6 +110,11 @@ impl ConfigReconcilerSpawnToken {
     pub fn subscribe_update_disposition(&self) -> UpdateDispositionReceiver {
         UpdateDispositionReceiver::new(self.ledger_rx.clone())
     }
+
+    /// Returns a clone of the handle to the former zone root archiver.
+    pub fn former_zone_root_archiver(&self) -> FormerZoneRootArchiver {
+        self.common.former_zone_root_archiver.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -630,6 +635,25 @@ impl AvailableDatasetsReceiver {
     ) -> Self {
         Self {
             inner: AvailableDatasetsReceiverInner::FakeStatic(pools.collect()),
+        }
+    }
+
+    /// Wait until the set of available datasets may have changed.
+    ///
+    /// Returns immediately if the set has changed since this receiver last
+    /// observed it, or `Err` if it can never change again because the
+    /// config reconciler task is gone. The test variants' datasets never
+    /// change, so for them this never returns.
+    pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
+        match &mut self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                receiver.changed().await
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { .. }
+            | AvailableDatasetsReceiverInner::FakeStatic(_) => {
+                std::future::pending().await
+            }
         }
     }
 

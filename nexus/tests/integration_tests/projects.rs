@@ -6,10 +6,16 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_affinity_group;
 use nexus_test_utils::resource_helpers::create_anti_affinity_group;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
@@ -29,8 +35,8 @@ use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::policy::ProjectRole;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
@@ -39,9 +45,9 @@ use nexus_types::external_api::snapshot;
 use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use nexus_types_versions::latest::instance::Instance;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::GenericUuid;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -126,30 +132,16 @@ async fn test_project_create_defaults(cptestctx: &ControlPlaneTestContext) {
         client: &ClientTestContext,
         project: &str,
     ) {
+        let instance_params = InstanceCreateBuilder::new("my-instance")
+            .with_description("")
+            .with_user_data(&[])
+            .with_start(false)
+            .with_nics(Default::default())
+            .finish();
         let error = object_create_error(
             client,
             &format!("/v1/instances?project={project}"),
-            &instance::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "my-instance".parse().unwrap(),
-                    description: String::new(),
-                },
-                ncpus: InstanceCpuCount(4),
-                memory: ByteCount::from_gibibytes_u32(1),
-                hostname: "the-host".parse().unwrap(),
-                user_data: Vec::new(),
-                ssh_public_keys: Some(Vec::new()),
-                network_interfaces: Default::default(),
-                external_ips: Vec::new(),
-                disks: Vec::new(),
-                boot_disk: None,
-                cpu_platform: None,
-                start: false,
-                auto_restart_policy: Default::default(),
-                anti_affinity_groups: Vec::new(),
-                multicast_groups: Vec::new(),
-                enable_jumbo_frames: false,
-            },
+            &instance_params,
             StatusCode::NOT_FOUND,
         )
         .await;
@@ -285,6 +277,61 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
+async fn test_project_deletion_clean_up_role_assignments(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    let name = "role-project";
+    let url = format!("/v1/projects/{}", name);
+    create_project(&client, &name).await;
+    grant_iam(
+        client,
+        &url,
+        ProjectRole::Viewer,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Look up the project before deleting it, because the lookup fails once
+    // the project is gone.
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
+        .project_name(&Name::from_str(name).unwrap().into())
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("project lookup");
+    let assignments = datastore
+        .role_assignment_fetch_visible(&opctx, &authz_project)
+        .await
+        .expect("role_assignment_fetch_visible");
+    let user_id = USER_TEST_UNPRIVILEGED.id().into_untyped_uuid();
+    assert!(
+        assignments.iter().any(|a| a.identity_id == user_id),
+        "missing role assignment for {user_id}: {assignments:?}"
+    );
+
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+    delete_project(&url, &client).await;
+
+    // The project's policy can no longer be fetched through the API, so
+    // check the database directly.
+    let assignments = datastore
+        .role_assignment_fetch_visible(&opctx, &authz_project)
+        .await
+        .expect("role_assignment_fetch_visible");
+    assert!(
+        assignments.is_empty(),
+        "unexpected role assignments: {assignments:?}"
+    );
+}
+
+#[nexus_test]
 async fn test_project_deletion_with_instance(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -300,31 +347,16 @@ async fn test_project_deletion_with_instance(
     delete_project_default_subnet(&name, &client).await;
     delete_project_default_vpc(&name, &client).await;
 
+    let instance_params = InstanceCreateBuilder::new("my-instance")
+        .with_description("description")
+        .with_user_data(b"none")
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
+        .with_start(false)
+        .finish();
     let _: Instance = object_create(
         client,
         &format!("/v1/instances?project={}", name),
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "my-instance".parse().unwrap(),
-                description: "description".to_string(),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
-            user_data: b"none".to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::None,
-            external_ips: vec![],
-            disks: vec![],
-            boot_disk: None,
-            cpu_platform: None,
-            start: false,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-        },
+        &instance_params,
     )
     .await;
 

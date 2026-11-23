@@ -17,13 +17,16 @@ use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
 use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
+use itertools::Itertools;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_generation_kinds::NexusGeneration;
 use omicron_generation_kinds::SledConfigGeneration;
+use omicron_generation_kinds::TargetReleaseGeneration;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -574,6 +577,7 @@ pub enum FailedMgsUpdateReason {
     /// for the sled to evacuate
     #[error("cannot update {component} until sled is evacuated")]
     WaitingOnSledEvacuation {
+        sled_id: SledUuid,
         component: MgsUpdateComponent,
         #[source]
         details: WaitingOnSledEvacuationDetails,
@@ -955,9 +959,31 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
 pub struct PlanningMgsUpdatesStepReport {
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     pub pending_mgs_updates: PendingMgsUpdates,
-    #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
-    pub update_disposition_changes:
-        BTreeMap<SledUuid, BlueprintSledUpdateDispositionKind>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub update_disposition_changes: IdOrdMap<SledUpdateDispositionChange>,
+}
+
+/// Describes a change to a sled's update disposition (e.g., marking it for
+/// evacuation so that it can be updated)
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub struct SledUpdateDispositionChange {
+    /// id of the sled whose update disposition is changing
+    pub sled_id: SledUuid,
+    /// id of the sled's baseboard
+    pub baseboard_id: Arc<BaseboardId>,
+    /// the sled's new update disposition
+    pub kind: BlueprintSledUpdateDispositionKind,
+}
+
+impl IdOrdItem for SledUpdateDispositionChange {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
 }
 
 impl PlanningMgsUpdatesStepReport {
@@ -965,7 +991,7 @@ impl PlanningMgsUpdatesStepReport {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
-            update_disposition_changes: BTreeMap::new(),
+            update_disposition_changes: IdOrdMap::new(),
         }
     }
 
@@ -1019,8 +1045,13 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let n = update_disposition_changes.len();
             let s = plural(n);
             writeln!(f, "* {n} sled{s} changed update disposition:")?;
-            for (sled_id, new_disposition) in update_disposition_changes {
-                writeln!(f, "  * {sled_id}: {new_disposition}")?;
+            for change in update_disposition_changes.iter() {
+                let SledUpdateDispositionChange { sled_id, baseboard_id, kind } =
+                    change;
+                writeln!(
+                    f,
+                    "  * sled {sled_id}, baseboard {baseboard_id}: {kind}"
+                )?;
             }
         }
 
@@ -1086,10 +1117,8 @@ pub struct PlanningAddStepReport {
     pub waiting_on: Option<ZoneAddWaitingOn>,
 
     /// Reasons why zone adds and any updates are blocked.
-    ///
-    /// This is typically a list of MUPdate-related reasons.
     #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
-    pub add_update_blocked_reasons: Vec<String>,
+    pub add_update_blocked_reasons: Vec<AddUpdateBlockedReason>,
 
     /// Set to true if the target release generation is 1, which would allow
     /// zones to be added.
@@ -1370,6 +1399,109 @@ impl fmt::Display for PlanningAddStepReport {
     }
 }
 
+/// Reason why the planner is not adding or updating zones
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum AddUpdateBlockedReason {
+    /// The current target release generation is lower than the minimum
+    /// required by the blueprint.  This means that the system has detected that
+    /// a MUPdate has occurred since the last time the target release was set.
+    TargetReleaseGenerationTooLow {
+        /// current target release generation
+        current: TargetReleaseGeneration,
+        /// minimum target release generation required by the blueprint
+        minimum: TargetReleaseGeneration,
+    },
+
+    /// Some sleds have `remove_mupdate_override` set in the blueprint.
+    SledsWithMupdateOverride {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+
+    /// Some sleds reported errors fetching their MUPdate override information.
+    SledsWithMupdateOverrideErrors {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+
+    /// Some sleds reported zones whose image source is not an artifact.
+    ZonesNotFromArtifacts {
+        /// number of such zones on each affected sled
+        #[cfg_attr(
+            test,
+            any(((0, 16).into(), Default::default(), Default::default()))
+        )]
+        zone_counts_by_sled: BTreeMap<SledUuid, usize>,
+    },
+
+    /// Some sleds reported measurements set to the install dataset rather than
+    /// specific artifacts.
+    MeasurementsNotFromArtifacts {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+}
+
+impl fmt::Display for AddUpdateBlockedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddUpdateBlockedReason::TargetReleaseGenerationTooLow {
+                current,
+                minimum,
+            } => write!(
+                f,
+                "current target release generation ({current}) is lower \
+                 than minimum required by blueprint ({minimum})",
+            ),
+            AddUpdateBlockedReason::SledsWithMupdateOverride { sled_ids } => {
+                write!(
+                    f,
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sled_ids.iter().join(", ")
+                )
+            }
+            AddUpdateBlockedReason::SledsWithMupdateOverrideErrors {
+                sled_ids,
+            } => write!(
+                f,
+                "sleds have mupdate override errors: {}",
+                sled_ids.iter().join(", ")
+            ),
+            AddUpdateBlockedReason::ZonesNotFromArtifacts {
+                zone_counts_by_sled,
+            } => {
+                writeln!(
+                    f,
+                    "sleds have deployment units with image sources \
+                     not set to Artifact:"
+                )?;
+                for (sled_id, count) in zone_counts_by_sled {
+                    let zones = if *count == 1 { "zone" } else { "zones" };
+                    writeln!(f, "- sled {sled_id}: {count} {zones}")?;
+                }
+                Ok(())
+            }
+            AddUpdateBlockedReason::MeasurementsNotFromArtifacts {
+                sled_ids,
+            } => {
+                writeln!(
+                    f,
+                    "sleds have measurements with image sources \
+                     not set to Artifact:"
+                )?;
+                for sled_id in sled_ids {
+                    writeln!(f, "- sled {sled_id} set to install dataset")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// We have at least the minimum required number of zones of a given kind.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
@@ -1625,7 +1757,12 @@ pub enum ZoneUpdatesWaitingOn {
     DiscretionaryZones,
 
     /// Waiting on zones to propagate to inventory.
-    InventoryPropagation,
+    InventoryPropagation {
+        /// kinds of the zones whose blueprint config is not yet reflected in
+        /// inventory
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        kinds: BTreeSet<ZoneKind>,
+    },
 
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
@@ -1647,7 +1784,9 @@ impl ZoneUpdatesWaitingOn {
                 "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::DiscretionaryZones => "discretionary zones",
-            Self::InventoryPropagation => "zone propagation to inventory",
+            Self::InventoryPropagation { .. } => {
+                "zone propagation to inventory"
+            }
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
@@ -1671,6 +1810,17 @@ pub enum ZoneUnsafeToShutdown {
     Cockroachdb { reason: CockroachdbUnsafeToShutdown },
     BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
     InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
+}
+
+impl ZoneUnsafeToShutdown {
+    /// Returns the kind of zone that this reason applies to
+    pub fn zone_kind(&self) -> ZoneKind {
+        match self {
+            ZoneUnsafeToShutdown::Cockroachdb { .. } => ZoneKind::CockroachDb,
+            ZoneUnsafeToShutdown::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            ZoneUnsafeToShutdown::InternalDns { .. } => ZoneKind::InternalDns,
+        }
+    }
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {

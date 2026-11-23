@@ -961,6 +961,12 @@ pub enum BlueprintPlannerStatus {
     /// by the config file.
     Disabled,
 
+    /// The reconfigurator config has not been loaded yet, so the planner did
+    /// not run.
+    ///
+    /// This is expected briefly after Nexus starts up.
+    ConfigNotYetLoaded,
+
     /// The blueprint limit was reached, so automatic blueprint planning was
     /// disabled.
     ///
@@ -1263,6 +1269,10 @@ pub enum SitrepLoadStatus {
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
+    /// If `true`, then sitrep garbage collection has been explicitly disabled
+    /// by the config file.
+    #[serde(default)]
+    pub disabled: bool,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
@@ -1535,6 +1545,8 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
     pub alert_marker_gc: fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
     pub support_bundle_marker_gc:
+        fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+    pub problem_marker_gc:
         fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
 }
 
