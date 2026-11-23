@@ -92,6 +92,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_23_00, INTERNET_GATEWAY_NO_CASCADE_DELETE),
     (2026_11_11_00, ACPI_SHUTDOWN),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),

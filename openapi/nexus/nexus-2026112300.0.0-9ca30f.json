@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111100.0.0"
+    "version": "2026112300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -5111,7 +5111,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
+            "description": "Detach without checking whether the attachment is in use. An attachment is in use when a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Without `cascade`, the server performs a best-effort check and refuses the request if the attachment appears to be in use. Detaching never deletes routes.",
             "schema": {
               "type": "boolean"
             }
@@ -5321,7 +5321,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
+            "description": "Detach without checking whether the attachment is in use. An attachment is in use when a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Without `cascade`, the server performs a best-effort check and refuses the request if the attachment appears to be in use. Detaching never deletes routes.",
             "schema": {
               "type": "boolean"
             }
@@ -5567,7 +5567,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
+            "description": "Also delete any routes targeting this gateway. Without `cascade`, delete fails if any routes target it. Deleting the gateway always detaches its IP pools and IP addresses.",
             "schema": {
               "type": "boolean"
             }

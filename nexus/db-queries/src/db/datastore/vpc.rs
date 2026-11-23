@@ -1624,6 +1624,9 @@ impl DataStore {
         Ok(())
     }
 
+    /// Delete an internet gateway along with its IP pool and IP address
+    /// attachments. With `cascade`, routes targeting the gateway are deleted
+    /// too. Without it, the delete fails if any such routes exist.
     pub async fn vpc_delete_internet_gateway(
         &self,
         opctx: &OpContext,
@@ -1631,100 +1634,32 @@ impl DataStore {
         vpc_id: Uuid,
         cascade: bool,
     ) -> DeleteResult {
-        let res = if cascade {
-            self.vpc_delete_internet_gateway_cascade(opctx, authz_igw).await
-        } else {
-            self.vpc_delete_internet_gateway_no_cascade(opctx, authz_igw).await
-        };
+        self.vpc_delete_internet_gateway_txn(opctx, authz_igw, cascade).await?;
 
-        if res.is_ok() {
-            // This is a named resource in router rules, so router resolution
-            // will change on add/delete.
-            self.vpc_increment_rpw_version(opctx, vpc_id).await?;
-        }
-
-        res
+        // Routes can target a gateway by name, so deleting a gateway changes
+        // what they resolve to. Bump router versions so routes are re-resolved.
+        self.vpc_increment_rpw_version(opctx, vpc_id).await
     }
 
-    pub async fn vpc_delete_internet_gateway_no_cascade(
+    async fn vpc_delete_internet_gateway_txn(
         &self,
         opctx: &OpContext,
         authz_igw: &authz::InternetGateway,
+        cascade: bool,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_igw).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
 
         #[derive(Debug)]
-        enum DeleteError {
-            IpPoolsExist,
-            IpAddressesExist,
-        }
+        struct RoutesExist;
 
-        self.transaction_retry_wrapper("vpc_delete_internet_gateway_no_cascade")
+        self.transaction_retry_wrapper("vpc_delete_internet_gateway")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Delete ip pool associations
-                    use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as pool;
-                    let count = pool::internet_gateway_ip_pool
-                        .filter(pool::time_deleted.is_null())
-                        .filter(pool::internet_gateway_id.eq(authz_igw.id()))
-                        .count()
-                        .first_async::<i64>(&conn)
-                        .await?;
-                    if count > 0 {
-                        return Err(err.bail(DeleteError::IpPoolsExist));
-                    }
-
-                    // Delete ip address associations
-                    use nexus_db_schema::schema::internet_gateway_ip_address::dsl as addr;
-                    let count = addr::internet_gateway_ip_address
-                        .filter(addr::time_deleted.is_null())
-                        .filter(addr::internet_gateway_id.eq(authz_igw.id()))
-                        .count()
-                        .first_async::<i64>(&conn)
-                        .await?;
-                    if count > 0 {
-                        return Err(err.bail(DeleteError::IpAddressesExist));
-                    }
-
-                    use nexus_db_schema::schema::internet_gateway::dsl;
                     let now = Utc::now();
-                    diesel::update(dsl::internet_gateway)
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(authz_igw.id()))
-                        .set(dsl::time_deleted.eq(now))
-                        .execute_async(&conn)
-                        .await?;
 
-                    Ok(())
-                }
-            })
-            .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    match err {
-                        DeleteError::IpPoolsExist => Error::invalid_request("Ip pools referencing this gateway exist. To perform a cascading delete set the cascade option"),
-                        DeleteError::IpAddressesExist => Error::invalid_request("Ip addresses referencing this gateway exist. To perform a cascading delete set the cascade option"),
-                    }
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
-            })
-    }
-
-    pub async fn vpc_delete_internet_gateway_cascade(
-        &self,
-        opctx: &OpContext,
-        authz_igw: &authz::InternetGateway,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_igw).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        self.transaction_retry_wrapper("vpc_delete_internet_gateway_cascade")
-            .transaction(&conn, |conn| {
-                async move {
                     use nexus_db_schema::schema::internet_gateway::dsl as igw;
                     let igw_info = igw::internet_gateway
                         .filter(igw::time_deleted.is_null())
@@ -1733,18 +1668,42 @@ impl DataStore {
                         .first_async(&conn)
                         .await?;
 
-                    use nexus_db_schema::schema::internet_gateway::dsl;
-                    let now = Utc::now();
-                    diesel::update(dsl::internet_gateway)
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(authz_igw.id()))
-                        .set(dsl::time_deleted.eq(now))
-                        .execute_async(&conn)
+                    // Routes refer to a gateway by name, and names are only
+                    // unique within a VPC, so limit the search to this VPC's
+                    // routers.
+                    use nexus_db_schema::schema::vpc_router::dsl as vr;
+                    let vpc_routers = vr::vpc_router
+                        .filter(vr::time_deleted.is_null())
+                        .filter(vr::vpc_id.eq(igw_info.vpc_id))
+                        .select(vr::id)
+                        .load_async::<Uuid>(&conn)
                         .await?;
 
-                    // Delete ip pool associations
+                    use nexus_db_schema::schema::router_route::dsl as rr;
+                    let target = format!("inetgw:{}", igw_info.name());
+                    if cascade {
+                        diesel::update(rr::router_route)
+                            .filter(rr::time_deleted.is_null())
+                            .filter(rr::vpc_router_id.eq_any(vpc_routers))
+                            .filter(rr::target.eq(target))
+                            .set(rr::time_deleted.eq(now))
+                            .execute_async(&conn)
+                            .await?;
+                    } else {
+                        let route = rr::router_route
+                            .filter(rr::time_deleted.is_null())
+                            .filter(rr::vpc_router_id.eq_any(vpc_routers))
+                            .filter(rr::target.eq(target))
+                            .select(rr::id)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .optional()?;
+                        if route.is_some() {
+                            return Err(err.bail(RoutesExist));
+                        }
+                    }
+
                     use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as pool;
-                    let now = Utc::now();
                     diesel::update(pool::internet_gateway_ip_pool)
                         .filter(pool::time_deleted.is_null())
                         .filter(pool::internet_gateway_id.eq(authz_igw.id()))
@@ -1752,9 +1711,7 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
-                    // Delete ip address associations
                     use nexus_db_schema::schema::internet_gateway_ip_address::dsl as addr;
-                    let now = Utc::now();
                     diesel::update(addr::internet_gateway_ip_address)
                         .filter(addr::time_deleted.is_null())
                         .filter(addr::internet_gateway_id.eq(authz_igw.id()))
@@ -1762,28 +1719,10 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
-                    // Delete routes targeting this igw
-                    use nexus_db_schema::schema::vpc_router::dsl as vr;
-                    let vpc_routers = vr::vpc_router
-                        .filter(vr::time_deleted.is_null())
-                        .filter(vr::vpc_id.eq(igw_info.vpc_id))
-                        .select(VpcRouter::as_select())
-                        .load_async(&conn)
-                        .await?
-                        .into_iter()
-                        .map(|x| x.id())
-                        .collect::<Vec<_>>();
-
-                    use nexus_db_schema::schema::router_route::dsl as rr;
-                    let now = Utc::now();
-                    diesel::update(rr::router_route)
-                        .filter(rr::time_deleted.is_null())
-                        .filter(rr::vpc_router_id.eq_any(vpc_routers))
-                        .filter(
-                            rr::target
-                                .eq(format!("inetgw:{}", igw_info.name())),
-                        )
-                        .set(rr::time_deleted.eq(now))
+                    diesel::update(igw::internet_gateway)
+                        .filter(igw::time_deleted.is_null())
+                        .filter(igw::id.eq(authz_igw.id()))
+                        .set(igw::time_deleted.eq(now))
                         .execute_async(&conn)
                         .await?;
 
@@ -1791,7 +1730,16 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| match err.take() {
+                Some(RoutesExist) => Error::invalid_request(
+                    "Routes referencing this gateway exist. To perform a \
+                     cascading delete set the cascade option",
+                ),
+                None => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_igw),
+                ),
+            })
     }
 
     pub async fn vpc_update_router(
