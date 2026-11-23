@@ -1575,6 +1575,7 @@ pub mod fm_rendezvous {
     pub enum OpResult {
         #[default]
         Skipped,
+        MissingDependency(String),
         Executed {
             start: DateTime<Utc>,
             end: DateTime<Utc>,

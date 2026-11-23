@@ -435,6 +435,13 @@ impl DataStore {
             ))
             .check_if_exists::<Problem>(problem_id.into_untyped_uuid())
     }
+
+    pub async fn problem_list_alerts(
+        &self,
+        opctx: &OpContext,
+        authz_problem: &authz::Problem,
+    ) -> ListResultVec<Alert> {
+    }
 }
 
 /// The outcome of [`DataStore::problem_set_current_revision`].

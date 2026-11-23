@@ -134,10 +134,11 @@ impl FmRendezvous {
 
         // Active problem revisions may reference alerts and/or support bundles
         // created in the same sitrep, so wait for these tasks to complete
-        // before creating any revisions.
+        // before activating any revisions.
         let (alerts, support_bundles) =
             tokio::try_join!(alerts, support_bundles)
                 .expect(TASKS_SHOULDNT_FAIL);
+        // WIP
 
         let status = Status {
             sitrep_id: Some(sitrep.1.id()),
