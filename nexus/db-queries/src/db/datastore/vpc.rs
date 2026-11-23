@@ -1634,6 +1634,19 @@ impl DataStore {
         vpc_id: Uuid,
         cascade: bool,
     ) -> DeleteResult {
+        self.vpc_delete_internet_gateway_txn(opctx, authz_igw, cascade).await?;
+
+        // Routes can target a gateway by name, so deleting a gateway changes
+        // what they resolve to. Bump router versions so routes are re-resolved.
+        self.vpc_increment_rpw_version(opctx, vpc_id).await
+    }
+
+    async fn vpc_delete_internet_gateway_txn(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+        cascade: bool,
+    ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_igw).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -1726,13 +1739,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByResource(authz_igw),
                 ),
-            })?;
-
-        // This is a named resource in router rules, so router resolution
-        // will change on add/delete.
-        self.vpc_increment_rpw_version(opctx, vpc_id).await?;
-
-        Ok(())
+            })
     }
 
     pub async fn vpc_update_router(
