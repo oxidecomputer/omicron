@@ -2813,8 +2813,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_list(&opctx, &project_lookup, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|i| i.into())
-                .collect();
+                .map(|i| i.try_into())
+                .collect::<Result<_, _>>()?;
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 instances,
@@ -2845,7 +2845,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &new_instance_params,
                 )
                 .await?;
-            Ok(HttpResponseCreated(instance.into()))
+            Ok(HttpResponseCreated(instance.try_into()?))
         })
         .await
     }
@@ -2874,7 +2874,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .datastore()
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
-            Ok(HttpResponseOk(instance_and_vmm.into()))
+            Ok(HttpResponseOk(instance_and_vmm.try_into()?))
         };
         apictx
             .context
@@ -2926,14 +2926,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &instance_config,
                 )
                 .await?;
-            Ok(HttpResponseOk(instance.into()))
+            Ok(HttpResponseOk(instance.try_into()?))
         })
         .await
     }
 
     async fn instance_reboot(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<project::OptionalProjectSelector>,
+        query_params: Query<instance::InstanceStopOrRebootParams>,
         path_params: Path<path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
@@ -2945,9 +2945,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_reboot(&opctx, &instance_lookup).await?;
-            Ok(HttpResponseAccepted(instance.into()))
+            let instance = nexus
+                .instance_reboot(
+                    &opctx,
+                    &instance_lookup,
+                    query.force.unwrap_or(false),
+                )
+                .await?;
+            Ok(HttpResponseAccepted(instance.try_into()?))
         })
         .await
     }
@@ -2973,14 +2978,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     crate::app::sagas::instance_start::Reason::User,
                 )
                 .await?;
-            Ok(HttpResponseAccepted(instance.into()))
+            Ok(HttpResponseAccepted(instance.try_into()?))
         })
         .await
     }
 
     async fn instance_stop(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<project::OptionalProjectSelector>,
+        query_params: Query<instance::InstanceStopOrRebootParams>,
         path_params: Path<path_params::InstancePath>,
     ) -> Result<HttpResponseAccepted<instance::Instance>, HttpError> {
         let path = path_params.into_inner();
@@ -2992,9 +2997,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_stop(&opctx, &instance_lookup).await?;
-            Ok(HttpResponseAccepted(instance.into()))
+            let instance = nexus
+                .instance_stop(
+                    &opctx,
+                    &instance_lookup,
+                    query.force.unwrap_or(false),
+                )
+                .await?;
+            Ok(HttpResponseAccepted(instance.try_into()?))
         })
         .await
     }

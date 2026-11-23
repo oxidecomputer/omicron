@@ -110,6 +110,11 @@ impl ConfigReconcilerSpawnToken {
     pub fn subscribe_update_disposition(&self) -> UpdateDispositionReceiver {
         UpdateDispositionReceiver::new(self.ledger_rx.clone())
     }
+
+    /// Returns a clone of the handle to the former zone root archiver.
+    pub fn former_zone_root_archiver(&self) -> FormerZoneRootArchiver {
+        self.common.former_zone_root_archiver.clone()
+    }
 }
 
 #[derive(Debug, Clone)]

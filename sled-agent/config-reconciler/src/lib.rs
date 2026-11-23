@@ -62,6 +62,7 @@ pub use dataset_serialization_task::NestedDatasetDestroyError;
 pub use dataset_serialization_task::NestedDatasetEnsureError;
 pub use dataset_serialization_task::NestedDatasetListError;
 pub use dataset_serialization_task::NestedDatasetMountError;
+pub use debug_collector::FormerZoneRootArchiver;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
 pub use handle::ConfigReconcilerSpawnToken;

@@ -14,7 +14,7 @@ use crate::fm::{CertificateFact, DiskFact, SagaFact, SmfServiceFact};
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
-    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, SitrepUuid,
+    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, ProblemUuid, SitrepUuid,
     SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,10 @@ pub struct Case {
     /// Diagnosis-engine-derived facts attached to this case. See
     /// [`Fact`] for semantics.
     pub facts: IdOrdMap<Fact>,
+    /// Problems associated with this case, indexed by their ID.
+    ///
+    /// See [`CaseProblem`] for details.
+    pub problems: IdOrdMap<CaseProblem>,
 }
 
 impl Case {
@@ -76,6 +80,14 @@ impl Case {
                 .facts
                 .iter()
                 .any(|f| f.metadata.created_sitrep_id == sitrep_id)
+            || self.problems.iter().any(|p| {
+                // TODO(eliza): we *might* also consider checking if the problem
+                // itself has a revision that was created in this sitrep, but
+                // that would require passing in the whole sitrep...and, I'm on
+                // the fence as to whether that should be considered a change to
+                // the *case* or not...
+                p.linked_sitrep_id == sitrep_id
+            })
     }
 }
 
@@ -338,7 +350,7 @@ impl fmt::Display for DisplayFact<'_> {
         let payload =
             serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
         display::fmt_json_value(f, "payload", &payload, indent, styles)?;
-        writeln!(f)
+        Ok(())
     }
 }
 
@@ -383,6 +395,53 @@ impl iddqd::IdOrdItem for SupportBundleRequest {
     iddqd::id_upcast!();
 }
 
+/// An association between a [`Case`] and a problem.
+///
+/// These associations are used by diagnosis engines to track whether a problem
+/// exists for a given case across multiple sitreps. The relationship between
+/// cases and problems is many-to-many: a problem may be created due to the
+/// observations contained in one case, but diagnosis engines may determine
+/// that other cases contain observations also related to the same problem. In
+/// the other direction, a case may result in the diagnosis of any number of
+/// problems.
+///
+/// These associations are purely internal to the sitrep, and are used for
+/// internal bookkeeping, such as tracking whether or not a case already has an
+/// active problem of a given code. Unlike problem revision requests and alert
+/// or support bundle link requests, they do not correspond to any record
+/// outside the sitrep, and do not request that rendezvous take any externally
+/// visible action.
+///
+/// The lifetime of this association is tied to that of the case. When the
+/// linked case is no longer present in the current sitrep, these associations
+/// are not carried forward into the next sitrep. However, they may outlive the
+/// presence of the linked problem in the sitrep: if the problem is resolved,
+/// this record should be kept to represent that a resolved problem was created
+/// for the case.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaseProblem {
+    /// The ID of the associated problem.
+    pub problem_id: ProblemUuid,
+    /// The sitrep in which this association between the case and the problem
+    /// was first created.
+    ///
+    /// This is *not* the sitrep in which either the case or the problem was
+    /// created.
+    pub linked_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the problem is associated with
+    /// the case, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for CaseProblem {
+    type Key<'a> = &'a ProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.problem_id
+    }
+
+    iddqd::id_upcast!();
+}
+
 /// Displays a [`Case`], as returned by [`Case::display_indented`].
 #[must_use = "this struct does nothing unless displayed"]
 pub struct DisplayCase<'a> {
@@ -413,6 +472,7 @@ impl fmt::Display for DisplayCase<'_> {
                     alerts_requested,
                     support_bundles_requested,
                     facts,
+                    problems,
                 },
             indent,
             sitrep_id,
@@ -431,20 +491,13 @@ impl fmt::Display for DisplayCase<'_> {
             if indent > 0 { BULLET } else { "" },
             heading.style(format_args!("case {id}")),
         )?;
-        writeln!(
-            f,
-            "{:>indent$}{}",
-            "",
-            heading.style("=========================================")
-        )?;
         metadata
             .display_multiline(indent, sitrep_id)
             .colored(colored)
             .fmt(f)?;
 
         if !ereports.is_empty() {
-            writeln!(f, "\n{:>indent$}{}:", "", heading.style("ereports"))?;
-            writeln!(f, "{:>indent$}{}", "", heading.style("---------"))?;
+            writeln!(f, "{:>indent$}{}:", "", heading.style("ereports"))?;
 
             let indent = indent + 2;
             for CaseEreport { id, ereport, assigned_sitrep_id, comment } in
@@ -502,13 +555,11 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     styles.label(ASSIGNMENT_ID, WIDTH)
                 )?;
-                writeln!(f)?;
             }
         }
 
         if !facts.is_empty() {
-            writeln!(f, "\n{:>indent$}{}:", "", heading.style("facts"))?;
-            writeln!(f, "{:>indent$}{}", "", heading.style("------"))?;
+            writeln!(f, "{:>indent$}{}:", "", heading.style("facts"))?;
 
             let indent = indent + 2;
             for fact in facts.iter() {
@@ -521,15 +572,9 @@ impl fmt::Display for DisplayCase<'_> {
         if !alerts_requested.is_empty() {
             writeln!(
                 f,
-                "\n{:>indent$}{}:",
+                "{:>indent$}{}:",
                 "",
                 heading.style("alerts requested")
-            )?;
-            writeln!(
-                f,
-                "{:>indent$}{}",
-                "",
-                heading.style("-----------------")
             )?;
 
             let indent = indent + 2;
@@ -569,22 +614,15 @@ impl fmt::Display for DisplayCase<'_> {
                     styles.label(REQUESTED_IN, WIDTH),
                     this_sitrep(*requested_sitrep_id)
                 )?;
-                writeln!(f)?;
             }
         }
 
         if !support_bundles_requested.is_empty() {
             writeln!(
                 f,
-                "\n{:>indent$}{}:",
+                "{:>indent$}{}:",
                 "",
                 heading.style("support bundles requested")
-            )?;
-            writeln!(
-                f,
-                "{:>indent$}{}",
-                "",
-                heading.style("-------------------------")
             )?;
 
             let indent = indent + 2;
@@ -617,11 +655,42 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{}", "", styles.label(DATA, 0))?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
-                writeln!(f)?;
             }
         }
 
-        writeln!(f)?;
+        if !problems.is_empty() {
+            writeln!(
+                f,
+                "{:>indent$}{}:",
+                "",
+                heading.style("active problems")
+            )?;
+
+            let indent = indent + 2;
+            for CaseProblem { problem_id, linked_sitrep_id, comment } in
+                problems.iter()
+            {
+                const ADDED_IN: &str = "added in:";
+                const WIDTH: usize = const_max_len(&[ADDED_IN]);
+
+                writeln!(
+                    f,
+                    "{BULLET:>indent$}{}",
+                    heading.style(format_args!("problem {problem_id}"))
+                )?;
+                display::Comment::from(comment)
+                    .indent(indent)
+                    .colored(colored)
+                    .fmt(f)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {linked_sitrep_id}{}",
+                    "",
+                    styles.label(ADDED_IN, WIDTH),
+                    this_sitrep(*linked_sitrep_id)
+                )?;
+            }
+        }
 
         Ok(())
     }
@@ -707,6 +776,7 @@ impl fmt::Display for DisplayCaseSummary<'_> {
             alerts_requested: _,
             support_bundles_requested: _,
             facts: _,
+            problems: _,
         } = case;
         let Metadata { created_sitrep_id, closed_sitrep_id, de, comment } =
             metadata;
@@ -766,8 +836,8 @@ mod tests {
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
         AlertUuid, CaseUuid, CollectionUuid, EreporterRestartUuid, FactUuid,
-        OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid, SupportBundleUuid,
-        ZpoolUuid,
+        OmicronZoneUuid, PhysicalDiskUuid, ProblemUuid, SitrepUuid,
+        SupportBundleUuid, ZpoolUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -936,6 +1006,18 @@ mod tests {
             })
             .unwrap();
 
+        let mut problems = IdOrdMap::new();
+        problems
+            .insert_unique(CaseProblem {
+                problem_id: ProblemUuid::from_str(
+                    "a0b1e3a0-4c0d-4e5f-8a9b-0c1d2e3f4a5b",
+                )
+                .unwrap(),
+                linked_sitrep_id: closed_sitrep_id,
+                comment: "the rectifier is missing".to_string(),
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -950,6 +1032,7 @@ mod tests {
             alerts_requested,
             support_bundles_requested,
             facts,
+            problems,
         };
 
         (case, closed_sitrep_id)
