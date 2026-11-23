@@ -921,6 +921,7 @@ mod test {
     use sled_agent_types::inventory::SvcsEnabledNotOnline;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::inventory::SvcsError;
+    use sled_agent_types::inventory::WicketSshAuthStatus;
     use sled_agent_types::inventory::ZpoolHealth;
     use slog::Logger;
     use slog::o;
@@ -960,6 +961,7 @@ mod test {
             smf_services_enabled_not_online: smf_services,
             reference_measurements: iddqd::IdOrdMap::new(),
             fmd: Ok(FmdInventory::default()),
+            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
         }
     }
 

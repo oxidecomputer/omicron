@@ -56,5 +56,6 @@ impl_typed_generation_kinds! {
         SledRegistration = {},
         TargetRelease = {},
         UpdateDisposition = {},
+        WicketSshAuth = {},
     },
 }
