@@ -4,7 +4,6 @@
 
 use super::rng::ProblemBuilderRng;
 use crate::problem::ProblemCode;
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use iddqd::{IdOrdMap, id_ord_map};
 use nexus_types::fm::AllProblems;
@@ -579,19 +578,18 @@ impl<'parent> ProblemSetBuilder<'parent> {
     ///   was already attached in a previous revision, or if a DE wished to add
     ///   an explicit debug log entry.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// This function returns an error if the resulting problem set is invalid.
-    /// This occurs if a problem has no revisions, or a the same problem ID
-    /// occurs twice in the problem set. Neither of these should be possible and
-    /// indicate a bug in the `ProblemSetBuilder`.
-    pub fn build(
-        self,
-    ) -> anyhow::Result<(AllProblems, IdOrdMap<ActiveProblemReport>)> {
+    /// This function panics if the resulting problem set is invalid. This
+    /// occurs if a problem has no revisions, or a the same problem ID occurs
+    /// twice in the problem set. The `ProblemSetBuilder` should guarantee that
+    /// these invariants are always upheld, so any of these conditions is a bug
+    /// in this module.
+    pub fn build(self) -> (AllProblems, IdOrdMap<ActiveProblemReport>) {
         let Self { mut pending_revisions, parent_problems, sitrep_id, .. } =
             self;
         let mut problems = AllProblems::default();
-        let mut reports = IdOrdMap::new();
+        let mut reports = IdOrdMap::with_capacity(pending_revisions.len());
 
         // Copy forward all problems from the parent sitrep.
         for problem in parent_problems.into_iter().flat_map(|p| p.by_id()) {
@@ -600,29 +598,31 @@ impl<'parent> ProblemSetBuilder<'parent> {
                 // instead.
                 if let Some(pending) = pending_revisions.remove(&problem.id) {
                     let (problem, report) = pending.build(sitrep_id);
-                    reports.insert_unique(report).expect(
-                        "since both pending revisions and reports are keyed by \
-                        the problem's UUID, there should never already be a \
-                        report present",
-                    );
+                    if !report.log.is_empty() {
+                        reports.insert_unique(report).expect(
+                            "since both pending revisions and reports are \
+                            keyed by the problem's UUID, there should never \
+                            already be a report present",
+                        );
+                    }
                     problem
                 } else {
                     problem.clone()
                 };
-            let id = problem.id;
-            problems.insert_unique(problem.clone()).with_context(|| {
-                format!("failed to copy forward problem {id}")
-            })?;
+            problems.insert_unique(problem).expect(
+                "the problems in the parent sitrep are keyed by problem UUID, \
+                 so the contents of it should always be unique",
+            );
         }
 
         // Any remaining pending revisions represent new problems requested in
         // this sitrep.
         for pending in pending_revisions {
-            let id = pending.id;
             let (problem, report) = pending.build(sitrep_id);
-            problems.insert_unique(problem).with_context(|| {
-                format!("failed to insert revised problem {id}")
-            })?;
+            problems.insert_unique(problem).expect(
+                "pending revisions are keyed by problem UUID, so its contents \
+                 should always be unique.",
+            );
             if !report.log.is_empty() {
                 reports.insert_unique(report).expect(
                     "pending revisions are keyed by problem ID, so each \
@@ -631,7 +631,7 @@ impl<'parent> ProblemSetBuilder<'parent> {
             }
         }
 
-        Ok((problems, reports))
+        (problems, reports)
     }
 }
 
@@ -1037,7 +1037,7 @@ mod tests {
             rev.id()
         };
 
-        let (built, reports) = problems.build().expect("build succeeds");
+        let (built, reports) = problems.build();
         assert_eq!(built.len(), 1);
         let problem = built.by_id().get(&id).expect("problem was built");
         assert_eq!(problem.requested_sitrep_id, sitrep_id);
@@ -1085,7 +1085,7 @@ mod tests {
             rev.attach_support_bundle(new_bundle, "collect evidence");
         }
 
-        let (built, reports) = problems.build().expect("build succeeds");
+        let (built, reports) = problems.build();
         let problem = built.by_id().get(&id).expect("problem was built");
         assert_eq!(problem.requested_sitrep_id, parent_requested_in);
         assert_eq!(problem.comment, "parent problem");
@@ -1146,7 +1146,7 @@ mod tests {
             rev.attach_alert(warned_alert, "already linked in parent");
         }
 
-        let (built, reports) = problems.build().expect("build succeeds");
+        let (built, reports) = problems.build();
         assert_eq!(built.len(), 3);
         for id in [untouched_id, no_op_id, warned_id] {
             let problem = built.by_id().get(&id).expect("problem is present");
@@ -1187,7 +1187,7 @@ mod tests {
             assert_eq!(rev.time_resolved(), Some(time_resolved));
         }
 
-        let (built, reports) = problems.build().expect("build succeeds");
+        let (built, reports) = problems.build();
         let problem = built.by_id().get(&id).expect("problem was built");
         assert!(problem.is_resolved());
         assert_eq!(
@@ -1204,7 +1204,7 @@ mod tests {
             next.revise(DE, &id).is_none(),
             "a resolved problem must not be revised"
         );
-        let (next_built, next_reports) = next.build().expect("build succeeds");
+        let (next_built, next_reports) = next.build();
         assert_eq!(
             next_built.by_id().get(&id),
             built.by_id().get(&id),

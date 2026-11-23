@@ -227,7 +227,7 @@ impl<'a> SitrepBuilder<'a> {
                     .extend(case.ereports.iter().map(|ce| ce.ereport.clone()));
             })
             .collect();
-        let (problems, problem_report) = self.active_problems.build()?;
+        let (problems, problem_report) = self.active_problems.build();
         let report = fm::analysis_reports::AnalysisReport {
             log: self.debug_log,
             sitrep_id: self.sitrep_id,
