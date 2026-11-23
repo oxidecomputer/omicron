@@ -49,8 +49,13 @@ const WICKET_AUTHORIZED_KEYS_PATH: &str = "opt/oxide/wicket/authorized_keys";
 const WICKET_SSHD_CONFIG_PATH: &str = "opt/oxide/wicket/wicket_sshd_config";
 const SUPPORT_AUTHORIZED_KEYS_PATH: &str = "opt/oxide/support/authorized_keys";
 
+// SMF service and instance names for sshd
 const SSHD_SERVICE_NAME: &str = "network/ssh";
 const SSHD_INSTANCE_NAME: &str = "default";
+
+// Default interval on which this reconciler will retry reconfiguring sshd, if
+// it fails to do so.
+const RECONFIGURE_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub enum WicketSshAuthReconcilerError {
@@ -116,10 +121,30 @@ impl WicketSshAuthReconciler {
         wicket_auth_rx: WicketSshAuthReceiver,
         base_log: &Logger,
     ) -> Self {
+        Self::new_impl(
+            wicket_auth_rx,
+            base_log,
+            Arc::new(RealSshdRefresher),
+            RECONFIGURE_RETRY_INTERVAL,
+        )
+    }
+
+    // Private constructor that allows tests to specify a different way to
+    // refresh sshd (e.g., not reliant on SMF) and a different retry interval.
+    fn new_impl(
+        wicket_auth_rx: WicketSshAuthReceiver,
+        base_log: &Logger,
+        refresh_sshd: Arc<dyn SshdRefresher>,
+        reconfigure_retry_interval: Duration,
+    ) -> Self {
         let log =
             base_log.new(slog::o!("component" => "WicketSshAuthReconciler"));
-        let (actor, zone_lifecycle_tx, status_rx) =
-            WicketSshAuthActor::new(wicket_auth_rx, log.clone());
+        let (actor, zone_lifecycle_tx, status_rx) = WicketSshAuthActor::new(
+            wicket_auth_rx,
+            refresh_sshd,
+            reconfigure_retry_interval,
+            log.clone(),
+        );
 
         let actor_task = tokio::spawn({
             let log = log.clone();
@@ -165,8 +190,15 @@ impl WicketSshAuthReconciler {
         &self,
         switch_zone: &InstalledZone,
     ) -> Result<SwitchZoneBootedGuard<'_>, WicketSshAuthReconcilerError> {
+        self.configure_zone_root_before_boot(switch_zone.root().into()).await
+    }
+
+    async fn configure_zone_root_before_boot(
+        &self,
+        zone_root: Arc<Utf8Path>,
+    ) -> Result<SwitchZoneBootedGuard<'_>, WicketSshAuthReconcilerError> {
         self.zone_lifecycle_tx
-            .configure_switch_zone_before_boot(switch_zone)
+            .configure_switch_zone_before_boot(zone_root)
             .await?;
         Ok(SwitchZoneBootedGuard { booted: false, inner: self })
     }
@@ -298,17 +330,43 @@ AuthorizedKeysFile {auth_keys_file}",
     })
 }
 
-fn send_smf_refresh_to_sshd_in_switch_zone() -> anyhow::Result<()> {
-    let scf = Scf::connect_zone(SWITCH_ZONE_NAME)?;
-    let scope = scf.scope_local()?;
-    let Some(service) = scope.service(SSHD_SERVICE_NAME)? else {
-        bail!("no `{SSHD_SERVICE_NAME}` service present in switch zone");
-    };
-    let Some(mut instance) = service.instance(SSHD_INSTANCE_NAME)? else {
-        bail!("no `{SSHD_INSTANCE_NAME}` instance within {}", service.fmri());
-    };
-    instance.smf_refresh()?;
-    Ok(())
+/// Helper trait to allow unit tests to operate without needing to interact with
+/// SMF. There is only one prod implementation of this trait
+/// ([`RealSshdRefresher`]).
+trait SshdRefresher: std::fmt::Debug + Send + Sync {
+    fn refresh(&self) -> anyhow::Result<()>;
+}
+
+#[derive(Debug)]
+struct RealSshdRefresher;
+
+impl RealSshdRefresher {
+    /// Given an [`Scf`] handle, perform a refresh of the sshd service.
+    ///
+    /// This is separate from this trait's `impl SshdRefresher` so that illumos
+    /// unit tests can cover refreshing an sshd attached to a standalone SMF
+    /// setup.
+    fn refresh_via_scf_handle(scf: &Scf<'_>) -> anyhow::Result<()> {
+        let scope = scf.scope_local()?;
+        let Some(service) = scope.service(SSHD_SERVICE_NAME)? else {
+            bail!("no `{SSHD_SERVICE_NAME}` service present in switch zone");
+        };
+        let Some(mut instance) = service.instance(SSHD_INSTANCE_NAME)? else {
+            bail!(
+                "no `{SSHD_INSTANCE_NAME}` instance within {}",
+                service.fmri()
+            );
+        };
+        instance.smf_refresh()?;
+        Ok(())
+    }
+}
+
+impl SshdRefresher for RealSshdRefresher {
+    fn refresh(&self) -> anyhow::Result<()> {
+        let scf = Scf::connect_zone(SWITCH_ZONE_NAME)?;
+        Self::refresh_via_scf_handle(&scf)
+    }
 }
 
 #[derive(Debug)]
@@ -316,12 +374,16 @@ struct WicketSshAuthActor {
     wicket_auth_rx: WicketSshAuthReceiver,
     zone_lifecycle_rx: SwitchZoneLifecycleReceiver,
     zone_state: ZoneState,
+    refresh_sshd: Arc<dyn SshdRefresher>,
+    reconfigure_retry_interval: Duration,
     log: Logger,
 }
 
 impl WicketSshAuthActor {
     fn new(
         wicket_auth_rx: WicketSshAuthReceiver,
+        refresh_sshd: Arc<dyn SshdRefresher>,
+        reconfigure_retry_interval: Duration,
         log: Logger,
     ) -> (Self, SwitchZoneLifecycleSender, watch::Receiver<WicketSshAuthStatus>)
     {
@@ -329,14 +391,20 @@ impl WicketSshAuthActor {
             SwitchZoneLifecycle::channel();
         let (zone_state, zone_state_rx) = ZoneState::new();
         (
-            Self { wicket_auth_rx, zone_lifecycle_rx, zone_state, log },
+            Self {
+                wicket_auth_rx,
+                zone_lifecycle_rx,
+                zone_state,
+                refresh_sshd,
+                reconfigure_retry_interval,
+                log,
+            },
             zone_lifecycle_tx,
             zone_state_rx,
         )
     }
 
     async fn run(mut self) -> Result<Infallible, watch::error::RecvError> {
-        const RECONFIGURE_RETRY_INTERVAL: Duration = Duration::from_secs(5);
         let mut need_reconfigure_retry = false;
 
         loop {
@@ -411,7 +479,7 @@ impl WicketSshAuthActor {
                 }
 
                 // Inherently cancel-safe (it's just a sleep).
-                () = tokio::time::sleep(RECONFIGURE_RETRY_INTERVAL),
+                () = tokio::time::sleep(self.reconfigure_retry_interval),
                     if need_reconfigure_retry =>
                 {
                     match self.wicket_auth_rx.current_and_update() {
@@ -465,6 +533,7 @@ impl WicketSshAuthActor {
                     if Self::reconfigure_running_zone(
                         active_zone,
                         wicket_ssh_auth,
+                        Arc::clone(&self.refresh_sshd),
                         &self.log,
                     )
                     .await
@@ -577,6 +646,7 @@ impl WicketSshAuthActor {
     async fn reconfigure_running_zone(
         active_zone: ActiveSwitchZone<'_>,
         wicket_ssh_auth: WicketSshAuth,
+        ssh_refresher: Arc<dyn SshdRefresher>,
         log: &Logger,
     ) -> Result<(), ()> {
         let zone_root = Arc::clone(active_zone.zone_root());
@@ -584,6 +654,7 @@ impl WicketSshAuthActor {
 
         let result: anyhow::Result<()> = {
             let log = log.clone();
+            let sshd_refresher = ssh_refresher.clone();
             tokio::task::spawn_blocking(move || {
                 // The order of operations here is a little tricky, and we
                 // attempt to gracefully handle partial success as best we can.
@@ -627,7 +698,7 @@ impl WicketSshAuthActor {
                             &wicket_ssh_auth,
                             &log,
                         )?;
-                        send_smf_refresh_to_sshd_in_switch_zone()?;
+                        sshd_refresher.refresh()?;
                         write_wicket_authorized_keys(
                             &zone_root,
                             &wicket_ssh_auth,
@@ -647,7 +718,7 @@ impl WicketSshAuthActor {
                             &wicket_ssh_auth,
                             &log,
                         )?;
-                        send_smf_refresh_to_sshd_in_switch_zone()?;
+                        sshd_refresher.refresh()?;
                     }
                 }
                 Ok(())
@@ -868,12 +939,12 @@ mod switch_zone_lifecycle {
     impl SwitchZoneLifecycleSender {
         pub(super) async fn configure_switch_zone_before_boot(
             &self,
-            switch_zone: &InstalledZone,
+            zone_root: Arc<Utf8Path>,
         ) -> Result<(), WicketSshAuthReconcilerError> {
             let (tx, rx) = oneshot::channel();
             self.0.send_modify(|inner| {
                 *inner = SwitchZoneLifecycleInner::ConfigureForBoot {
-                    zone_root: switch_zone.root().into(),
+                    zone_root,
                     response: Mutex::new(Some(tx)),
                 };
             });
@@ -975,3 +1046,6 @@ mod switch_zone_lifecycle {
 use self::switch_zone_lifecycle::SwitchZoneLifecycle;
 use self::switch_zone_lifecycle::SwitchZoneLifecycleReceiver;
 use self::switch_zone_lifecycle::SwitchZoneLifecycleSender;
+
+#[cfg(test)]
+mod tests;

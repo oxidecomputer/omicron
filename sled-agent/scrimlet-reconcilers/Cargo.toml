@@ -46,6 +46,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
@@ -55,5 +56,6 @@ omicron-test-utils.workspace = true
 proptest.workspace = true
 scuffle = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
+sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
