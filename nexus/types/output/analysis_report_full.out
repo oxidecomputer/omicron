@@ -12,3 +12,24 @@ cases (1 with activity):
       * /!\ WARNING: something suspicious:
         // hmmm...
         * key: value
+active problems (1 with activity):
+  * active problem 9a815936-afbe-4da6-b7df-9cfe424a3080
+    // parent problem
+    requested in sitrep:    92c9dc22-4b87-460c-91dc-907c83a860a6
+    latest revision:        2
+      revised in sitrep:    9da7a3a9-6d3f-423c-a137-5666d0c760e8
+    problem code:           0001 (as of rev 2)
+    operator summary:       revised summary
+    total alerts:           1
+      added in this sitrep: 0
+    total support bundles:  2
+      added in this sitrep: 1
+    activity in this analysis:
+      * revised summary:
+        // it got worse
+        * de: physical_disk
+        * summary: revised summary
+      * attached support bundle:
+        // collect evidence
+        * de: physical_disk
+        * support_bundle_id: 712e84b4-5c41-429c-8859-ba1ffe6dca4e

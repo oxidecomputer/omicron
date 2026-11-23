@@ -1700,6 +1700,36 @@ mod tests {
                     ],
                 }],
                 "log": [{ "event": "began analysis" }],
+                "active_problems": [{
+                    "id": "9a815936-afbe-4da6-b7df-9cfe424a3080",
+                    "requested_sitrep_id": "92c9dc22-4b87-460c-91dc-907c83a860a6",
+                    "revised_sitrep_id": "9da7a3a9-6d3f-423c-a137-5666d0c760e8",
+                    "state": "active",
+                    "summary": "revised summary",
+                    "comment": "parent problem",
+                    "current_problem_code": 1,
+                    "revision": 2,
+                    "total_alerts": 1,
+                    "new_alerts": 0,
+                    "total_support_bundles": 2,
+                    "new_support_bundles": 1,
+                    "log": [
+                        {
+                            "event": "revised summary",
+                            "comment": "it got worse",
+                            "level": "Info",
+                            "de": "physical_disk",
+                            "summary": "revised summary"
+                        },
+                        {
+                            "event": "attached support bundle",
+                            "comment": "collect evidence",
+                            "level": "Info",
+                            "de": "physical_disk",
+                            "support_bundle_id": "712e84b4-5c41-429c-8859-ba1ffe6dca4e"
+                        }
+                    ]
+                }]
             }))
             .expect("example analysis report should deserialize");
 
