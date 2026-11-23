@@ -588,24 +588,35 @@ impl<'parent> ProblemSetBuilder<'parent> {
     pub fn build(
         self,
     ) -> anyhow::Result<(AllProblems, IdOrdMap<ActiveProblemReport>)> {
-        let Self { pending_revisions, parent_problems, sitrep_id, .. } = self;
+        let Self { mut pending_revisions, parent_problems, sitrep_id, .. } =
+            self;
         let mut problems = AllProblems::default();
         let mut reports = IdOrdMap::new();
 
-        // Copy forward the parent's problems that have no pending revision.
-        // This must happen before consuming `pending_revisions`, because we
-        // need to use that map to check whether there is a pending revision of
-        // the problem that should take precedent.
+        // Copy forward all problems from the parent sitrep.
         for problem in parent_problems.into_iter().flat_map(|p| p.by_id()) {
-            if pending_revisions.contains_key(&problem.id) {
-                continue;
-            }
+            let problem =
+                // If there is a pending revision for any such problem, use that
+                // instead.
+                if let Some(pending) = pending_revisions.remove(&problem.id) {
+                    let (problem, report) = pending.build(sitrep_id);
+                    reports.insert_unique(report).expect(
+                        "since both pending revisions and reports are keyed by \
+                        the problem's UUID, there should never already be a \
+                        report present",
+                    );
+                    problem
+                } else {
+                    problem.clone()
+                };
             let id = problem.id;
             problems.insert_unique(problem.clone()).with_context(|| {
                 format!("failed to copy forward problem {id}")
             })?;
         }
 
+        // Any remaining pending revisions represent new problems requested in
+        // this sitrep.
         for pending in pending_revisions {
             let id = pending.id;
             let (problem, report) = pending.build(sitrep_id);
