@@ -377,7 +377,10 @@ where
                     // new restart ID. Our simulated SP retains ereport state
                     // across a power cycle, though.
                     //
-                    // TODO: Resolve this divergence.
+                    // TODO: Resolve this divergence. Calling
+                    // EreportState::pretend_to_restart should do it, though
+                    // that is edge-triggered so it'll need to be handled with
+                    // some care.
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }

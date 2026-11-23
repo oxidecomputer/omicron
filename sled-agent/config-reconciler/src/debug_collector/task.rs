@@ -181,7 +181,7 @@ pub struct FormerZoneRootArchiver {
 }
 
 impl FormerZoneRootArchiver {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn noop(log: &Logger) -> Self {
         let (archive_tx, _) = mpsc::channel(1);
         Self {
@@ -192,7 +192,7 @@ impl FormerZoneRootArchiver {
 
     /// Returns an archiver that records each path it's asked to archive (in
     /// the returned list), and immediately reports that archival is complete.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn recording(
         log: &Logger,
     ) -> (Self, Arc<std::sync::Mutex<Vec<Utf8PathBuf>>>) {
