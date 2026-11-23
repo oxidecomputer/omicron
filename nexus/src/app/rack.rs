@@ -30,7 +30,7 @@ use nexus_types::external_api::silo;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{
-    Ipv6Subnet, RACK_PREFIX_LENGTH, SLED_AGENT_PORT, UnderlaySubnets,
+    Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets,
 };
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -101,7 +101,8 @@ impl super::Nexus {
         // Now that we've found the unadopted rack in inventory, go ahead and
         // tell the new rack's multirack join service to complete the join:
         let ip = discovered_rack.join_service_ip;
-        let url = format!("http://[{ip}]:{SLED_AGENT_PORT}");
+        let port = self.multirack_join_service_port;
+        let url = format!("http://[{ip}]:{port}");
         let log = self.log.new(o!("SledAgent" => url.clone()));
         let join_service_client = sled_agent_client::Client::new_with_client(
             &url,
