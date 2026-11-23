@@ -2406,4 +2406,28 @@ mod tests {
             "available (generation 1 -> 2)",
         );
     }
+
+    #[test]
+    fn modified_wicket_ssh_auth_rendering() {
+        use omicron_generation_kinds::WicketSshAuthGeneration;
+        use sled_agent_types::inventory::WicketSshAuthKind;
+
+        let initial = WicketSshAuth::initial();
+        let authenticated = WicketSshAuth {
+            generation: WicketSshAuthGeneration::new().next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::from(
+                    ["fake public key".to_string()],
+                ),
+                allow_support_keys: false,
+            },
+        };
+
+        assert_eq!(
+            display_modified_wicket_ssh_auth(&initial, &authenticated),
+            "unauthenticated (generation 1) -> \
+             authenticated, 1 operator key, support not allowed \
+             (generation 2)",
+        );
+    }
 }

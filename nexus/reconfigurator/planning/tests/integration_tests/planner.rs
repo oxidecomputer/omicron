@@ -73,6 +73,7 @@ use omicron_deployment_graph::DagEdge;
 use omicron_deployment_graph::DagEdgesFile;
 use omicron_deployment_graph::DeploymentUnitName;
 use omicron_deployment_graph::OMICRON_LS_APIS_PATH;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_generation_kinds::{NexusGeneration, SledConfigGeneration};
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -91,6 +92,8 @@ use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::SourceNatConfigV6;
+use sled_agent_types::inventory::WicketSshAuth;
+use sled_agent_types::inventory::WicketSshAuthKind;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -234,6 +237,187 @@ fn sim_assert_planning_makes_no_changes(
     assert_blueprint_diff_is_empty(&blueprint, &new_blueprint);
 
     new_blueprint
+}
+
+fn wicket_ssh_auth_public_keys(
+    generation: WicketSshAuthGeneration,
+    key: &str,
+) -> WicketSshAuth {
+    WicketSshAuth {
+        generation,
+        kind: WicketSshAuthKind::PublicKeys {
+            authorized_keys: BTreeSet::from([key.to_string()]),
+            allow_support_keys: false,
+        },
+    }
+}
+
+fn sim_set_wicket_ssh_auth(
+    sim: &mut ReconfiguratorCliTestState,
+    wicket_ssh_auth: WicketSshAuth,
+) {
+    sim.change_description("set wicket SSH auth", |desc| {
+        desc.set_wicket_ssh_auth(wicket_ssh_auth);
+        Ok(())
+    })
+    .expect("set wicket SSH auth");
+}
+
+/// A change to the fleet-wide wicket SSH auth setting is broadcast to every
+/// sled (including sleds added after the change).
+#[test]
+fn test_wicket_ssh_auth_broadcast() {
+    static TEST_NAME: &str = "planner_wicket_ssh_auth_broadcast";
+    let logctx = test_setup_log(TEST_NAME);
+
+    // Use our example system; every sled starts with the initial setting.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+    assert_eq!(blueprint1.sleds.len(), 3);
+    for (sled_id, config) in &blueprint1.sleds {
+        assert_eq!(
+            config.wicket_ssh_auth,
+            WicketSshAuth::initial(),
+            "sled {sled_id} should start with the initial setting"
+        );
+    }
+
+    // Change the setting and plan.
+    let new_auth = wicket_ssh_auth_public_keys(
+        WicketSshAuthGeneration::new().next(),
+        "fake public key",
+    );
+    sim_set_wicket_ssh_auth(&mut sim, new_auth.clone());
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
+
+    // Every sled should have the new setting, and should have had its
+    // sled-agent generation bumped (exactly once) so the new config is
+    // delivered.
+    assert_eq!(blueprint2.sleds.len(), 3);
+    for (sled_id, config) in &blueprint2.sleds {
+        assert_eq!(
+            config.wicket_ssh_auth, new_auth,
+            "sled {sled_id} should have the new setting"
+        );
+        let old_config = &blueprint1.sleds[sled_id];
+        assert_eq!(
+            config.sled_agent_generation,
+            old_config.sled_agent_generation.next(),
+            "sled {sled_id} should have had its generation bumped once"
+        );
+        assert_eq!(
+            config.clone().into_in_service_sled_config().wicket_ssh_auth,
+            new_auth,
+            "sled {sled_id} sled-agent config should have the new setting"
+        );
+    }
+    assert!(
+        blueprint2
+            .comment
+            .contains("updated wicket SSH auth setting on 3 sleds"),
+        "unexpected blueprint comment: {:?}",
+        blueprint2.comment
+    );
+
+    let summary = blueprint2.diff_since_blueprint(&blueprint1);
+    println!(
+        "1 -> 2 (expected wicket SSH auth change):\n{}",
+        summary.display()
+    );
+    assert_eq!(summary.diff.sleds.added.len(), 0);
+    assert_eq!(summary.diff.sleds.removed.len(), 0);
+    assert_eq!(summary.diff.sleds.modified().count(), 3);
+    assert_contents(
+        "tests/output/planner_wicket_ssh_auth_1_2.txt",
+        &summary.display().to_string(),
+    );
+
+    // Planning again with the same setting should make no further changes.
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
+
+    // A sled added after the change should start out with the current setting
+    // (not the initial one). That isn't a _change_ to the setting, so the
+    // blueprint comment shouldn't claim one.
+    let new_sled_id = sim.sled_add("add new sled").expect("added sled");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
+    assert_eq!(blueprint3.sleds.len(), 4);
+    for (sled_id, config) in &blueprint3.sleds {
+        assert_eq!(
+            config.wicket_ssh_auth, new_auth,
+            "sled {sled_id} should have the new setting"
+        );
+    }
+    assert!(blueprint3.sleds.contains_key(&new_sled_id));
+    assert!(
+        !blueprint3.comment.contains("wicket SSH auth"),
+        "unexpected blueprint comment: {:?}",
+        blueprint3.comment
+    );
+
+    logctx.cleanup_successful();
+}
+
+/// Planning fails if the planning input's wicket SSH auth setting is
+/// inconsistent with the parent blueprint's.
+#[test]
+fn test_wicket_ssh_auth_rejects_invalid_input() {
+    static TEST_NAME: &str = "planner_wicket_ssh_auth_rejects_invalid_input";
+    let logctx = test_setup_log(TEST_NAME);
+
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+
+    // Move to generation 2.
+    let generation2 = WicketSshAuthGeneration::new().next();
+    let new_auth = wicket_ssh_auth_public_keys(generation2, "fake public key");
+    sim_set_wicket_ssh_auth(&mut sim, new_auth.clone());
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
+    for (sled_id, config) in &blueprint2.sleds {
+        assert_eq!(
+            config.wicket_ssh_auth, new_auth,
+            "sled {sled_id} should have the new setting"
+        );
+    }
+
+    // If the planning input goes backwards, planning should fail.
+    sim_set_wicket_ssh_auth(&mut sim, WicketSshAuth::initial());
+    let err = sim.run_planner().expect_err("planning should fail");
+    let err = format!("{err:#}");
+    assert!(err.contains("failed to ensure sled"), "unexpected error: {err}");
+    assert!(
+        err.contains("tried to set older wicket SSH auth generation 1"),
+        "unexpected error: {err}"
+    );
+
+    // If the planning input has the same generation but different contents,
+    // planning should fail.
+    sim_set_wicket_ssh_auth(
+        &mut sim,
+        wicket_ssh_auth_public_keys(generation2, "different fake public key"),
+    );
+    let err = sim.run_planner().expect_err("planning should fail");
+    let err = format!("{err:#}");
+    assert!(err.contains("failed to ensure sled"), "unexpected error: {err}");
+    assert!(
+        err.contains("same generation with different kind"),
+        "unexpected error: {err}"
+    );
+
+    // Neither failure should have produced a blueprint, and restoring the
+    // correct setting should allow planning to succeed again (with no
+    // changes).
+    sim_set_wicket_ssh_auth(&mut sim, new_auth);
+    let latest = sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
+    );
+    assert_eq!(latest.parent_blueprint_id, Some(blueprint2.id));
+
+    logctx.cleanup_successful();
 }
 
 /// Runs through a basic sequence of blueprints for adding a sled

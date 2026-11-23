@@ -1122,4 +1122,94 @@ mod tests {
             "sled_agent_generation was not bumped - no visible change",
         );
     }
+
+    #[test]
+    fn wicket_ssh_auth_is_a_scalar_edit() {
+        use omicron_generation_kinds::WicketSshAuthGeneration;
+        use sled_agent_types::inventory::WicketSshAuthKind;
+        use std::collections::BTreeSet;
+
+        let new_auth = WicketSshAuth {
+            generation: WicketSshAuthGeneration::new().next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::from(
+                    ["fake public key".to_string()],
+                ),
+                allow_support_keys: false,
+            },
+        };
+
+        // No edits: the setting passes through untouched.
+        let edited = new_active_editor().finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, WicketSshAuth::initial());
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+        );
+
+        // Setting a newer value (even repeatedly) is an edit that bumps the
+        // sled-agent generation exactly once.
+        let mut editor = new_active_editor();
+        editor.set_wicket_ssh_auth(new_auth.clone()).expect("set new auth");
+        editor.set_wicket_ssh_auth(new_auth.clone()).expect("set new auth");
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, new_auth);
+        assert!(edited.scalar_edits.wicket_ssh_auth);
+        assert!(edited.scalar_edits.has_edits());
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new().next(),
+            "sled_agent_generation bumped exactly once",
+        );
+
+        // Setting the value the sled already has is a no-op.
+        let mut editor = new_active_editor();
+        editor
+            .set_wicket_ssh_auth(WicketSshAuth::initial())
+            .expect("set unchanged auth");
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, WicketSshAuth::initial());
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+            "sled_agent_generation was not bumped - no visible change",
+        );
+
+        // A new sled created with a non-initial setting starts out with that
+        // setting, and that doesn't count as an edit.
+        let editor = SledEditor::for_new_active(
+            Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            new_auth.clone(),
+        );
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, new_auth);
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+        );
+
+        // Invalid changes are rejected and leave the setting untouched.
+        let mut editor = SledEditor::for_new_active(
+            Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            new_auth.clone(),
+        );
+        let err = editor
+            .set_wicket_ssh_auth(WicketSshAuth::initial())
+            .expect_err("older generation should be rejected");
+        assert!(
+            matches!(
+                err,
+                SledEditError::EditWicketSshAuth(
+                    WicketSshAuthEditError::OlderGeneration { .. }
+                )
+            ),
+            "unexpected error: {err:?}",
+        );
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, new_auth);
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+    }
 }
