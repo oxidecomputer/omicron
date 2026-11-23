@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task that collects and emits capacity metrics, as described in
-//! silo-quota.toml, project-quota.toml, sled-capacity.toml, and
-//! sled-reservation.toml.
+//! Background task that collects and emits capacity metrics.
 //!
 //! Note: because background tasks run on each Nexus instance, these metrics are
 //! emitted once for each Nexus--as of this writing, in triplicate. Callers
@@ -23,11 +21,14 @@ use crate::app::background::BackgroundTask;
 use dropshot::PaginationOrder;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use itertools::Itertools;
 use nexus_auth::context::OpContext;
 use nexus_db_model::Resources;
+use nexus_db_model::Sled;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::CapacityMetricsStatus;
@@ -35,6 +36,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use oximeter::MetricsError;
 use oximeter::Sample;
 use oximeter::queue::BoundedQueue;
@@ -47,11 +49,15 @@ oximeter::use_timeseries!("silo-quota.toml");
 oximeter::use_timeseries!("project-quota.toml");
 oximeter::use_timeseries!("sled-capacity.toml");
 oximeter::use_timeseries!("sled-reservation.toml");
+oximeter::use_timeseries!("zpool-capacity.toml");
+oximeter::use_timeseries!("zpool-reservation.toml");
 
 use project_quota::ProjectQuota;
 use silo_quota::SiloQuota;
 use sled_capacity::SledCapacity;
 use sled_reservation::SledReservation;
+use zpool_capacity::ZpoolCapacity;
+use zpool_reservation::ZpoolReservation;
 
 const QUEUE_SIZE: usize = 8192;
 
@@ -84,6 +90,7 @@ impl CapacityMetrics {
             silo_samples: 0,
             project_samples: 0,
             sled_samples: 0,
+            zpool_samples: 0,
         };
 
         match self.fetch_silo_samples(opctx, nexus_id, now).await {
@@ -111,6 +118,15 @@ impl CapacityMetrics {
             }
             Err(error) => {
                 slog::warn!(opctx.log, "failed to collect sled capacity/reservation metrics"; "error" => format!("{error:#}"));
+            }
+        }
+        match self.fetch_zpool_samples(opctx, nexus_id, now).await {
+            Ok(samples) => {
+                status.zpool_samples = samples.len();
+                self.enqueue_samples(opctx, samples);
+            }
+            Err(error) => {
+                slog::warn!(opctx.log, "failed to collect zpool capacity/reservation metrics"; "error" => format!("{error:#}"));
             }
         }
 
@@ -207,6 +223,161 @@ impl CapacityMetrics {
                     &sled_reservation::ReservoirRam { datum: reservoir_ram },
                 )?,
             ]);
+        }
+
+        Ok(samples)
+    }
+
+    /// Produce samples for `zpool_capacity` and `zpool_reservation` metrics.
+    ///
+    /// Note: these metrics are meant to show whether a given crucible region or
+    /// local disk can fit within a given zpool. As such, they capture the size
+    /// of each pool, as well as the amount of storage set aside for the control
+    /// plane, and reserved by existing regions and disks. These metrics are
+    /// based on the allocation logic in
+    /// `nexus/db-queries/src/db/queries/region_allocation.rs` and
+    /// `nexus/db-queries/src/db/queries/sled_reservation.rs`, but aren't meant
+    /// to capture the full nuance of that logic.
+    async fn fetch_zpool_samples(
+        &self,
+        opctx: &OpContext,
+        nexus_id: Uuid,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Vec<Sample>> {
+        let mut samples = Vec::<Sample>::new();
+
+        let sleds = self
+            .datastore
+            .sled_list_all_batched(opctx, SledFilter::InService)
+            .await?;
+        let sled_ids: HashMap<SledUuid, &Sled> =
+            sleds.iter().map(|sled| (sled.id(), sled)).collect();
+
+        // To describe zpool capacity and control plane reservation, look up all
+        // current zpools, as well as their size as reported by inventory.
+        let zpools = self
+            .datastore
+            .zpool_list_all_external_with_capacity_batched(
+                opctx,
+                DiskFilter::InService,
+            )
+            .await?;
+
+        // Zpool reservation is spread across crucible volumes and local disks,
+        // which themselves include encrypted and unencrypted disks (although
+        // only unencrypted disks are implemented as of this writing). Look up
+        // the parent zfs datasets for each of these disk types to describe
+        // zpool reservation.
+        let crucible_datasets =
+            self.datastore.crucible_dataset_list_all_batched(opctx).await?;
+        let crucible_pools: HashMap<ZpoolUuid, i64> = crucible_datasets
+            .iter()
+            .map(|dataset| (dataset.pool_id(), dataset.size_used))
+            .into_grouping_map()
+            .sum();
+
+        let local_datasets = self
+            .datastore
+            .local_storage_dataset_list_all_batched(opctx)
+            .await?;
+        let local_unencrypted_datasets = self
+            .datastore
+            .local_storage_unencrypted_dataset_list_all_batched(opctx)
+            .await?;
+        let local_pools: HashMap<ZpoolUuid, i64> = local_datasets
+            .iter()
+            .filter(|dataset| !dataset.is_tombstoned())
+            .map(|dataset| (dataset.pool_id(), dataset.size_used))
+            .into_grouping_map()
+            .sum();
+        let local_unencrypted_pools: HashMap<ZpoolUuid, i64> =
+            local_unencrypted_datasets
+                .iter()
+                .filter(|dataset| !dataset.is_tombstoned())
+                .map(|dataset| (dataset.pool_id(), dataset.size_used))
+                .into_grouping_map()
+                .sum();
+
+        for (pool, physical_disk, pool_capacity) in zpools {
+            let Some(sled) = sled_ids.get(&pool.sled_id()) else {
+                warn!(opctx.log, "sled for zpool record not found"; "pool_id" => %pool.id(), "sled_id" => %pool.sled_id());
+                continue;
+            };
+            let capacity_target = ZpoolCapacity {
+                nexus_id,
+                pool_id: pool.id().into_untyped_uuid(),
+                physical_disk_id: physical_disk.id().into_untyped_uuid(),
+                rack_id: sled.rack_id().into_untyped_uuid(),
+                sled_id: pool.sled_id().into_untyped_uuid(),
+                sled_model: sled.part_number().to_string().into(),
+                sled_revision: sled.revision(),
+                sled_serial: sled.serial_number().to_string().into(),
+            };
+            let reservation_target = ZpoolReservation {
+                nexus_id,
+                pool_id: pool.id().into_untyped_uuid(),
+                physical_disk_id: physical_disk.id().into_untyped_uuid(),
+                rack_id: sled.rack_id().into_untyped_uuid(),
+                sled_id: pool.sled_id().into_untyped_uuid(),
+                sled_model: sled.part_number().to_string().into(),
+                sled_revision: sled.revision(),
+                sled_serial: sled.serial_number().to_string().into(),
+            };
+
+            let crucible_reservation =
+                crucible_pools.get(&pool.id()).copied().unwrap_or(0);
+            let local_reservation = local_pools
+                .get(&pool.id())
+                .copied()
+                .unwrap_or(0)
+                + local_unencrypted_pools.get(&pool.id()).copied().unwrap_or(0);
+
+            // Skip capacity samples for zpools that haven't reported via
+            // inventory.
+            if let Some(capacity) = pool_capacity {
+                samples.push(Sample::new_with_timestamp(
+                    now,
+                    &capacity_target,
+                    &zpool_capacity::TotalSize { datum: capacity.to_bytes() },
+                )?)
+            }
+            samples.push(Sample::new_with_timestamp(
+                now,
+                &capacity_target,
+                &zpool_capacity::ControlPlaneBuffer {
+                    datum: pool.control_plane_storage_buffer().to_bytes(),
+                },
+            )?);
+
+            match u64::try_from(crucible_reservation) {
+                Ok(datum) => samples.push(Sample::new_with_timestamp(
+                    now,
+                    &reservation_target,
+                    &zpool_reservation::DistributedVolume { datum },
+                )?),
+                Err(error) => slog::warn!(
+                    opctx.log,
+                    "invalid size_used; skipping metric sample";
+                    "pool_id" => %pool.id(),
+                    "value" => crucible_reservation,
+                    "error" => %error,
+                ),
+            }
+
+            match u64::try_from(local_reservation) {
+                Ok(datum) => samples.push(Sample::new_with_timestamp(
+                    now,
+                    &reservation_target,
+                    &zpool_reservation::LocalDisk { datum },
+                )?),
+                Err(error) => slog::warn!(
+                    opctx.log,
+                    "invalid size_used; skipping metric sample";
+                    "pool_id" => %pool.id(),
+                    "value" => local_reservation,
+                    "error" => %error,
+                ),
+            }
         }
 
         Ok(samples)
@@ -797,6 +968,210 @@ mod tests {
                     (sled_id, sample.timeseries_name.to_string()),
                     (
                         fields["sled_cpu_family"].value.clone(),
+                        sample.measurement.datum().clone(),
+                    ),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert!(
+            collect_samples(&registry).is_empty(),
+            "produce must drain the buffer"
+        );
+    }
+
+    // Integration test for zpool capacity metrics. Create zpools and inv_zpool
+    // rows to populate capacity metrics; create dataset records for crucible
+    // volumes and local disks to populate reservation metrics. Then collect
+    // samples from the producer registry; and assert the expected samples.
+    #[nexus_test(server = crate::Server)]
+    async fn test_zpool_metrics(cptestctx: &ControlPlaneTestContext) {
+        use nexus_db_model::CrucibleDataset;
+        use nexus_db_model::InvZpool;
+        use nexus_db_model::PhysicalDisk;
+        use nexus_db_model::PhysicalDiskKind;
+        use nexus_db_model::PhysicalDiskPolicy;
+        use nexus_db_model::RendezvousLocalStorageDataset;
+        use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
+        use nexus_db_model::Zpool;
+        use nexus_db_schema::schema::inv_zpool;
+        use nexus_types::inventory::ZpoolHealth;
+        use omicron_uuid_kinds::BlueprintUuid;
+        use omicron_uuid_kinds::CollectionUuid;
+        use omicron_uuid_kinds::DatasetUuid;
+        use omicron_uuid_kinds::PhysicalDiskUuid;
+
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Insert records for sleds, zpools, physical disks, and zpool
+        // inventory, including a disk that's been expunged.
+        let sled_id = datastore
+            .sled_upsert(SledUpdateBuilder::new().build())
+            .await
+            .unwrap()
+            .id();
+
+        let mut pools = BTreeMap::new();
+        for (name, disk_policy, buffer_gib) in [
+            ("populated", PhysicalDiskPolicy::InService, 250),
+            ("empty", PhysicalDiskPolicy::InService, 100),
+            ("expunged", PhysicalDiskPolicy::Expunged, 250),
+        ] {
+            let mut disk = PhysicalDisk::from_parts(
+                PhysicalDiskUuid::new_v4(),
+                "test-vendor".to_string(),
+                format!("zpool-metrics-{name}"),
+                "test-model".to_string(),
+                PhysicalDiskKind::U2,
+                sled_id,
+            );
+            disk.disk_policy = disk_policy;
+            let disk_id = disk.id();
+            datastore.physical_disk_insert(&opctx, disk).await.unwrap();
+            let pool_id = ZpoolUuid::new_v4();
+            datastore
+                .zpool_insert(
+                    &opctx,
+                    Zpool::new(
+                        pool_id,
+                        sled_id,
+                        disk_id,
+                        ByteCount::from_gibibytes_u32(buffer_gib).into(),
+                    ),
+                )
+                .await
+                .unwrap();
+            pools.insert(name, pool_id);
+        }
+
+        for (pool, offset_seconds, size_gib) in
+            [("populated", 0, 100), ("populated", 1, 200), ("expunged", 0, 400)]
+        {
+            diesel::insert_into(inv_zpool::table)
+                .values(InvZpool::new(
+                    CollectionUuid::new_v4(),
+                    sled_id,
+                    &nexus_types::inventory::Zpool {
+                        time_collected: chrono::Utc::now()
+                            + chrono::Duration::seconds(offset_seconds),
+                        id: pools[pool],
+                        total_size: ByteCount::from_gibibytes_u32(size_gib),
+                        health: ZpoolHealth::Online,
+                    },
+                ))
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        // Insert records for distributed volumes and local disks.
+        for (pool, size_gib) in [("populated", 30), ("expunged", 60)] {
+            let mut dataset = CrucibleDataset::new(
+                DatasetUuid::new_v4(),
+                pools[pool],
+                "[::1]:0".parse().unwrap(),
+            );
+            dataset.size_used = i64::from(size_gib) << 30;
+            datastore
+                .crucible_dataset_insert_if_not_exists(dataset)
+                .await
+                .unwrap();
+        }
+
+        for (pool, size_gib) in [("populated", 5)] {
+            let mut dataset = RendezvousLocalStorageDataset::new(
+                DatasetUuid::new_v4(),
+                pools[pool],
+                BlueprintUuid::new_v4(),
+            );
+            dataset.size_used = i64::from(size_gib) << 30;
+            datastore
+                .local_storage_dataset_insert_if_not_exists(&opctx, dataset)
+                .await
+                .unwrap();
+        }
+
+        for (pool, size_gib) in [("populated", 7), ("expunged", 8)] {
+            let mut dataset = RendezvousLocalStorageUnencryptedDataset::new(
+                DatasetUuid::new_v4(),
+                pools[pool],
+                BlueprintUuid::new_v4(),
+            );
+            dataset.size_used = i64::from(size_gib) << 30;
+            datastore
+                .local_storage_unencrypted_dataset_insert_if_not_exists(
+                    &opctx, dataset,
+                )
+                .await
+                .unwrap();
+        }
+
+        let expected: BTreeMap<_, _> = [
+            ("populated", "zpool_capacity:total_size", 200),
+            ("populated", "zpool_capacity:control_plane_buffer", 250),
+            ("populated", "zpool_reservation:distributed_volume", 30),
+            ("populated", "zpool_reservation:local_disk", 12),
+            ("empty", "zpool_capacity:control_plane_buffer", 100),
+            ("empty", "zpool_reservation:distributed_volume", 0),
+            ("empty", "zpool_reservation:local_disk", 0),
+        ]
+        .into_iter()
+        .map(|(pool, metric, value_gib)| {
+            (
+                (pools[pool].into_untyped_uuid(), metric.to_string()),
+                (
+                    FieldValue::Uuid(sled_id.into_untyped_uuid()),
+                    Datum::U64(
+                        ByteCount::from_gibibytes_u32(value_gib).to_bytes(),
+                    ),
+                ),
+            )
+        })
+        .collect();
+
+        let registry = ProducerRegistry::new();
+        let mut task = CapacityMetrics::new(
+            datastore.clone(),
+            &registry,
+            OmicronZoneUuid::new_v4(),
+        );
+        assert!(collect_samples(&registry).is_empty());
+
+        task.activate(&opctx).await;
+
+        // Assert expected samples.
+        let pool_ids: BTreeSet<Uuid> =
+            pools.values().map(|pool| pool.into_untyped_uuid()).collect();
+        let samples: Vec<_> = collect_samples(&registry)
+            .into_iter()
+            .filter(|sample| {
+                matches!(
+                    sample.target_name(),
+                    "zpool_capacity" | "zpool_reservation"
+                ) && matches!(
+                    sample.sorted_target_fields()["pool_id"].value,
+                    FieldValue::Uuid(pool_id) if pool_ids.contains(&pool_id)
+                )
+            })
+            .collect();
+        assert_eq!(samples.len(), 7);
+
+        let actual: BTreeMap<_, _> = samples
+            .iter()
+            .map(|sample| {
+                let fields = sample.sorted_target_fields();
+                let FieldValue::Uuid(pool_id) = fields["pool_id"].value else {
+                    panic!("expected pool_id to be a uuid");
+                };
+                (
+                    (pool_id, sample.timeseries_name.to_string()),
+                    (
+                        fields["sled_id"].value.clone(),
                         sample.measurement.datum().clone(),
                     ),
                 )

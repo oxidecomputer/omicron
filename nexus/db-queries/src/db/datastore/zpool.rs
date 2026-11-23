@@ -29,8 +29,10 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::ApplyPhysicalDiskFilterExt;
 use nexus_db_model::PhysicalDiskKind;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_types::deployment::DiskFilter;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -211,6 +213,72 @@ impl DataStore {
                 .zpool_list_all_external(opctx, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|(z, _)| z.id().into());
+            zpools.extend(batch);
+        }
+
+        Ok(zpools)
+    }
+
+    /// Fetches a page of the list of all zpools on U.2 disks in all sleds,
+    /// joined to pool capacity as observed from inventory.
+    async fn zpool_list_all_external_with_capacity(
+        &self,
+        opctx: &OpContext,
+        disk_filter: DiskFilter,
+        pagparams: &DataPageParams<'_, DbTypedUuid<ZpoolKind>>,
+    ) -> ListResultVec<(Zpool, PhysicalDisk, Option<ByteCount>)> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::inv_zpool;
+        use nexus_db_schema::schema::physical_disk::dsl as dsl_physical_disk;
+        use nexus_db_schema::schema::zpool::dsl as dsl_zpool;
+
+        paginated(dsl_zpool::zpool, dsl_zpool::id, pagparams)
+            .filter(dsl_zpool::time_deleted.is_null())
+            .inner_join(
+                nexus_db_schema::schema::physical_disk::table.on(
+                    dsl_zpool::physical_disk_id.eq(dsl_physical_disk::id).and(
+                        dsl_physical_disk::variant.eq(PhysicalDiskKind::U2),
+                    ),
+                ),
+            )
+            .physical_disk_filter(disk_filter)
+            .select((
+                Zpool::as_select(),
+                PhysicalDisk::as_select(),
+                inv_zpool::table
+                    .select(inv_zpool::total_size)
+                    .filter(inv_zpool::id.eq(dsl_zpool::id))
+                    .order_by(inv_zpool::time_collected.desc())
+                    .limit(1)
+                    .single_value(),
+            ))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn zpool_list_all_external_with_capacity_batched(
+        &self,
+        opctx: &OpContext,
+        disk_filter: DiskFilter,
+    ) -> ListResultVec<(Zpool, PhysicalDisk, Option<ByteCount>)> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.check_complex_operations_allowed()?;
+        let mut zpools = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .zpool_list_all_external_with_capacity(
+                    opctx,
+                    disk_filter,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p.found_batch(&batch, &|(z, _, _)| z.id().into());
             zpools.extend(batch);
         }
 

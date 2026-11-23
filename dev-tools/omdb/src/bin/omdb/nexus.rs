@@ -2313,6 +2313,7 @@ fn print_task_capacity_metrics(details: &serde_json::Value) {
             println!("    silo samples: {}", status.silo_samples);
             println!("    project samples: {}", status.project_samples);
             println!("    sled samples: {}", status.sled_samples);
+            println!("    zpool samples: {}", status.zpool_samples);
         }
     }
 }

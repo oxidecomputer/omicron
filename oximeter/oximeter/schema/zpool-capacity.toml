@@ -1,0 +1,59 @@
+format_version = 1
+
+[target]
+name = "zpool_capacity"
+description = "Zpool capacity"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "nexus_id", "pool_id", "physical_disk_id", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] }
+]
+
+[fields.nexus_id]
+type = "uuid"
+description = "ID of the Nexus reporting the sample. We emit metrics from each Nexus, so aggregate over Nexus instances by mean or max, but not sum, to avoid double-counting."
+
+[fields.pool_id]
+type = "uuid"
+description = "ID for the zpool"
+
+[fields.physical_disk_id]
+type = "uuid"
+description = "ID for the zpool's physical disk"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the zpool's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the zpool's sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the zpool's sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the zpool's sled"
+
+[[metrics]]
+name = "total_size"
+description = "Total size of the pool"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "control_plane_buffer"
+description = "Storage set aside for the control plane"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
