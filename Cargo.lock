@@ -321,7 +321,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-bb8-diesel"
 version = "0.3.1"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?branch=no-per-closure-futures#64ce4b97f3df17b85df8b5c1580c8bb3d9c472c1"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?branch=no-per-closure-futures#0e590e58fb35ffebdca6be834094ed5300b9c370"
 dependencies = [
  "async-trait",
  "bb8",
