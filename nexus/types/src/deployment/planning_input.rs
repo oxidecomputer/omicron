@@ -46,6 +46,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types_versions::latest::inventory::SourceNatConfigError;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
@@ -1182,6 +1183,9 @@ pub struct Policy {
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
     pub old_repo: TufRepoPolicy,
+
+    /// Operator-controlled configuration for wicket SSH authentication.
+    pub wicket_ssh_auth: WicketSshAuth,
 
     /// Runtime configuration (feature flags) to control planner behavior.
     pub planner_config: PlannerConfig,
