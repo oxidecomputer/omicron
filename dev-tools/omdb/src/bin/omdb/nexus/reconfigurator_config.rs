@@ -6,6 +6,8 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use anyhow::Context as _;
+use anyhow::bail;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -17,6 +19,7 @@ use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use std::io;
 use std::io::Write;
 use std::num::ParseIntError;
@@ -57,6 +60,15 @@ pub struct ReconfiguratorConfigOpts {
 
     #[clap(long)]
     disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+
+    #[clap(long)]
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
+
+    #[clap(long, action = ArgAction::Set)]
+    blueprint_pruner_enabled: Option<bool>,
+
+    #[clap(long)]
+    blueprint_pruner_nkeep: Option<u32>,
 }
 
 impl ReconfiguratorConfigOpts {
@@ -67,14 +79,27 @@ impl ReconfiguratorConfigOpts {
             planner_enabled: self
                 .planner_enabled
                 .unwrap_or(current.planner_enabled),
-            planner_config: PlannerConfig::default(),
+            planner_config: PlannerConfig {
+                disruption_policy: self
+                    .disruption_policy
+                    .map(|p| p.into())
+                    .unwrap_or(current.planner_config.disruption_policy),
+                sled_update_reboot_policy: self
+                    .sled_update_reboot_policy
+                    .map(|p| p.into())
+                    .unwrap_or(
+                        current.planner_config.sled_update_reboot_policy,
+                    ),
+            },
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
                 .unwrap_or(current.tuf_repo_pruner_enabled),
-            disruption_policy: self
-                .disruption_policy
-                .map(|p| p.into())
-                .unwrap_or(current.disruption_policy),
+            blueprint_pruner_enabled: self
+                .blueprint_pruner_enabled
+                .unwrap_or(current.blueprint_pruner_enabled),
+            blueprint_pruner_nkeep: self
+                .blueprint_pruner_nkeep
+                .unwrap_or(current.blueprint_pruner_nkeep),
         }
     }
 
@@ -110,6 +135,23 @@ impl From<ReconfiguratorDisruptionPolicyOpt>
                 Self::MigrateOrTerminate
             }
             ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SledUpdateRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
+        match value {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
         }
     }
 }
@@ -175,12 +217,18 @@ async fn reconfigurator_config_show(
             // newlines.
             write!(indented, "{}", config.display()).unwrap();
         }
-        Err(err) => {
-            if err.status() == Some(StatusCode::NOT_FOUND) {
-                println!("No config specified");
-            } else {
-                eprintln!("error: {:#}", err)
+        Err(err) if err.status() == Some(StatusCode::NOT_FOUND) => {
+            match args.version {
+                ReconfiguratorConfigVersionOrCurrent::Current => {
+                    println!("No config specified");
+                }
+                ReconfiguratorConfigVersionOrCurrent::Version(version) => {
+                    bail!("no reconfigurator config with version {version}");
+                }
             }
+        }
+        Err(err) => {
+            return Err(err).context("retrieving reconfigurator config");
         }
     }
 
@@ -192,48 +240,48 @@ async fn reconfigurator_config_set(
     args: &ReconfiguratorConfigSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let (current_config, new_config) =
-        match client.reconfigurator_config_show_current().await {
-            Ok(config) => {
-                let Some(next_version) = config.version.checked_add(1) else {
-                    eprintln!(
-                        "ERROR: Failed to update config. Max version reached."
-                    );
-                    return Ok(());
+    let (current_config, new_config) = match client
+        .reconfigurator_config_show_current()
+        .await
+    {
+        Ok(config) => {
+            let Some(next_version) = config.version.checked_add(1) else {
+                bail!(
+                    "failed to update reconfigurator config: \
+                         max version reached"
+                );
+            };
+            let config = config.into_inner();
+            // Future fields should use the following pattern, and only update
+            // the values if a setting changed.
+            let Some(new_config) =
+                args.config.update_if_modified(&config.config, next_version)
+            else {
+                println!("no modifications made to current config values:");
+                let stdout = io::stdout();
+                let mut indented = IndentWriter::new("    ", stdout.lock());
+                // No need for writeln! here because .display() adds its own
+                // newlines.
+                write!(indented, "{}", config.display()).unwrap();
+                return Ok(());
+            };
+            (Some(config), new_config)
+        }
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                let default_config = ReconfiguratorConfig::default();
+                // In this initial case, the operator expects that we always set
+                // a config.
+                let new_config = ReconfiguratorConfigParam {
+                    version: 1,
+                    config: args.config.update(&default_config),
                 };
-                let config = config.into_inner();
-                // Future fields should use the following pattern, and only update
-                // the values if a setting changed.
-                let Some(new_config) = args
-                    .config
-                    .update_if_modified(&config.config, next_version)
-                else {
-                    println!("no modifications made to current config values:");
-                    let stdout = io::stdout();
-                    let mut indented = IndentWriter::new("    ", stdout.lock());
-                    // No need for writeln! here because .display() adds its own
-                    // newlines.
-                    write!(indented, "{}", config.display()).unwrap();
-                    return Ok(());
-                };
-                (Some(config), new_config)
+                (None, new_config)
+            } else {
+                return Err(err).context("retrieving reconfigurator config");
             }
-            Err(err) => {
-                if err.status() == Some(StatusCode::NOT_FOUND) {
-                    let default_config = ReconfiguratorConfig::default();
-                    // In this initial case, the operator expects that we always set
-                    // a config.
-                    let new_config = ReconfiguratorConfigParam {
-                        version: 1,
-                        config: args.config.update(&default_config),
-                    };
-                    (None, new_config)
-                } else {
-                    eprintln!("error: {:#}", err);
-                    return Ok(());
-                }
-            }
-        };
+        }
+    };
 
     client.reconfigurator_config_set(&new_config).await?;
     println!(

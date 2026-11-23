@@ -10,17 +10,23 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerConfig;
+use crate::deployment::BlueprintSledUpdateDispositionKind;
+use crate::deployment::MgsUpdateComponent;
+use crate::inventory::CabooseVersionError;
 use crate::inventory::CabooseWhich;
 
 use daft::Diffable;
 use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::M2Slot;
+use itertools::Itertools;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_generation_kinds::NexusGeneration;
+use omicron_generation_kinds::SledConfigGeneration;
+use omicron_generation_kinds::TargetReleaseGeneration;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -29,6 +35,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +43,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Write;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -496,7 +504,6 @@ pub enum PlanningNoopImageSourceSkipZoneReason {
         error: String,
     },
     ArtifactNotInRepo {
-        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         artifact_hash: ArtifactHash,
         zone_kind: String,
         file_name: String,
@@ -566,6 +573,15 @@ pub enum FailedMgsUpdateReason {
     /// There was a failed attempt to plan an SP update
     #[error("failed to plan an SP update")]
     Sp(#[from] FailedSpUpdateReason),
+    /// An update to the given component could be scheduled, but we're waiting
+    /// for the sled to evacuate
+    #[error("cannot update {component} until sled is evacuated")]
+    WaitingOnSledEvacuation {
+        sled_id: SledUuid,
+        component: MgsUpdateComponent,
+        #[source]
+        details: WaitingOnSledEvacuationDetails,
+    },
 }
 
 /// Describes the reason why an RoT bootloader failed to update
@@ -586,25 +602,16 @@ pub enum FailedMgsUpdateReason {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedRotBootloaderUpdateReason {
-    /// The component's caboose was missing a value for "sign"
-    #[error("caboose for {0:?} is missing sign")]
-    CabooseMissingSign(CabooseWhich),
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
-    /// No artifact with the required conditions for the component was found
-    #[error("no artifact matching {0} was found")]
-    NoMatchingArtifactFound(String),
-    /// Too many artifacts with the required conditions for the component were
-    /// found
-    #[error("too many artifacts matching {0} were found")]
-    TooManyMatchingArtifacts(String),
+    /// The version in one of the component's cabooses could not be determined
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+    /// The artifact that the component ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] TargetArtifactError),
 }
 
 /// Describes the reason why an RoT failed to update
@@ -625,28 +632,19 @@ pub enum FailedRotBootloaderUpdateReason {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedRotUpdateReason {
-    /// The component's caboose was missing a value for "sign"
-    #[error("caboose for {0:?} is missing sign")]
-    CabooseMissingSign(CabooseWhich),
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
-    /// No artifact with the required conditions for the component was found
-    #[error("no artifact matching {0} was found")]
-    NoMatchingArtifactFound(String),
-    /// Too many artifacts with the required conditions for the component were
-    /// found
-    #[error("too many artifacts matching {0} were found")]
-    TooManyMatchingArtifacts(String),
+    /// The version in one of the component's cabooses could not be determined
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
     /// RoT state was not found in inventory
     #[error("rot state is not in inventory")]
     RotStateNotInInventory,
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+    /// The artifact that the component ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] TargetArtifactError),
 }
 
 /// Describes the reason why an SP failed to update
@@ -667,12 +665,44 @@ pub enum FailedRotUpdateReason {
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedSpUpdateReason {
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// The version in one of the component's cabooses could not be determined
+    #[error(transparent)]
+    Caboose(#[from] CabooseVersionError),
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+    /// The artifact that the component ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] TargetArtifactError),
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
+}
+
+/// Describes the reason why the artifact that an SP, RoT, or RoT bootloader
+/// ought to be running could not be chosen from a TUF repo
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum TargetArtifactError {
+    /// The caboose used to choose the artifact was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
     /// No artifact with the required conditions for the component was found
     #[error("no artifact matching {0} was found")]
     NoMatchingArtifactFound(String),
@@ -680,13 +710,6 @@ pub enum FailedSpUpdateReason {
     /// found
     #[error("too many artifacts matching {0} were found")]
     TooManyMatchingArtifacts(String),
-    /// The component's corresponding SP was not found in the inventory
-    #[error("corresponding SP is not in inventory")]
-    SpNotInInventory,
-    /// The component's corresponding sled contains zones that are unsafe to
-    /// shut down
-    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
-    UnsafeZoneFound(String),
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -716,37 +739,22 @@ pub enum FailedHostOsUpdateReason {
     /// The active host phase 1 slot was not found in inventory
     #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
-    /// The component's caboose was not found in the inventory
-    #[error("caboose for {0:?} is not in inventory")]
-    CabooseNotInInventory(CabooseWhich),
-    /// The version in the caboose or artifact was not able to be parsed
-    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
-    FailedVersionParse { caboose: CabooseWhich, err: String },
     /// The inactive host phase 1 hash was not found in inventory
     #[error("inactive host phase 1 hash for slot {0:?} is not in inventory")]
     InactiveHostPhase1HashNotInInventory(M2Slot),
     /// Last reconciliation details were not found in inventory
     #[error("sled agent last reconciliation is not in inventory")]
     LastReconciliationNotInInventory,
-    /// No artifacts with the required conditions for the component were found
-    #[error("no matching artifacts for phase 1 or 2 were found")]
-    NoMatchingArtifactsFound,
-    /// No artifact with the required conditions for phase 1 was found
-    #[error("no matching artifact for phase 1 was found")]
-    NoMatchingPhase1ArtifactFound,
-    /// No artifact with the required conditions for phase 2 was found
-    #[error("no matching artifact for phase 2 was found")]
-    NoMatchingPhase2ArtifactFound,
     /// Sled agent info was not found in inventory
     #[error("sled agent info is not in inventory")]
     SledAgentInfoNotInInventory,
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
-    /// Too many artifacts with the required conditions for the component were
-    /// found
-    #[error("too many matching artifacts were found")]
-    TooManyMatchingArtifacts,
+    /// The host OS artifacts that the sled ought to be running could not be
+    /// chosen from the TUF repo
+    #[error(transparent)]
+    TargetArtifact(#[from] HostOsTargetArtifactError),
     /// The sled agent reported an error determining the boot disk
     #[error("sled agent was unable to determine the boot disk: {0:?}")]
     UnableToDetermineBootDisk(String),
@@ -758,9 +766,82 @@ pub enum FailedHostOsUpdateReason {
     /// shut down
     #[error("sled contains zones that are unsafe to shut down: {0:?}")]
     UnsafeZoneFound(String),
+}
+
+/// Describes the reason why the host OS artifacts that a sled ought to be
+/// running could not be chosen from a TUF repo
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum HostOsTargetArtifactError {
+    /// No artifacts with the required conditions for the component were found
+    #[error("no matching artifacts for phase 1 or 2 were found")]
+    NoMatchingArtifactsFound,
+    /// No artifact with the required conditions for phase 1 was found
+    #[error("no matching artifact for phase 1 was found")]
+    NoMatchingPhase1ArtifactFound,
+    /// No artifact with the required conditions for phase 2 was found
+    #[error("no matching artifact for phase 2 was found")]
+    NoMatchingPhase2ArtifactFound,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many matching artifacts were found")]
+    TooManyMatchingArtifacts,
     /// The sled model could not be determined
     #[error("unable to determine the sled model {0:?}")]
     UnableToDetermineSledModel(String),
+}
+
+/// Describes the details of what we're waiting on when a sled is being
+/// evacuated
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum WaitingOnSledEvacuationDetails {
+    #[error("sled is missing from inventory")]
+    MissingFromInventory,
+    #[error("ledgered sled config is not available from inventory")]
+    MissingLedgeredSledConfig,
+    #[error(
+        "waiting for ledgered sled config generation to be {desired} \
+         (currently {current})"
+    )]
+    WaitingForSledConfigGeneration {
+        desired: SledConfigGeneration,
+        current: SledConfigGeneration,
+    },
+    #[error("instance manager has not received its config")]
+    InstanceManagerNoConfig,
+    #[error("instance manager is still available")]
+    InstanceManagerAvailable,
+    #[error("instance manager still has {num_registered_vmms} registered VMMs")]
+    InstanceManagerRegisteredVmms { num_registered_vmms: NonZeroUsize },
 }
 
 #[derive(
@@ -878,6 +959,31 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
 pub struct PlanningMgsUpdatesStepReport {
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
     pub pending_mgs_updates: PendingMgsUpdates,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub update_disposition_changes: IdOrdMap<SledUpdateDispositionChange>,
+}
+
+/// Describes a change to a sled's update disposition (e.g., marking it for
+/// evacuation so that it can be updated)
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub struct SledUpdateDispositionChange {
+    /// id of the sled whose update disposition is changing
+    pub sled_id: SledUuid,
+    /// id of the sled's baseboard
+    pub baseboard_id: Arc<BaseboardId>,
+    /// the sled's new update disposition
+    pub kind: BlueprintSledUpdateDispositionKind,
+}
+
+impl IdOrdItem for SledUpdateDispositionChange {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
 }
 
 impl PlanningMgsUpdatesStepReport {
@@ -885,18 +991,29 @@ impl PlanningMgsUpdatesStepReport {
         Self {
             blocked_mgs_updates: Vec::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
+            update_disposition_changes: IdOrdMap::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pending_mgs_updates.is_empty()
-            && self.blocked_mgs_updates.is_empty()
+        let Self {
+            blocked_mgs_updates,
+            pending_mgs_updates,
+            update_disposition_changes,
+        } = self;
+        pending_mgs_updates.is_empty()
+            && blocked_mgs_updates.is_empty()
+            && update_disposition_changes.is_empty()
     }
 }
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { blocked_mgs_updates, pending_mgs_updates } = self;
+        let Self {
+            blocked_mgs_updates,
+            pending_mgs_updates,
+            update_disposition_changes,
+        } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -923,6 +1040,21 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
+
+        if !update_disposition_changes.is_empty() {
+            let n = update_disposition_changes.len();
+            let s = plural(n);
+            writeln!(f, "* {n} sled{s} changed update disposition:")?;
+            for change in update_disposition_changes.iter() {
+                let SledUpdateDispositionChange { sled_id, baseboard_id, kind } =
+                    change;
+                writeln!(
+                    f,
+                    "  * sled {sled_id}, baseboard {baseboard_id}: {kind}"
+                )?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -985,10 +1117,8 @@ pub struct PlanningAddStepReport {
     pub waiting_on: Option<ZoneAddWaitingOn>,
 
     /// Reasons why zone adds and any updates are blocked.
-    ///
-    /// This is typically a list of MUPdate-related reasons.
     #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
-    pub add_update_blocked_reasons: Vec<String>,
+    pub add_update_blocked_reasons: Vec<AddUpdateBlockedReason>,
 
     /// Set to true if the target release generation is 1, which would allow
     /// zones to be added.
@@ -1269,6 +1399,109 @@ impl fmt::Display for PlanningAddStepReport {
     }
 }
 
+/// Reason why the planner is not adding or updating zones
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum AddUpdateBlockedReason {
+    /// The current target release generation is lower than the minimum
+    /// required by the blueprint.  This means that the system has detected that
+    /// a MUPdate has occurred since the last time the target release was set.
+    TargetReleaseGenerationTooLow {
+        /// current target release generation
+        current: TargetReleaseGeneration,
+        /// minimum target release generation required by the blueprint
+        minimum: TargetReleaseGeneration,
+    },
+
+    /// Some sleds have `remove_mupdate_override` set in the blueprint.
+    SledsWithMupdateOverride {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+
+    /// Some sleds reported errors fetching their MUPdate override information.
+    SledsWithMupdateOverrideErrors {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+
+    /// Some sleds reported zones whose image source is not an artifact.
+    ZonesNotFromArtifacts {
+        /// number of such zones on each affected sled
+        #[cfg_attr(
+            test,
+            any(((0, 16).into(), Default::default(), Default::default()))
+        )]
+        zone_counts_by_sled: BTreeMap<SledUuid, usize>,
+    },
+
+    /// Some sleds reported measurements set to the install dataset rather than
+    /// specific artifacts.
+    MeasurementsNotFromArtifacts {
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        sled_ids: BTreeSet<SledUuid>,
+    },
+}
+
+impl fmt::Display for AddUpdateBlockedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddUpdateBlockedReason::TargetReleaseGenerationTooLow {
+                current,
+                minimum,
+            } => write!(
+                f,
+                "current target release generation ({current}) is lower \
+                 than minimum required by blueprint ({minimum})",
+            ),
+            AddUpdateBlockedReason::SledsWithMupdateOverride { sled_ids } => {
+                write!(
+                    f,
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sled_ids.iter().join(", ")
+                )
+            }
+            AddUpdateBlockedReason::SledsWithMupdateOverrideErrors {
+                sled_ids,
+            } => write!(
+                f,
+                "sleds have mupdate override errors: {}",
+                sled_ids.iter().join(", ")
+            ),
+            AddUpdateBlockedReason::ZonesNotFromArtifacts {
+                zone_counts_by_sled,
+            } => {
+                writeln!(
+                    f,
+                    "sleds have deployment units with image sources \
+                     not set to Artifact:"
+                )?;
+                for (sled_id, count) in zone_counts_by_sled {
+                    let zones = if *count == 1 { "zone" } else { "zones" };
+                    writeln!(f, "- sled {sled_id}: {count} {zones}")?;
+                }
+                Ok(())
+            }
+            AddUpdateBlockedReason::MeasurementsNotFromArtifacts {
+                sled_ids,
+            } => {
+                writeln!(
+                    f,
+                    "sleds have measurements with image sources \
+                     not set to Artifact:"
+                )?;
+                for sled_id in sled_ids {
+                    writeln!(f, "- sled {sled_id} set to install dataset")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// We have at least the minimum required number of zones of a given kind.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
@@ -1524,10 +1757,18 @@ pub enum ZoneUpdatesWaitingOn {
     DiscretionaryZones,
 
     /// Waiting on zones to propagate to inventory.
-    InventoryPropagation,
+    InventoryPropagation {
+        /// kinds of the zones whose blueprint config is not yet reflected in
+        /// inventory
+        #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+        kinds: BTreeSet<ZoneKind>,
+    },
 
     /// Waiting on updates to RoT bootloader / RoT / SP / Host OS.
     PendingMgsUpdates,
+
+    /// Waiting on sled update disposition changes in support of MGS updates
+    SledUpdateDispositionChanges,
 
     /// Waiting on the same set of blockers zone adds are waiting on.
     ZoneAddBlockers,
@@ -1543,9 +1784,14 @@ impl ZoneUpdatesWaitingOn {
                 "blocked MGS updates (RoT bootloader / RoT / SP / Host OS)"
             }
             Self::DiscretionaryZones => "discretionary zones",
-            Self::InventoryPropagation => "zone propagation to inventory",
+            Self::InventoryPropagation { .. } => {
+                "zone propagation to inventory"
+            }
             Self::PendingMgsUpdates => {
                 "pending MGS updates (RoT bootloader / RoT / SP / Host OS)"
+            }
+            Self::SledUpdateDispositionChanges => {
+                "sled update disposition changes"
             }
             Self::ZoneAddBlockers => "zone add blockers",
             Self::Measurements => "reference measurement changes",
@@ -1564,6 +1810,17 @@ pub enum ZoneUnsafeToShutdown {
     Cockroachdb { reason: CockroachdbUnsafeToShutdown },
     BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
     InternalDns { total_internal_dns_zones: usize, synchronized_count: usize },
+}
+
+impl ZoneUnsafeToShutdown {
+    /// Returns the kind of zone that this reason applies to
+    pub fn zone_kind(&self) -> ZoneKind {
+        match self {
+            ZoneUnsafeToShutdown::Cockroachdb { .. } => ZoneKind::CockroachDb,
+            ZoneUnsafeToShutdown::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            ZoneUnsafeToShutdown::InternalDns { .. } => ZoneKind::InternalDns,
+        }
+    }
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
@@ -1602,7 +1859,7 @@ impl fmt::Display for ZoneUnsafeToShutdown {
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum ZoneWaitingToExpunge {
-    Nexus { zone_generation: Generation },
+    Nexus { zone_generation: NexusGeneration },
 }
 
 impl fmt::Display for ZoneWaitingToExpunge {
@@ -1633,7 +1890,7 @@ pub enum PlanningNexusGenerationBumpReport {
     WaitingOn(NexusGenerationBumpWaitingOn),
 
     /// We are bumping the Nexus generation number to this value.
-    BumpingGeneration(Generation),
+    BumpingGeneration(NexusGeneration),
 }
 
 impl PlanningNexusGenerationBumpReport {
@@ -1649,7 +1906,7 @@ impl PlanningNexusGenerationBumpReport {
         *self = Self::WaitingOn(why);
     }
 
-    pub fn set_next_generation(&mut self, next_generation: Generation) {
+    pub fn set_next_generation(&mut self, next_generation: NexusGeneration) {
         *self = Self::BumpingGeneration(next_generation);
     }
 }

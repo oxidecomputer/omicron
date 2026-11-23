@@ -9,10 +9,10 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest},
     resource_helpers::{
-        attach_ip_address_to_igw, attach_ip_pool_to_igw, create_floating_ip,
-        create_instance_with, create_internet_gateway, create_ip_pool,
-        create_local_user, create_project, create_route, create_router,
-        create_silo, create_vpc, delete_internet_gateway,
+        InstanceCreateBuilder, attach_ip_address_to_igw, attach_ip_pool_to_igw,
+        create_floating_ip, create_instance_from_body, create_internet_gateway,
+        create_ip_pool, create_local_user, create_project, create_route,
+        create_router, create_silo, create_vpc, delete_internet_gateway,
         detach_ip_address_from_igw, detach_ip_pool_from_igw, grant_iam,
         link_ip_pool, objects_list_page_authz, test_params,
     },
@@ -45,6 +45,7 @@ use omicron_common::{
         IdentityMetadataCreateParams, NameOrId, RouteDestination, RouteTarget,
     },
 };
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -480,8 +481,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
 
     // Create a silo and link both pools as silo defaults.
     let silo =
-        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "test-silo", SiloIdentityMode::LocalOnly).await;
     link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
     link_ip_pool(client, "pool-v6", &silo.identity.id, true).await;
 
@@ -512,6 +512,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -528,6 +529,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
             },
             ipv6_prefix: None,
             dns_name: "test-vpc".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -621,8 +623,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
 
     // Create a silo and link both pools, but only the IPv4 pool as a default.
     let silo =
-        create_silo(client, "test-silo", true, SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(client, "test-silo", SiloIdentityMode::LocalOnly).await;
     link_ip_pool(client, "pool-v4", &silo.identity.id, true).await;
     link_ip_pool(client, "pool-v6", &silo.identity.id, false).await;
 
@@ -653,6 +654,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -669,6 +671,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
             },
             ipv6_prefix: None,
             dns_name: "test-vpc".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -719,7 +722,13 @@ async fn test_setup(c: &ClientTestContext) {
         })),
     )
     .await;
-    link_ip_pool(&c, IP_POOL_NAME, &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &c,
+        IP_POOL_NAME,
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
     let _floater = create_floating_ip(
         c,
         FLOATING_IP_NAME,
@@ -742,19 +751,15 @@ async fn test_setup(c: &ClientTestContext) {
             vpc_name: VPC_NAME.parse().unwrap(),
         },
     ]);
-    let _inst = create_instance_with(
+    let _inst = create_instance_from_body(
         c,
         PROJECT_NAME,
-        INSTANCE_NAME,
-        &nic_attach,
-        Vec::new(),
-        vec![ExternalIpCreate::Floating {
-            floating_ip: NameOrId::Name(FLOATING_IP_NAME.parse().unwrap()),
-        }],
-        true,
-        None,
-        None,
-        Vec::new(),
+        InstanceCreateBuilder::new(INSTANCE_NAME)
+            .with_nics(nic_attach)
+            .with_external_ips(vec![ExternalIpCreate::Floating {
+                floating_ip: NameOrId::Name(FLOATING_IP_NAME.parse().unwrap()),
+            }])
+            .finish(),
     )
     .await;
 

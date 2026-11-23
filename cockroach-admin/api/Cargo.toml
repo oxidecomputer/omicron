@@ -12,6 +12,5 @@ cockroach-admin-types-versions.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 http.workspace = true
-omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true

@@ -9,6 +9,7 @@
 
 mod address_lots;
 mod affinity;
+mod alerts;
 mod allow_list;
 mod audit_log;
 mod authn_http;
@@ -37,6 +38,7 @@ mod metrics;
 mod metrics_querier;
 #[cfg(feature = "multicast")]
 mod multicast;
+mod multirack;
 mod oximeter;
 mod pantry;
 mod password_login;
@@ -52,6 +54,7 @@ mod schema;
 mod scim;
 mod silo_users;
 mod silos;
+mod sled_bp_availability;
 mod sleds;
 mod snapshots;
 mod ssh_keys;

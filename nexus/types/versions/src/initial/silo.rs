@@ -82,8 +82,8 @@ pub struct Silo {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// A silo where discoverable is false can be retrieved only by its id - it
-    /// will not be part of the "list all silos" output.
+    /// A non-discoverable silo can only be retrieved by ID - it will not be
+    /// part of the "list all silos" output.
     pub discoverable: bool,
 
     /// How users and groups are managed in this Silo
@@ -184,6 +184,8 @@ pub struct SiloCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
+    /// A non-discoverable silo can only be retrieved by ID - it will not be
+    /// part of the "list all silos" output.
     pub discoverable: bool,
 
     pub identity_mode: SiloIdentityMode,

@@ -103,7 +103,8 @@
             prefix = "${upperName}=\"";
           in
           trivial.pipe shas [
-            (lists.findFirst (strings.hasPrefix prefix) "")
+            (lists.findFirst (strings.hasPrefix prefix)
+              (throw "findSha: no '${upperName}' entry found in the provided checksums -- add it to the corresponding tools/*_checksums file"))
             (strings.removePrefix prefix)
             (strings.removeSuffix "\"")
           ]);
@@ -441,6 +442,9 @@
             LIBCLANG_PATH = "${libclang.lib}/lib";
             OPENSSL_DIR = "${openssl.dev}";
             OPENSSL_LIB_DIR = "${openssl.out}/lib";
+
+            # Needed so `pq-sys` uses Nix's `libpq` instead of the host's.
+            PQ_LIB_DIR = "${postgresql.lib}/lib";
 
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs

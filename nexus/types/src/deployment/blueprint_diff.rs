@@ -17,15 +17,17 @@ use super::{
     BlueprintHostPhase2TableData, BlueprintMeasurements,
     BlueprintMeasurementsTableData, BlueprintMetadata,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZoneImageSource, ClickhouseClusterConfig,
+    BlueprintSledUpdateDisposition, BlueprintZoneConfigDiff,
+    BlueprintZoneImageSource, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
 use daft::{Diffable, Leaf};
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::{CompressionAlgorithm, DatasetName};
+use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
+use sled_agent_types_versions::latest::disk::CompressionAlgorithm;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
@@ -68,12 +70,13 @@ impl<'a> BlueprintDiffSummary<'a> {
             target_release_minimum_generation,
             nexus_generation,
             external_networking_generation,
+            internal_dns_version,
+            external_dns_version,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
             parent_blueprint_id: _,
-            internal_dns_version: _,
-            external_dns_version: _,
+            reflects_collection: _,
             cockroachdb_fingerprint: _,
             cockroachdb_setting_preserve_downgrade: _,
             oximeter_read_version: _,
@@ -127,6 +130,20 @@ impl<'a> BlueprintDiffSummary<'a> {
         // sleds also, but it doesn't hurt to double check.)
         if external_networking_generation.before
             != external_networking_generation.after
+        {
+            return true;
+        }
+
+        // Did either DNS generation change?
+        //
+        // The target blueprint must reflect the latest DNS generations in order
+        // for blueprint execution to update DNS at all, even in response to
+        // non-blueprint changes (e.g., scrimlets moving around).  Thus,
+        // blueprints must be considered different if the DNS generations are
+        // differenet.  See the comments in
+        // `nexus_reconfigurator_execution::dns` for details.
+        if internal_dns_version.before != internal_dns_version.after
+            || external_dns_version.before != external_dns_version.after
         {
             return true;
         }
@@ -2084,7 +2101,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Removed,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Removed,
@@ -2128,6 +2149,23 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                 )?;
 
                 let mut rows = Vec::new();
+                if sled.before.update_disposition
+                    != sled.after.update_disposition
+                {
+                    rows.push(KvPair::new(
+                        BpDiffState::Modified,
+                        UPDATE_DISPOSITION,
+                        display_modified_update_disposition(
+                            &sled.before.update_disposition,
+                            &sled.after.update_disposition,
+                        ),
+                    ));
+                } else {
+                    rows.push(KvPair::new_unchanged(
+                        UPDATE_DISPOSITION,
+                        linear_table_unchanged(&sled.after.update_disposition),
+                    ));
+                }
                 // If either before or after is set for remove_mupdate_override,
                 // display it.
                 if sled.before.remove_mupdate_override.is_some()
@@ -2158,7 +2196,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Added,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Added,
@@ -2255,5 +2297,72 @@ fn display_optional_preserve_downgrade(
     match value {
         Some(v) => v.to_string(),
         None => INVALID_VALUE_PARENS.to_string(),
+    }
+}
+
+fn display_modified_update_disposition(
+    before: &BlueprintSledUpdateDisposition,
+    after: &BlueprintSledUpdateDisposition,
+) -> String {
+    let kind = if before.kind != after.kind {
+        format!("{} {ARROW} {}", before.kind, after.kind)
+    } else {
+        after.kind.to_string()
+    };
+    let generation = if before.generation != after.generation {
+        format!(
+            "(generation {} {ARROW} {})",
+            before.generation, after.generation,
+        )
+    } else {
+        format!("(generation {})", after.generation)
+    };
+    format!("{kind} {generation}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deployment::BlueprintSledUpdateDispositionKind;
+    use crate::deployment::ReconfiguratorDisruptionPolicy;
+
+    const EVACUATING: BlueprintSledUpdateDispositionKind =
+        BlueprintSledUpdateDispositionKind::Evacuating {
+            policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+        };
+
+    // The initial (`available`, generation 1) disposition and its single-step
+    // departures, shared by the rendering tests.
+    const AVAILABLE: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition::initial();
+
+    // kind + generation both changed by one: the valid parent→child edit.
+    const BUMPED: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next(),
+            kind: EVACUATING,
+        };
+
+    // generation changed, kind unchanged.
+    const GEN_ONLY: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next(),
+            kind: AVAILABLE.kind,
+        };
+
+    #[test]
+    fn modified_update_disposition_rendering() {
+        // Kind change with a generation bump.
+        assert_eq!(
+            display_modified_update_disposition(&AVAILABLE, &BUMPED),
+            "available -> evacuating (live-migrate or terminate) \
+             (generation 1 -> 2)",
+        );
+
+        // A generation change with no kind change.
+        assert_eq!(
+            display_modified_update_disposition(&AVAILABLE, &GEN_ONLY),
+            "available (generation 1 -> 2)",
+        );
     }
 }

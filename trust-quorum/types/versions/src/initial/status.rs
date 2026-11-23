@@ -23,7 +23,7 @@ pub enum CommitStatus {
 }
 
 /// Status of the node coordinating the reconfiguration or LRTQ upgrade.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct CoordinatorStatus {
     pub config: Configuration,
     pub acked_prepares: BTreeSet<BaseboardId>,

@@ -146,7 +146,7 @@ async fn cmd_pantry_status(
 ) -> Result<(), anyhow::Error> {
     let status = client.pantry_status().await.context("listing volumes")?;
 
-    println!("num_job_handles {:?}", status.num_job_handles);
+    println!("num_job_handles: {:?}", status.num_job_handles);
     println!("Volumes found: {}", status.volumes.len());
 
     let mut rows = Vec::new();

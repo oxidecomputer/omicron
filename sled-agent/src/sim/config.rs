@@ -5,9 +5,11 @@
 //! Interfaces for working with sled agent configuration
 
 use dropshot::ConfigDropshot;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZpoolHealth;
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use sp_sim::FAKE_GIMLET_MODEL;
@@ -72,6 +74,8 @@ pub struct ConfigHardware {
 pub struct Config {
     /// unique id for the sled
     pub id: SledUuid,
+    /// ID for the simulated rack
+    pub rack_id: RackUuid,
     /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
     /// IP address and TCP port for Nexus instance to register with
@@ -82,6 +86,8 @@ pub struct Config {
     pub storage: ConfigStorage,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
+    /// is this sled a normal gimlet, or a scrimlet?
+    pub sled_role: SledRole,
 }
 
 pub enum ZpoolConfig {
@@ -95,6 +101,7 @@ pub enum ZpoolConfig {
 impl Config {
     pub fn for_testing(
         id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         zpool_config: ZpoolConfig,
@@ -102,21 +109,26 @@ impl Config {
     ) -> Config {
         Self::for_testing_with_baseboard(
             id,
+            rack_id,
             sim_mode,
             nexus_address,
             zpool_config,
             cpu_family,
             None,
+            SledRole::Gimlet,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn for_testing_with_baseboard(
         id: SledUuid,
+        rack_id: RackUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         zpool_config: ZpoolConfig,
         cpu_family: SledCpuFamily,
         baseboard_serial: Option<String>,
+        sled_role: SledRole,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
@@ -142,6 +154,7 @@ impl Config {
 
         Config {
             id,
+            rack_id,
             sim_mode,
             nexus_address,
             dropshot: ConfigDropshot {
@@ -164,6 +177,7 @@ impl Config {
                     revision: 3,
                 },
             },
+            sled_role,
         }
     }
 }

@@ -62,17 +62,10 @@ struct ReconfiguratorExec {
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
-    /// an internal DNS server in this deployment
-    // This default value is currently appropriate for all deployed systems.
-    // That relies on two assumptions:
-    //
-    // 1. The internal DNS servers' underlay addresses are at a fixed location
-    //    from the base of the AZ subnet.  This is unlikely to change, since the
-    //    DNS servers must be discoverable with virtually no other information.
-    // 2. The AZ subnet used for all deployments today is fixed.
-    //
-    // For simulated systems (e.g., `cargo xtask omicron-dev run-all`), or if
-    // these assumptions change in the future, we may need to adjust this.
+    /// an internal DNS server in this deployment (likely needs to be specified
+    /// for each deployment)
+    // This default value was once appropriate for deployed systems, but isn't
+    // any more since they have different AZ subnets today.
     #[arg(long, default_value = "[fd00:1122:3344:3::1]:53")]
     dns_server: SocketAddr,
 
@@ -108,9 +101,20 @@ impl ReconfiguratorExec {
             internal_dns_resolver::QorbResolver::new(vec![self.dns_server]);
 
         info!(&log, "setting up database pool");
-        let pool = Arc::new(db::Pool::new(&log, &qorb_resolver));
+        let pool = Arc::new(db::Pool::new(
+            &log,
+            &qorb_resolver,
+            db::ClaimBacktraceSetting::Capture,
+        ));
+        // Passing in omicron_git_version::current is probably not necessary
+        // since the types that depend on the Git version will probably not be
+        // constructed by this binary. But we do it anyway, because this is a
+        // leaf node, so recompiling it if the commit changes is not a huge
+        // deal. If this becomes a problem in the future, we could pass in a
+        // dummy version, at the cost of making this code path that much harder
+        // to reason about.
         let datastore = Arc::new(
-            DataStore::new_failfast(&log, pool)
+            DataStore::new_failfast(&log, pool, omicron_git_version::current())
                 .await
                 .context("creating datastore")?,
         );

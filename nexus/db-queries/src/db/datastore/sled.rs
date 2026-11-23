@@ -20,6 +20,7 @@ use crate::db::model::SledResourceVmmState;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
+use crate::db::model::to_db_typed_generation;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -27,6 +28,7 @@ use crate::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use crate::db::queries::sled_reservation::LocalStorageAllocation;
 use crate::db::queries::sled_reservation::LocalStorageAllocationRequired;
 use crate::db::queries::sled_reservation::SLED_INSERT_QUERY_SENTINELS;
+use crate::db::queries::sled_reservation::SledFindTargetsRow;
 use crate::db::queries::sled_reservation::sentinel_to_reason;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
@@ -35,6 +37,7 @@ use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
@@ -46,19 +49,20 @@ use nexus_db_model::DbTypedUuid;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
+use nexus_types::trust_quorum::check_trust_quorum_allows_expunge;
 use nonempty::NonEmpty;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::DiskUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -66,12 +70,13 @@ use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::IndexedRandom;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -200,6 +205,82 @@ enum SledReservationTransactionError {
     Diesel(#[from] diesel::result::Error),
     #[error(transparent)]
     Reservation(#[from] SledReservationError),
+}
+
+#[derive(Debug, Default)]
+struct SledTargetSets {
+    targets: HashSet<SledUuid>,
+    banned: HashSet<SledUuid>,
+    unpreferred: HashSet<SledUuid>,
+    required: HashSet<SledUuid>,
+    preferred: HashSet<SledUuid>,
+}
+
+fn classify_sled_targets(
+    rows: Vec<SledFindTargetsRow>,
+    must_use_sleds: Option<&HashSet<SledUuid>>,
+    must_not_use_sleds: Option<&HashSet<SledUuid>>,
+) -> SledTargetSets {
+    let mut sets = SledTargetSets::default();
+
+    for row in rows {
+        let sled_id = row.sled_id();
+
+        if row.is_candidate {
+            // If there is a Some list of sleds to select from, only add
+            // this target if it is in that list. A None list means that any
+            // sled could be a target.
+            match must_use_sleds {
+                Some(must_use_sleds) => {
+                    if must_use_sleds.contains(&sled_id) {
+                        sets.targets.insert(sled_id);
+                    }
+                }
+
+                None => {
+                    sets.targets.insert(sled_id);
+                }
+            }
+
+            // If there is `Some(_)` list of sleds we must not use, _remove_
+            // this target if it's in that list.
+            //
+            // We remove from `sets.targets` instead of adding to `sets.banned`
+            // here because `banned` is specifically for anti-affinity rules
+            // (and produces error messages as such). If we have a "must not use
+            // sled", we silently skip it. (One use of this is to pick a VMM
+            // migration destination sled that must not be the same as its
+            // current source sled.)
+            //
+            // The order of this check relative to the `must_use_sleds` above is
+            // intentional - if a sled is in both sets, we let
+            // `must_not_use_sleds` take precedence. If we only have
+            // `must_not_use_sleds`, this must be second in order to remove the
+            // sled we unconditionally added as a target in the `None` branch
+            // above.
+            if let Some(must_not_use_sleds) = must_not_use_sleds {
+                if must_not_use_sleds.contains(&sled_id) {
+                    sets.targets.remove(&sled_id);
+                }
+            }
+        }
+
+        if let Some(policy) = row.affinity_policy {
+            match policy {
+                AffinityPolicy::Fail => sets.required.insert(sled_id),
+                AffinityPolicy::Allow => sets.preferred.insert(sled_id),
+            };
+        }
+
+        if let Some(policy) = row.anti_affinity_policy {
+            match policy {
+                AffinityPolicy::Fail => sets.banned.insert(sled_id),
+                AffinityPolicy::Allow => sets.unpreferred.insert(sled_id),
+            };
+        }
+    }
+
+    sets
 }
 
 // Chooses a sled for reservation with the supplied constraints.
@@ -354,447 +435,651 @@ fn pick_sled_reservation_target(
     return Err(SledReservationError::NotFound);
 }
 
-/// A candidate dataset for a local storage allocation
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-struct CandidateDataset {
-    rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
+/// A local storage disk that needs a dataset allocation.
+#[derive(Debug, Clone)]
+struct LocalStorageRequest {
+    /// The virtual disk requiring the allocation
+    disk_id: DiskUuid,
+
+    /// Disk size plus required dataset overhead, in bytes
+    required_dataset_size: i64,
+}
+
+/// A zpool on the target sled that is a valid target for a local storage
+/// allocation and is not already used by one of this instance's existing
+/// allocations.
+#[derive(Debug, Clone)]
+struct LocalStorageCandidatePool {
     pool_id: ZpoolUuid,
     sled_id: SledUuid,
+    rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
+
+    /// Bytes available for new allocations, see
+    /// `ZpoolGetForSledReservationResult::headroom`
+    headroom: i64,
 }
 
-/// For a given local storage disk that has not been allocated, store all the
-/// candidate datasets that could fulfill that allocation.
-#[derive(Clone, Debug)]
-struct PossibleAllocationsForRequest<'a> {
-    request: &'a LocalStorageDisk,
-    candidate_datasets: HashSet<CandidateDataset>,
+/// Why no complete set of local storage allocations could be chosen for a
+/// sled.
+#[derive(Debug, thiserror::Error)]
+enum LocalStorageUnsatisfiable {
+    /// No disks required an allocation. Callers are expected to check for
+    /// this case before choosing allocations.
+    #[error("no disks require a local storage allocation")]
+    NoAllocationsRequired,
+
+    /// There are more disks requiring an allocation than usable pools: each
+    /// disk needs a distinct pool.
+    #[error(
+        "{requests} disks require a local storage allocation, \
+         but only {pools} pools are usable"
+    )]
+    NotEnoughPools { requests: usize, pools: usize },
+
+    /// No unused pool fits this request. Requests are placed largest first,
+    /// so when even the roomiest remaining pool (reported here) does not fit
+    /// the request, no assignment of these requests to these pools exists.
+    #[error(
+        "disk {disk_id} requires {required_dataset_size} bytes, \
+         but pool {pool_id} only has {headroom} bytes of headroom"
+    )]
+    RequestDoesNotFit {
+        disk_id: DiskUuid,
+        required_dataset_size: i64,
+        pool_id: ZpoolUuid,
+        headroom: i64,
+    },
 }
 
-/// Store the intermediate search state during the search for all possible
-/// pairings of requests for local storage to datasets. This is ordered by how
-/// many pairings have been made so far to prioritize quickly finding a complete
-/// allocation.
-struct IncompleteAllocationList {
-    /// Requests for a local storage allocation that have been paired with a
-    /// dataset
-    allocations: Vec<LocalStorageAllocation>,
-
-    /// Remaining candidate datasets for non-paired allocation requests
-    candidates_left: HashSet<CandidateDataset>,
-
-    /// Which allocation request to consider next
-    request_index: usize,
-}
-
-impl PartialOrd for IncompleteAllocationList {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for IncompleteAllocationList {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.allocations.len().cmp(&other.allocations.len())
-    }
-}
-
-impl PartialEq for IncompleteAllocationList {
-    fn eq(&self, other: &Self) -> bool {
-        self.allocations.len() == other.allocations.len()
-    }
-}
-
-impl Eq for IncompleteAllocationList {}
-
-/// Store all the state required to iterate through possible mappings of local
-/// storage allocation requests to datasets.
+/// Pair each local storage request with a distinct pool, or return an error
+/// if that isn't possible.
 ///
-/// Yield complete allocation lists as they're found, where complete means all
-/// allocations have been performed, because computing all possibilities up
-/// front is expensive.
-struct CompleteLocalStorageAllocationLists<'a> {
-    log: Logger,
+/// Place the requests largest-first, each on a pool chosen uniformly at
+/// random from the unused pools that fit it. This either produces a valid
+/// pairing or proves that none exists:
+///
+/// - A pool fits a request iff the request is strictly smaller than the
+///   pool's free space, so any pool that fits a request also fits every
+///   smaller request.
+///
+/// - Placing the largest remaining request on any pool that fits it therefore
+///   does not inhibit subsequent requests. If a valid pairing uses that pool for
+///   a different (necessarily smaller) subsequent request, that request can
+///   instead use whichever pool the larger one would have taken.
+///
+/// - Applying that argument at each step down the sorted list means no
+///   backtracking is needed. If some request has no fitting pool left, no
+///   assignment of these requests to these pools exists at all.
+///
+/// A caller seeing an error can conclude that these requests cannot fit on
+/// this sled at all, rather than needing to try other arrangements.
+///
+/// For a given rng state and inputs the output is deterministic; tests rely
+/// on this by passing a seeded rng.
+fn pair_local_storage_requests_to_pools(
+    mut requests: Vec<LocalStorageRequest>,
+    mut pools: Vec<LocalStorageCandidatePool>,
+    rng: &mut StdRng,
+) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
+    if requests.is_empty() {
+        return Err(LocalStorageUnsatisfiable::NoAllocationsRequired);
+    }
 
-    sled_target: SledUuid,
+    // Each request requires a distinct pool.
+    if requests.len() > pools.len() {
+        return Err(LocalStorageUnsatisfiable::NotEnoughPools {
+            requests: requests.len(),
+            pools: pools.len(),
+        });
+    }
 
-    instance_id: InstanceUuid,
+    requests.sort_by(|a, b| {
+        b.required_dataset_size
+            .cmp(&a.required_dataset_size)
+            .then(a.disk_id.cmp(&b.disk_id))
+    });
 
-    /// All allocations that need to be performed
-    allocations_to_perform: Vec<PossibleAllocationsForRequest<'a>>,
+    let mut allocations = Vec::with_capacity(requests.len());
 
-    /// A queue of incomplete allocation lists to search through, where
-    /// incomplete means there are still local storage disk to dataset
-    /// allocations to be performed. These are sorted by the number of
-    /// allocations made so far to prioritize yielding a valid allocation.
-    queue: BinaryHeap<IncompleteAllocationList>,
+    for request in &requests {
+        let fitting: Vec<usize> = (0..pools.len())
+            .filter(|&i| request.required_dataset_size < pools[i].headroom)
+            .collect();
+
+        let Some(&choice) = fitting.choose(rng) else {
+            // Requests are placed largest-first, so if not even the roomiest
+            // remaining pool fits this request, no assignment of these
+            // requests to these pools fits either.
+            let roomiest = pools
+                .iter()
+                .max_by_key(|pool| pool.headroom)
+                .expect("more pools than remaining requests");
+
+            return Err(LocalStorageUnsatisfiable::RequestDoesNotFit {
+                disk_id: request.disk_id,
+                required_dataset_size: request.required_dataset_size,
+                pool_id: roomiest.pool_id,
+                headroom: roomiest.headroom,
+            });
+        };
+
+        let pool = pools.swap_remove(choice);
+
+        allocations.push(LocalStorageAllocation {
+            disk_id: request.disk_id,
+
+            local_storage_unencrypted_dataset_allocation_id:
+                DatasetUuid::new_v4(),
+
+            required_dataset_size: request.required_dataset_size,
+
+            local_storage_unencrypted_dataset_id: pool
+                .rendezvous_local_storage_unencrypted_dataset_id,
+
+            pool_id: pool.pool_id,
+
+            sled_id: pool.sled_id,
+        });
+    }
+
+    // `requests` was checked non-empty above.
+    NonEmpty::from_vec(allocations)
+        .ok_or(LocalStorageUnsatisfiable::NoAllocationsRequired)
 }
 
-impl<'a> CompleteLocalStorageAllocationLists<'a> {
-    fn new(
-        log: &Logger,
-        sled_target: SledUuid,
-        instance_id: InstanceUuid,
-        mut zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
-        local_storage_disks: &'a [LocalStorageDisk],
-    ) -> Option<Self> {
-        let local_storage_allocation_required: Vec<&LocalStorageDisk> =
-            local_storage_disks
-                .iter()
-                .filter(|disk| disk.local_storage_dataset_allocation.is_none())
-                .collect();
+/// Choose a local storage allocation for every local storage disk of an
+/// instance that does not have one, against a snapshot of the target sled's
+/// zpools.
+///
+/// The returned allocations use distinct pools, and exclude any pool already
+/// used by one of the instance's existing local storage allocations: local
+/// storage for the same instance must not share zpools.
+///
+/// The snapshot is only advisory. `sled_insert_resource_query` re-validates
+/// capacity and dataset/pool/sled/disk state atomically at insert time, and
+/// inserts nothing if any check fails.
+fn choose_local_storage_allocations(
+    zpools_for_sled: &IdOrdMap<ZpoolGetForSledReservationResult>,
+    local_storage_disks: &[LocalStorageDisk],
+    rng: &mut StdRng,
+) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
+    // Each disk either still needs an allocation, or already has one whose
+    // pool (encrypted or unencrypted) is not eligible for further
+    // allocations.
+    let mut requests: Vec<LocalStorageRequest> = Vec::new();
+    let mut used_pools: HashSet<ZpoolUuid> = HashSet::new();
 
-        // First, each request for local storage can possibly be satisfied by a
-        // number of zpools on the sled. Find this list of candidate zpools for
-        // each required local storage allocation.
+    for disk in local_storage_disks {
+        match &disk.local_storage_dataset_allocation {
+            None => requests.push(LocalStorageRequest {
+                disk_id: DiskUuid::from_untyped_uuid(disk.id()),
+                required_dataset_size: disk.required_dataset_size(),
+            }),
 
-        // If there's an existing local storage allocation on a zpool
-        // (regardless of whether or not it's an encrypted or unencrypted
-        // allocation), remove that pool from the list of candidates. Local
-        // storage for the same Instance should not share any zpools.
-        let local_storage_zpools_used: HashSet<ZpoolUuid> = local_storage_disks
+            Some(allocation) => {
+                used_pools.insert(ZpoolUuid::from_untyped_uuid(
+                    allocation.pool_id().into_untyped_uuid(),
+                ));
+            }
+        }
+    }
+
+    let pools: Vec<LocalStorageCandidatePool> = zpools_for_sled
+        .iter()
+        .filter(|zpool_get_result| {
+            !used_pools.contains(&zpool_get_result.pool.id())
+        })
+        .map(|zpool_get_result| LocalStorageCandidatePool {
+            pool_id: zpool_get_result.pool.id(),
+            sled_id: zpool_get_result.pool.sled_id(),
+            rendezvous_local_storage_unencrypted_dataset_id: zpool_get_result
+                .rendezvous_local_storage_unencrypted_dataset_id,
+            headroom: zpool_get_result.headroom(),
+        })
+        .collect();
+
+    pair_local_storage_requests_to_pools(requests, pools, rng)
+}
+
+/// Return true if any local storage disk still requiring an allocation has
+/// been deleted, or is no longer attached to the given instance.
+///
+/// The reservation loop calls this when the insert query inserted zero rows,
+/// to tell two situations apart: the zpool snapshot went stale (retry with a
+/// fresh one), or a disk in the request went away (no sled can ever satisfy
+/// this reservation, so fail now rather than retrying everywhere).
+async fn any_request_disk_deleted_or_detached(
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+    instance_id: InstanceUuid,
+    local_storage_disks: &[LocalStorageDisk],
+) -> LookupResult<bool> {
+    use nexus_db_schema::schema::disk::dsl;
+
+    let disk_ids: Vec<Uuid> = local_storage_disks
+        .iter()
+        .filter(|disk| disk.local_storage_dataset_allocation.is_none())
+        .map(|disk| disk.id())
+        .collect();
+
+    let expected = disk_ids.len();
+
+    let attach_instance_ids: Vec<Option<Uuid>> = dsl::disk
+        .filter(dsl::id.eq_any(disk_ids))
+        .filter(dsl::time_deleted.is_null())
+        .select(dsl::attach_instance_id)
+        .load_async(conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("selecting local storage disks failed")
+        })?;
+
+    // A missing row means the disk was deleted: soft-deleted rows are
+    // filtered out above, and a hard-deleted row is gone entirely.
+    if attach_instance_ids.len() != expected {
+        return Ok(true);
+    }
+
+    Ok(attach_instance_ids.iter().any(|attach_instance_id| {
+        *attach_instance_id != Some(instance_id.into_untyped_uuid())
+    }))
+}
+
+#[cfg(test)]
+mod local_storage_pairing_test {
+    use super::*;
+
+    use nexus_types::external_api::disk;
+    use omicron_uuid_kinds::ExternalZpoolUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ProjectUuid;
+    use proptest::prelude::*;
+
+    fn request(disk_id: u128, size: i64) -> LocalStorageRequest {
+        LocalStorageRequest {
+            disk_id: DiskUuid::from_untyped_uuid(Uuid::from_u128(disk_id)),
+            required_dataset_size: size,
+        }
+    }
+
+    fn pool(pool_id: u128, headroom: i64) -> LocalStorageCandidatePool {
+        LocalStorageCandidatePool {
+            pool_id: ZpoolUuid::from_untyped_uuid(Uuid::from_u128(pool_id)),
+            sled_id: SledUuid::from_untyped_uuid(Uuid::from_u128(0x51ed)),
+            rendezvous_local_storage_unencrypted_dataset_id:
+                DatasetUuid::from_untyped_uuid(Uuid::from_u128(pool_id)),
+            headroom,
+        }
+    }
+
+    fn test_rng() -> StdRng {
+        StdRng::seed_from_u64(0)
+    }
+
+    /// An allocation fits only if it is strictly smaller than the pool's
+    /// headroom, matching the comparison in `sled_insert_resource_query`.
+    #[test]
+    fn boundary_is_strict() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 100)],
+            vec![pool(1, 100)],
+            &mut test_rng(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::RequestDoesNotFit { .. }
+        ));
+
+        pair_local_storage_requests_to_pools(
+            vec![request(1, 99)],
+            vec![pool(1, 100)],
+            &mut test_rng(),
+        )
+        .unwrap();
+    }
+
+    /// If our selection of local disk allocation always picked "the pool
+    /// with the most free space first", this workload of allocations
+    /// would reliably fail.
+    ///
+    /// Instead, our allocation pattern identifies all pools where a the
+    /// largest disk request COULD fit, and then randomly picks from
+    /// those options. This does make the selection non-deterministic
+    /// (hence our supplied RNG).
+    ///
+    /// However, for the sake of a test, we're trying to validate
+    /// that this works "well enough" - we use hard-coded RNGs for determinism,
+    /// and then validate that "an overwhelming majority" pass.
+    #[test]
+    fn descending_workload_across_seeds() {
+        // 774 GiB of headroom per pool, in bytes.
+        let pool_headroom: i64 =
+            external::ByteCount::from_gibibytes_u32(774).to_bytes() as i64;
+
+        // Disk sizes in GiB, chosen so that seven rounds of these disks
+        // nearly fill ten pools.
+        const DISK_GIB: [u32; 7] = [388, 195, 98, 50, 26, 14, 8];
+
+        // Compute each request's size (disk size plus dataset overhead)
+        // through the same path production uses, so this workload stays in
+        // sync with the overhead charged by DiskTypeLocalStorage::new.
+        let request_sizes: Vec<i64> = DISK_GIB
             .iter()
-            .filter_map(|disk| {
-                disk.local_storage_dataset_allocation.as_ref().map(
-                    |allocation| {
-                        ZpoolUuid::from_untyped_uuid(
-                            allocation.pool_id().into_untyped_uuid(),
-                        )
-                    },
+            .enumerate()
+            .map(|(i, gib)| {
+                local_storage_disk(
+                    Uuid::from_u128(i as u128 + 1),
+                    external::ByteCount::from_gibibytes_u32(*gib),
                 )
+                .required_dataset_size()
             })
             .collect();
 
-        // Do not allow multiple disks backed by local storage to use the same
-        // pool for the same instance.
-        zpools_for_sled.retain(|zpool_get_result| {
-            !local_storage_zpools_used.contains(&zpool_get_result.pool.id())
-        });
+        let mut succeeded = 0;
 
-        if local_storage_allocation_required.len() > zpools_for_sled.len() {
-            // Not enough zpools to satisfy the number of allocations required.
-            // Find another sled!
-            info!(
-                &log,
-                "sled {sled_target} does not have enough zpools to satisfy \
-                local storage allocations";
-                "zpools" => zpools_for_sled.len(),
-                "allocations" => local_storage_allocation_required.len(),
-            );
+        for seed in 0..100u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut headrooms = [pool_headroom; 10];
 
-            return None;
-        }
+            let all_rounds_placed = (0..7).all(|_| {
+                let requests: Vec<LocalStorageRequest> = request_sizes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, size)| request(i as u128 + 1, *size))
+                    .collect();
 
-        info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
+                let pools: Vec<LocalStorageCandidatePool> = headrooms
+                    .iter()
+                    .enumerate()
+                    .map(|(i, headroom)| pool(i as u128 + 1, *headroom))
+                    .collect();
 
-        let mut allocations_to_perform =
-            Vec::with_capacity(local_storage_allocation_required.len());
-
-        for request in &local_storage_allocation_required {
-            // Find all the zpools that could satisfy this local storage
-            // request. These will be filtered later.
-            let candidate_datasets: HashSet<CandidateDataset> = zpools_for_sled
-                .iter()
-                .filter(|zpool_get_result| {
-                    // The total request size for the local storage dataset
-                    // allocation is the disk size plus the required
-                    // overhead.
-                    let request_size: i64 = request.size().to_bytes() as i64
-                        + request.required_dataset_overhead().to_bytes() as i64;
-
-                    // Any zpool that has space for this local storage
-                    // dataset allocation is considered a candidate.
-                    zpool_get_result.has_room_for_allocation(request_size)
-                })
-                .map(|zpool_get_result| CandidateDataset {
-                    rendezvous_local_storage_unencrypted_dataset_id:
-                        zpool_get_result
-                            .rendezvous_local_storage_unencrypted_dataset_id,
-                    pool_id: zpool_get_result.pool.id(),
-                    sled_id: zpool_get_result.pool.sled_id(),
-                })
-                .collect();
-
-            if candidate_datasets.is_empty() {
-                // if there's no local storage datasets on this sled for this
-                // request's size, then try another sled.
-                info!(
-                    &log,
-                    "sled {sled_target} does not have any candidate datasets \
-                    with available space to satisfy local storage allocation";
-                    "request" => ?request,
-                );
-
-                return None;
-            }
-
-            allocations_to_perform.push(PossibleAllocationsForRequest {
-                request,
-                candidate_datasets,
+                match pair_local_storage_requests_to_pools(
+                    requests, pools, &mut rng,
+                ) {
+                    Ok(allocations) => {
+                        for allocation in &allocations {
+                            let i = usize::try_from(
+                                allocation
+                                    .pool_id
+                                    .into_untyped_uuid()
+                                    .as_u128()
+                                    - 1,
+                            )
+                            .unwrap();
+                            headrooms[i] -= allocation.required_dataset_size;
+                        }
+                        true
+                    }
+                    Err(_) => false,
+                }
             });
+
+            if all_rounds_placed {
+                succeeded += 1;
+            }
         }
 
-        // From the list of allocations to perform, and all the candidate local
-        // storage datasets that could fit those allocations, find a list of all
-        // valid request -> zpool mappings.
-        //
-        // Start from no allocations made yet, a list of allocations to perform
-        // (stored in `requests`), and all of the available zpools on the sled.
-
-        let mut queue = BinaryHeap::new();
-
-        queue.push(IncompleteAllocationList {
-            allocations: vec![],
-            candidates_left: zpools_for_sled
-                .iter()
-                .map(|zpool_get_result| CandidateDataset {
-                    rendezvous_local_storage_unencrypted_dataset_id:
-                        zpool_get_result
-                            .rendezvous_local_storage_unencrypted_dataset_id,
-                    pool_id: zpool_get_result.pool.id(),
-                    sled_id: zpool_get_result.pool.sled_id(),
-                })
-                .collect(),
-            request_index: 0,
-        });
-
-        Some(Self {
-            log: log.clone(),
-            sled_target,
-            instance_id,
-            allocations_to_perform,
-            queue,
-        })
+        // The exact count depends on the rng draw pattern, so leave slack;
+        // anything far from 100 means placement is systematically stranding
+        // space. (At the time of writing, 99 of the 100 seeds succeed.)
+        assert!(
+            succeeded >= 90,
+            "only {succeeded}/100 seeds placed the workload"
+        );
     }
 
-    /// Remove items from the queue if
-    ///
-    /// - the _current_ size usage for the pools now shows that there is not
-    ///   enough room.
-    ///
-    /// - any of the disks requiring an allocation were detached or deleted
-    pub async fn prune_invalidated_allocation_lists(
-        &mut self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        opctx: &OpContext,
-    ) -> LookupResult<()> {
-        // Between when the instance allocation was requested and now, any disk
-        // backed by local storage could have been detached and deleted. Check
-        // for that here, and prune the entire search space if this happened.
+    /// Total free space is not the criterion: each request needs one pool
+    /// that individually fits it.
+    #[test]
+    fn infeasible_despite_total_space() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 500), request(2, 500)],
+            vec![pool(1, 1200), pool(2, 300)],
+            &mut test_rng(),
+        )
+        .unwrap_err();
 
-        let disks: HashMap<Uuid, db::model::Disk> = {
-            use nexus_db_schema::schema::disk::dsl;
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::RequestDoesNotFit { .. }
+        ));
+    }
 
-            let disk_ids: Vec<Uuid> = self
-                .allocations_to_perform
-                .iter()
-                .map(|allocation| allocation.request.id())
-                .collect();
+    #[test]
+    fn more_requests_than_pools() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 1), request(2, 1), request(3, 1)],
+            vec![pool(1, 100), pool(2, 100)],
+            &mut test_rng(),
+        )
+        .unwrap_err();
 
-            dsl::disk
-                .filter(dsl::id.eq_any(disk_ids))
-                .select(db::model::Disk::as_select())
-                .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context("selecting multiple disks failed")
-                })?
-                .into_iter()
-                .map(|disk| (disk.id(), disk))
-                .collect()
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::NotEnoughPools { requests: 3, pools: 2 }
+        ));
+
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 1)],
+            vec![],
+            &mut test_rng(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::NotEnoughPools { requests: 1, pools: 0 }
+        ));
+    }
+
+    #[test]
+    fn no_requests() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![],
+            vec![pool(1, 100)],
+            &mut test_rng(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::NoAllocationsRequired
+        ));
+    }
+
+    fn local_storage_disk(
+        disk_id: Uuid,
+        size: external::ByteCount,
+    ) -> LocalStorageDisk {
+        let params = disk::DiskCreate {
+            identity: external::IdentityMetadataCreateParams {
+                name: format!("disk-{disk_id}").parse().unwrap(),
+                description: String::from("a local storage disk"),
+            },
+
+            disk_backend: disk::DiskBackend::Local {},
+
+            size,
         };
 
-        for allocation in &self.allocations_to_perform {
-            let disk_id = allocation.request.id();
+        LocalStorageDisk::new(
+            db::model::Disk::new(
+                disk_id,
+                ProjectUuid::new_v4(),
+                &params,
+                db::model::BlockSize::AdvancedFormat,
+                db::model::DiskRuntimeState::new(),
+                db::model::DiskType::LocalStorage,
+            ),
+            db::model::DiskTypeLocalStorage::new(disk_id, size).unwrap(),
+        )
+    }
 
-            let Some(disk) = disks.get(&disk_id) else {
-                // Is it possible the disk has been hard-deleted somehow?
-                // Otherwise how would we land here, given that we just created
-                // the map!
-                return Err(Error::internal_error(&format!(
-                    "disk id {disk_id} not found in map"
-                )));
-            };
+    /// Disks that already have an allocation are not re-allocated, and the
+    /// pools those allocations use are not eligible for the remaining disks.
+    #[test]
+    fn existing_allocations_reserve_their_pool() {
+        let sled_id = SledUuid::new_v4();
+        let pool_a = ZpoolUuid::new_v4();
+        let pool_b = ZpoolUuid::new_v4();
 
-            // Prune the entire space if the disk was deleted, or if the disk
-            // was detached.
-            if disk.time_deleted().is_some()
-                || disk.attach_instance_id
-                    != Some(self.instance_id.into_untyped_uuid())
-            {
-                self.queue.clear();
-                return Ok(());
+        let mut zpools_for_sled = IdOrdMap::new();
+        for pool_id in [pool_a, pool_b] {
+            zpools_for_sled
+                .insert_unique(ZpoolGetForSledReservationResult::new_for_test(
+                    db::model::Zpool::new(
+                        pool_id,
+                        sled_id,
+                        PhysicalDiskUuid::new_v4(),
+                        external::ByteCount::from_gibibytes_u32(0).into(),
+                    ),
+                    i64::from(u32::MAX),
+                    DatasetUuid::new_v4(),
+                    0,
+                    0,
+                ))
+                .unwrap();
+        }
+
+        let allocated_disk = {
+            let mut disk = local_storage_disk(
+                Uuid::new_v4(),
+                external::ByteCount::from_gibibytes_u32(1),
+            );
+            disk.local_storage_dataset_allocation =
+                Some(datastore::LocalStorageAllocation::Unencrypted(
+                    db::model::LocalStorageUnencryptedDatasetAllocation::new_for_tests_only(
+                        DatasetUuid::new_v4(),
+                        Utc::now(),
+                        DatasetUuid::new_v4(),
+                        ExternalZpoolUuid::from_untyped_uuid(
+                            pool_a.into_untyped_uuid(),
+                        ),
+                        sled_id,
+                        external::ByteCount::from_gibibytes_u32(1).into(),
+                    ),
+                ));
+            disk
+        };
+
+        let unallocated_disk = local_storage_disk(
+            Uuid::new_v4(),
+            external::ByteCount::from_gibibytes_u32(1),
+        );
+        let unallocated_disk_id = unallocated_disk.id();
+
+        let allocations = choose_local_storage_allocations(
+            &zpools_for_sled,
+            &[allocated_disk, unallocated_disk],
+            &mut test_rng(),
+        )
+        .unwrap();
+
+        // Only the unallocated disk gets an allocation, and it lands on the
+        // pool the existing allocation does not use.
+        assert_eq!(allocations.len(), 1);
+        assert_eq!(
+            allocations[0].disk_id.into_untyped_uuid(),
+            unallocated_disk_id,
+        );
+        assert_eq!(allocations[0].pool_id, pool_b);
+    }
+
+    /// Backtracking search for any assignment of requests to distinct
+    /// fitting pools, used to check the greedy pairing against ground truth.
+    fn matching_exists(
+        requests: &[i64],
+        pools: &[i64],
+        used: &mut Vec<bool>,
+    ) -> bool {
+        let Some((first, rest)) = requests.split_first() else {
+            return true;
+        };
+
+        for (i, headroom) in pools.iter().enumerate() {
+            if !used[i] && first < headroom {
+                used[i] = true;
+                if matching_exists(rest, pools, used) {
+                    return true;
+                }
+                used[i] = false;
             }
         }
 
-        // Prune incomplete allocations that are no longer valid.
-
-        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
-            &conn,
-            opctx,
-            self.sled_target,
-        )
-        .await
-        .internal_context("zpool_get_for_sled_reservation failed")?;
-
-        self.queue.retain(|incomplete_allocation_list| {
-            // An incomplete allocation list has a set of local storage
-            // allocations that were matched to zpools with available space:
-            //
-            // | allocation -> zpool | allocation -> zpool | ...
-            //
-            // Check that each of of these is still valid: this iterator was
-            // constructed from a `ZpoolGetForSledReservationResult` that was
-            // taken previously, and other sled reservations (or crucible
-            // allocations!) may have consumed space that was previously free.
-            // If the sled reservation query was run for one of these
-            // allocations it would always fail.
-            //
-            // Do not retain an incomplete allocation list if any of the
-            // allocations are no longer valid. This also prunes the search
-            // space, as going any further would not make sense.
-
-            for allocation in &incomplete_allocation_list.allocations {
-                match zpools_for_sled.get(&allocation.pool_id) {
-                    Some(zpool_for_sled) => {
-                        // Zpool still exists and is still a valid target, does
-                        // it still have room?
-
-                        if !zpool_for_sled.has_room_for_allocation(
-                            allocation.required_dataset_size,
-                        ) {
-                            // Do not retain this incomplete list of
-                            // allocations: one of them is no longer valid.
-                            return false;
-                        }
-                    }
-
-                    None => {
-                        // Zpool doesn't exist anymore or it's no longer a valid
-                        // target (for example due to being marked
-                        // no_provision).
-                        return false;
-                    }
-                }
-            }
-
-            // by default, continue searching further
-            true
-        });
-
-        Ok(())
+        false
     }
-}
 
-impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
-    type Item = NonEmpty<LocalStorageAllocation>;
+    proptest! {
+        /// The greedy pairing succeeds exactly when some valid assignment
+        /// exists, and its output is well formed.
+        #[test]
+        fn greedy_matches_brute_force(
+            request_sizes in proptest::collection::vec(0..16i64, 1..=6),
+            pool_headrooms in proptest::collection::vec(0..16i64, 0..=8),
+            seed in proptest::prelude::any::<u64>(),
+        ) {
+            let requests: Vec<LocalStorageRequest> = request_sizes
+                .iter()
+                .enumerate()
+                .map(|(i, size)| request(i as u128 + 1, *size))
+                .collect();
 
-    fn next(&mut self) -> Option<Self::Item> {
-        // For each incomplete allocation list:
-        //
-        // - find the next request to allocate for
-        //
-        // - select a local storage dataset from the list of local storage
-        //   datasets that have not been used yet that could fulfill that
-        //   request
-        //
-        // - remove that selected local storage dataset from the list of
-        //   candidates
-        //
-        // - add that to the queue
-        //
-        // A list of allocations as complete if all requests have been matched
-        // with a local storage dataset.
+            let pools: Vec<LocalStorageCandidatePool> = pool_headrooms
+                .iter()
+                .enumerate()
+                .map(|(i, headroom)| pool(i as u128 + 1, *headroom))
+                .collect();
 
-        while let Some(incomplete_allocation_list) = self.queue.pop() {
-            let IncompleteAllocationList {
-                allocations,
-                candidates_left,
-                request_index,
-            } = incomplete_allocation_list;
+            let mut used = vec![false; pool_headrooms.len()];
+            let expect_feasible = pool_headrooms.len() >= request_sizes.len()
+                && matching_exists(&request_sizes, &pool_headrooms, &mut used);
 
-            // If we have an allocation for each possible allocation, this one
-            // is complete.
-            if request_index == self.allocations_to_perform.len() {
-                let allocations_len = allocations.len();
+            match pair_local_storage_requests_to_pools(
+                requests,
+                pools,
+                &mut StdRng::seed_from_u64(seed),
+            ) {
+                Ok(allocations) => {
+                    prop_assert!(expect_feasible);
 
-                match NonEmpty::from_vec(allocations) {
-                    Some(allocations) => {
-                        return Some(allocations);
-                    }
+                    prop_assert_eq!(allocations.len(), request_sizes.len());
 
-                    None => {
-                        // There should be `request_index` entries in the
-                        // `allocations` vec, this is weird!
-                        error!(
-                            &self.log,
-                            "expected {request_index} in the \
-                            allocations vec, saw {allocations_len}",
+                    let disk_ids: HashSet<DiskUuid> =
+                        allocations.iter().map(|a| a.disk_id).collect();
+                    prop_assert_eq!(disk_ids.len(), allocations.len());
+
+                    let pool_ids: HashSet<ZpoolUuid> =
+                        allocations.iter().map(|a| a.pool_id).collect();
+                    prop_assert_eq!(pool_ids.len(), allocations.len());
+
+                    for allocation in &allocations {
+                        let headroom = pool_headrooms[usize::try_from(
+                            allocation
+                                .pool_id
+                                .into_untyped_uuid()
+                                .as_u128()
+                                - 1,
+                        )
+                        .unwrap()];
+
+                        prop_assert!(
+                            allocation.required_dataset_size < headroom
                         );
                     }
                 }
 
-                continue;
-            }
-
-            // Try to allocate the Nth possible allocation
-            let request = &self.allocations_to_perform[request_index];
-
-            // Create a possible config based on the what datasets are
-            // left, and the candidate datasets for this request.
-            for candidate_dataset in &request.candidate_datasets {
-                if candidates_left.contains(candidate_dataset) {
-                    // This request could be satisfied by this dataset.
-                    // Select it and search further.
-
-                    let mut set_allocations = allocations.clone();
-                    set_allocations.push(LocalStorageAllocation {
-                        disk_id: request.request.id(),
-
-                        local_storage_unencrypted_dataset_allocation_id:
-                            DatasetUuid::new_v4(),
-
-                        required_dataset_size: {
-                            let request_size: i64 =
-                                request.request.size().to_bytes() as i64
-                                    + request
-                                        .request
-                                        .required_dataset_overhead()
-                                        .to_bytes()
-                                        as i64;
-                            request_size
-                        },
-
-                        local_storage_unencrypted_dataset_id: candidate_dataset
-                            .rendezvous_local_storage_unencrypted_dataset_id,
-
-                        pool_id: candidate_dataset.pool_id,
-
-                        sled_id: candidate_dataset.sled_id,
-                    });
-
-                    // Note by removing a candidate dataset from the list in
-                    // this way, this step mandates that a single local storage
-                    // dataset is not used for multiple local storage
-                    // allocations for a given instance.
-
-                    let mut set_candidates_left = candidates_left.clone();
-                    set_candidates_left.remove(candidate_dataset);
-
-                    self.queue.push(IncompleteAllocationList {
-                        allocations: set_allocations,
-                        candidates_left: set_candidates_left,
-                        request_index: request_index + 1,
-                    });
+                Err(reason) => {
+                    prop_assert!(
+                        !expect_feasible,
+                        "greedy failed ({reason}) but a valid assignment \
+                        exists",
+                    );
                 }
-
-                // Else there are no candidate datasets left for this request,
-                // and therefore the list of requests cannot be fulfilled by the
-                // current mapping of requests to datasets
             }
         }
-
-        None
     }
 }
 
@@ -815,14 +1100,12 @@ pub struct MigrateSuccessUpdate {
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Returns the sled, and whether or not it was updated on success.
-    ///
     /// Returns an error if `sled_agent_gen` is stale, or the sled is
     /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<(Sled, bool)> {
+    ) -> CreateResult<Sled> {
         use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
@@ -830,7 +1113,7 @@ impl DataStore {
         let insertable_sled = sled_update.clone().into_insertable();
         let now = insertable_sled.time_modified();
 
-        let sled = diesel::insert_into(dsl::sled)
+        diesel::insert_into(dsl::sled)
             .values(insertable_sled)
             .on_conflict(dsl::id)
             .do_update()
@@ -846,9 +1129,13 @@ impl DataStore {
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
                 dsl::cpu_family.eq(sled_update.cpu_family),
-                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
+                dsl::sled_agent_gen
+                    .eq(to_db_typed_generation(sled_update.sled_agent_gen)),
             ))
-            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
+            .filter(
+                dsl::sled_agent_gen
+                    .lt(to_db_typed_generation(sled_update.sled_agent_gen)),
+            )
             .filter(dsl::sled_state.ne(SledState::Decommissioned))
             .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
@@ -861,12 +1148,7 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })?;
-
-        // We compare only seconds since the epoch, because writing to and
-        // reading from the database causes us to lose precision.
-        let was_modified = now.timestamp() == sled.time_modified().timestamp();
-        Ok((sled, was_modified))
+            })
     }
 
     /// Returns true if a sled exists and is in-service, false if not.
@@ -918,14 +1200,14 @@ impl DataStore {
             .get_result_async::<DbTypedUuid<RackKind>>(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(TransactionError::Database)?;
 
         Ok(rack_id.map(RackUuid::from))
     }
 
-    // Return the commissioned sled if it exists in the given rack, given its
+    // Return the in-service sled if it exists in the given rack, given its
     // `BaseboardId`.
-    pub async fn sled_get_commissioned_by_baseboard_and_rack_id(
+    pub async fn sled_get_in_service_by_baseboard_and_rack_id(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
@@ -939,7 +1221,7 @@ impl DataStore {
             .filter(dsl::part_number.eq(baseboard_id.part_number))
             .filter(dsl::serial_number.eq(baseboard_id.serial_number))
             .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
-            .sled_filter(SledFilter::Commissioned)
+            .sled_filter(SledFilter::InService)
             .select(Sled::as_select())
             .get_result_async::<Sled>(conn)
             .await
@@ -947,6 +1229,29 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(sled)
+    }
+
+    /// Return the baseboards of every in-service sled in `rack_id`.
+    pub async fn sled_list_in_service_baseboards_in_rack_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<BTreeSet<BaseboardId>, TransactionError<Error>> {
+        use nexus_db_schema::schema::sled::dsl;
+        let baseboards = dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .sled_filter(SledFilter::InService)
+            .select((dsl::part_number, dsl::serial_number))
+            .load_async::<(String, String)>(conn)
+            .await?;
+
+        Ok(baseboards
+            .into_iter()
+            .map(|(part_number, serial_number)| BaseboardId {
+                part_number,
+                serial_number,
+            })
+            .collect())
     }
 
     pub async fn sled_list(
@@ -1016,6 +1321,7 @@ impl DataStore {
             resources,
             constraints,
             reservation_reason,
+            &mut StdRng::from_os_rng(),
         )
         .await
         .map_err(|e| match e {
@@ -1027,6 +1333,7 @@ impl DataStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn sled_reservation_create_inner(
         &self,
         opctx: &OpContext,
@@ -1035,6 +1342,7 @@ impl DataStore {
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
         reservation_reason: SledReservationReason,
+        rng: &mut StdRng,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
         let log = opctx.log.new(o!(
@@ -1096,12 +1404,13 @@ impl DataStore {
         // arguments to this function.
         let maybe_must_use_sleds: Option<HashSet<SledUuid>> =
             if let Some(must_select_from) = constraints.must_select_from() {
-                let set = must_select_from.into_iter().cloned().collect();
+                let set = must_select_from.clone();
                 info!(&log, "reservation constrained to sleds {set:?}");
                 Some(set)
             } else {
                 None
             };
+        let maybe_must_not_use_sleds = constraints.must_not_select_from();
 
         // If any local storage disks have been allocated already, then this
         // constrains VMM placement and where other unallocated local storage
@@ -1208,67 +1517,24 @@ impl DataStore {
             &resources,
             constraints.cpu_families(),
         )
-            .get_results_async::<(
-                // Sled UUID
-                Uuid,
-                // Would an allocation to this sled fit?
-                bool,
-                // Affinity policy on this sled
-                Option<AffinityPolicy>,
-                // Anti-affinity policy on this sled
-                Option<AffinityPolicy>,
-            )>(&*conn).await?;
+        .get_results_async::<SledFindTargetsRow>(&*conn)
+        .await?;
 
         // Translate the database results into a format which we can use to pick
         // a sled using more complex rules.
         //
         // See: `pick_sled_reservation_target(...)`
-        let mut sled_targets = HashSet::new();
-        let mut banned = HashSet::new();
-        let mut unpreferred = HashSet::new();
-        let mut required = HashSet::new();
-        let mut preferred = HashSet::new();
-
-        for (sled_id, fits, affinity_policy, anti_affinity_policy) in
-            possible_sleds
-        {
-            // this is required because [`sled_find_targets_query`] returns a
-            // query where the first element in the tuple is
-            // ['`sql_types::Uuid`], and typed uuids can't be returned in
-            // queries like this.
-            let sled_id = SledUuid::from_untyped_uuid(sled_id);
-
-            if fits {
-                // If there is a Some list of sleds to select from, only add
-                // this target if it is in that list. A None list means that any
-                // sled could be a target.
-                match &maybe_must_use_sleds {
-                    Some(must_use_sleds) => {
-                        if must_use_sleds.contains(&sled_id) {
-                            sled_targets.insert(sled_id);
-                        }
-                    }
-
-                    None => {
-                        sled_targets.insert(sled_id);
-                    }
-                }
-            }
-
-            if let Some(policy) = affinity_policy {
-                match policy {
-                    AffinityPolicy::Fail => required.insert(sled_id),
-                    AffinityPolicy::Allow => preferred.insert(sled_id),
-                };
-            }
-
-            if let Some(policy) = anti_affinity_policy {
-                match policy {
-                    AffinityPolicy::Fail => banned.insert(sled_id),
-                    AffinityPolicy::Allow => unpreferred.insert(sled_id),
-                };
-            }
-        }
+        let SledTargetSets {
+            targets: mut sled_targets,
+            mut banned,
+            mut unpreferred,
+            required,
+            mut preferred,
+        } = classify_sled_targets(
+            possible_sleds,
+            maybe_must_use_sleds.as_ref(),
+            maybe_must_not_use_sleds,
+        );
 
         // Prior to R18, all Disks using the encrypted local storage dataset
         // should have been deleted, and we will be revisiting how to do
@@ -1302,9 +1568,11 @@ impl DataStore {
 
         info!(&log, "sled targets: {sled_targets:?}");
 
-        let local_storage_allocation_required = local_storage_disks
+        let disks_needing_allocation = local_storage_disks
             .iter()
-            .any(|disk| disk.local_storage_dataset_allocation.is_none());
+            .filter(|disk| disk.local_storage_dataset_allocation.is_none())
+            .count();
+        let local_storage_allocation_required = disks_needing_allocation > 0;
 
         info!(
             &log,
@@ -1319,7 +1587,7 @@ impl DataStore {
         // In the uncontended case, however, we'll only iterate through this
         // loop once.
 
-        'sled_reservation: loop {
+        loop {
             // Pick a reservation target, given the constraints we previously
             // saw in the database.
             let sled_target = pick_sled_reservation_target(
@@ -1419,87 +1687,90 @@ impl DataStore {
                     }
                 };
             } else {
-                // If local storage allocation is required, match the requests
-                // with all the zpools of this sled that have available space.
-                // The `CompleteLocalStorageAllocationLists` iterator finds all
-                // possible configurations that would satisfy the requests for
-                // local storage and tries them all.
-
-                let zpools_for_sled =
-                    DataStore::zpool_get_for_sled_reservation(
+                // Local storage allocation is required. Choose an assignment
+                // of unallocated disks to distinct zpools from a fresh
+                // snapshot of the sled's zpools, then let the insert CTE
+                // re-validate everything atomically. If the CTE inserts zero
+                // rows, the snapshot went stale between the fetch and the
+                // insert (concurrent reservations, crucible allocations, or
+                // pool and dataset policy changes): take a new snapshot and
+                // try again, a bounded number of times, before moving to the
+                // next sled.
+                let mut zpools_for_sled =
+                    DataStore::zpool_get_for_sled_reservation_on_conn(
                         &conn,
                         &opctx,
                         sled_target,
                     )
                     .await?;
 
-                if zpools_for_sled.is_empty() {
-                    warn!(&log, "no zpools for {sled_target:?}?");
-
-                    sled_targets.remove(&sled_target);
-                    banned.remove(&sled_target);
-                    unpreferred.remove(&sled_target);
-                    preferred.remove(&sled_target);
-
-                    continue 'sled_reservation;
-                };
-
-                let mut complete_allocation_lists =
-                    match CompleteLocalStorageAllocationLists::new(
-                        &log,
-                        sled_target,
-                        instance_id,
-                        zpools_for_sled,
-                        &local_storage_disks,
-                    ) {
-                        Some(complete_allocation_lists) => {
-                            complete_allocation_lists
-                        }
-
-                        None => {
-                            // Cannot use this sled, as no complete allocation
-                            // lists exist: `new` will have logged why, so try
-                            // another sled.
-
-                            sled_targets.remove(&sled_target);
-                            banned.remove(&sled_target);
-                            unpreferred.remove(&sled_target);
-                            preferred.remove(&sled_target);
-
-                            continue 'sled_reservation;
-                        }
-                    };
-
-                // Search for each complete set of local storage allocations
-                // required, and attempt the sled insert resource query with
-                // that particular set.
+                // We only retry here when we fail due to a concurrent
+                // reservation making our proposed allocation invalid. When this
+                // happens, at least one of our proposed (disk, zpool) pairings
+                // must no longer fit.
                 //
-                // If the `complate_allocation_lists` iterator returns None,
-                // control will exit the `local_storage_allocation_search` loop,
-                // which will then try the next possible sled target. In the
-                // case where there were pre-existing local storage allocations
-                // there will _not_ be any more sleds to try and the user will
-                // see a capacity error.
+                // In scenarios where concurrent actors are performing
+                // allocations (and not freeing anything!), a pairing that stops
+                // fitting never fits again. Since we'll only propose pairings
+                // that fit on a newer snapshot, each failed attempt removes
+                // one of these pairings.
+                // There are only disks * zpools pairings, so the sled runs out
+                // of pairings before this budget runs out.
+                //
+                // Admittedly: concurrent frees can revive pairings; under
+                // sustained free-and-reallocate churn we may give up on the
+                // sled before it theoretically could satisfy an allocation
+                // request.
+                let max_attempts =
+                    disks_needing_allocation * zpools_for_sled.len();
 
-                'local_storage_allocation_search: loop {
-                    // If other concurrent sled reservations are not taken into
-                    // account, another sled reservation could allocate local
-                    // storage onto the same pools that this one considers
-                    // candidates, and then this iterator will return
-                    // allocations that will never work. Because the iterator
-                    // searches for _every_ possible combination, this will end
-                    // up searching for a long time. It's important to prune the
-                    // list that we're searching from!
+                'attempts: for attempt in 0..max_attempts {
+                    if attempt > 0 {
+                        // The previous insert lost its race; take a fresh
+                        // snapshot.
+                        zpools_for_sled =
+                            DataStore::zpool_get_for_sled_reservation_on_conn(
+                                &conn,
+                                &opctx,
+                                sled_target,
+                            )
+                            .await?;
+                    }
 
-                    complete_allocation_lists
-                        .prune_invalidated_allocation_lists(&conn, &opctx)
-                        .await?;
+                    let allocations = match choose_local_storage_allocations(
+                        &zpools_for_sled,
+                        &local_storage_disks,
+                        rng,
+                    ) {
+                        Ok(allocations) => allocations,
 
-                    let Some(allocations) = complete_allocation_lists.next()
-                    else {
-                        // All done searching, nothing worked. Try another
-                        // sled!
-                        break 'local_storage_allocation_search;
+                        Err(
+                            LocalStorageUnsatisfiable::NoAllocationsRequired,
+                        ) => {
+                            // This branch is only entered when at least one
+                            // disk needs an allocation.
+                            return Err(
+                                SledReservationTransactionError::Connection(
+                                    Error::internal_error(
+                                        "local storage allocation required, \
+                                        but no disks need an allocation",
+                                    ),
+                                ),
+                            );
+                        }
+
+                        Err(reason) => {
+                            // The greedy pairing failing means no assignment
+                            // exists on this sled with the current data. Try
+                            // another sled.
+                            info!(
+                                &log,
+                                "sled {sled_target} cannot satisfy local \
+                                storage allocations: {reason}",
+                            );
+
+                            break 'attempts;
+                        }
                     };
 
                     info!(
@@ -1527,11 +1798,36 @@ impl DataStore {
                                 return Ok(resource);
                             }
 
-                            // Ending up here without inserting any rows is
-                            // expected during concurrent reservations requiring
-                            // local storage allocations, but repeatedly ending
-                            // up here without pruning any allocations is likely
-                            // a bug.
+                            // Zero rows means one of the CTE's local storage
+                            // validity checks failed even though our snapshot
+                            // said everything fit (the sled-level checks all
+                            // raise sentinel errors instead). Either the
+                            // snapshot went stale, or a disk was deleted or
+                            // detached concurrently. In the latter case no
+                            // sled can ever satisfy this reservation, so fail
+                            // now instead of retrying here and on every other
+                            // sled.
+                            if any_request_disk_deleted_or_detached(
+                                &conn,
+                                instance_id,
+                                &local_storage_disks,
+                            )
+                            .await?
+                            {
+                                info!(
+                                    &log,
+                                    "local storage disk deleted or detached \
+                                    during reservation",
+                                );
+
+                                return Err(
+                                    SledReservationTransactionError::Reservation(
+                                        SledReservationError::NotFound,
+                                    ),
+                                );
+                            }
+
+                            // Stale snapshot: take a fresh one and recompute.
                         }
 
                         Err(diesel::result::Error::DatabaseError(
@@ -1556,32 +1852,15 @@ impl DataStore {
                                 &e,
                                 &SLED_INSERT_QUERY_SENTINELS,
                             ) {
-                                // Concurrent sled reservations could have
-                                // allocated enough hardware threads, RSS RAM,
-                                // and/or reservoir RAM that means this
-                                // sled_target is no longer valid.
-                                //
-                                // Alternatively, a concurrent reservation could
-                                // have allocated another instance to this sled
-                                // target which makes it invalid for this
-                                // instance we are trying to allocate due to
-                                // affinity / anti-affinity constraints.
-                                //
-                                // Both of these cases are not a problem when
-                                // _not_ performing local storage allocations:
-                                // in that branch, when the insert query returns
-                                // that it inserted 0 rows or returned an error
-                                // sentinel, another sled_target will be chosen
-                                // right away.
-                                //
-                                // If a sentinel is returned, the insert query
-                                // isn't succeeding for reasons other than the
-                                // available space for local storage. If we
-                                // don't bail out here, the loop will keep
-                                // searching through permutations of local
-                                // storage allocations to try. Bail out of the
-                                // search right away and pick another
-                                // sled_target.
+                                // Sentinels indicate a sled-level problem:
+                                // concurrent reservations could have consumed
+                                // enough hardware threads, RSS RAM, and/or
+                                // reservoir RAM that this sled_target is no
+                                // longer valid, or another instance landed
+                                // here and now violates affinity or
+                                // anti-affinity constraints. Recomputing the
+                                // local storage assignment cannot help; pick
+                                // another sled_target.
 
                                 let reason = sentinel_to_reason(sentinel);
                                 info!(
@@ -1590,7 +1869,7 @@ impl DataStore {
                                     "sentinel" => sentinel,
                                 );
 
-                                break 'local_storage_allocation_search;
+                                break 'attempts;
                             } else {
                                 // The query failed, return this as an error
                                 error!(
@@ -1606,6 +1885,10 @@ impl DataStore {
                         }
                     }
                 }
+
+                // Attempts exhausted or this sled cannot satisfy the
+                // allocations; fall through to remove this sled from the
+                // candidate set and try another.
             }
 
             sled_targets.remove(&sled_target);
@@ -1743,7 +2026,7 @@ impl DataStore {
     ) -> Result<SledPolicy, TransitionError> {
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
-        let sled_id = to_db_typed_uuid(authz_sled.id());
+        let sled_id = authz_sled.id();
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
         let policy = self
@@ -1752,101 +2035,14 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    let t = SledTransition::Policy(new_sled_policy);
-                    let valid_old_policies = t.valid_old_policies();
-                    let valid_old_states = t.valid_old_states();
-
-                    use nexus_db_schema::schema::sled::dsl;
-                    let query = diesel::update(dsl::sled)
-                        .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(sled_id));
-
-                    let query = match check {
-                        ValidateTransition::Yes => query
-                            .filter(
-                                dsl::sled_policy.eq_any(
-                                    valid_old_policies
-                                        .into_iter()
-                                        .map(to_db_sled_policy),
-                                ),
-                            )
-                            .filter(
-                                dsl::sled_state
-                                    .eq_any(valid_old_states.iter().copied()),
-                            )
-                            .into_boxed(),
-                        #[cfg(test)]
-                        ValidateTransition::No => query.into_boxed(),
-                    };
-
-                    let query = query
-                        .set((
-                            dsl::sled_policy
-                                .eq(to_db_sled_policy(new_sled_policy)),
-                            dsl::time_modified.eq(Utc::now()),
-                        ))
-                        .check_if_exists::<Sled>(sled_id);
-
-                    let result = query.execute_and_check(&conn).await?;
-
-                    let old_policy = match (check, result.status) {
-                        (ValidateTransition::Yes, UpdateStatus::Updated) => {
-                            result.found.policy()
-                        }
-                        (
-                            ValidateTransition::Yes,
-                            UpdateStatus::NotUpdatedButExists,
-                        ) => {
-                            // Two reasons this can happen:
-                            // 1. An idempotent update: this is treated as a
-                            //    success.
-                            // 2. Invalid state transition: a failure.
-                            //
-                            // To differentiate between the two, check that the
-                            // new policy is the same as the old policy, and
-                            // that the old state is valid.
-                            if result.found.policy() == new_sled_policy
-                                && valid_old_states
-                                    .contains(&result.found.state())
-                            {
-                                result.found.policy()
-                            } else {
-                                return Err(err.bail(
-                                    TransitionError::InvalidTransition {
-                                        current: result.found,
-                                        transition: SledTransition::Policy(
-                                            new_sled_policy,
-                                        ),
-                                    },
-                                ));
-                            }
-                        }
-                        #[cfg(test)]
-                        (ValidateTransition::No, _) => result.found.policy(),
-                    };
-
-                    // When a sled is expunged, the associated disks with that
-                    // sled should also be implicitly set to expunged.
-                    let new_disk_policy = match new_sled_policy {
-                        SledPolicy::InService { .. } => None,
-                        SledPolicy::Expunged => {
-                            Some(nexus_db_model::PhysicalDiskPolicy::Expunged)
-                        }
-                    };
-                    if let Some(new_disk_policy) = new_disk_policy {
-                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
-                        diesel::update(physical_disk_dsl::physical_disk)
-                            .filter(physical_disk_dsl::time_deleted.is_null())
-                            .filter(physical_disk_dsl::sled_id.eq(sled_id))
-                            .set(
-                                physical_disk_dsl::disk_policy
-                                    .eq(new_disk_policy),
-                            )
-                            .execute_async(&conn)
-                            .await?;
-                    }
-
-                    Ok(old_policy)
+                    Self::sled_set_policy_conn(
+                        &conn,
+                        sled_id,
+                        new_sled_policy,
+                        check,
+                        &err,
+                    )
+                    .await
                 }
             })
             .await
@@ -1860,6 +2056,184 @@ impl DataStore {
                 ))
             })?;
         Ok(policy)
+    }
+
+    /// Load up the trust quorum configuration, ensure that it allows this sled
+    /// to be expunged, and expunge it if it does.
+    ///
+    /// This method is idempotent: if the sled is already expunged, it returns
+    /// `Ok(SledPolicy::Expunged)`. (The upcoming background task that's part of
+    /// RFD 747 relies on this behavior.)
+    pub async fn sled_set_policy_to_expunged_if_trust_quorum_allows(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        authz_tq: &authz::TrustQuorumConfig,
+        baseboard_id: &BaseboardId,
+    ) -> Result<SledPolicy, external::Error> {
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+        opctx.authorize(authz::Action::Read, authz_tq).await?;
+
+        let sled_id = authz_sled.id();
+        let rack_id = authz_tq.rack().id();
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper(
+            "sled_set_policy_to_expunged_if_trust_quorum_allows",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+
+            async move {
+                let current = {
+                    use nexus_db_schema::schema::sled::dsl;
+                    dsl::sled
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(to_db_typed_uuid(sled_id)))
+                        .select(Sled::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?
+                };
+                // If the sled is already expunged, skip the trust quorum check.
+                // This way, expungement is idempotent.
+                let already_expunged = match current.as_ref().map(Sled::policy)
+                {
+                    Some(SledPolicy::Expunged) => true,
+                    Some(SledPolicy::InService { .. }) | None => false,
+                };
+                if !already_expunged {
+                    async {
+                        let (config, _) =
+                            Self::tq_load_latest_possible_committed_config_conn(
+                                &conn, rack_id,
+                            )
+                            .await?;
+                        check_trust_quorum_allows_expunge(
+                            sled_id,
+                            baseboard_id,
+                            &config,
+                        )?;
+                        Ok::<_, TransactionError<Error>>(())
+                    }
+                    .await
+                    .map_err(|error| match error {
+                        TransactionError::Database(error) => error,
+                        TransactionError::CustomError(error) => {
+                            err.bail(TransitionError::External(error))
+                        }
+                    })?;
+                }
+
+                Self::sled_set_policy_conn(
+                    &conn,
+                    sled_id,
+                    SledPolicy::Expunged,
+                    ValidateTransition::Yes,
+                    &err,
+                )
+                .await
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            }
+            TransitionError::from(public_error_from_diesel(
+                e,
+                ErrorHandler::Server,
+            ))
+        })
+        .map_err(|error| error.into_external_error())
+    }
+
+    async fn sled_set_policy_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+        new_sled_policy: SledPolicy,
+        check: ValidateTransition,
+        err: &OptionalError<TransitionError>,
+    ) -> Result<SledPolicy, DieselError> {
+        let sled_id = to_db_typed_uuid(sled_id);
+        let t = SledTransition::Policy(new_sled_policy);
+        let valid_old_policies = t.valid_old_policies();
+        let valid_old_states = t.valid_old_states();
+
+        use nexus_db_schema::schema::sled::dsl;
+        let query = diesel::update(dsl::sled)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(sled_id));
+
+        let query = match check {
+            ValidateTransition::Yes => query
+                .filter(dsl::sled_policy.eq_any(
+                    valid_old_policies.into_iter().map(to_db_sled_policy),
+                ))
+                .filter(
+                    dsl::sled_state.eq_any(valid_old_states.iter().copied()),
+                )
+                .into_boxed(),
+            #[cfg(test)]
+            ValidateTransition::No => query.into_boxed(),
+        };
+
+        let query = query
+            .set((
+                dsl::sled_policy.eq(to_db_sled_policy(new_sled_policy)),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .check_if_exists::<Sled>(sled_id);
+
+        let result = query.execute_and_check(conn).await?;
+
+        let old_policy = match (check, result.status) {
+            (ValidateTransition::Yes, UpdateStatus::Updated) => {
+                result.found.policy()
+            }
+            (ValidateTransition::Yes, UpdateStatus::NotUpdatedButExists) => {
+                // Two reasons this can happen:
+                // 1. An idempotent update: this is treated as a
+                //    success.
+                // 2. Invalid state transition: a failure.
+                //
+                // To differentiate between the two, check that the
+                // new policy is the same as the old policy, and
+                // that the old state is valid.
+                if result.found.policy() == new_sled_policy
+                    && valid_old_states.contains(&result.found.state())
+                {
+                    result.found.policy()
+                } else {
+                    return Err(err.bail(TransitionError::InvalidTransition {
+                        current: result.found,
+                        transition: SledTransition::Policy(new_sled_policy),
+                    }));
+                }
+            }
+            #[cfg(test)]
+            (ValidateTransition::No, _) => result.found.policy(),
+        };
+
+        // When a sled is expunged, the associated disks with that
+        // sled should also be implicitly set to expunged.
+        let new_disk_policy = match new_sled_policy {
+            SledPolicy::InService { .. } => None,
+            SledPolicy::Expunged => {
+                Some(nexus_db_model::PhysicalDiskPolicy::Expunged)
+            }
+        };
+        if let Some(new_disk_policy) = new_disk_policy {
+            use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+            diesel::update(physical_disk_dsl::physical_disk)
+                .filter(physical_disk_dsl::time_deleted.is_null())
+                .filter(physical_disk_dsl::sled_id.eq(sled_id))
+                .set(physical_disk_dsl::disk_policy.eq(new_disk_policy))
+                .execute_async(conn)
+                .await?;
+        }
+
+        Ok(old_policy)
     }
 
     /// Marks the state of the sled as decommissioned, as believed by Nexus.
@@ -2169,6 +2543,9 @@ impl TransitionError {
 pub(in crate::db::datastore) mod test {
     use super::*;
     use crate::db;
+    use crate::db::datastore::SledBpAvailabilityUpsertOutcome;
+    use crate::db::datastore::SledBpAvailabilityWrite;
+    use crate::db::datastore::SledBpAvailabilityWriteOutcome;
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
@@ -2181,8 +2558,20 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::create_affinity_group;
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_filtered;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
+    use crate::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
     use crate::db::pub_test_utils::helpers::small_resource_request;
+    use crate::db::pub_test_utils::simulated_sleds::apply_sled_bp_availability;
+    use crate::db::pub_test_utils::simulated_sleds::initialize_sled_bp_availability;
+    use crate::db::pub_test_utils::simulated_sleds::sled_updates_from_system;
+    use crate::db::pub_test_utils::simulated_sleds::test_sled_resources;
+    use crate::db::pub_test_utils::simulated_sleds::upsert_sleds_from_system;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use crate::db::queries::sled_reservation::BANNED_SLEDS_SENTINEL;
+    use crate::db::queries::sled_reservation::REQUIRED_SLEDS_SENTINEL;
+    use crate::db::queries::sled_reservation::SLED_BP_AVAILABLE_SENTINEL;
+    use crate::db::queries::sled_reservation::SLED_HAS_SPACE_SENTINEL;
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -2191,12 +2580,25 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
-    use nexus_db_model::{Generation, SledCpuFamily};
+    use nexus_db_model::SledBlueprintAvailabilityInput;
+    use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::example::ExampleSystem;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_reconfigurator_planning::system::SimulatedSledResources;
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
+    use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::external_api::{affinity, disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
+    use omicron_generation_kinds::SledRegistrationGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AffinityGroupUuid;
     use omicron_uuid_kinds::AntiAffinityGroupUuid;
@@ -2207,19 +2609,95 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use predicates::{BoxPredicate, prelude::*};
+    use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
+
+    #[tokio::test]
+    async fn test_sled_get_in_service_by_baseboard_and_rack_id() {
+        let logctx = dev::test_setup_log(
+            "test_sled_get_in_service_by_baseboard_and_rack_id",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let rack_id = RackUuid::new_v4();
+        let baseboard_id = BaseboardId {
+            part_number: "test-part".to_string(),
+            serial_number: "test-serial".to_string(),
+        };
+        let lookup = async |rack_id| {
+            datastore
+                .sled_get_in_service_by_baseboard_and_rack_id(
+                    opctx,
+                    rack_id,
+                    baseboard_id.clone(),
+                )
+                .await
+                .expect("looked up sled by baseboard")
+                .map(|sled| sled.id())
+        };
+
+        let sled_id =
+            sled_upsert_for_baseboard(datastore, rack_id, &baseboard_id)
+                .await
+                .id();
+        let (authz_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .expect("looked up sled");
+
+        assert_eq!(lookup(rack_id).await, Some(sled_id));
+        assert_eq!(lookup(RackUuid::new_v4()).await, None);
+
+        // Non-provisionable is still in service.
+        datastore
+            .sled_set_provision_policy(
+                opctx,
+                &authz_sled,
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .expect("set sled non-provisionable");
+        assert_eq!(lookup(rack_id).await, Some(sled_id));
+
+        // Expunged but not yet decommissioned is still commissioned, but not in
+        // service.
+        datastore
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .await
+            .expect("expunged sled");
+        let (_, sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch()
+            .await
+            .expect("looked up sled");
+        assert_eq!(sled.state(), SledState::Active);
+        assert_eq!(lookup(rack_id).await, None);
+
+        datastore
+            .sled_set_state_to_decommissioned(opctx, &authz_sled)
+            .await
+            .expect("decommissioned sled");
+        assert_eq!(lookup(rack_id).await, None);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn upsert_sled_updates_hardware() {
         let logctx = dev::test_setup_log("upsert_sled_updates_hardware");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
 
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
@@ -2234,23 +2712,23 @@ pub(in crate::db::datastore) mod test {
         );
 
         // Fail the update, since the generation number didn't change.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Bump the generation number so the next insert succeeds.
-        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
 
         // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
         // Now reset the generation to a lower value and try again.
         // This should fail.
         let current_gen = sled_update.sled_agent_gen;
-        sled_update.sled_agent_gen = Generation::new();
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        sled_update.sled_agent_gen = SledRegistrationGeneration::new();
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
         // Now bump the generation from the saved `current_gen`
         // Change the reservoir value again. This should succeed.
@@ -2260,14 +2738,15 @@ pub(in crate::db::datastore) mod test {
             )
             .unwrap(),
         );
-        sled_update.sled_agent_gen.0 = current_gen.0.next();
+        sled_update.sled_agent_gen = current_gen.next();
         // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
-        assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
+        assert_eq!(
+            SledRegistrationGeneration::from(observed_sled.sled_agent_gen),
+            sled_update.sled_agent_gen
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2281,8 +2760,8 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let observed_sled =
+            sled_upsert_expect_written(datastore, sled_update.clone()).await;
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -2323,29 +2802,15 @@ pub(in crate::db::datastore) mod test {
             .unwrap(),
         );
 
-        // Upserting the sled should produce an error, because it is decommissioend.
-        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+        // This upsert call is rejected by both the decommissioned and the sled
+        // agent generation filters.
+        sled_upsert_expect_filtered(opctx, datastore, sled_update.clone())
+            .await;
 
-        // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
-            .sled_id(observed_sled.id())
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-        assert_eq!(
-            observed_sled_2.usable_hardware_threads,
-            observed_sled.usable_hardware_threads,
-            "usable_hardware_threads should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.usable_physical_ram,
-            observed_sled.usable_physical_ram,
-            "usable_physical_ram should not have changed"
-        );
-        assert_eq!(
-            observed_sled_2.reservoir_size, observed_sled.reservoir_size,
-            "reservoir_size should not have changed"
-        );
+        // This upsert call, even though at a newer generation, is rejected by
+        // the decommissioned filter.
+        sled_update.sled_agent_gen = sled_update.sled_agent_gen.next();
+        sled_upsert_expect_filtered(opctx, datastore, sled_update).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2359,15 +2824,37 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
+        // (Note that all five sleds have their update disposition set to
+        // available in the blueprint, so the only thing making a sled
+        // ineligible below is its policy and/or state.)
+        let (example, blueprint) = example_system_with_resources(&opctx, 5);
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
+        let [
+            non_provisionable_update,
+            expunged_update,
+            decommissioned_update,
+            illegal_decommissioned_update,
+            provisionable_update,
+        ]: [SledUpdate; 5] = sled_updates_from_system(
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .try_into()
+        .expect("simulated system has exactly five sleds");
+
         // Define some sleds that resources cannot be provisioned on.
-        let (non_provisionable_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let (expunged_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let (decommissioned_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-        let (illegal_decommissioned_sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let non_provisionable_sled =
+            sled_upsert_expect_written(datastore, non_provisionable_update)
+                .await;
+        let expunged_sled =
+            sled_upsert_expect_written(datastore, expunged_update).await;
+        let decommissioned_sled =
+            sled_upsert_expect_written(datastore, decommissioned_update).await;
+        let illegal_decommissioned_sled = sled_upsert_expect_written(
+            datastore,
+            illegal_decommissioned_update,
+        )
+        .await;
 
         let ineligible_sleds = IneligibleSleds {
             non_provisionable: non_provisionable_sled.id(),
@@ -2399,9 +2886,8 @@ pub(in crate::db::datastore) mod test {
         assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
 
         // Now add a provisionable sled and try again.
-        let sled_update = test_new_sled_update();
-        let (provisionable_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let provisionable_sled =
+            sled_upsert_expect_written(datastore, provisionable_update).await;
 
         // Try a few times to ensure that resources never get allocated to the
         // non-provisionable sled.
@@ -2434,17 +2920,310 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
+    fn assert_insufficient_capacity(error: external::Error) {
+        match error {
+            external::Error::InsufficientCapacity { .. } => (),
+            other => panic!("expected InsufficientCapacity, got {other:?}"),
+        }
+    }
+
+    // Test that reservations are never created on sleds the blueprint hasn't
+    // marked available, and that marking a sled available again makes it
+    // eligible.
+    #[tokio::test]
+    async fn sled_reservation_create_bp_unavailable() {
+        let logctx =
+            dev::test_setup_log("sled_reservation_create_bp_unavailable");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // * Both sleds are active in the sled table.
+        // * unavailable_sled is marked evacuating in the blueprint.
+        let (example, blueprint) = example_system_with_resources(&opctx, 1);
+        let [unavailable_sled]: [Sled; 1] = upsert_sleds_from_system(
+            &datastore,
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .await
+        .try_into()
+        .expect("simulated system has exactly one sled");
+        let evacuating = child_blueprint(&opctx, &blueprint, |builder| {
+            builder
+                .sled_set_update_disposition_kind(
+                    unavailable_sled.id(),
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: ReconfiguratorDisruptionPolicy::Terminate,
+                    },
+                )
+                .expect("set update disposition of a blueprint sled");
+        });
+        initialize_sled_bp_availability(&datastore, &evacuating).await;
+
+        // * new_sled is not in any blueprint at all, simulating a
+        //   newly added sled before the planner has picked it up.
+        let new_sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
+
+        let resources = small_resource_request();
+
+        // Unconstrained query: no sled is eligible.
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap_err();
+        assert_insufficient_capacity(error);
+
+        // A query constrained to unavailable_sled: also not eligible.
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraintBuilder::new()
+                    .must_select_from(&[unavailable_sled.id()])
+                    .build(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap_err();
+        assert_insufficient_capacity(error);
+
+        // A query constrained to new_sled: still not eligible.
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraintBuilder::new()
+                    .must_select_from(&[new_sled.id()])
+                    .build(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap_err();
+        assert_insufficient_capacity(error);
+
+        // Simulate a later blueprint, which marks the sled available again.
+        // (For testing purposes, we pretend that new_sled has not been
+        // picked up by the planner yet.)
+        let available_again = child_blueprint(&opctx, &evacuating, |builder| {
+            builder
+                .sled_set_update_disposition_kind(
+                    unavailable_sled.id(),
+                    BlueprintSledUpdateDispositionKind::Available,
+                )
+                .expect("set update disposition of a blueprint sled");
+        });
+        let writes =
+            apply_sled_bp_availability(&datastore, &available_again).await;
+        assert_eq!(
+            writes,
+            [expected_active_write(
+                &available_again,
+                unavailable_sled.id(),
+                SledBpAvailabilityUpsertOutcome::Written,
+            )]
+            .into_iter()
+            .collect::<IdOrdMap<_>>(),
+            "newer generation applies to the re-available sled"
+        );
+        for _ in 0..10 {
+            let resource = datastore
+                .sled_reservation_create(
+                    &opctx,
+                    InstanceUuid::new_v4(),
+                    PropolisUuid::new_v4(),
+                    resources.clone(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resource.sled_id(),
+                unavailable_sled.id(),
+                "resource is always allocated to the re-available sled"
+            );
+            datastore
+                .sled_reservation_delete(&opctx, resource.id.into())
+                .await
+                .unwrap();
+        }
+
+        // Simulate another blueprint with the new sled now present in it.
+        let with_new_sled =
+            child_blueprint(&opctx, &available_again, |builder| {
+                builder.ensure_sled_exists(
+                    new_sled.id(),
+                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                );
+            });
+        let writes =
+            apply_sled_bp_availability(&datastore, &with_new_sled).await;
+        assert_eq!(
+            writes,
+            [
+                expected_active_write(
+                    &with_new_sled,
+                    unavailable_sled.id(),
+                    SledBpAvailabilityUpsertOutcome::Rejected,
+                ),
+                expected_active_write(
+                    &with_new_sled,
+                    new_sled.id(),
+                    SledBpAvailabilityUpsertOutcome::Written,
+                ),
+            ]
+            .into_iter()
+            .collect::<IdOrdMap<_>>(),
+            "only the newly included sled is written"
+        );
+        let resource = datastore
+            .sled_reservation_create(
+                &opctx,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
+                resources.clone(),
+                db::model::SledReservationConstraintBuilder::new()
+                    .must_select_from(&[new_sled.id()])
+                    .build(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resource.sled_id(), new_sled.id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test possible races in sled availability between the find-targets and
+    // insert halves of a reservation.
+    //
+    // The two parts run outside the context of a transaction, so the overall
+    // allocation process must be resilient to concurrent modifications to the
+    // database.
+    #[tokio::test]
+    async fn sled_reservation_insert_bp_unavailable() {
+        let logctx =
+            dev::test_setup_log("sled_reservation_insert_bp_unavailable");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (example, blueprint) = example_system_with_resources(&opctx, 2);
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
+        let [evacuating_sled, other_sled]: [Sled; 2] =
+            upsert_sleds_from_system(
+                &datastore,
+                &example.system,
+                nexus_test_utils::RACK_UUID,
+            )
+            .await
+            .try_into()
+            .expect("simulated system has exactly two sleds");
+        let new_sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
+
+        // The first half of a reservation: the search sees both sleds present
+        // in the blueprint.
+        let test_instance = Instance::new();
+        let mut found: Vec<SledUuid> = test_instance
+            .find_targets(&datastore)
+            .await
+            .into_iter()
+            .map(|target| {
+                assert!(
+                    target.is_candidate,
+                    "sled {} is a candidate",
+                    target.sled_id()
+                );
+                target.sled_id()
+            })
+            .collect();
+        found.sort();
+        let mut expected = vec![evacuating_sled.id(), other_sled.id()];
+        expected.sort();
+        assert_eq!(found, expected, "search finds exactly the available sleds");
+
+        // Now mark one of the sleds as evacuating.
+        let evacuating = child_blueprint(&opctx, &blueprint, |builder| {
+            builder
+                .sled_set_update_disposition_kind(
+                    evacuating_sled.id(),
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: ReconfiguratorDisruptionPolicy::Terminate,
+                    },
+                )
+                .expect("set update disposition of a blueprint sled");
+        });
+        apply_sled_bp_availability(&datastore, &evacuating).await;
+
+        // Now try doing an insert -- this should refuse to allocate on the
+        // evacuating sled.
+        for sled_id in [evacuating_sled.id(), new_sled.id()] {
+            let outcome = test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    sled_id,
+                    SledReservationReason::Start,
+                )
+                .await;
+            assert_eq!(
+                outcome,
+                InsertResourceOutcome::Rejected {
+                    sentinel: SLED_BP_AVAILABLE_SENTINEL
+                },
+                "insert on sled {sled_id} is rejected for blueprint availability"
+            );
+        }
+
+        // But the still-available sled still accepts the reservation.
+        let outcome = test_instance
+            .insert_resource(
+                &datastore,
+                PropolisUuid::new_v4(),
+                other_sled.id(),
+                SledReservationReason::Start,
+            )
+            .await;
+        assert_eq!(outcome, InsertResourceOutcome::Inserted);
+
+        // Do another find_targets -- this now agrees with the insert.
+        let found: Vec<SledUuid> = Instance::new()
+            .find_targets(&datastore)
+            .await
+            .into_iter()
+            .map(|target| target.sled_id())
+            .collect();
+        assert_eq!(found, [other_sled.id()]);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Utilities to help with Affinity Testing
 
     // Create a resource request that will entirely fill a sled.
     fn large_resource_request() -> db::model::Resources {
-        // NOTE: This is dependent on [`test_new_sled_update`] using the default
-        // configuration for [`SledSystemHardware`].
-        let sled_resources = SledUpdateBuilder::new().hardware().build();
-        let threads = sled_resources.usable_hardware_threads;
-        let rss_ram = sled_resources.usable_physical_ram;
-        let reservoir_ram = sled_resources.reservoir_size;
-        db::model::Resources::new(threads, rss_ram, reservoir_ram)
+        // example_system_with_resources also uses test_sled_resources, so this
+        // will entirely fill those simulated sleds.
+        let sled_resources = test_sled_resources();
+        db::model::Resources::new(
+            sled_resources.usable_hardware_threads,
+            sled_resources.usable_physical_ram.into(),
+            sled_resources.reservoir_size.into(),
+        )
     }
 
     // This short-circuits some of the logic and checks we normally have when
@@ -2492,14 +3271,77 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
     }
 
-    async fn create_sleds(datastore: &DataStore, count: usize) -> Vec<Sled> {
-        let mut sleds = vec![];
-        for _ in 0..count {
-            let (sled, _) =
-                datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-            sleds.push(sled);
+    fn example_system_with_resources(
+        opctx: &OpContext,
+        nsleds: usize,
+    ) -> (ExampleSystem, Blueprint) {
+        ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
+            .nsleds(nsleds)
+            .sled_resources(test_sled_resources())
+            .build()
+    }
+
+    fn expected_active_write(
+        blueprint: &Blueprint,
+        sled_id: SledUuid,
+        outcome: SledBpAvailabilityUpsertOutcome,
+    ) -> SledBpAvailabilityWrite {
+        let config = blueprint
+            .sleds
+            .get(&sled_id)
+            .unwrap_or_else(|| panic!("sled {sled_id} is in the blueprint"));
+        match SledBlueprintAvailabilityInput::from_blueprint(sled_id, config)
+            .state
+        {
+            SledBpAvailabilityState::Active {
+                availability,
+                update_disposition_generation,
+            } => SledBpAvailabilityWrite {
+                sled_id,
+                outcome: SledBpAvailabilityWriteOutcome::Active {
+                    availability,
+                    update_disposition_generation,
+                    outcome,
+                },
+            },
+            SledBpAvailabilityState::Decommissioned => {
+                panic!("sled {sled_id} is active in the blueprint")
+            }
         }
-        sleds
+    }
+
+    // Build a child of the parent blueprint with the given edits (standing in
+    // for a planning run).
+    fn child_blueprint(
+        opctx: &OpContext,
+        parent: &Blueprint,
+        edit: impl FnOnce(&mut BlueprintBuilder<'_>),
+    ) -> Blueprint {
+        let mut builder = BlueprintBuilder::new_based_on(
+            &opctx.log,
+            parent,
+            ReflectsCollection::Indeterminate,
+            "sled_reservation_tests",
+            PlannerRng::from_entropy(),
+        )
+        .expect("created BlueprintBuilder from parent blueprint");
+        edit(&mut builder);
+        builder.build(BlueprintSource::Test)
+    }
+
+    async fn create_sleds(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        count: usize,
+    ) -> Vec<Sled> {
+        let (example, blueprint) = example_system_with_resources(opctx, count);
+        initialize_sled_bp_availability(datastore, &blueprint).await;
+        upsert_sleds_from_system(
+            datastore,
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .await
     }
 
     type GroupName = &'static str;
@@ -2577,15 +3419,26 @@ pub(in crate::db::datastore) mod test {
         id: InstanceUuid,
         groups: Vec<GroupName>,
         force_onto_sled: Option<SledUuid>,
+        avoid_sleds: Vec<SledUuid>,
         resources: db::model::Resources,
         cpu_platform: Option<db::model::InstanceCpuPlatform>,
+        reservation_reason: SledReservationReason,
     }
 
-    struct FindTargetsOutput {
-        id: SledUuid,
-        fits: bool,
-        affinity_policy: Option<AffinityPolicy>,
-        anti_affinity_policy: Option<AffinityPolicy>,
+    /// The result of [`Instance::insert_resource`].
+    #[derive(Debug, PartialEq, Eq)]
+    enum InsertResourceOutcome {
+        /// The resource was successfully inserted.
+        Inserted,
+
+        /// The insert query was rejected.
+        Rejected {
+            /// The sentinel value raised by the database.
+            ///
+            /// Compare against the sentinels defined in
+            /// [`crate::db::queries::sled_reservation`].
+            sentinel: &'static str,
+        },
     }
 
     impl Instance {
@@ -2598,8 +3451,10 @@ pub(in crate::db::datastore) mod test {
                 id,
                 groups: vec![],
                 force_onto_sled: None,
+                avoid_sleds: vec![],
                 resources: small_resource_request(),
                 cpu_platform: None,
+                reservation_reason: SledReservationReason::Start,
             }
         }
 
@@ -2610,12 +3465,14 @@ pub(in crate::db::datastore) mod test {
                 id: local_storage_test_instance.id,
                 groups: vec![],
                 force_onto_sled: None,
+                avoid_sleds: vec![],
                 resources: db::model::Resources::new(
                     local_storage_test_instance.ncpus.into(),
                     local_storage_test_instance.memory.into(),
                     local_storage_test_instance.memory.into(),
                 ),
                 cpu_platform: None,
+                reservation_reason: SledReservationReason::Start,
             }
         }
 
@@ -2628,45 +3485,32 @@ pub(in crate::db::datastore) mod test {
         async fn find_targets(
             &self,
             datastore: &DataStore,
-        ) -> Vec<FindTargetsOutput> {
+        ) -> Vec<SledFindTargetsRow> {
             assert!(self.force_onto_sled.is_none());
+            assert!(self.avoid_sleds.is_empty());
 
             let families =
                 self.cpu_platform.map(|p| p.compatible_sled_cpu_families());
 
             sled_find_targets_query(self.id, &self.resources, families)
-                .get_results_async::<(
-                    Uuid,
-                    bool,
-                    Option<AffinityPolicy>,
-                    Option<AffinityPolicy>,
-                )>(&*datastore.pool_connection_for_tests().await.unwrap())
+                .get_results_async::<SledFindTargetsRow>(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap()
-                .into_iter()
-                .map(|(id, fits, affinity_policy, anti_affinity_policy)| {
-                    FindTargetsOutput {
-                        id: SledUuid::from_untyped_uuid(id),
-                        fits,
-                        affinity_policy,
-                        anti_affinity_policy,
-                    }
-                })
-                .collect()
         }
 
         // This is the second half of creating a sled reservation.
         // It can be called during tests trying to invoke contention manually.
-        //
-        // Returns "true" if the INSERT succeeded
         async fn insert_resource(
             &self,
             datastore: &DataStore,
             propolis_id: PropolisUuid,
             sled_id: SledUuid,
             reservation_reason: SledReservationReason,
-        ) -> bool {
+        ) -> InsertResourceOutcome {
             assert!(self.force_onto_sled.is_none());
+            assert!(self.avoid_sleds.is_empty());
 
             let resource = SledResourceVmm::new(
                 propolis_id,
@@ -2685,15 +3529,18 @@ pub(in crate::db::datastore) mod test {
             .execute_async(&*conn)
             .await
             {
-                Ok(rows_inserted) => rows_inserted > 0,
-
+                // Without local storage allocations, we should never get Ok(0)
+                // back.
+                Ok(0) => panic!(
+                    "insert query inserted no rows without raising a sentinel"
+                ),
+                Ok(_) => InsertResourceOutcome::Inserted,
                 Err(e) => {
-                    if matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS)
-                        .is_some()
-                    {
-                        false
-                    } else {
-                        panic!("{e}")
+                    match matches_sentinel(&e, &SLED_INSERT_QUERY_SENTINELS) {
+                        Some(sentinel) => {
+                            InsertResourceOutcome::Rejected { sentinel }
+                        }
+                        None => panic!("{e}"),
                     }
                 }
             }
@@ -2716,6 +3563,19 @@ pub(in crate::db::datastore) mod test {
             self
         }
 
+        // Forbid this instance from being placed on a specific sled. Can be
+        // called multiple times.
+        fn avoid_sled(mut self, sled: SledUuid) -> Self {
+            self.avoid_sleds.push(sled);
+            self
+        }
+
+        // Set the reason for this instance's reservation (defaults to `Start`).
+        fn reservation_reason(mut self, reason: SledReservationReason) -> Self {
+            self.reservation_reason = reason;
+            self
+        }
+
         async fn add_to_groups_and_reserve(
             &self,
             opctx: &OpContext,
@@ -2733,10 +3593,10 @@ pub(in crate::db::datastore) mod test {
             all_groups: &AllGroups,
         ) {
             for our_group_name in &self.groups {
-                let (affinity, group_id) = all_groups
-                    .id_by_name
-                    .get(our_group_name)
-                    .expect("Group not found: {our_group_name}");
+                let (affinity, group_id) =
+                    all_groups.id_by_name.get(our_group_name).unwrap_or_else(
+                        || panic!("Group not found: {our_group_name}"),
+                    );
                 match *affinity {
                     Affinity::Positive => {
                         add_instance_to_affinity_group(
@@ -2765,8 +3625,11 @@ pub(in crate::db::datastore) mod test {
         instance: &Instance,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
+        // Avoid specific sleds, if requested
+        let constraints = db::model::SledReservationConstraintBuilder::new()
+            .must_not_select_from(&instance.avoid_sleds);
+
         // Pick a specific sled, if requested
-        let constraints = db::model::SledReservationConstraintBuilder::new();
         let constraints = if let Some(sled_target) = instance.force_onto_sled {
             constraints.must_select_from(&[sled_target])
         } else {
@@ -2782,13 +3645,18 @@ pub(in crate::db::datastore) mod test {
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
-                SledReservationReason::Start,
+                instance.reservation_reason.clone(),
+                &mut StdRng::from_os_rng(),
             )
             .await?;
 
         if let Some(sled_target) = instance.force_onto_sled {
             assert_eq!(SledUuid::from(result.sled_id), sled_target);
         }
+        assert!(
+            !instance.avoid_sleds.contains(&SledUuid::from(result.sled_id)),
+            "reservation landed on a sled it was told to avoid"
+        );
 
         Ok(result)
     }
@@ -2805,7 +3673,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -2854,7 +3722,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -2900,7 +3768,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -2947,7 +3815,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -2994,7 +3862,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3057,7 +3925,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -3110,7 +3978,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -3158,7 +4026,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3217,7 +4085,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3275,7 +4143,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3343,7 +4211,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3411,7 +4279,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3470,7 +4338,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -3516,6 +4384,293 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
+    // "must not select from" constraint: avoided sleds are never chosen, and
+    // avoiding every sled yields an insufficient-capacity error.
+    #[tokio::test]
+    async fn must_not_select_from_excludes_sled() {
+        let logctx = dev::test_setup_log("must_not_select_from_excludes_sled");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let test_instance = Instance::new().avoid_sled(sleds[0].id());
+        let resource =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[1].id());
+
+        let test_instance =
+            Instance::new().avoid_sled(sleds[0].id()).avoid_sled(sleds[1].id());
+        let err =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // "must not select from" takes precedence over "must select from" when a
+    // sled appears in both sets.
+    #[tokio::test]
+    async fn must_not_select_from_overrides_must_select_from() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_overrides_must_select_from",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let test_instance =
+            Instance::new().sled(sleds[0].id()).avoid_sled(sleds[0].id());
+        let err =
+            create_instance_reservation(&datastore, &opctx, &test_instance)
+                .await
+                .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Affinity, Policy = Fail, combined with "must not select from".
+    #[tokio::test]
+    async fn must_not_select_from_affinity_policy_fail() {
+        let logctx =
+            dev::test_setup_log("must_not_select_from_affinity_policy_fail");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: affinity::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity").avoid_sled(sleds[0].id());
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::RequiredAffinitySledNotValid,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Affinity, Policy = Allow, combined with "must not select from"
+    #[tokio::test]
+    async fn must_not_select_from_affinity_policy_allow() {
+        let logctx =
+            dev::test_setup_log("must_not_select_from_affinity_policy_allow");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: affinity::AffinityPolicy::Allow,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity").avoid_sled(sleds[0].id());
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[1].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-Affinity, Policy = Fail, combined with "must not select from".
+    #[tokio::test]
+    async fn must_not_select_from_anti_affinity_policy_fail() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_anti_affinity_policy_fail",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 3;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: affinity::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances =
+            [Instance::new().group("anti-affinity").sled(sleds[1].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // sleds[1] is banned by anti-affinity; avoiding sleds[0] and sleds[2]
+        // leaves nothing.
+        let test_instance = Instance::new()
+            .group("anti-affinity")
+            .avoid_sled(sleds[0].id())
+            .avoid_sled(sleds[2].id());
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
+
+        // Avoiding only sleds[0] leaves sleds[2].
+        let test_instance =
+            Instance::new().group("anti-affinity").avoid_sled(sleds[0].id());
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have placed instance");
+        assert_eq!(resource.sled_id(), sleds[2].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test the typical behavior of a "must not select from" constraint; i.e.,
+    // that we're trying to autoselect a destination sled for VMM migration (and
+    // that auto selection "must not select from" the sled where the VMM is
+    // currently placed).
+    //
+    // We should successfully find an alternative sled, and both the source and
+    // destination reservations should exist with their expected
+    // `SledReservationReason`s.
+    #[tokio::test]
+    async fn must_not_select_from_migration_target_reservation() {
+        let logctx = dev::test_setup_log(
+            "must_not_select_from_migration_target_reservation",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (_authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
+
+        let instance_id = InstanceUuid::new_v4();
+        let start_instance = Instance::new_with_id(instance_id);
+        let start_resource =
+            create_instance_reservation(&datastore, &opctx, &start_instance)
+                .await
+                .expect("Should have placed instance");
+        let src_sled_id = start_resource.sled_id();
+        let expected_dst_sled_id = sleds
+            .iter()
+            .map(|s| s.id())
+            .find(|id| *id != src_sled_id)
+            .expect("two sleds exist");
+
+        let migrate_instance = Instance::new_with_id(instance_id)
+            .reservation_reason(SledReservationReason::MigrationTarget)
+            .avoid_sled(src_sled_id);
+        let target_resource =
+            create_instance_reservation(&datastore, &opctx, &migrate_instance)
+                .await
+                .expect("Should have placed migration target");
+        assert_eq!(target_resource.sled_id(), expected_dst_sled_id);
+        assert_ne!(target_resource.id(), start_resource.id());
+
+        // Both reservations exist for this instance.
+        {
+            use nexus_db_schema::schema::sled_resource_vmm::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let rows = dsl::sled_resource_vmm
+                .filter(dsl::instance_id.eq(to_db_typed_uuid(instance_id)))
+                .select(SledResourceVmm::as_select())
+                .get_results_async(&*conn)
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 2, "unexpected rows: {rows:?}");
+            let states: Vec<_> = rows.iter().map(|r| r.state).collect();
+            assert!(
+                states.contains(&SledResourceVmmState::Active),
+                "unexpected rows: {rows:?}"
+            );
+            assert!(
+                states.contains(&SledResourceVmmState::Target),
+                "unexpected rows: {rows:?}"
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Test that concurrent provisioning of an affinity group can cause
     // the INSERT of a sled_resource_vmm to fail.
     #[tokio::test]
@@ -3529,7 +4684,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().group("affinity");
 
@@ -3538,7 +4693,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3571,7 +4726,7 @@ pub(in crate::db::datastore) mod test {
         // Now if we try to find targets again, the result will change.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds
                 .iter()
@@ -3579,7 +4734,7 @@ pub(in crate::db::datastore) mod test {
         );
         let affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id == sleds[0].id())
+            .find(|sled| sled.sled_id() == sleds[0].id())
             .unwrap();
         assert!(matches!(
             affine_sled.affinity_policy.expect("Sled 0 should be affine"),
@@ -3589,8 +4744,8 @@ pub(in crate::db::datastore) mod test {
         // Inserting onto sleds[1..3] should fail -- the affinity requirement
         // should bind us to sleds[0].
         for i in 1..=3 {
-            assert!(
-                !test_instance
+            assert_eq!(
+                test_instance
                     .insert_resource(
                         &datastore,
                         PropolisUuid::new_v4(),
@@ -3598,12 +4753,15 @@ pub(in crate::db::datastore) mod test {
                         SledReservationReason::Start,
                     )
                     .await,
+                InsertResourceOutcome::Rejected {
+                    sentinel: REQUIRED_SLEDS_SENTINEL
+                },
                 "Shouldn't have been able to insert into sled {i}"
             )
         }
 
         // Inserting into sleds[0] should succeed
-        assert!(
+        assert_eq!(
             test_instance
                 .insert_resource(
                     &datastore,
@@ -3611,7 +4769,8 @@ pub(in crate::db::datastore) mod test {
                     sleds[0].id(),
                     SledReservationReason::Start,
                 )
-                .await
+                .await,
+            InsertResourceOutcome::Inserted,
         );
 
         db.terminate().await;
@@ -3631,7 +4790,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().group("anti-affinity");
 
@@ -3640,7 +4799,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3674,13 +4833,13 @@ pub(in crate::db::datastore) mod test {
         // Now if we try to find targets again, the result will change.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
         let anti_affine_sled = possible_sleds
             .iter()
-            .find(|sled| sled.id == sleds[0].id())
+            .find(|sled| sled.sled_id() == sleds[0].id())
             .unwrap();
         assert!(matches!(
             anti_affine_sled
@@ -3691,8 +4850,8 @@ pub(in crate::db::datastore) mod test {
 
         // Inserting onto sleds[0] should fail -- the anti-affinity requirement
         // should prevent us from inserting there.
-        assert!(
-            !test_instance
+        assert_eq!(
+            test_instance
                 .insert_resource(
                     &datastore,
                     PropolisUuid::new_v4(),
@@ -3700,11 +4859,12 @@ pub(in crate::db::datastore) mod test {
                     SledReservationReason::Start,
                 )
                 .await,
+            InsertResourceOutcome::Rejected { sentinel: BANNED_SLEDS_SENTINEL },
             "Shouldn't have been able to insert into sleds[0]"
         );
 
         // Inserting into sleds[1] should succeed
-        assert!(
+        assert_eq!(
             test_instance
                 .insert_resource(
                     &datastore,
@@ -3712,7 +4872,8 @@ pub(in crate::db::datastore) mod test {
                     sleds[1].id(),
                     SledReservationReason::Start,
                 )
-                .await
+                .await,
+            InsertResourceOutcome::Inserted,
         );
 
         db.terminate().await;
@@ -3730,7 +4891,7 @@ pub(in crate::db::datastore) mod test {
             create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(&opctx, &datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().use_many_resources();
 
@@ -3739,7 +4900,7 @@ pub(in crate::db::datastore) mod test {
         // All sleds should be available.
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
-        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(possible_sleds.iter().all(|sled| sled.is_candidate));
         assert!(
             possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
         );
@@ -3771,14 +4932,14 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(possible_sleds.len(), 1);
         assert!(possible_sleds[0].affinity_policy.is_none());
         assert!(possible_sleds[0].anti_affinity_policy.is_none());
-        assert!(possible_sleds[0].fits);
-        assert_eq!(possible_sleds[0].id, sleds[1].id());
+        assert!(possible_sleds[0].is_candidate);
+        assert_eq!(possible_sleds[0].sled_id(), sleds[1].id());
 
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
         // be enough space on these sleds.
         for i in [0, 2, 3] {
-            assert!(
-                !test_instance
+            assert_eq!(
+                test_instance
                     .insert_resource(
                         &datastore,
                         PropolisUuid::new_v4(),
@@ -3786,12 +4947,15 @@ pub(in crate::db::datastore) mod test {
                         SledReservationReason::Start,
                     )
                     .await,
-                "Shouldn't have been able to insert into sleds[i]"
+                InsertResourceOutcome::Rejected {
+                    sentinel: SLED_HAS_SPACE_SENTINEL
+                },
+                "Shouldn't have been able to insert into sleds[{i}]"
             );
         }
 
         // Inserting into sleds[1] should succeed
-        assert!(
+        assert_eq!(
             test_instance
                 .insert_resource(
                     &datastore,
@@ -3799,7 +4963,8 @@ pub(in crate::db::datastore) mod test {
                     sleds[1].id(),
                     SledReservationReason::Start,
                 )
-                .await
+                .await,
+            InsertResourceOutcome::Inserted,
         );
 
         db.terminate().await;
@@ -3814,17 +4979,34 @@ pub(in crate::db::datastore) mod test {
         let (_authz_project, _project) =
             create_project(&opctx, &datastore, "project").await;
 
-        let mut sleds = vec![];
-        for family in [SledCpuFamily::AmdMilan, SledCpuFamily::AmdTurin] {
-            for _ in 0..2 {
-                let mut builder = SledUpdateBuilder::new();
-                builder.rack_id(nexus_test_utils::RACK_UUID);
-                builder.hardware().cpu_family(family);
-                let (sled, _) =
-                    datastore.sled_upsert(builder.build()).await.unwrap();
-                sleds.push(sled);
-            }
+        let families = [
+            SledCpuFamily::AmdMilan,
+            SledCpuFamily::AmdMilan,
+            SledCpuFamily::AmdTurin,
+            SledCpuFamily::AmdTurin,
+        ];
+        let mut builder =
+            ExampleSystemBuilder::new(&opctx.log, "sled_reservation_tests")
+                .nsleds(families.len());
+        for (index, family) in families.into_iter().enumerate() {
+            builder = builder
+                .with_sled_resources(
+                    index,
+                    SimulatedSledResources {
+                        cpu_family: family,
+                        ..test_sled_resources()
+                    },
+                )
+                .expect("sled index is in range");
         }
+        let (example, blueprint) = builder.build();
+        initialize_sled_bp_availability(&datastore, &blueprint).await;
+        upsert_sleds_from_system(
+            &datastore,
+            &example.system,
+            nexus_test_utils::RACK_UUID,
+        )
+        .await;
 
         let mut test_instance = Instance::new();
         for platform in [None, Some(InstanceCpuPlatform::AmdMilan)] {
@@ -3868,8 +5050,8 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up a sled to test against.
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
         let sled_id = sled.id();
 
         // Add a couple disks to this sled.
@@ -4060,8 +5242,8 @@ pub(in crate::db::datastore) mod test {
             .enumerate();
 
         // Set up a sled to test against.
-        let (sled, _) =
-            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let sled =
+            sled_upsert_expect_written(datastore, test_new_sled_update()).await;
         let sled_id = sled.id();
 
         for (i, ((policy, state), after)) in all_transitions {
@@ -4305,6 +5487,29 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         config: &LocalStorageTest,
     ) {
+        // Ordinarily we would use ExampleSystem to build a blueprint, but do it
+        // blueprint manually here because the test config in this file sets up
+        // a number of things not currently modeled by that.
+        //
+        // TODO: port this over to ExampleSystem.
+        let empty = BlueprintBuilder::build_empty("local storage tests");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &opctx.log,
+            &empty,
+            ReflectsCollection::Indeterminate,
+            "local storage tests",
+            PlannerRng::from_entropy(),
+        )
+        .expect("created BlueprintBuilder from empty blueprint");
+        for sled_config in &config.sleds {
+            builder.ensure_sled_exists(
+                sled_config.sled_id,
+                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            );
+        }
+        let blueprint = builder.build(BlueprintSource::Test);
+        initialize_sled_bp_availability(datastore, &blueprint).await;
+
         for sled_config in &config.sleds {
             let sled = SledUpdate::new(
                 sled_config.sled_id,
@@ -4320,13 +5525,13 @@ pub(in crate::db::datastore) mod test {
                     usable_hardware_threads: 128,
                     usable_physical_ram: (64 << 30).try_into().unwrap(),
                     reservoir_size: (56 << 30).try_into().unwrap(),
-                    cpu_family: SledCpuFamily::AmdMilan,
+                    cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
                 RackUuid::new_v4(),
-                Generation::new(),
+                SledRegistrationGeneration::new(),
             );
 
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            sled_upsert_expect_written(datastore, sled).await;
 
             for u2 in &sled_config.u2s {
                 let physical_disk = db::model::PhysicalDisk::from_parts(
@@ -4398,7 +5603,7 @@ pub(in crate::db::datastore) mod test {
                                 description: String::from("desc"),
                             },
                         ),
-                        project_id: authz_project.id(),
+                        project_id: authz_project.id().into(),
                         policy: group.policy.into(),
                         failure_domain: group.failure_domain.into(),
                     },
@@ -4420,7 +5625,7 @@ pub(in crate::db::datastore) mod test {
                                 description: String::from("desc"),
                             },
                         ),
-                        project_id: authz_project.id(),
+                        project_id: authz_project.id().into(),
                         policy: group.policy.into(),
                         failure_domain: group.failure_domain.into(),
                     },
@@ -6299,6 +7504,7 @@ pub(in crate::db::datastore) mod test {
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
                             SledReservationReason::Start,
+                            &mut StdRng::from_os_rng(),
                         )
                         .await
                         .unwrap()
@@ -6440,6 +7646,7 @@ pub(in crate::db::datastore) mod test {
                                     db::model::SledReservationConstraints::none(
                                     ),
                                     SledReservationReason::Start,
+                                    &mut StdRng::from_os_rng(),
                                 )
                                 .await
                         }
@@ -6575,10 +7782,11 @@ pub(in crate::db::datastore) mod test {
                     name: external::Name::try_from(format!("local-{i}-{n}"))
                         .unwrap(),
 
-                    // 64 instances per sled, total provisionable size is 1024 -
-                    // 250 = 774, so roughly 12 G disks, minus overhead of about
-                    // 780M = drop to 10G
-                    size: external::ByteCount::from_gibibytes_u32(10),
+                    // 64 instances per sled, each with a disk on every U.2. The
+                    // provisionable size of each U.2 is (1024 - 250) G = 774 G,
+                    // less overhead (4 MiB per GiB) = ~771.0 G, so ~12.05 G per
+                    // disk: use 12 G.
+                    size: external::ByteCount::from_gibibytes_u32(12),
                 });
             }
 
@@ -6624,6 +7832,7 @@ pub(in crate::db::datastore) mod test {
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
                             SledReservationReason::Start,
+                            &mut StdRng::from_os_rng(),
                         )
                         .await
                         .unwrap()
@@ -7627,6 +8836,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -7738,6 +8948,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -7845,6 +9056,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -7957,6 +9169,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -8072,6 +9285,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await
             .unwrap();
@@ -8179,6 +9393,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await
             .unwrap();
@@ -8287,6 +9502,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await
             .unwrap();
@@ -8398,6 +9614,27 @@ pub(in crate::db::datastore) mod test {
             })
             .collect();
 
+        // Choose allocations based on the stale disk list, as the reservation
+        // loop would have.
+
+        let allocations = {
+            let zpools_for_sled =
+                DataStore::zpool_get_for_sled_reservation_on_conn(
+                    &conn,
+                    &opctx,
+                    config.sleds[0].sled_id,
+                )
+                .await
+                .unwrap();
+
+            choose_local_storage_allocations(
+                &zpools_for_sled,
+                &local_storage_disks,
+                &mut StdRng::from_os_rng(),
+            )
+            .unwrap()
+        };
+
         // Set `time_deleted` on the first disk
 
         {
@@ -8413,35 +9650,38 @@ pub(in crate::db::datastore) mod test {
                 .unwrap();
         };
 
-        // Duplicate the loop logic that performs the allocation search.
+        // The insertion CTE must not create any records for allocations that
+        // reference a deleted disk.
 
-        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
-            &conn,
-            &opctx,
+        let resource = SledResourceVmm::new(
+            PropolisUuid::new_v4(),
+            instance.id,
             config.sleds[0].sled_id,
-        )
-        .await
-        .unwrap();
+            instance.resources(),
+            SledReservationReason::Start.into(),
+        );
 
-        let mut complete_allocation_lists =
-            CompleteLocalStorageAllocationLists::new(
-                &logctx.log,
-                config.sleds[0].sled_id,
+        let result = sled_insert_resource_query(
+            &resource,
+            &LocalStorageAllocationRequired::Yes { allocations },
+        )
+        .execute_async(&*conn)
+        .await;
+
+        assert_eq!(result, Ok(0));
+
+        // The reservation loop treats zero inserted rows plus a deleted disk
+        // as a terminal failure; check the signal it uses.
+
+        assert!(
+            any_request_disk_deleted_or_detached(
+                &conn,
                 instance.id,
-                zpools_for_sled,
                 &local_storage_disks,
             )
-            .unwrap();
-
-        // After pruning, there should be no allocations left.to try: a disk was
-        // deleted, so the search should stop.
-
-        complete_allocation_lists
-            .prune_invalidated_allocation_lists(&conn, &opctx)
             .await
-            .unwrap();
-
-        assert!(complete_allocation_lists.next().is_none());
+            .unwrap()
+        );
 
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -8583,32 +9823,26 @@ pub(in crate::db::datastore) mod test {
             SledReservationReason::Start.into(),
         );
 
-        // Duplicate the loop logic that performs the allocation search
+        // Choose allocations based on the disk list captured before the
+        // detach - what we're testing here is that the insertion CTE does not
+        // perform a reservation if the disk is detached.
 
-        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
-            &conn,
-            &opctx,
-            config.sleds[0].sled_id,
-        )
-        .await
-        .unwrap();
+        let allocations = {
+            let zpools_for_sled =
+                DataStore::zpool_get_for_sled_reservation_on_conn(
+                    &conn,
+                    &opctx,
+                    config.sleds[0].sled_id,
+                )
+                .await
+                .unwrap();
 
-        let mut complete_allocation_lists =
-            CompleteLocalStorageAllocationLists::new(
-                &logctx.log,
-                config.sleds[0].sled_id,
-                instance.id,
-                zpools_for_sled,
+            choose_local_storage_allocations(
+                &zpools_for_sled,
                 &local_storage_disks,
+                &mut StdRng::from_os_rng(),
             )
-            .unwrap();
-
-        // Skip the pruning step, as that would prune the detached disk - what
-        // we're testing here is that the insertion CTE does not perform a
-        // reservation if the disk is detached.
-
-        let Some(allocations) = complete_allocation_lists.next() else {
-            panic!("no allocations returned!");
+            .unwrap()
         };
 
         let result = sled_insert_resource_query(
@@ -8621,6 +9855,19 @@ pub(in crate::db::datastore) mod test {
         // This should insert zero rows.
 
         assert_eq!(result, Ok(0));
+
+        // The reservation loop treats zero inserted rows plus a detached disk
+        // as a terminal failure; check the signal it uses.
+
+        assert!(
+            any_request_disk_deleted_or_detached(
+                &conn,
+                instance.id,
+                &local_storage_disks,
+            )
+            .await
+            .unwrap()
+        );
 
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -8636,6 +9883,416 @@ pub(in crate::db::datastore) mod test {
         };
 
         assert_eq!(allocation_records.len(), 0);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // A local storage assignment computed from a zpool snapshot can go stale
+    // if a concurrent reservation consumes the chosen pool. The insert CTE
+    // must reject the stale assignment, and a reservation computed from a
+    // fresh snapshot must succeed on the remaining pool.
+    #[tokio::test]
+    async fn local_storage_allocation_stale_snapshot_retry() {
+        let logctx = dev::test_setup_log(
+            "local_storage_allocation_stale_snapshot_retry",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled with two U2s, where each U2 has room for exactly one
+            // 512 GiB disk: usable space is 1024 GiB - 250 GiB buffer, and
+            // each disk requires 512 GiB plus overhead.
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..2)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys-{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // Three instances with one 512 GiB local storage disk each: only
+            // two can fit on this sled.
+            instances: ["one", "two", "three"]
+                .iter()
+                .map(|name| LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: name.to_string(),
+                    affinity: None,
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
+                    disks: vec![LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("disk-{name}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(512),
+                    }],
+                })
+                .collect(),
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Compute an assignment for the second instance's disk. The chooser
+        // is deterministic for a given rng seed, and the first instance's
+        // reservation below runs against an identical snapshot with the same
+        // seed, so both pick the same pool.
+
+        let instance_two =
+            Instance::from_local_storage_test_instance(&config.instances[1]);
+
+        let instance_two_disks: Vec<LocalStorageDisk> = datastore
+            .instance_list_disks_on_conn(
+                &conn,
+                instance_two.id.into_untyped_uuid(),
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|disk| match disk {
+                db::datastore::Disk::LocalStorage(disk) => Some(disk),
+                db::datastore::Disk::Crucible(_) => None,
+            })
+            .collect();
+
+        let stale_allocations = {
+            let zpools_for_sled =
+                DataStore::zpool_get_for_sled_reservation_on_conn(
+                    &conn,
+                    &opctx,
+                    config.sleds[0].sled_id,
+                )
+                .await
+                .unwrap();
+
+            choose_local_storage_allocations(
+                &zpools_for_sled,
+                &instance_two_disks,
+                &mut StdRng::seed_from_u64(0),
+            )
+            .unwrap()
+        };
+
+        // Reserve the first instance with the same seed; this consumes the
+        // pool the stale assignment chose.
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+
+            datastore
+                .sled_reservation_create_inner(
+                    &opctx,
+                    instance.id,
+                    PropolisUuid::new_v4(),
+                    instance.resources(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                    &mut StdRng::seed_from_u64(0),
+                )
+                .await
+                .unwrap();
+        }
+
+        // The insert CTE must reject the stale assignment: its pool no
+        // longer has room. This is the signal the reservation loop consumes
+        // before recomputing from a fresh snapshot.
+
+        let resource = SledResourceVmm::new(
+            PropolisUuid::new_v4(),
+            instance_two.id,
+            config.sleds[0].sled_id,
+            instance_two.resources(),
+            SledReservationReason::Start.into(),
+        );
+
+        let result = sled_insert_resource_query(
+            &resource,
+            &LocalStorageAllocationRequired::Yes {
+                allocations: stale_allocations,
+            },
+        )
+        .execute_async(&*conn)
+        .await;
+
+        assert_eq!(result, Ok(0));
+
+        // A full reservation for the second instance succeeds: recomputing
+        // from a fresh snapshot lands on the remaining pool.
+
+        datastore
+            .sled_reservation_create(
+                &opctx,
+                instance_two.id,
+                PropolisUuid::new_v4(),
+                instance_two.resources(),
+                db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap();
+
+        // Both pools are now full, so a third reservation fails cleanly.
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[2],
+            );
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance.id,
+                    PropolisUuid::new_v4(),
+                    instance.resources(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap_err();
+        }
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// What happens when you ask for more disks than there are zpools?
+    #[tokio::test]
+    async fn local_storage_allocation_too_many() {
+        let logctx = dev::test_setup_log("local_storage_allocation_too_many");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled, with five U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..5)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // One instance with ten local storage disks.
+            instances: vec![LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: "local1".to_string(),
+                affinity: None,
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
+                disks: (0..10)
+                    .map(|i| LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("local1-{i}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(512),
+                    })
+                    .collect(),
+            }],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // Sled reservation should _not_ succeed
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+            let instance_id = instance.id;
+            let resources = instance.resources();
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::new_v4(),
+                    resources,
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap_err();
+        }
+
+        let allocation_records: Vec<_> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+            dsl::local_storage_unencrypted_dataset_allocation
+                .filter(dsl::time_deleted.is_null())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
+                .load_async(&*conn)
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(allocation_records.len(), 0);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Reserve seven instances one at a time, each with seven local storage
+    /// disks sized in descending halves of a pool's usable space. The disks
+    /// fit in aggregate, but whether each reservation succeeds depends on the
+    /// placement choices made for the reservations before it: a pool must
+    /// survive with room for the largest disk.
+    ///
+    /// A placement rule that always picks the roomiest fitting pool levels
+    /// every pool down together and fails this workload at the seventh
+    /// instance, for every rng seed. Random placement succeeds for nearly
+    /// every seed; this test pins one such seed, along with fixed zpool ids
+    /// so the seed selects the same pools on every run.
+    #[tokio::test]
+    async fn local_storage_allocation_descending_serial() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_descending_serial");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut rng = StdRng::seed_from_u64(0);
+
+        // Each disk is sized just over half of what remains of a pool's 774
+        // GiB of usable space after the disks larger than it.
+        let disk_gb: Vec<u32> = vec![388, 195, 98, 50, 26, 14, 8];
+
+        let config = LocalStorageTest {
+            // One sled, with ten U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys{i}"),
+
+                        zpool_id: ZpoolUuid::from_untyped_uuid(
+                            Uuid::from_u128(0x51ed_2001 + i),
+                        ),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // 7 instances, each with 7 disks
+            instances: (0..7)
+                .map(|i| LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: format!("local{i}"),
+                    affinity: None,
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(2),
+                    disks: (0..7)
+                        .map(|j| LocalStorageTestInstanceDisk {
+                            id: Uuid::new_v4(),
+                            name: external::Name::try_from(format!(
+                                "local{i}-{j}"
+                            ))
+                            .unwrap(),
+                            size: external::ByteCount::from_gibibytes_u32(
+                                disk_gb[j],
+                            ),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // All reservations should succeed, issued one at a time.
+        for config_instance in &config.instances {
+            let instance =
+                Instance::from_local_storage_test_instance(config_instance);
+
+            datastore
+                .sled_reservation_create_inner(
+                    &opctx,
+                    instance.id,
+                    PropolisUuid::new_v4(),
+                    instance.resources(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                    &mut rng,
+                )
+                .await
+                .unwrap();
+        }
 
         validate_local_storage_allocations(&datastore).await;
 

@@ -24,6 +24,11 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (8, REJECT_LOCAL_SWITCH_RESETS),
+    (7, BYTE_WRAPPER_0_2_BUMP),
+    (6, ARTIFACT_HASH_SCHEMA),
+    (5, RACK_ID),
+    (4, COMPONENT_VPD),
     (3, NEWTYPE_UUID_BUMP),
     (2, COSMO),
     (1, INITIAL),
@@ -232,6 +237,7 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/sp/{type}/{slot}/component/{component}/reset",
+        versions = VERSION_REJECT_LOCAL_SWITCH_RESETS..,
     }]
     async fn sp_component_reset(
         rqctx: RequestContext<Self::Context>,
@@ -240,6 +246,21 @@ pub trait GatewayApi {
         HttpResponseUpdatedNoContent,
         latest::update::SpComponentResetError,
     >;
+
+    /// Reset an SP component (possibly the SP itself).
+    #[endpoint {
+        operation_id = "sp_component_reset",
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/reset",
+        versions = ..VERSION_REJECT_LOCAL_SWITCH_RESETS,
+    }]
+    async fn sp_component_reset_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseUpdatedNoContent, v1::update::SpComponentResetError>
+    {
+        Self::sp_component_reset(rqctx, path).await.map_err(From::from)
+    }
 
     /// Update an SP component
     ///
@@ -333,6 +354,21 @@ pub trait GatewayApi {
         path: Path<latest::component::PathSpComponent>,
         body: TypedBody<latest::update::UpdateAbortBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the vital product data (VPD) identity of a component.
+    ///
+    /// Not all components have VPD. This endpoint will return an error if the
+    /// requested component does not advertise the `HAS_VPD` DeviceCapability
+    /// bit.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/vpd",
+        versions = VERSION_COMPONENT_VPD..,
+    }]
+    async fn sp_component_vpd_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::component::PathSpComponent>,
+    ) -> Result<HttpResponseOk<latest::component_vpd::ComponentVpd>, HttpError>;
 
     /// Read the CMPA from a root of trust.
     ///
@@ -509,12 +545,27 @@ pub trait GatewayApi {
     #[endpoint {
         method = PUT,
         path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn sp_installinator_image_id_set(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::component::PathSp>,
         body: TypedBody<latest::update::InstallinatorImageId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/sp/{type}/{slot}/ipcc/installinator-image-id",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn sp_installinator_image_id_set_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+        body: TypedBody<v1::update::InstallinatorImageId>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::sp_installinator_image_id_set(rqctx, path, body.map(Into::into))
+            .await
+    }
 
     /// Clear any previously-set installinator image ID on the target sled.
     #[endpoint {
@@ -535,11 +586,28 @@ pub trait GatewayApi {
     #[endpoint {
         method = GET,
         path = "/sp/{type}/{slot}/host-phase2-progress",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn sp_host_phase2_progress_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::component::PathSp>,
     ) -> Result<HttpResponseOk<latest::update::HostPhase2Progress>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/host-phase2-progress",
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn sp_host_phase2_progress_get_v1(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v1::component::PathSp>,
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2Progress>, HttpError> {
+        Self::sp_host_phase2_progress_get(rqctx, path).await.map(
+            |HttpResponseOk(progress)| {
+                HttpResponseOk(v1::update::HostPhase2Progress::from(progress))
+            },
+        )
+    }
 
     /// Clear the most recent host phase2 request we've seen from the target SP.
     #[endpoint {
@@ -561,6 +629,7 @@ pub trait GatewayApi {
         method = POST,
         path = "/recovery/host-phase2",
         request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
     }]
     async fn recovery_host_phase2_upload(
         rqctx: RequestContext<Self::Context>,
@@ -569,6 +638,26 @@ pub trait GatewayApi {
         HttpResponseOk<latest::update::HostPhase2RecoveryImageId>,
         HttpError,
     >;
+
+    #[endpoint {
+        method = POST,
+        path = "/recovery/host-phase2",
+        request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
+        versions = ..VERSION_ARTIFACT_HASH_SCHEMA,
+    }]
+    async fn recovery_host_phase2_upload_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: UntypedBody,
+    ) -> Result<HttpResponseOk<v1::update::HostPhase2RecoveryImageId>, HttpError>
+    {
+        Self::recovery_host_phase2_upload(rqctx, body).await.map(
+            |HttpResponseOk(image_id)| {
+                HttpResponseOk(v1::update::HostPhase2RecoveryImageId::from(
+                    image_id,
+                ))
+            },
+        )
+    }
 
     /// Get the identifier for the switch this MGS instance is connected to.
     ///
@@ -597,6 +686,23 @@ pub trait GatewayApi {
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::component::SpIdentifier>>, HttpError>;
+
+    /// Returns the rack UUID of the rack this management gateway service is
+    /// located in.
+    ///
+    /// All service processors accessed via this gateway can be assumed to be
+    /// located in the rack with this ID.
+    ///
+    /// If the rack UUID has not yet been set (i.e. because RSS has not yet
+    /// run), this endpoint returns a 503 Service Unavailable error.
+    #[endpoint {
+            method = GET,
+            path = "/local/rack-id",
+            versions = VERSION_RACK_ID..
+        }]
+    async fn rack_id_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::local::RackId>, HttpError>;
 
     /// Request ereports from the target service processor.
     ///

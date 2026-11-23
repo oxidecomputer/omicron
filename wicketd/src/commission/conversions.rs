@@ -747,6 +747,45 @@ pub(crate) fn rack_setup_status_to_ct(
             rack_state: RackState::Initialized,
             operation: None,
         },
+        B::MultirackJoinInProgress { id } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::MULTIRACK_JOIN,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::InProgress { current_step: None },
+            }),
+        },
+        B::MultirackJoinCompleted { id: Some(id) } => RackSetupStatus {
+            rack_state: RackState::Initialized,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::MULTIRACK_JOIN,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Completed,
+            }),
+        },
+        B::MultirackJoinCompleted { id: None } => RackSetupStatus {
+            rack_state: RackState::Initialized,
+            operation: None,
+        },
+        B::MultirackJoinFailed { id, message } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::MULTIRACK_JOIN,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Failed {
+                    message,
+                    failed_step: None,
+                },
+            }),
+        },
+        B::MultirackJoinPanicked { id } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::MULTIRACK_JOIN,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Panicked,
+            }),
+        },
     }
 }
 

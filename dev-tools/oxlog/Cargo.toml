@@ -19,5 +19,8 @@ sigpipe.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
+[dev-dependencies]
+camino-tempfile.workspace = true
+
 [[bin]]
 name = "oxlog"

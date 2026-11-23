@@ -66,10 +66,6 @@ pub enum TargetCommand {
         #[clap(short, long, help_heading = "Preset overrides")]
         machine: Option<crate::target::Machine>,
 
-        /// The switch to use for the target.
-        #[clap(short, long, help_heading = "Preset overrides")]
-        switch: Option<crate::target::Switch>,
-
         #[clap(short, long, help_heading = "Preset overrides")]
         /// Specify whether nexus will run in a single-sled or multi-sled
         /// environment.

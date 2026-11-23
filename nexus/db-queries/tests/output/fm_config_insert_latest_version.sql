@@ -22,10 +22,11 @@ WITH
             time_modified,
             analysis_enabled,
             sitrep_limit,
-            history_pruning_threshold
+            history_pruning_threshold,
+            certificate_expiry_warning_days
           )
       VALUES
-        ($4, $5, $6, $7, $8, $9)
+        ($4, $5, $6, $7, $8, $9, $10)
       RETURNING
         version
     )

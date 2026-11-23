@@ -21,7 +21,9 @@ pub enum Image {
 }
 
 /// Classification of the target machine
-#[derive(Clone, Debug, strum::EnumString, strum::Display, ValueEnum)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, strum::EnumString, strum::Display, ValueEnum,
+)]
 #[strum(serialize_all = "kebab-case")]
 #[clap(rename_all = "kebab-case")]
 pub enum Machine {
@@ -36,7 +38,9 @@ pub enum Machine {
     NonGimlet,
 }
 
-#[derive(Clone, Debug, strum::EnumString, strum::Display, ValueEnum)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, strum::EnumString, strum::Display, ValueEnum,
+)]
 #[strum(serialize_all = "lowercase")]
 #[clap(rename_all = "lowercase")]
 pub enum Switch {
@@ -46,6 +50,17 @@ pub enum Switch {
     Stub,
     /// Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
     SoftNpu,
+}
+
+impl Machine {
+    /// The switch zone this machine's sled-agent config expects.
+    pub fn switch(&self) -> Switch {
+        match self {
+            Machine::Gimlet => Switch::Asic,
+            Machine::GimletStandalone => Switch::Stub,
+            Machine::NonGimlet => Switch::SoftNpu,
+        }
+    }
 }
 
 /// Topology of the sleds within the rack.
@@ -144,13 +159,14 @@ impl KnownTarget {
         &self,
         image: Option<Image>,
         machine: Option<Machine>,
-        switch: Option<Switch>,
         rack_topology: Option<RackTopology>,
         clickhouse_topology: Option<ClickhouseTopology>,
     ) -> Result<Self> {
         let image = image.unwrap_or(self.image.clone());
+        // A machine override discards the preset's switch; it is derived
+        // from the new machine below.
+        let switch = if machine.is_some() { None } else { self.switch.clone() };
         let machine = machine.or(self.machine.clone());
-        let switch = switch.or(self.switch.clone());
         let rack_topology = rack_topology.unwrap_or(self.rack_topology.clone());
         let clickhouse_topology =
             clickhouse_topology.unwrap_or(self.clickhouse_topology.clone());
@@ -186,13 +202,69 @@ impl KnownTarget {
             }
         }
 
-        if !matches!(machine, Some(Machine::Gimlet))
-            && matches!(switch, Some(Switch::Asic))
-        {
-            bail!("'switch=asic' is only valid with 'machine=gimlet'");
-        }
+        // `machine` selects a sled-agent config that names its switch backend,
+        // and `switch` selects the zone package. Derive the switch from the
+        // machine; a target that names both must agree.
+        let switch = match (&machine, switch) {
+            (Some(machine), None) => Some(machine.switch()),
+            (Some(machine), Some(switch)) => {
+                let expected = machine.switch();
+                if switch != expected {
+                    bail!(
+                        "'machine={machine}' ships a sled-agent config for \
+                         'switch={expected}', not 'switch={switch}'"
+                    );
+                }
+                Some(switch)
+            }
+            (None, switch) => switch,
+        };
 
         Ok(Self { image, machine, switch, rack_topology, clickhouse_topology })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn create(machine: Machine, switch: Option<Switch>) -> Result<KnownTarget> {
+        KnownTarget::validate_and_create(
+            Image::Standard,
+            Some(machine),
+            switch,
+            RackTopology::SingleSled,
+            ClickhouseTopology::SingleNode,
+        )
+    }
+
+    #[test]
+    fn switch_follows_machine() {
+        for machine in
+            [Machine::Gimlet, Machine::GimletStandalone, Machine::NonGimlet]
+        {
+            let expected = machine.switch();
+            let derived = create(machine.clone(), None).unwrap();
+            assert_eq!(derived.switch, Some(expected.clone()));
+            assert!(create(machine.clone(), Some(expected)).is_ok());
+            for other in [Switch::Asic, Switch::Stub, Switch::SoftNpu] {
+                if other != machine.switch() {
+                    assert!(
+                        create(machine.clone(), Some(other.clone())).is_err(),
+                        "{machine} + {other}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn machine_override_rederives_switch() {
+        let dev = create(Machine::NonGimlet, None).unwrap();
+        let standalone = dev
+            .with_overrides(None, Some(Machine::GimletStandalone), None, None)
+            .unwrap();
+        assert_eq!(standalone.switch, Some(Switch::Stub));
     }
 }
 
@@ -201,7 +273,7 @@ impl Default for KnownTarget {
         KnownTarget {
             image: Image::Standard,
             machine: Some(Machine::NonGimlet),
-            switch: Some(Switch::Stub),
+            switch: Some(Switch::SoftNpu),
             rack_topology: RackTopology::MultiSled,
             clickhouse_topology: ClickhouseTopology::SingleNode,
         }

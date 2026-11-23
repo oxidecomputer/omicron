@@ -319,29 +319,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "post": {
-        "summary": "Run rack setup.",
-        "description": "Will return an error if not all of the rack setup configuration has been populated.",
-        "operationId": "post_run_rack_setup",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackInitUuid"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config": {
@@ -359,47 +336,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "summary": "Update (a subset of) the current RSS configuration.",
-        "description": "Sensitive values (certificates and password hash) are not set through this endpoint.",
-        "operationId": "put_rss_config",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutRssUserConfigInsensitive"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Reset all RSS configuration to their default values.",
-        "operationId": "delete_rss_config",
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -432,122 +368,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/bgp/auth-key/{key_id}": {
-      "put": {
-        "summary": "Set the BGP authentication key for a particular key ID.",
-        "operationId": "put_bgp_auth_key",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/BgpAuthKeyId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutBgpAuthKeyBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PutBgpAuthKeyResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/cert": {
-      "post": {
-        "summary": "Add an external certificate.",
-        "description": "This must be paired with its private key. They may be posted in either order, but one cannot post two certs in a row (or two keys in a row).",
-        "operationId": "post_rss_config_cert",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "String",
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateUploadResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/key": {
-      "post": {
-        "summary": "Add the private key of an external certificate.",
-        "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
-        "operationId": "post_rss_config_key",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "String",
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateUploadResponse"
                 }
               }
             }
@@ -611,67 +431,11 @@
         }
       }
     },
-    "/rack-setup/config/recovery-user-password-hash": {
-      "put": {
-        "summary": "Update the RSS config recovery silo user password hash.",
-        "operationId": "put_rss_config_recovery_user_password_hash",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/reload-config": {
       "post": {
         "summary": "Instruct wicketd to reload its SMF config properties.",
         "description": "The only expected client of this endpoint is `curl` from wicketd's SMF `refresh` method, but other clients hitting it is harmless.",
         "operationId": "post_reload_config",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/repository": {
-      "put": {
-        "summary": "Upload a TUF repository to the server.",
-        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
-        "operationId": "put_repository",
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1071,31 +835,6 @@
           "serial_number"
         ]
       },
-      "BgpAuthKey": {
-        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
-        "oneOf": [
-          {
-            "description": "TCP-MD5 authentication.",
-            "type": "object",
-            "properties": {
-              "key": {
-                "description": "The pre-shared key.",
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "tcp_md5"
-                ]
-              }
-            },
-            "required": [
-              "key",
-              "kind"
-            ]
-          }
-        ]
-      },
       "BgpAuthKeyId": {
         "description": "The key identifier for authentication to use with a BGP peer.",
         "allOf": [
@@ -1122,7 +861,7 @@
                 "x-rust-type": {
                   "crate": "byte-wrapper",
                   "path": "byte_wrapper::HexArray::<32>",
-                  "version": "0.1.0"
+                  "version": "0.2.0"
                 },
                 "type": "string",
                 "pattern": "^[0-9a-fA-F]{64}$",
@@ -1273,71 +1012,6 @@
         },
         "required": [
           "sleds"
-        ]
-      },
-      "CertificateUploadResponse": {
-        "description": "The result of uploading half of a certificate/key pair.",
-        "oneOf": [
-          {
-            "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting_on_cert"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "The cert chain has been uploaded, but we're waiting on its corresponding private key.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting_on_key"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "A cert chain and its key have been accepted.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "cert_key_accepted"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "A cert chain and its key are valid, but have already been uploaded.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "cert_key_duplicate_ignored"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          }
         ]
       },
       "ClearUpdateStateOptions": {
@@ -1928,13 +1602,22 @@
             }
           },
           "event_reports": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
-              }
-            }
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpEventReport"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpEventReport"
+            },
+            "uniqueItems": true
           },
           "system_version": {
             "nullable": true,
@@ -2318,82 +2001,6 @@
           "status"
         ]
       },
-      "ManualPortConfig": {
-        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Addresses configured on this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
-            }
-          },
-          "autoneg": {
-            "description": "Whether autonegotiation is enabled.",
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "description": "BGP peers reachable on this port.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "description": "LLDP configuration for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "description": "Static routes for this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "tx_eq": {
-            "nullable": true,
-            "description": "Transmit equalization overrides for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "nullable": true,
-            "description": "The forward error correction mode, if any.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "The port speed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkSpeed"
-              }
-            ]
-          }
-        },
-        "required": [
-          "addresses",
-          "autoneg",
-          "routes",
-          "uplink_port_speed"
-        ],
-        "additionalProperties": false
-      },
       "MaxPathConfig": {
         "type": "integer",
         "format": "uint8",
@@ -2618,6 +2225,15 @@
           "rack_network_config"
         ]
       },
+      "MultirackJoinUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MultirackJoinUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -2625,11 +2241,6 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
-      },
-      "NewPasswordHash": {
-        "title": "A password hash in PHC string format",
-        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
-        "type": "string"
       },
       "Oui": {
         "description": "An Organization Unique Identifier.",
@@ -2672,7 +2283,7 @@
         ]
       },
       "PowerState": {
-        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"See RFD 81.\\n\\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\", \"type\": \"string\", \"enum\": [ \"A0\", \"A1\", \"A2\" ] } ``` </details>",
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
         "enum": [
           "A0",
@@ -3460,132 +3071,6 @@
         },
         "type": "string"
       },
-      "PutBgpAuthKeyBody": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "$ref": "#/components/schemas/BgpAuthKey"
-          }
-        },
-        "required": [
-          "key"
-        ]
-      },
-      "PutBgpAuthKeyResponse": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
-      "PutRssRecoveryUserPasswordHash": {
-        "type": "object",
-        "properties": {
-          "hash": {
-            "$ref": "#/components/schemas/NewPasswordHash"
-          }
-        },
-        "required": [
-          "hash"
-        ]
-      },
-      "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.\n\nThis version replaces the flat `internal_services_ip_pool_ranges` of the initial version with fully-specified [`service_ip_pools`], letting operators name and describe each pool.\n\n[`service_ip_pools`]: Self::service_ip_pools",
-        "type": "object",
-        "properties": {
-          "allowed_source_ips": {
-            "description": "IPs or subnets allowed to make requests to user-facing services.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AllowedSourceIps"
-              }
-            ]
-          },
-          "bootstrap_sleds": {
-            "description": "The slot numbers of the sleds to bring up during RSS.\n\nwicketd maps these back to sleds with the correct identifiers based on the bootstrap sleds it reports.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint16",
-              "minimum": 0
-            },
-            "uniqueItems": true
-          },
-          "dns_servers": {
-            "description": "The external DNS server addresses.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          },
-          "external_dns_ips": {
-            "description": "Service IP addresses on which external DNS servers are run.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          },
-          "external_dns_zone_name": {
-            "description": "The DNS zone name delegated to the rack for external DNS.",
-            "type": "string"
-          },
-          "external_jumbo_frames_opt_in_enabled": {
-            "description": "Enable the fleet-wide jumbo-frames opt-in.",
-            "default": false,
-            "type": "boolean"
-          },
-          "ntp_servers": {
-            "description": "The external NTP server addresses.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "rack_network_config": {
-            "description": "The user-specified rack network configuration.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
-              }
-            ]
-          },
-          "service_ip_pools": {
-            "title": "IdOrdMap",
-            "description": "The service IP pools which may be used for internal services.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServiceIpPoolConfig"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "allowed_source_ips",
-          "bootstrap_sleds",
-          "dns_servers",
-          "external_dns_ips",
-          "external_dns_zone_name",
-          "ntp_servers",
-          "rack_network_config",
-          "service_ip_pools"
-        ]
-      },
       "RackInitUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -3598,6 +3083,20 @@
       "RackOperationStatus": {
         "description": "Current status of any rack-level operation being performed by this bootstrap agent.",
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "uninitialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -3686,14 +3185,80 @@
           {
             "type": "object",
             "properties": {
+              "id": {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              },
               "status": {
                 "type": "string",
                 "enum": [
-                  "uninitialized"
+                  "multirack_join_in_progress"
                 ]
               }
             },
             "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/MultirackJoinUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "multirack_join_completed"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "multirack_join_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "multirack_join_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
               "status"
             ]
           }
@@ -4306,31 +3871,6 @@
           "ranges"
         ]
       },
-      "SetBgpAuthKeyStatus": {
-        "oneOf": [
-          {
-            "description": "The key was accepted and replaced an old key.",
-            "type": "string",
-            "enum": [
-              "replaced"
-            ]
-          },
-          {
-            "description": "The key was accepted, and is the same as the existing key.",
-            "type": "string",
-            "enum": [
-              "unchanged"
-            ]
-          },
-          {
-            "description": "The key was accepted and is new.",
-            "type": "string",
-            "enum": [
-              "added"
-            ]
-          }
-        ]
-      },
       "Sff8636Datapath": {
         "description": "The datapath of an SFF-8636 module.\n\nThis describes the state of a single lane in an SFF module. It includes information about input and output signals, faults, and controls.",
         "type": "object",
@@ -4428,7 +3968,7 @@
         ]
       },
       "SpComponentCaboose": {
-        "description": "`SpComponentCaboose`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"epoch\": { \"type\": [ \"string\", \"null\" ] }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"sign\": { \"type\": [ \"string\", \"null\" ] }, \"version\": { \"type\": \"string\" } } } ``` </details>",
+        "description": "`SpComponentCaboose`",
         "type": "object",
         "properties": {
           "board": {
@@ -4460,7 +4000,7 @@
         ]
       },
       "SpComponentInfo": {
-        "description": "Overview of a single SP component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Overview of a single SP component.\", \"type\": \"object\", \"required\": [ \"capabilities\", \"component\", \"description\", \"device\", \"presence\" ], \"properties\": { \"capabilities\": { \"description\": \"`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"component\": { \"description\": \"The unique identifier for this component.\", \"type\": \"string\" }, \"description\": { \"description\": \"A human-readable description of the component.\", \"type\": \"string\" }, \"device\": { \"description\": \"The name of the physical device.\", \"type\": \"string\" }, \"presence\": { \"description\": \"Whether or not the component is present, to the best of the SP's ability to judge.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpComponentPresence\" } ] }, \"serial_number\": { \"description\": \"The component's serial number, if it has one.\", \"type\": [ \"string\", \"null\" ] } } } ``` </details>",
+        "description": "Overview of a single SP component.",
         "type": "object",
         "properties": {
           "capabilities": {
@@ -4504,7 +4044,7 @@
         ]
       },
       "SpComponentPresence": {
-        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Description of the presence or absence of a component.\\n\\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\", \"oneOf\": [ { \"description\": \"The component is present.\", \"type\": \"string\", \"enum\": [ \"present\" ] }, { \"description\": \"The component is not present.\", \"type\": \"string\", \"enum\": [ \"not_present\" ] }, { \"description\": \"The component is present but in a failed or faulty state.\", \"type\": \"string\", \"enum\": [ \"failed\" ] }, { \"description\": \"The SP is unable to determine the presence of the component.\", \"type\": \"string\", \"enum\": [ \"unavailable\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component timed out.\", \"type\": \"string\", \"enum\": [ \"timeout\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component failed.\", \"type\": \"string\", \"enum\": [ \"error\" ] } ] } ``` </details>",
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
         "oneOf": [
           {
             "description": "The component is present.",
@@ -4548,6 +4088,22 @@
               "error"
             ]
           }
+        ]
+      },
+      "SpEventReport": {
+        "description": "An event report for a single SP.",
+        "type": "object",
+        "properties": {
+          "event_report": {
+            "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+          },
+          "sp": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          }
+        },
+        "required": [
+          "event_report",
+          "sp"
         ]
       },
       "SpIdentifier": {
@@ -7914,6 +7470,13 @@
               }
             ]
           },
+          "src_addr": {
+            "nullable": true,
+            "description": "The optional source address to use for starting a BGP session with a numbered peer.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
+          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
@@ -7939,19 +7502,146 @@
       },
       "UserSpecifiedPortConfig": {
         "description": "A user-specified port configuration.",
-        "anyOf": [
+        "oneOf": [
           {
-            "description": "A manually-configured port.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ManualPortConfig"
+            "description": "A front port intended for use as an uplink",
+            "type": "object",
+            "properties": {
+              "addresses": {
+                "description": "Addresses configured on this port.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+                }
+              },
+              "autoneg": {
+                "description": "Whether autonegotiation is enabled.",
+                "type": "boolean"
+              },
+              "bgp_peers": {
+                "description": "BGP peers reachable on this port.",
+                "default": [],
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "uplink"
+                ]
+              },
+              "lldp": {
+                "nullable": true,
+                "description": "LLDP configuration for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LldpPortConfig"
+                  }
+                ]
+              },
+              "routes": {
+                "description": "Static routes for this port.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteConfig"
+                }
+              },
+              "tx_eq": {
+                "nullable": true,
+                "description": "Transmit equalization overrides for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TxEqConfig"
+                  }
+                ]
+              },
+              "uplink_port_fec": {
+                "nullable": true,
+                "description": "The forward error correction mode, if any.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkFec"
+                  }
+                ]
+              },
+              "uplink_port_speed": {
+                "description": "The port speed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkSpeed"
+                  }
+                ]
               }
+            },
+            "required": [
+              "addresses",
+              "autoneg",
+              "kind",
+              "routes",
+              "uplink_port_speed"
             ]
           },
           {
-            "description": "A port configured automatically via DDM.",
+            "description": "A front port running DDM for multirack",
             "type": "object",
-            "additionalProperties": false
+            "properties": {
+              "autoneg": {
+                "description": "Whether autonegotiation is enabled.",
+                "type": "boolean"
+              },
+              "fec": {
+                "nullable": true,
+                "description": "The forward error correction mode, if any.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkFec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ddm"
+                ]
+              },
+              "lldp": {
+                "nullable": true,
+                "description": "LLDP configuration for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LldpPortConfig"
+                  }
+                ]
+              },
+              "speed": {
+                "description": "The port speed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/LinkSpeed"
+                  }
+                ]
+              },
+              "tx_eq": {
+                "nullable": true,
+                "description": "Transmit equalization overrides for this port.",
+                "default": null,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TxEqConfig"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "autoneg",
+              "kind",
+              "speed"
+            ]
           }
         ]
       },
@@ -8086,7 +7776,7 @@
         ]
       },
       "IgnitionCommand": {
-        "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
+        "description": "Ignition command.",
         "type": "string",
         "enum": [
           "power_on",

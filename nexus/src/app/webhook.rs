@@ -205,7 +205,7 @@ impl Nexus {
         rx: lookup::AlertReceiver<'_>,
         params: alert::AlertReceiverProbe,
     ) -> Result<alert::AlertProbeResult, Error> {
-        let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
+        let (authz_rx, rx) = rx.fetch_for(authz::Action::Modify).await?;
         let rx_id = authz_rx.id();
         let datastore = self.datastore();
         let secrets =
@@ -267,7 +267,7 @@ impl Nexus {
             );
 
             let deliveries = datastore
-                .webhook_rx_list_resendable_events(opctx, &rx_id)
+                .webhook_rx_list_resendable_alerts(opctx, &rx_id)
                 .await
                 .map_err(|e| {
                     e.internal_context("error listing events to resend")

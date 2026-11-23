@@ -5,9 +5,7 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::sprockets_client::{
-    SprocketsClient, SprocketsClientError,
-};
+use crate::bootstrap::{MultirackJoinAccessor, RssAccessError};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -17,7 +15,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
-use crate::rot::{RotAttestationHandle, RotAttestationTask};
+use crate::rot::RotAttestor;
 use crate::services::{self, ServiceManager, SledAgentInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
@@ -42,16 +40,12 @@ use illumos_utils::zfs::RemoveReservationError;
 use illumos_utils::zfs::RemoveReservationErrorInner;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
-use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -64,6 +58,10 @@ use omicron_uuid_kinds::{
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
+use sled_agent_config_reconciler::PathInPool;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -78,7 +76,7 @@ use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::instance::{
@@ -86,7 +84,10 @@ use sled_agent_types::instance::{
     SledVmmState, VmmPutStateResponse, VmmStateRequested,
     VmmUnregisterResponse,
 };
-use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
+use sled_agent_types::inventory::{
+    Inventory, OmicronSledConfig, SledRegistrationInfo, SledRole,
+};
+use sled_agent_types::multirack::MultirackJoinServiceStatus;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -201,6 +202,9 @@ pub enum Error {
 
     #[error(transparent)]
     Rot(#[from] crate::rot::RotError),
+
+    #[error("Failed to complete multirack join request")]
+    MultirackJoin(#[from] crate::bootstrap::RssAccessError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -218,6 +222,8 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use crate::instance::Error as InstanceError;
+        use crate::instance_manager::Error as InstanceManagerError;
         use dropshot::ClientErrorStatusCode;
         use dropshot::ErrorStatusCode;
 
@@ -225,14 +231,12 @@ impl From<Error> for dropshot::HttpError {
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
-            Error::Instance(crate::instance_manager::Error::Instance(
-                instance_error,
-            )) => {
+            Error::Instance(InstanceManagerError::Instance(instance_error)) => {
                 match instance_error {
                     // The instance's request channel is full, so it cannot
                     // currently process this request. Shed load, but indicate
                     // to the client that it can try again later.
-                    err @ crate::instance::Error::FailedSendChannelFull => {
+                    err @ InstanceError::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
                             // InlineErrorChain isn't really necessary here, but include it anyway,
@@ -240,7 +244,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    crate::instance::Error::Propolis(propolis_error) => {
+                    InstanceError::Propolis(propolis_error) => {
                         if let Some(status_code) =
                             propolis_error.status().and_then(|status| {
                                 ErrorStatusCode::try_from(status).ok()
@@ -268,13 +272,13 @@ impl From<Error> for dropshot::HttpError {
                             propolis_error.to_string(),
                         )
                     }
-                    crate::instance::Error::Transition(omicron_error) => {
+                    InstanceError::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
                         // Omicron error so that Nexus will see it in the
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
-                    crate::instance::Error::Terminating => {
+                    InstanceError::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
@@ -284,7 +288,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
-                    err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
+                    err @ InstanceError::SubnetAlreadyAttached(_) => {
                         HttpError::for_client_error(
                             Some(SUBNET_ALREADY_ATTACHED.to_string()),
                             ClientErrorStatusCode::CONFLICT,
@@ -292,22 +296,66 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(
-                        InlineErrorChain::new(&e).to_string(),
-                    ),
+                    err @ (InstanceError::WaitForService(_)
+                    | InstanceError::PropolisHttpServerTimeout(_)
+                    | InstanceError::VnicCreation(_)
+                    | InstanceError::Notification(_)
+                    | InstanceError::Migration(_)
+                    | InstanceError::NicNotInPropolisSpec(_)
+                    | InstanceError::ZoneCommand(_)
+                    | InstanceError::ZoneBoot(_)
+                    | InstanceError::ZoneEnsureAddress(_)
+                    | InstanceError::ZoneInstall(_)
+                    | InstanceError::SerdeJsonError(_)
+                    | InstanceError::Opte(_)
+                    | InstanceError::InvalidHostname(_)
+                    | InstanceError::ResolveError(_)
+                    | InstanceError::VmNotRunning(_)
+                    | InstanceError::PropolisAlreadyRegistered(_)
+                    | InstanceError::U2NotFound
+                    | InstanceError::Io(_)
+                    | InstanceError::FailedSendChannelClosed
+                    | InstanceError::FailedSendClientClosed
+                    | InstanceError::RequestDropped(_)) => {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
                 }
             }
+            Error::Instance(e @ InstanceManagerError::NoSuchVmm(_)) => {
+                HttpError::for_not_found(
+                    Some(NO_SUCH_INSTANCE.to_string()),
+                    // NoSuchVmm has no source error, so it's currently not
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchVmm(_),
-            ) => HttpError::for_not_found(
-                Some(NO_SUCH_INSTANCE.to_string()),
-                // NoSuchVmm has no source error, so it's currently not necessary to use a
-                // chain-logging adapter here, but if that changes in the future, the compiler
-                // won't complain.
-                InlineErrorChain::new(&e).to_string(),
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                HttpError::for_unavail(
+                    Some(reason.http_error_code().to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            err @ Error::Instance(
+                InstanceManagerError::Opte(_)
+                | InstanceManagerError::Underlay(_)
+                | InstanceManagerError::ZoneBundle(_)
+                | InstanceManagerError::FailedSendInstanceManagerClosed
+                | InstanceManagerError::FailedSendClientClosed
+                | InstanceManagerError::RequestDropped(_),
+            ) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
-                BundleError::NoStorage | BundleError::Unavailable { .. } => {
+                BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
                 BundleError::NoSuchZone { .. } => {
@@ -325,7 +373,26 @@ impl From<Error> for dropshot::HttpError {
                         inner.to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(
+                err @ (BundleError::Command { .. }
+                | BundleError::OpenBundleFile { .. }
+                | BundleError::ReadBundleData { .. }
+                | BundleError::ReadDirectory { .. }
+                | BundleError::Metadata { .. }
+                | BundleError::Serialization(_)
+                | BundleError::Deserialization(_)
+                | BundleError::Task(_)
+                | BundleError::FailedSend(_)
+                | BundleError::DroppedRequest(_)
+                | BundleError::BundleFailed(_)
+                | BundleError::Zone(_)
+                | BundleError::PathBuf(_)
+                | BundleError::Cleanup(_)
+                | BundleError::DestroySnapshot(_)
+                | BundleError::ListSnapshot(_)
+                | BundleError::EnsureDataset(_)
+                | BundleError::DestroyDataset(_)
+                | BundleError::SetProperty(_)
+                | BundleError::WalkDir(_)) => HttpError::for_internal_error(
                     InlineErrorChain::new(&err).to_string(),
                 ),
             },
@@ -333,8 +400,44 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(
-                InlineErrorChain::new(&e).to_string(),
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinGenerationUnavailable,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::GONE,
+                err.to_string(),
+            ),
+            Error::MultirackJoin(
+                err @ RssAccessError::MultirackJoinPendingConfigUpdate,
+            ) => HttpError::for_client_error(
+                Some(err.error_code().to_string()),
+                ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
+            err @ (Error::BootDiskNotFound
+            | Error::Config(_)
+            | Error::BackingFs(_)
+            | Error::SwapDevice(_)
+            | Error::Etherstub(_)
+            | Error::EtherstubVnic(_)
+            | Error::Bootstrap(_)
+            | Error::DeleteAddress(_)
+            | Error::Underlay(_)
+            | Error::SledSubnet { .. }
+            | Error::Opte(_)
+            | Error::Hardware(_)
+            | Error::ResolveError(_)
+            | Error::ZpoolList(_)
+            | Error::Bootstore(_)
+            | Error::EarlyNetworkDeserialize(_)
+            | Error::SupportBundle(_)
+            | Error::Metrics(_)
+            | Error::UnexpectedRevision(_)
+            | Error::RepoDepotStart(_)
+            | Error::TimeNotSynchronized
+            | Error::MultirackJoin(_)
+            | Error::Rot(_)) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
         }
     }
@@ -406,7 +509,7 @@ struct SledAgentInner {
     nexus_notifier: NexusNotifierHandle,
 
     // A handle to the RoT for attestation requests.
-    rot_attestor: RotAttestationHandle,
+    rot_attestor: RotAttestor,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -434,6 +537,9 @@ struct SledAgentInner {
 
     // Handle to access reference measurements for Sprockets/TrustQuorum
     measurements: Arc<MeasurementsHandle>,
+
+    // A mechanism to access a multirack join service task
+    multirack_join_accessor: MultirackJoinAccessor,
 }
 
 impl SledAgentInner {
@@ -457,6 +563,7 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
@@ -465,6 +572,7 @@ impl SledAgent {
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -619,13 +727,16 @@ impl SledAgent {
             port_manager.clone(),
             config_reconciler.currently_managed_zpools_rx().clone(),
             config_reconciler.available_datasets_rx(),
-            long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
+            config_reconciler_spawn_token.former_zone_root_archiver(),
         )?;
 
-        let svc_config =
-            services::Config::new(identifiers, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            identifiers,
+            config.deployment.sidecar_revision(),
+        );
 
         // Get our system network config from the bootstore; we cannot proceed
         // until we have this, as we need to set up uplinks inside the switch
@@ -698,7 +809,7 @@ impl SledAgent {
         long_running_task_handles
             .scrimlet_reconcilers
             .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
-                system_networking_config_rx: network_config_rx.clone(),
+                system_networking_config_rx: network_config_rx,
                 mode: ScrimletReconcilersMode::SwitchZone(
                     this_sled_switch_zone_ip,
                 ),
@@ -722,14 +833,9 @@ impl SledAgent {
             .sled_agent_started(SledAgentInfo {
                 config: svc_config,
                 port_manager: port_manager.clone(),
-                resolver: Resolver::new_from_ip(
-                    parent_log.new(o!("component" => "DnsResolver")),
-                    *sled_address.ip(),
-                )?,
                 underlay_address: *sled_address.ip(),
                 local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
-                network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
             .await?;
@@ -756,9 +862,7 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
-        // Spawn a background task for handling RoT attestation operations
-        let rot_attest_handle =
-            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+        let rot_attestor = RotAttestor::new(&log, &config.sprockets.attest)?;
 
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
@@ -783,7 +887,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_notifier: nexus_notifier_handle,
-                rot_attestor: rot_attest_handle,
+                rot_attestor,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 trust_quorum: long_running_task_handles.trust_quorum.clone(),
@@ -796,6 +900,7 @@ impl SledAgent {
                 metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
+                multirack_join_accessor,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -857,7 +962,7 @@ impl SledAgent {
         &self,
         rot: Rot,
         remote_addr: SocketAddr,
-    ) -> Result<&RotAttestationHandle, HttpError> {
+    ) -> Result<&RotAttestor, HttpError> {
         // We currently only support the LPC55 RoT
         let Rot::Oxide = rot;
         // And we only serve sled-local clients
@@ -962,15 +1067,6 @@ impl SledAgent {
         config: OmicronSledConfig,
     ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
         self.inner.config_reconciler.set_sled_config(config).await
-    }
-
-    /// Returns whether or not the sled believes itself to be a scrimlet
-    pub fn get_role(&self) -> SledRole {
-        if self.inner.hardware.is_scrimlet() {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        }
     }
 
     /// Idempotently ensures that a given instance is registered with this sled,
@@ -1083,19 +1179,6 @@ impl SledAgent {
             .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
-    }
-
-    /// Idempotently ensures that the given virtual disk is attached (or not) as
-    /// specified.
-    ///
-    /// NOTE: Not yet implemented.
-    pub async fn disk_ensure(
-        &self,
-        _disk_id: Uuid,
-        _initial_state: DiskRuntimeState,
-        _target: DiskStateRequested,
-    ) -> Result<DiskRuntimeState, Error> {
-        todo!("Disk attachment not yet implemented");
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
@@ -1256,6 +1339,36 @@ impl SledAgent {
         }
     }
 
+    /// Return sled registration info.
+    ///
+    /// IMPORTANT!
+    /// ----------
+    ///
+    /// There are several restrictions associated with this method! Pay close
+    /// attention!
+    ///
+    /// 1. This method MUST NOT be async or take any locks. That is because this
+    ///    is a synchronous callback from Nexus's `upsert_sled`. Any kind of
+    ///    blocking here can lead to deadlocks.
+    ///
+    /// 2. The data returned here MUST be immutable. This is to avoid a tricky
+    ///    ABA race, as documented at
+    ///    <https://claude.ai/artifact/AZNUEPEDh4R8wKpWFh1n5Q>.
+    ///
+    /// This is understandably quite restrictive! In the long term, consider
+    /// completely reworking this:
+    ///
+    /// * Have RSS and the multirack join service populate immutable data,
+    ///   once.
+    /// * Return mutable data through inventory.
+    /// * Remove the `sled_upsert` upcall.
+    pub(crate) fn sled_registration_info(&self) -> SledRegistrationInfo {
+        SledRegistrationInfo {
+            sled_id: self.inner.id,
+            rack_id: self.inner.start_request.body.rack_id,
+        }
+    }
+
     /// Return basic information about ourselves: identity and status
     ///
     /// This is basically a GET version of the information we push to Nexus on
@@ -1265,6 +1378,7 @@ impl SledAgent {
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
         let baseboard = self.inner.hardware.baseboard();
+        let rack_id = self.inner.start_request.body.rack_id;
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
@@ -1295,9 +1409,10 @@ impl SledAgent {
             sled_agent_address,
             sled_role,
             baseboard_id: baseboard.into(),
+            rack_id,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
-            cpu_family,
+            cpu_family: cpu_family.into(),
             reservoir_size,
             disks,
             zpools,
@@ -1306,6 +1421,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
+            instance_manager_status: self.inner.instances.status(),
             smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
             fmd,
@@ -1405,11 +1521,8 @@ impl SledAgent {
             .available_datasets_rx()
             .all_mounted_local_storage_unencrypted_datasets()
             .into_iter()
-            .any(|path_in_pool| match path_in_pool.pool {
-                ZpoolOrRamdisk::Zpool(zpool_name) => {
-                    zpool_name == ZpoolName::External(zpool_id)
-                }
-                ZpoolOrRamdisk::Ramdisk => false,
+            .any(|path_in_pool| {
+                path_in_pool.pool() == ZpoolName::External(zpool_id)
             });
 
         if !present {
@@ -1440,7 +1553,7 @@ impl SledAgent {
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
-                compression: omicron_common::disk::CompressionAlgorithm::Off,
+                compression: CompressionAlgorithm::Off,
             }),
             id: None,
             additional_options: None,
@@ -1485,11 +1598,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1511,11 +1621,8 @@ impl SledAgent {
                 .available_datasets_rx()
                 .all_mounted_local_storage_unencrypted_datasets()
                 .into_iter()
-                .any(|path_in_pool| match path_in_pool.pool {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => {
-                        zpool_name == ZpoolName::External(zpool_id)
-                    }
-                    ZpoolOrRamdisk::Ramdisk => false,
+                .any(|path_in_pool| {
+                    path_in_pool.pool() == ZpoolName::External(zpool_id)
                 });
 
             if !present {
@@ -1641,6 +1748,23 @@ impl SledAgent {
             .detach_subnet(propolis_id, subnet)
             .await
             .map_err(|e| Error::Instance(e))
+    }
+
+    /// Complete a multirack join operation and return the final bootstore
+    /// generation
+    pub(crate) async fn complete_multirack_join(&self) -> Result<u64, Error> {
+        let generation = self
+            .inner
+            .multirack_join_accessor
+            .complete_multirack_join()
+            .await?;
+        Ok(generation)
+    }
+
+    pub(crate) fn multirack_join_service_status(
+        &self,
+    ) -> Result<MultirackJoinServiceStatus, RssAccessError> {
+        self.inner.multirack_join_accessor.multirack_join_service_status()
     }
 }
 

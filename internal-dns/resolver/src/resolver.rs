@@ -509,9 +509,10 @@ mod test {
             let (dns_server, dropshot_server) = dns_server::start_servers(
                 log.clone(),
                 store,
-                &dns_server::dns_server::Config {
-                    bind_address: "[::1]:0".parse().unwrap(),
-                },
+                &dns_server::dns_server::Config::new(vec![
+                    "[::1]:0".parse().unwrap(),
+                ])
+                .expect("valid DNS configuration"),
                 &dropshot::ConfigDropshot {
                     bind_address: "[::1]:0".parse().unwrap(),
                     default_request_body_max_bytes: 8 * 1024,
@@ -539,7 +540,7 @@ mod test {
         }
 
         fn dns_server_address(&self) -> SocketAddr {
-            self.dns_server.local_address()
+            self.dns_server.sole_local_address().expect("exactly one address")
         }
 
         fn cleanup_successful(mut self) {
@@ -833,17 +834,10 @@ mod test {
         spec = "tests/output/test-server.json",
         interface = Positional,
         inner_type = slog::Logger,
-        pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-            slog::debug!(log, "client request";
-                "method" => %request.method(),
-                "uri" => %request.url(),
-                "body" => ?&request.body(),
-            );
-        }),
-        post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-            slog::debug!(log, "client response"; "result" => ?result);
-        }),
+        hooks = Expected,
     );
+
+    progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
     // Verify that we have an up-to-date representation
     // of this server's API as JSON.
@@ -893,7 +887,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &dns_server.dns_server.local_addresses().collect::<Vec<_>>(),
         )
         .unwrap();
 
@@ -973,8 +967,14 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             &[
-                dns_server1.dns_server.local_address(),
-                dns_server2.dns_server.local_address(),
+                dns_server1
+                    .dns_server
+                    .sole_local_address()
+                    .expect("exactly one address"),
+                dns_server2
+                    .dns_server
+                    .sole_local_address()
+                    .expect("exactly one address"),
             ],
         )
         .unwrap();
@@ -1050,7 +1050,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &dns_server.dns_server.local_addresses().collect::<Vec<_>>(),
         )
         .unwrap();
 

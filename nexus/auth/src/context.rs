@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::SiloUuid;
 use slog::debug;
 use slog::o;
 use slog::trace;
@@ -22,7 +23,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
-use uuid::Uuid;
 
 /// Provides general facilities scoped to whatever operation Nexus is currently
 /// doing
@@ -419,7 +419,7 @@ impl Session for ConsoleSessionWithSiloId {
     fn silo_user_id(&self) -> SiloUserUuid {
         self.console_session.silo_user_id()
     }
-    fn silo_id(&self) -> Uuid {
+    fn silo_id(&self) -> SiloUuid {
         self.silo_id
     }
     fn time_last_used(&self) -> DateTime<Utc> {

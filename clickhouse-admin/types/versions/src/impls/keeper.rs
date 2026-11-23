@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use itertools::Itertools;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use slog::{Logger, info};
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
@@ -638,7 +638,7 @@ mod tests {
     };
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use slog::{Drain, o};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::net::{Ipv4Addr, Ipv6Addr};

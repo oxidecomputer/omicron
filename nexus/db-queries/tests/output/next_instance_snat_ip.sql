@@ -183,7 +183,7 @@ WITH
       UPDATE
         ip_pool_range
       SET
-        time_modified = $26, rcgen = rcgen + 1
+        rcgen = rcgen + 1
       WHERE
         id = (SELECT ip_pool_range_id FROM next_external_ip) AND time_deleted IS NULL
       RETURNING
@@ -196,19 +196,19 @@ WITH
           CASE
           WHEN ip.ip_version = 'v4' AND nic.has_ipv4_stack THEN 'TRUE'
           WHEN ip.ip_version = 'v6' AND nic.has_ipv6_stack THEN 'TRUE'
-          ELSE $27
+          ELSE $26
           END
             AS BOOL
         )
       FROM
-        (SELECT ip_version FROM ip_pool WHERE id = $28 AND time_deleted IS NULL) AS ip
+        (SELECT ip_version FROM ip_pool WHERE id = $27 AND time_deleted IS NULL) AS ip
         CROSS JOIN (
             SELECT
               ip IS NOT NULL AS has_ipv4_stack, ipv6 IS NOT NULL AS has_ipv6_stack
             FROM
               network_interface
             WHERE
-              parent_id = $29 AND time_deleted IS NULL AND is_primary
+              parent_id = $28 AND time_deleted IS NULL AND is_primary
           )
             AS nic
     ),
@@ -223,11 +223,11 @@ WITH
             FROM
               ip_pool_resource
             WHERE
-              ip_pool_id = $30 AND resource_type = 'silo' AND resource_id = $31
+              ip_pool_id = $29 AND resource_type = 'silo' AND resource_id = $30
           )
-          AND (SELECT assignment FROM ip_pool WHERE id = $32 AND time_deleted IS NULL) = 'silos'
+          AND (SELECT assignment FROM ip_pool WHERE id = $31 AND time_deleted IS NULL) = 'silos'
           THEN 'TRUE'
-          ELSE $33
+          ELSE $32
           END
             AS BOOL
         )

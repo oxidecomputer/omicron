@@ -126,8 +126,8 @@ impl Encoder {
     fn encode_settings(&self, settings: Settings, mut dst: &mut BytesMut) {
         for (name, setting) in settings.iter() {
             io::string::encode(name, &mut dst);
-            io::string::encode(&setting.value, &mut dst);
             dst.put_u8(u8::from(setting.important));
+            io::string::encode(&setting.value, &mut dst);
         }
 
         // There is no prefix for the length of the settings map. It's NULL
@@ -159,7 +159,14 @@ impl tokio_util::codec::Encoder<Packet> for Encoder {
         match item {
             Packet::Hello(hello) => self.encode_hello(&hello, dst),
             Packet::Query(query) => self.encode_query(query, dst),
-            Packet::Data(block) => self.encode_block(block, dst)?,
+            Packet::Data(block) => {
+                if let Err(e) = self.encode_block(block, dst) {
+                    probes::packet__send__failed!(|| {
+                        (self.addr.to_string(), kind, e.to_string())
+                    });
+                    return Err(e);
+                }
+            }
             Packet::Cancel => dst.put_u8(Packet::CANCEL),
             Packet::Ping => dst.put_u8(Packet::PING),
         };

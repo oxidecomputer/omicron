@@ -9,6 +9,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_local_user;
@@ -21,7 +22,6 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
-use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::InstanceCpuCount;
 use nexus_types::external_api::project;
 use nexus_types::external_api::silo::{
@@ -218,6 +218,7 @@ async fn create_resources_in_test_suite_silo(
                 name: test_project_name.parse().unwrap(),
                 description: String::new(),
             },
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user1.id))
@@ -226,28 +227,14 @@ async fn create_resources_in_test_suite_silo(
     .expect("failed to create project in test-suite-silo");
 
     // Create instance in test-suite-silo as the test user
-    let instance_params = instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "test-inst".parse().unwrap(),
-            description: "test instance in test-suite-silo".to_string(),
-        },
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "test-inst".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: None,
-        network_interfaces:
-            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
-    };
+    let instance_params = InstanceCreateBuilder::new("test-inst")
+        .with_description("test instance in test-suite-silo")
+        .with_ncpus(InstanceCpuCount::try_from(2).unwrap())
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_hostname("test-inst")
+        .with_user_data(&[])
+        .with_ssh_public_keys(None)
+        .finish();
 
     NexusRequest::objects_post(
         client,

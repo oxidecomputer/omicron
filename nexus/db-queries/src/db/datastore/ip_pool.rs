@@ -22,12 +22,14 @@ use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::SelectableSql;
 use crate::db::raw_query_builder::TypedSqlQuery;
+use crate::db::true_or_cast_error::matches_sentinel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
@@ -63,6 +65,8 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SiloUuid;
 use ref_cast::RefCast;
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -120,6 +124,13 @@ const REASSIGN_LAST_POOL_ERROR: &str = "Cannot reassign the last IP Pool \
 const DELETE_LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool \
     assigned for system services use. Create and assign at least one more \
     IP Pool before deleting this one.";
+
+// Error message emitted when a user attempts to assign a pool from system
+// serivces to silos, and that pool is currently assigned to a specific external
+// service, e.g., Nexus.
+const ASSIGNED_TO_EXTERNAL_SERVICE_ERROR: &str = "Cannot reassign an IP \
+    Pool for silos, while it is assigned to a specific external service. \
+    Unassign it first, and try again.";
 
 /// Check if pool selection has an IP version conflict.
 ///
@@ -267,7 +278,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type
                     .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(authz_silo.id())),
+                    .and(
+                        ip_pool_resource::resource_id
+                            .eq(authz_silo.id().into_untyped_uuid()),
+                    ),
             )
             .filter(ip_pool::id.eq(ip_pool_id))
             .filter(ip_pool::time_deleted.is_null())
@@ -319,7 +333,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
-            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
             // Filter by pool type
@@ -402,7 +419,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
-            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(pool_type))
             .into_boxed();
@@ -528,7 +548,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
-            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(IpPoolType::Unicast))
@@ -725,7 +748,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         ip: IpAddr,
         pool_type: IpPoolType,
-        silo_id: Option<Uuid>,
+        silo_id: Option<SiloUuid>,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_range;
@@ -757,7 +780,10 @@ impl DataStore {
                             ip_pool_resource::resource_type
                                 .eq(IpPoolResourceType::Silo),
                         )
-                        .and(ip_pool_resource::resource_id.eq(silo_id)),
+                        .and(
+                            ip_pool_resource::resource_id
+                                .eq(silo_id.into_untyped_uuid()),
+                        ),
                 ),
             ));
         } else {
@@ -834,6 +860,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
     ) -> DeleteResult {
+        use nexus_db_schema::schema::external_service_ip_pool;
         use nexus_db_schema::schema::ip_pool::dsl;
         use nexus_db_schema::schema::ip_pool_range;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -854,6 +881,29 @@ impl DataStore {
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
+            ));
+        }
+
+        // Verify the pool is not assigned to any external service. A concurrent
+        // assignment is caught separately by the `rcgen` check on the delete
+        // below, since assigning a pool to a service bumps its `rcgen`.
+        let assignment =
+            external_service_ip_pool::dsl::external_service_ip_pool
+                .filter(
+                    external_service_ip_pool::dsl::ip_pool_id
+                        .eq(authz_pool.id()),
+                )
+                .select(external_service_ip_pool::dsl::ip_pool_id)
+                .limit(1)
+                .first_async::<Uuid>(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+        if assignment.is_some() {
+            return Err(Error::invalid_request(
+                "IP Pool cannot be deleted while it is assigned to a service",
             ));
         }
 
@@ -914,32 +964,6 @@ impl DataStore {
         Ok(())
     }
 
-    /// Check whether the pool is assigned for system services.
-    //
-    // TODO-remove: This should go away when we let operators reassign any IP
-    // Pool. The pool belongs to them even in that case, and so we should show
-    // it to them.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
-    pub async fn ip_pool_is_assigned_to_system_services(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-    ) -> LookupResult<bool> {
-        use nexus_db_schema::schema::ip_pool;
-        ip_pool::table
-            .find(authz_pool.id())
-            .filter(ip_pool::time_deleted.is_null())
-            .select(ip_pool::assignment.eq(IpPoolAssignment::SystemServices))
-            .first_async::<bool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            .map(|result| result.unwrap_or(false))
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     pub async fn ip_pool_update(
         &self,
         opctx: &OpContext,
@@ -990,8 +1014,18 @@ impl DataStore {
                     ref info,
                 ) => {
                     let message = info.message();
-                    if message.ends_with("invalid bool value") {
+                    if matches_sentinel(&e, &[BAD_SILO_LINK_SENTINEL]).is_some()
+                    {
                         Error::invalid_request(BAD_SILO_LINK_ERROR)
+                    } else if matches_sentinel(
+                        &e,
+                        &[ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL],
+                    )
+                    .is_some()
+                    {
+                        Error::invalid_request(
+                            ASSIGNED_TO_EXTERNAL_SERVICE_ERROR,
+                        )
                     } else if message.contains("division by zero") {
                         Error::invalid_request(POOL_HAS_IPS_ERROR)
                     } else if message.starts_with("could not parse")
@@ -1154,7 +1188,6 @@ impl DataStore {
         .filter(ip_pool::id.eq(authz_pool.id()))
         .filter(ip_pool::time_deleted.is_null())
         .filter(silo::time_deleted.is_null())
-        .filter(silo::discoverable.eq(true))
         .select(IpPoolResource::as_select())
         .load_async::<IpPoolResource>(
             &*self.pool_connection_authorized(opctx).await?,
@@ -1198,7 +1231,10 @@ impl DataStore {
         };
         query
             .inner_join(ip_pool_resource::table)
-            .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo.id().into_untyped_uuid()),
+            )
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
@@ -1216,7 +1252,8 @@ impl DataStore {
         opctx: &OpContext,
         ip_pool_resource: IncompleteIpPoolResource,
     ) -> CreateResult<IpPoolResource> {
-        if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
+        if ip_pool_resource.resource_id == INTERNAL_SILO_ID.into_untyped_uuid()
+        {
             return Err(Error::invalid_request(
                 "IP Pools should not be linked to the internal Oxide silo. \
                     Assign the Pool for system services use instead.",
@@ -1281,7 +1318,7 @@ impl DataStore {
         {
             self.link_default_gateway(
                 opctx,
-                ip_pool_resource.resource_id,
+                SiloUuid::from_untyped_uuid(ip_pool_resource.resource_id),
                 ip_pool_resource.ip_pool_id,
                 &conn,
             )
@@ -1306,7 +1343,7 @@ impl DataStore {
     async fn link_default_gateway(
         &self,
         opctx: &OpContext,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
@@ -1317,7 +1354,7 @@ impl DataStore {
 
         let projects = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
-            .filter(project_dsl::silo_id.eq(silo_id))
+            .filter(project_dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .select(Project::as_select())
             .load_async(conn)
             .await
@@ -1326,7 +1363,7 @@ impl DataStore {
         for project in &projects {
             let vpcs = vpc_dsl::vpc
                 .filter(vpc_dsl::time_deleted.is_null())
-                .filter(vpc_dsl::project_id.eq(project.id()))
+                .filter(vpc_dsl::project_id.eq(to_db_typed_uuid(project.id())))
                 .select(Vpc::as_select())
                 .load_async(conn)
                 .await
@@ -1403,7 +1440,7 @@ impl DataStore {
     async fn unlink_ip_pool_gateway(
         &self,
         opctx: &OpContext,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
@@ -1414,7 +1451,7 @@ impl DataStore {
 
         let projects = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
-            .filter(project_dsl::silo_id.eq(silo_id))
+            .filter(project_dsl::silo_id.eq(to_db_typed_uuid(silo_id)))
             .select(Project::as_select())
             .load_async(conn)
             .await
@@ -1423,7 +1460,7 @@ impl DataStore {
         for project in &projects {
             let vpcs = vpc_dsl::vpc
                 .filter(vpc_dsl::time_deleted.is_null())
-                .filter(vpc_dsl::project_id.eq(project.id()))
+                .filter(vpc_dsl::project_id.eq(to_db_typed_uuid(project.id())))
                 .select(Vpc::as_select())
                 .load_async(conn)
                 .await
@@ -1490,7 +1527,7 @@ impl DataStore {
         if !is_default {
             // Simple case: just unset the default flag.
             return diesel::update(dsl::ip_pool_resource)
-                .filter(dsl::resource_id.eq(silo_id))
+                .filter(dsl::resource_id.eq(silo_id.into_untyped_uuid()))
                 .filter(dsl::ip_pool_id.eq(ip_pool_id))
                 .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
                 .filter(exists(
@@ -1531,7 +1568,9 @@ impl DataStore {
                                 .on(pool_dsl::id.eq(dsl::ip_pool_id)),
                         )
                         .filter(dsl::ip_pool_id.eq(ip_pool_id))
-                        .filter(dsl::resource_id.eq(silo_id))
+                        .filter(
+                            dsl::resource_id.eq(silo_id.into_untyped_uuid()),
+                        )
                         .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
                         .filter(pool_dsl::time_deleted.is_null())
                         .select(IpPoolResource::as_select())
@@ -1547,7 +1586,10 @@ impl DataStore {
                     // (silo, pool_type, ip_version).
                     diesel::update(
                         dsl::ip_pool_resource
-                            .filter(dsl::resource_id.eq(silo_id))
+                            .filter(
+                                dsl::resource_id
+                                    .eq(silo_id.into_untyped_uuid()),
+                            )
                             .filter(
                                 dsl::resource_type.eq(IpPoolResourceType::Silo),
                             )
@@ -1563,7 +1605,10 @@ impl DataStore {
                     diesel::update(
                         dsl::ip_pool_resource
                             .filter(dsl::ip_pool_id.eq(ip_pool_id))
-                            .filter(dsl::resource_id.eq(silo_id))
+                            .filter(
+                                dsl::resource_id
+                                    .eq(silo_id.into_untyped_uuid()),
+                            )
                             .filter(
                                 dsl::resource_type.eq(IpPoolResourceType::Silo),
                             ),
@@ -2030,7 +2075,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
-            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool_range::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
@@ -2136,7 +2184,10 @@ impl DataStore {
             .filter(
                 ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
-            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(
+                ip_pool_resource::resource_id
+                    .eq(authz_silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool::time_deleted.is_null())
             .filter(ip_pool_range::time_deleted.is_null())
             .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
@@ -2223,6 +2274,11 @@ const SILO_DELETED_SENTINEL: &str = "silo-deleted";
 // Sentinel we try to cast as an integer when trying to reassign the last
 // system-services pool of a given type.
 const LAST_POOL_SENTINEL: &str = "last-pool";
+
+// Sentinel we try to cast as a bool when a user attempts to assign a pool from
+// system serivces to silos, and that pool is currently assigned to a specific
+// external service, e.g., Nexus.
+const ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL: &str = "assigned-to-services";
 
 /// Extract the sentinel string from a UUID cast error message.
 ///
@@ -2382,7 +2438,7 @@ fn link_ip_pool_to_external_silo_query(
 // ```
 fn unlink_ip_pool_from_external_silo_query(
     ip_pool_id: Uuid,
-    silo_id: Uuid,
+    silo_id: SiloUuid,
 ) -> TypedSqlQuery<()> {
     let mut builder = QueryBuilder::new();
     builder
@@ -2405,7 +2461,7 @@ fn unlink_ip_pool_from_external_silo_query(
         .bind::<IpKindEnum, _>(IpKind::Floating)
         .sql(" AND instance.time_deleted IS NULL AND project.silo_id = ")
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
         .sql(
             " LIMIT 1), floating_ips AS (\
         SELECT 1 \
@@ -2424,7 +2480,7 @@ fn unlink_ip_pool_from_external_silo_query(
         .bind::<IpKindEnum, _>(IpKind::Floating)
         .sql(" AND project.silo_id = ")
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
         .sql(
             " AND project.time_deleted IS NULL LIMIT 1), \
             multicast_groups AS (\
@@ -2450,7 +2506,7 @@ fn unlink_ip_pool_from_external_silo_query(
         )
         .sql(" AND resource_id = ")
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id)
+        .bind::<sql_types::Uuid, _>(silo_id.into_untyped_uuid())
         .sql(
             " AND \
             CAST(IF(\
@@ -2600,6 +2656,19 @@ fn reassign_system_services_ip_pool_query(
             LIMIT 1\
         ), 1/0, 1) AS BOOL))",
         )
+        // Generate bool-cast error if the pool is currently assigned to a
+        // specific external service like Nexus.
+        .sql(
+            " AND CAST(IF(EXISTS(\
+            SELECT 1 \
+            FROM external_service_ip_pool \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql("), '")
+        .sql(ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL)
+        .sql("', 'TRUE') AS BOOL)")
         // Generate int-cast error if this is the last pool of this assignment.
         .sql(
             " AND CAST(IF(\
@@ -2635,12 +2704,13 @@ mod test {
     use crate::authz;
     use crate::db::datastore::external_ip::FloatingIpAllocation;
     use crate::db::datastore::ip_pool::{
-        BAD_SILO_LINK_ERROR, DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
-        REASSIGN_LAST_POOL_ERROR, assign_ip_pool_query,
-        link_ip_pool_to_external_silo_query,
+        ASSIGNED_TO_EXTERNAL_SERVICE_ERROR, BAD_SILO_LINK_ERROR,
+        DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR, REASSIGN_LAST_POOL_ERROR,
+        assign_ip_pool_query, link_ip_pool_to_external_silo_query,
         unlink_ip_pool_from_external_silo_query,
     };
     use crate::db::explain::ExplainableAsync as _;
+    use crate::db::model::to_db_typed_uuid;
     use crate::db::model::{
         IncompleteIpPoolResource, IpPool, IpPoolResource, IpPoolResourceType,
         Project,
@@ -2656,8 +2726,8 @@ mod test {
     };
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::{
-        InternetGatewayIpPool, IpPoolAssignment, IpPoolIdentity, IpPoolType,
-        IpVersion,
+        ExternalServiceKind, InternetGatewayIpPool, IpPoolAssignment,
+        IpPoolIdentity, IpPoolType, IpVersion,
     };
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
@@ -2674,6 +2744,7 @@ mod test {
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::SiloUuid;
     use omicron_uuid_kinds::{
         ExternalIpUuid, GenericUuid as _, OmicronZoneUuid,
     };
@@ -2757,7 +2828,7 @@ mod test {
         let link_body = IncompleteIpPoolResource {
             ip_pool_id: pool1_for_silo.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: silo_id,
+            resource_id: silo_id.into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -2828,7 +2899,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: second_silo_default.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -2838,13 +2909,13 @@ mod test {
 
         // now remove the association and we should get nothing again
         let authz_silo =
-            authz::Silo::new(authz::Fleet, silo_id, LookupType::ById(silo_id));
+            authz::Silo::new(authz::Fleet, silo_id, LookupType::by_id(silo_id));
         let q =
             nexus_db_schema::schema::ip_pool_resource::dsl::ip_pool_resource
                 .select(IpPoolResource::as_select())
                 .filter(
                     nexus_db_schema::schema::ip_pool_resource::dsl::resource_id
-                        .eq(authz_silo.id()),
+                        .eq(authz_silo.id().into_untyped_uuid()),
                 )
                 .get_results_async(
                     &*datastore
@@ -2865,7 +2936,7 @@ mod test {
                 .select(IpPoolResource::as_select())
                 .filter(
                     nexus_db_schema::schema::ip_pool_resource::dsl::resource_id
-                        .eq(authz_silo.id()),
+                        .eq(authz_silo.id().into_untyped_uuid()),
                 )
                 .get_results_async(
                     &*datastore
@@ -2895,108 +2966,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_ip_pools_assigned_to_system_services() {
-        let logctx =
-            dev::test_setup_log("test_ip_pools_assigned_to_system_services");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Create the v4 and v6 system-service pools the loop expects to find.
-        create_service_ip_pool(
-            opctx,
-            datastore,
-            "oxide-service-pool-v4",
-            IpVersion::V4.into(),
-        )
-        .await;
-        create_service_ip_pool(
-            opctx,
-            datastore,
-            "oxide-service-pool-v6",
-            IpVersion::V6.into(),
-        )
-        .await;
-
-        for version in [IpVersion::V4, IpVersion::V6] {
-            // confirm system services pools are identified correctly
-            let service_pools = datastore
-                .ip_pools_service_lookup_by_version(
-                    &opctx,
-                    version,
-                    NonZeroU32::new(1).unwrap(),
-                )
-                .await
-                .unwrap();
-            let service_pool = service_pools.first().unwrap();
-            assert_eq!(service_pool.db_pool.ip_version, version);
-
-            let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(
-                    &opctx,
-                    &service_pool.authz_pool,
-                )
-                .await;
-            assert_eq!(is_internal, Ok(true));
-
-            // a silo pool should not be considered assigned for system services
-            let identity = IdentityMetadataCreateParams {
-                name: format!("other-{version}-pool").parse().unwrap(),
-                description: "".to_string(),
-            };
-            let other_pool = datastore
-                .ip_pool_create(
-                    &opctx,
-                    IpPool::new(&identity, version, IpPoolAssignment::Silos),
-                )
-                .await
-                .expect("Failed to create IP pool");
-            assert_eq!(other_pool.ip_version, version);
-
-            let authz_other_pool = authz::IpPool::new(
-                authz::FLEET,
-                other_pool.id(),
-                LookupType::ById(other_pool.id()),
-            );
-            let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(
-                    &opctx,
-                    &authz_other_pool,
-                )
-                .await;
-            assert_eq!(is_internal, Ok(false));
-
-            // now link it to the current silo; it is still not assigned for system services
-            let silo_id = opctx.authn.silo_required().unwrap().id();
-            let is_default = matches!(version, IpVersion::V4);
-            let link = IncompleteIpPoolResource {
-                ip_pool_id: other_pool.id(),
-                resource_type: IpPoolResourceType::Silo,
-                resource_id: silo_id,
-                is_default,
-            };
-            datastore
-                .ip_pool_link_silo(&opctx, link)
-                .await
-                .expect("Failed to link IP pool to silo");
-
-            let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(
-                    &opctx,
-                    &authz_other_pool,
-                )
-                .await;
-            assert_eq!(is_internal, Ok(false));
-        }
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
     // We're breaking out the utilization tests for IPv4 and IPv6 pools, since
-    // pools only contain one version now.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8888.
+    // pools only contain one version.
     #[tokio::test]
     async fn test_ipv4_ip_pool_utilization() {
         let logctx = dev::test_setup_log("test_ipv4_ip_pool_utilization");
@@ -3011,6 +2982,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                defaults: None,
             },
         );
         let (.., project) =
@@ -3063,7 +3035,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: true,
         };
         datastore
@@ -3124,6 +3096,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                defaults: None,
             },
         );
         let (.., project) =
@@ -3149,7 +3122,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: true,
         };
         datastore
@@ -3334,7 +3307,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: true,
         };
         datastore
@@ -3407,7 +3380,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: true,
         };
         datastore
@@ -3470,7 +3443,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -3513,7 +3486,7 @@ mod test {
         let default_link = IncompleteIpPoolResource {
             ip_pool_id: default_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: true, // This one is the default
         };
         datastore
@@ -3538,7 +3511,7 @@ mod test {
         // Pool linking is the mechanism of access control for multicast.
 
         // Create an opctx for a completely different silo (random UUID)
-        let other_silo_id = uuid::Uuid::new_v4();
+        let other_silo_id = SiloUuid::new_v4();
         let other_silo_user_id = omicron_uuid_kinds::SiloUserUuid::new_v4();
         let other_silo_authn = crate::authn::Context::for_test_user(
             other_silo_user_id,
@@ -3619,7 +3592,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v4_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -3647,7 +3620,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v6_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -3858,7 +3831,7 @@ mod test {
         let ssm_link = IncompleteIpPoolResource {
             ip_pool_id: ssm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -3913,7 +3886,7 @@ mod test {
         let asm_link = IncompleteIpPoolResource {
             ip_pool_id: asm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -3979,7 +3952,7 @@ mod test {
         let asm_v6_link = IncompleteIpPoolResource {
             ip_pool_id: asm_v6_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -4074,7 +4047,7 @@ mod test {
         let asm_link = IncompleteIpPoolResource {
             ip_pool_id: asm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -4130,7 +4103,7 @@ mod test {
         let ssm_link = IncompleteIpPoolResource {
             ip_pool_id: ssm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -4196,7 +4169,7 @@ mod test {
         let ssm_v6_link = IncompleteIpPoolResource {
             ip_pool_id: ssm_v6_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -4334,7 +4307,7 @@ mod test {
         let res = IncompleteIpPoolResource {
             ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: INTERNAL_SILO_ID,
+            resource_id: INTERNAL_SILO_ID.into_untyped_uuid(),
             is_default: false,
         };
         let query = link_ip_pool_to_external_silo_query(&res);
@@ -4357,7 +4330,7 @@ mod test {
         let res = IncompleteIpPoolResource {
             ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: INTERNAL_SILO_ID,
+            resource_id: INTERNAL_SILO_ID.into_untyped_uuid(),
             is_default: false,
         };
 
@@ -4440,7 +4413,7 @@ mod test {
         let external_link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
             is_default: false,
         };
         let _ = datastore
@@ -4496,24 +4469,23 @@ mod test {
 
         // Delete the silo, directly to avoid a bunch of machinery.
         use nexus_db_schema::schema::silo::dsl;
-        let c =
-            diesel::update(dsl::silo.find(nexus_types::silo::DEFAULT_SILO_ID))
-                .set(dsl::time_deleted.eq(diesel::dsl::now))
-                .execute_async(
-                    &*datastore
-                        .pool_connection_authorized(opctx)
-                        .await
-                        .unwrap(),
-                )
-                .await
-                .expect("Should be able to soft-delete silo");
+        let c = diesel::update(
+            dsl::silo
+                .find(to_db_typed_uuid(nexus_types::silo::DEFAULT_SILO_ID)),
+        )
+        .set(dsl::time_deleted.eq(diesel::dsl::now))
+        .execute_async(
+            &*datastore.pool_connection_authorized(opctx).await.unwrap(),
+        )
+        .await
+        .expect("Should be able to soft-delete silo");
         assert_eq!(c, 1, "Should have deleted something");
 
         // Now try link to it.
         let external_link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
             is_default: false,
         };
         let err = datastore
@@ -4561,7 +4533,7 @@ mod test {
         let external_link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
             is_default: false,
         };
         let err = datastore
@@ -4601,7 +4573,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -4638,7 +4610,7 @@ mod test {
         let authz_silo = authz::Silo::new(
             authz::Fleet,
             nexus_types::silo::DEFAULT_SILO_ID,
-            LookupType::ById(nexus_types::silo::DEFAULT_SILO_ID),
+            LookupType::by_id(nexus_types::silo::DEFAULT_SILO_ID),
         );
         let err = datastore
             .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
@@ -4675,7 +4647,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: nexus_types::silo::DEFAULT_SILO_ID,
+            resource_id: nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
             is_default: true,
         };
         datastore
@@ -4712,7 +4684,7 @@ mod test {
         let authz_silo = authz::Silo::new(
             authz::Fleet,
             nexus_types::silo::DEFAULT_SILO_ID,
-            LookupType::ById(nexus_types::silo::DEFAULT_SILO_ID),
+            LookupType::by_id(nexus_types::silo::DEFAULT_SILO_ID),
         );
         let err = datastore
             .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, false)
@@ -4765,7 +4737,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v4_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -4798,7 +4770,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v6_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -4807,7 +4779,9 @@ mod test {
 
         // Verify both defaults exist by querying the pool resource table
         let defaults: Vec<IpPoolResource> = ip_pool_resource::table
-            .filter(ip_pool_resource::resource_id.eq(silo_id))
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool_resource::is_default.eq(true))
             .select(IpPoolResource::as_select())
             .load_async(
@@ -4845,7 +4819,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v4_pool2.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -4860,7 +4834,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v4_pool2.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: false,
                 },
             )
@@ -4874,7 +4848,7 @@ mod test {
             LookupType::ById(v4_pool2.id()),
         );
         let authz_silo =
-            authz::Silo::new(authz::Fleet, silo_id, LookupType::ById(silo_id));
+            authz::Silo::new(authz::Fleet, silo_id, LookupType::by_id(silo_id));
         datastore
             .ip_pool_set_default(&opctx, &authz_v4_pool2, &authz_silo, true)
             .await
@@ -4882,7 +4856,9 @@ mod test {
 
         // Verify: V6 default should still exist, V4 default should now be pool2
         let defaults: Vec<IpPoolResource> = ip_pool_resource::table
-            .filter(ip_pool_resource::resource_id.eq(silo_id))
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool_resource::is_default.eq(true))
             .select(IpPoolResource::as_select())
             .load_async(
@@ -4985,7 +4961,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_v4.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -4998,7 +4974,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_v6.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5011,7 +4987,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_v4.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5024,7 +5000,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_v6.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5033,7 +5009,9 @@ mod test {
 
         // Verify we have 4 default pools
         let defaults: Vec<IpPoolResource> = ip_pool_resource::table
-            .filter(ip_pool_resource::resource_id.eq(silo_id))
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
             .filter(ip_pool_resource::is_default.eq(true))
             .select(IpPoolResource::as_select())
             .load_async(
@@ -5108,7 +5086,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5160,7 +5138,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5206,7 +5184,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5242,7 +5220,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5296,7 +5274,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_ipv6.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5325,7 +5303,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_ipv4.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5424,7 +5402,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_ipv6.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5453,7 +5431,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_ipv4.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5550,7 +5528,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: v6_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5621,7 +5599,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_v4.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -5634,7 +5612,7 @@ mod test {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_v6.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
+                    resource_id: silo_id.into_untyped_uuid(),
                     is_default: false,
                 },
             )
@@ -5643,7 +5621,9 @@ mod test {
 
         // Query ip_pool_resource and verify denormalized columns match
         let resources: Vec<IpPoolResource> = ip_pool_resource::table
-            .filter(ip_pool_resource::resource_id.eq(silo_id))
+            .filter(
+                ip_pool_resource::resource_id.eq(silo_id.into_untyped_uuid()),
+            )
             .select(IpPoolResource::as_select())
             .load_async(
                 &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
@@ -6108,7 +6088,7 @@ mod test {
         let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -6218,7 +6198,7 @@ mod test {
         let mcast_link = IncompleteIpPoolResource {
             ip_pool_id: mcast_pool.id(),
             resource_type: IpPoolResourceType::Silo,
-            resource_id: authz_silo.id(),
+            resource_id: authz_silo.id().into_untyped_uuid(),
             is_default: false,
         };
         datastore
@@ -6425,6 +6405,109 @@ mod test {
                 range.last_address(),
             ),
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_assign_ip_pool_to_silos_while_assigned_to_services() {
+        let logctx = dev::test_setup_log(
+            "cannot_assign_ip_pool_to_silos_while_assigned_to_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 system-service pool, add a range, and assign it to an
+        // external service. Also create a v6 pool so that reassigning the v4
+        // pool for silo use is allowed at the end (more than one
+        // system-service pool remains).
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
+        let ip_range = IpRange::V4(Ipv4Range {
+            first: Ipv4Addr::new(1, 1, 1, 1),
+            last: Ipv4Addr::new(1, 1, 1, 10),
+        });
+        datastore
+            .ip_pool_add_range(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                &ip_range,
+            )
+            .await
+            .unwrap();
+
+        // Assign both to Nexus.
+        datastore
+            .external_service_ip_pool_assign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv4.authz_pool,
+            )
+            .await
+            .expect("Should be able to assign pool to Nexus");
+        datastore
+            .external_service_ip_pool_assign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv6.authz_pool,
+            )
+            .await
+            .expect("Should be able to assign pool to Nexus");
+
+        // Should not be able to assign the IPv4 pool to silos now, since
+        // it's assigned for use by Nexus.
+        let res = datastore
+            .ip_pool_assign(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                IpPoolAssignment::Silos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to assign to silos internal \
+                IP Pool when assigned to Nexus, found {res:#?}"
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            ASSIGNED_TO_EXTERNAL_SERVICE_ERROR
+        );
+
+        // Unassign it, and now we can assign the pool for silo use.
+        let _ = datastore
+            .external_service_ip_pool_unassign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv4.authz_pool,
+            )
+            .await
+            .expect("Should be able to unassign IP Pool");
+        let _ = datastore.ip_pool_assign(
+            opctx,
+            &ipv4.authz_pool,
+            &ipv4.db_pool,
+            IpPoolAssignment::Silos,
+        ).await
+            .expect(
+                "Should be able to delete internal IP Pool when more than one remains, \
+                after unassigning it from Nexus"
+            );
 
         db.terminate().await;
         logctx.cleanup_successful();

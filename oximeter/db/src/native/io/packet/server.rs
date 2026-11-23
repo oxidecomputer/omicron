@@ -128,17 +128,15 @@ impl tokio_util::codec::Decoder for Decoder {
                     Err(e) => {
                         // We failed to correctly decode the packet.
                         //
-                        // We may need to do something else in the future, but
-                        // for now, just throw away the buffer. We have no idea
-                        // how much data we need to lop off. We should
-                        // realistically RST the whole TCP connection, most
-                        // likely.
+                        // There's not much we can do here, since we don't have
+                        // a length to move to the end of this packet. Instead,
+                        // we'll just return the error, and the connection will
+                        // stay poisoned.
                         probes::invalid__packet!(|| (
                             self.addr.to_string(),
                             "Hello",
                             src.len()
                         ));
-                        src.clear();
                         return Err(e);
                     }
                 }
@@ -152,7 +150,6 @@ impl tokio_util::codec::Decoder for Decoder {
                         "Data",
                         src.len()
                     ));
-                    src.clear();
                     return Err(e);
                 }
             },
@@ -165,7 +162,6 @@ impl tokio_util::codec::Decoder for Decoder {
                         "Exception",
                         src.len()
                     ));
-                    src.clear();
                     return Err(e);
                 }
             },
@@ -193,7 +189,6 @@ impl tokio_util::codec::Decoder for Decoder {
                             "TableColumns",
                             src.len()
                         ));
-                        src.clear();
                         return Err(e);
                     }
                 }
@@ -208,22 +203,21 @@ impl tokio_util::codec::Decoder for Decoder {
                         "ProfileEvents",
                         src.len()
                     ));
-                    src.clear();
                     return Err(e);
                 }
             },
             _ => {
                 // We don't know anything about the packet, drop it.
                 //
-                // Again, we probably need to handle this more gracefully, but
-                // it's not clear how in the absence of a header with the packet
-                // size.
+                // Similar to a decoding error, we can't move beyond this
+                // unknown packet without a length in the header. There's
+                // nothing to do but return the error and consider the
+                // connection poisoned.
                 probes::unrecognized__server__packet!(|| (
                     self.addr.to_string(),
                     u64::from(kind),
                     src.len()
                 ));
-                src.clear();
                 return Err(Error::UnrecognizedServerPacket(kind));
             }
         };
@@ -337,10 +331,15 @@ mod tests {
         );
         assert_eq!(prefix.len(), 10);
 
+        let n_bytes = suffix.len();
         decoder.decode(&mut suffix).expect_err(
             "Should return an error when decoding from the middle of a frame",
         );
-        assert!(suffix.is_empty(), "Should truncate the input buffer on error");
+        assert_eq!(
+            suffix.len(),
+            n_bytes,
+            "Should leave the input buffer untouched on error"
+        );
     }
 
     #[test]

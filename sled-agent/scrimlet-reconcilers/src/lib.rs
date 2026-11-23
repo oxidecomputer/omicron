@@ -26,6 +26,7 @@
 //! * Configuration of BFD within `mgd`
 //! * Configuration of static routes within `mgd`
 //! * Configuration of SMF properties for `uplinkd` and `lldpd`
+//! * Configuration of the front ports that DDM runs on
 //!
 //! The specific configuration that should be applied comes from Nexus (or RSS,
 //! at rack setup time) and is sent to `sled-agent` via the bootstore.
@@ -42,6 +43,7 @@
 //! [`ThisSledSwitchZoneUnderlayIpAddr`]:
 //! sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr
 
+mod ddmd_reconciler;
 mod dpd_reconciler;
 mod handle;
 mod lldpd_reconciler;
@@ -51,31 +53,12 @@ mod status;
 mod switch_zone_slot;
 mod uplinkd_reconciler;
 
-pub use dpd_reconciler::DpdNatReconcilerStatusNatEntry;
-pub use dpd_reconciler::DpdNatReconcilerStatusNatEntryFailure;
-pub use dpd_reconciler::DpdPortOperationFailure;
-pub use dpd_reconciler::DpdPortReconcilerStatus;
-pub use dpd_reconciler::DpdReconcilerStatus;
+pub use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletStatus;
+
+pub use handle::BgpSocketConfig;
 pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;
-pub use lldpd_reconciler::LldpdReconcilerStatus;
-pub use mgd_reconciler::MgdBfdOperationFailure;
-pub use mgd_reconciler::MgdBfdReconcilerStatus;
-pub use mgd_reconciler::MgdBgpReconcilerStatus;
-pub use mgd_reconciler::MgdBgpReconcilerStatusOpCount;
-pub use mgd_reconciler::MgdReconcilerStatus;
-pub use mgd_reconciler::MgdStaticRouteReconcilerStatus;
-pub use status::DetermineSwitchSlotStatus;
-pub use status::ReconcilerActivationReason;
-pub use status::ReconcilerCurrentStatus;
-pub use status::ReconcilerInertReason;
-pub use status::ReconcilerRunningStatus;
-pub use status::ReconcilerStatus;
-pub use status::ReconciliationCompletedStatus;
-pub use status::ScrimletReconcilersStatus;
-pub use status::ScrimletStatus;
-pub use uplinkd_reconciler::UplinkdReconcilerStatus;
 
 // TODO-cleanup The SMF-based reconcilers need to know the name of the switch
 // zone. This is a little spread out today: `illumos-utils` defines

@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::Ledgerable;
 use schemars::{
     JsonSchema, SchemaGenerator,

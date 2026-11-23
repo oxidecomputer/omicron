@@ -14,7 +14,6 @@ use http::method::Method;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::background::run_blueprint_loader;
@@ -29,8 +28,9 @@ use nexus_types::external_api::update;
 use nexus_types::external_api::update::SetTargetReleaseParams;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
-use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
+use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use semver::Version;
+use sled_agent_types::disk::M2Slot;
 use std::sync::Arc;
 use std::time::Duration;
 use tufaceous::edit::RepositoryEditor;
@@ -366,7 +366,6 @@ async fn install_target_blueprint<N: NexusServer>(
     system_version: &Version,
     bump_min_target_release_generation: bool,
 ) -> Result<(), anyhow::Error> {
-    let lockstep_client = ctx.lockstep_client();
     let datastore = ctx.server.datastore();
     let log = &ctx.logctx.log;
     let opctx = OpContext::for_background(
@@ -405,65 +404,82 @@ async fn install_target_blueprint<N: NexusServer>(
         .context("no zone artifact in TUF repo")?
         .hash;
 
-    // Get the current blueprint.
-    let target_id =
-        lockstep_client.blueprint_target_view().await?.into_inner().target_id;
-    let mut blueprint = lockstep_client
-        .blueprint_view(target_id.as_untyped_uuid())
-        .await?
-        .into_inner();
-
-    // Create a child blueprint by mutating the IDs in place; update metadata
-    // for easier manual debugging if needed.
-    blueprint.parent_blueprint_id = Some(blueprint.id);
-    blueprint.id = BlueprintUuid::new_v4();
-    blueprint.time_created = Utc::now();
-    blueprint.creator = "target_release.rs test helper".to_string();
-    blueprint.comment = format!("manual update to {system_version}");
+    // If requested, set the blueprint's minimum target release generation to
+    // one past the current target release generation, mirroring what the
+    // planner does when it detects a MUPdate.
+    let new_min_target_release_generation =
+        if bump_min_target_release_generation {
+            let current_target_release = datastore
+                .target_release_get_current(&opctx)
+                .await
+                .context("getting current target release")?;
+            Some(current_target_release.generation().next())
+        } else {
+            None
+        };
 
     // Modify all the OS and zone sources to point to this TUF repo.
     let bp_artifact_version = BlueprintArtifactVersion::Available {
         version: ArtifactVersion::new(system_version.to_string()).unwrap(),
     };
-    for sled in blueprint.sleds.values_mut() {
-        // We should set the "active" slot, but we don't track that in the
-        // blueprint. Just pick one arbitrarily; Nexus's update validation logic
-        // works around the lack of an active slot indicator.
-        sled.host_phase_2.slot_a =
-            BlueprintHostPhase2DesiredContents::Artifact {
-                version: bp_artifact_version.clone(),
-                hash: host_phase_2_artifact_hash,
-            };
+    ctx.blueprint_edit_current_target(|builder| {
+        let zones_by_sled: Vec<(SledUuid, Vec<OmicronZoneUuid>)> = builder
+            .parent_blueprint()
+            .sleds
+            .iter()
+            .map(|(sled_id, sled)| {
+                (*sled_id, sled.zones.iter().map(|zone| zone.id).collect())
+            })
+            .collect();
+        for (sled_id, zone_ids) in zones_by_sled {
+            // We should set the "active" slot, but we don't track that in
+            // the blueprint. Just pick one arbitrarily; Nexus's update
+            // validation logic works around the lack of an active slot
+            // indicator.
+            builder
+                .sled_set_host_phase_2_slot(
+                    sled_id,
+                    M2Slot::A,
+                    BlueprintHostPhase2DesiredContents::Artifact {
+                        version: bp_artifact_version.clone(),
+                        hash: host_phase_2_artifact_hash,
+                    },
+                )
+                .with_context(|| {
+                    format!("setting host phase 2 slot A of sled {sled_id}")
+                })?;
 
-        for mut zone in sled.zones.iter_mut() {
-            zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: bp_artifact_version.clone(),
-                hash: zone_artifact_hash,
-            };
+            for zone_id in zone_ids {
+                builder
+                    .sled_set_zone_source(
+                        sled_id,
+                        zone_id,
+                        BlueprintZoneImageSource::Artifact {
+                            version: bp_artifact_version.clone(),
+                            hash: zone_artifact_hash,
+                        },
+                    )
+                    .with_context(|| {
+                        format!("setting image source of zone {zone_id}")
+                    })?;
+            }
         }
-    }
 
-    // If requested, set the blueprint's minimum target release generation to
-    // one past the current target release generation, mirroring what the
-    // planner does when it detects a mupdate.
-    if bump_min_target_release_generation {
-        let current_target_release = datastore
-            .target_release_get_current(&opctx)
-            .await
-            .context("getting current target release")?;
-        blueprint.target_release_minimum_generation =
-            (*current_target_release.generation).next();
-    }
+        if let Some(new_generation) = new_min_target_release_generation {
+            let current_generation =
+                builder.target_release_minimum_generation();
+            builder
+                .set_target_release_minimum_generation(
+                    current_generation,
+                    new_generation,
+                )
+                .context("setting minimum target release generation")?;
+        }
 
-    // Import this blueprint and make it the new target, reflecting a
-    // completed update to `system_version`.
-    lockstep_client.blueprint_import(&blueprint).await?;
-    lockstep_client
-        .blueprint_target_set(&BlueprintTargetSet {
-            enabled: false,
-            target_id: blueprint.id,
-        })
-        .await?;
+        builder.comment(format!("manual update to {system_version}"));
+        Ok(())
+    })
+    .await?;
 
     Ok(())
 }

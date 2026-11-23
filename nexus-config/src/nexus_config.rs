@@ -172,6 +172,15 @@ pub struct DeploymentConfig {
     /// Dropshot configuration for the external API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_external: ConfigDropshotWithTls,
+    /// Additional addresses to listen on for the external API.
+    ///
+    /// When set, Nexus launches additional external API servers bound to each
+    /// of these addresses, reusing all other settings (TLS, request limits,
+    /// etc.) from `dropshot_external`. This is mainly used to serve the
+    /// external API on both IPv4 and IPv6 addresses.
+    #[schemars(skip)]
+    #[serde(default)]
+    pub dropshot_external_additional_addresses: Vec<SocketAddr>,
     /// Dropshot configuration for internal API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
@@ -188,10 +197,26 @@ pub struct DeploymentConfig {
     /// Configuration for HTTP clients to external services.
     #[serde(default)]
     pub external_http_clients: ExternalHttpClientConfig,
+    /// By default, we capture backtraces when claiming a connection from the DB
+    /// pool, but setting this flag to `false` will disable that behavior.
+    ///
+    /// This flag is intended as an escape hatch in case we ever encounter an
+    /// unexpected pathological case where capturing backtraces is slow enough
+    /// to be an issue.
+    ///
+    /// Note that we probably shouldn't need a default here, but I'm leaving it
+    /// for now just to be safe in case there are any update-related corner
+    /// cases where this might matter. We can remove this in a future release.
+    #[serde(default = "default_record_db_claim_backtraces")]
+    pub record_db_claim_backtraces: bool,
 }
 
 fn default_techport_external_server_port() -> u16 {
     NEXUS_TECHPORT_EXTERNAL_PORT
+}
+
+fn default_record_db_claim_backtraces() -> bool {
+    true
 }
 
 impl DeploymentConfig {
@@ -422,6 +447,8 @@ pub struct BackgroundTaskConfig {
     pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for capacity metrics task
+    pub capacity_metrics: CapacityMetricsConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
     /// configuration for instance reincarnation task
@@ -432,6 +459,9 @@ pub struct BackgroundTaskConfig {
     pub v2p_mapping_propagation: V2PMappingPropagationConfig,
     /// configuration for abandoned VMM reaper task
     pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
+    /// configuration for the task that stops VMMs marked to be stopped for an
+    /// update
+    pub vmm_stop_for_update: VmmStopForUpdateConfig,
     /// configuration for saga recovery task
     pub saga_recovery: SagaRecoveryConfig,
     /// configuration for lookup region port task
@@ -477,6 +507,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_cleanup: AuditLogCleanupConfig,
     /// configuration for populate switch ports task
     pub populate_switch_ports: PopulateSwitchPortsConfig,
+    /// configuration for the task that marks VMMs to stop for an update
+    pub vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig,
 }
 
 #[serde_as]
@@ -521,6 +553,26 @@ pub struct AuditLogCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_deleted_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmmMarkStopForUpdateConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -709,6 +761,11 @@ pub struct BlueprintTasksConfig {
     /// reads the reconfigurator config from the database
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_load_reconfigurator_config: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// prunes old blueprints
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_prune: Duration,
 }
 
 #[serde_as]
@@ -722,6 +779,14 @@ pub struct RegionReplacementConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InstanceWatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityMetricsConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -783,6 +848,26 @@ pub struct AbandonedVmmReaperConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmmStopForUpdateConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable this task
+    ///
+    /// This is a lever for testing functionality without running the automated
+    /// tasks. There are other tasks dependent on this task running, and it is
+    /// dangerous to disable it. To prevent sleds from being evacuated for
+    /// updates, set the reboot policy with `omdb nexus reconfigurator-config
+    /// set --sled-update-reboot-policy immediate-no-evacuation` instead.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1015,6 +1100,14 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// A toggle to disable garbage collection of fault management sitreps
+    ///
+    /// This is intended for tests. If it is left on, sitreps accumulate until
+    /// the sitrep limit is reached, and analysis can no longer write new ones.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub sitrep_gc_disable: bool,
     /// period (in seconds) for periodic activations of the background task that
     /// prunes the oldest entries from the fault management sitrep history
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1041,6 +1134,7 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            sitrep_gc_disable: false,
             // This need not be activated very frequently, as it's triggered
             // whenever a new sitrep is committed and by the analysis task when
             // nearing capacity limits, so periodic activation is only a
@@ -1161,6 +1255,7 @@ mod test {
 
     use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+    use nexus_types::deployment::SledUpdateRebootPolicy;
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
@@ -1278,6 +1373,8 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            dropshot_external_additional_addresses = [ "[::1]:4567" ]
+            record_db_claim_backtraces = false
             [deployment.external_http_clients]
             interface = "opte0"
             treat_loopback_as_external = "yes_for_test_purposes_only"
@@ -1302,7 +1399,11 @@ mod test {
             [initial_reconfigurator_config]
             planner_enabled = true
             tuf_repo_pruner_enabled = false
-            disruption_policy = "terminate"
+            blueprint_pruner_enabled = false
+            blueprint_pruner_nkeep = 137
+            [initial_reconfigurator_config.planner_config]
+            sled_update_reboot_policy = "evacuate"
+            disruption_policy = "migrate_only"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1329,16 +1430,19 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
+            blueprints.period_secs_prune = 301
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_updater.disable = false
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            vmm_stop_for_update.period_secs = 300
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
@@ -1359,6 +1463,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_gc_disable = true
             fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
@@ -1376,6 +1481,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            vmm_mark_stop_for_update.period_secs = 300
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1404,6 +1510,9 @@ mod test {
                             ..Default::default()
                         }
                     },
+                    dropshot_external_additional_addresses: vec![
+                        "[::1]:4567".parse::<SocketAddr>().unwrap(),
+                    ],
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
                             .parse::<SocketAddr>()
@@ -1430,6 +1539,7 @@ mod test {
                         interface: Some("opte0".to_string()),
                         treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
+                    record_db_claim_backtraces: false,
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
@@ -1475,9 +1585,15 @@ mod test {
                     )]),
                     initial_reconfigurator_config: Some(ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
-                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
+                        blueprint_pruner_enabled: false,
+                        blueprint_pruner_nkeep: 137,
+                        planner_config: PlannerConfig {
+                            sled_update_reboot_policy:
+                                SledUpdateRebootPolicy::Evacuate,
+                            disruption_policy:
+                                ReconfiguratorDisruptionPolicy::MigrateOnly,
+                        },
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1532,7 +1648,9 @@ mod test {
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
                             period_secs_load_reconfigurator_config:
-                                Duration::from_secs(5)
+                                Duration::from_secs(5),
+                            period_secs_prune:
+                                Duration::from_secs(301),
                         },
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
@@ -1547,6 +1665,9 @@ mod test {
                             },
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
+                        },
+                        capacity_metrics: CapacityMetricsConfig {
+                            period_secs: Duration::from_secs(60),
                         },
                         instance_updater: InstanceUpdaterConfig {
                             period_secs: Duration::from_secs(30),
@@ -1565,6 +1686,10 @@ mod test {
                         },
                         abandoned_vmm_reaper: AbandonedVmmReaperConfig {
                             period_secs: Duration::from_secs(60),
+                        },
+                        vmm_stop_for_update: VmmStopForUpdateConfig {
+                            period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                         saga_recovery: SagaRecoveryConfig {
                             period_secs: Duration::from_secs(60),
@@ -1620,6 +1745,7 @@ mod test {
                             config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_gc_disable: true,
                             sitrep_history_prune_period_secs:
                                 Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
@@ -1655,6 +1781,10 @@ mod test {
                         },
                         populate_switch_ports: PopulateSwitchPortsConfig {
                             period_secs: Duration::from_secs(31),
+                        },
+                        vmm_mark_stop_for_update: VmmMarkStopForUpdateConfig {
+                            period_secs: Duration::from_secs(300),
+                            disable: false,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
@@ -1729,15 +1859,18 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
+            blueprints.period_secs_prune = 301
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            capacity_metrics.period_secs = 60
             instance_updater.period_secs = 30
             instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            vmm_stop_for_update.period_secs = 300
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
@@ -1772,6 +1905,7 @@ mod test {
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
             populate_switch_ports.period_secs = 31
+            vmm_mark_stop_for_update.period_secs = 300
 
             [default_region_allocation_strategy]
             type = "random"

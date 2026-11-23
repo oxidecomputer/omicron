@@ -7,6 +7,9 @@
 use anyhow::{Result, anyhow};
 use base64::Engine;
 use dropshot::HttpError;
+use samael::crypto::AllowedSignatureAlgorithm;
+use samael::crypto::CertificateDer;
+use samael::crypto::ReduceMode;
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
@@ -15,6 +18,7 @@ use samael::metadata::NameIdFormat;
 use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
+use samael::signature::Signature;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -109,7 +113,7 @@ impl SamlIdentityProvider {
             // sign authn request if keys were supplied
             let pkey = openssl::pkey::PKey::private_key_from_der(&key)
                 .map_err(|e| anyhow!(e.to_string()))?;
-            authn_request.signed_redirect(&encoded_relay_state, pkey)
+            authn_request.signed_redirect(&encoded_relay_state, &pkey)
         } else {
             authn_request.redirect(&encoded_relay_state)
         }
@@ -143,11 +147,27 @@ impl SamlIdentityProvider {
         sp_builder.acs_url(self.acs_url.clone());
         sp_builder.slo_url(self.slo_url.clone());
 
-        if let Some(cert) = &self.public_cert_bytes()? {
-            if let Ok(parsed) = openssl::x509::X509::from_der(&cert) {
-                sp_builder.certificate(Some(parsed));
-            }
+        if let Some(cert) = self.public_cert_bytes()? {
+            sp_builder.certificate(CertificateDer::from(cert));
         }
+
+        sp_builder.allowed_signature_algorithms(vec![
+            // List taken from Signature section of
+            // https://www.w3.org/TR/xmldsig-core1/#sec-AlgID, removing
+            // discouraged items.
+
+            // Required
+            AllowedSignatureAlgorithm::RsaSha256,
+            AllowedSignatureAlgorithm::EcdsaSha256,
+            // Optional
+            AllowedSignatureAlgorithm::RsaSha224,
+            AllowedSignatureAlgorithm::RsaSha384,
+            AllowedSignatureAlgorithm::RsaSha512,
+            AllowedSignatureAlgorithm::EcdsaSha224,
+            AllowedSignatureAlgorithm::EcdsaSha384,
+            AllowedSignatureAlgorithm::EcdsaSha512,
+            AllowedSignatureAlgorithm::DsaSha256,
+        ]);
 
         Ok(sp_builder.build()?)
     }
@@ -243,11 +263,16 @@ impl SamlIdentityProvider {
             return Err(HttpError::for_bad_request(
                 None,
                 format!(
-                    "SAMLResponse issuer {} does not match configured idp entity id {}",
+                    "SAMLResponse issuer {} does not match configured idp \
+                    entity id {}",
                     issuer, self.idp_entity_id,
                 ),
             ));
         }
+
+        // Before doing anything else, validate the deserialized response.
+
+        validate_saml_response(&saml_response)?;
 
         // Drop the parsed SAMLResponse, create a samael ServiceProvider object,
         // and use it to parse the same SAMLResponse string into a
@@ -278,50 +303,22 @@ impl SamlIdentityProvider {
         }
 
         let assertion = service_provider
-            .parse_base64_response(&saml_post.saml_response, None)
+            .parse_base64_response_with_mode(
+                &saml_post.saml_response,
+                // We don't track the list of possible request ids, so this is
+                // None.
+                None,
+                // _Only_ signed content is retained, and all other notes are
+                // removed. Note in this process the ds:Signature notes
+                // themselves are also removed.
+                ReduceMode::default(),
+            )
             .map_err(|e| {
                 HttpError::for_bad_request(
                     None,
                     format!("could not extract SAMLResponse assertion! {}", e),
                 )
             })?;
-
-        // If the response isn't signed, then parse_response above will fail.
-        // Every assertion should also be signed. Check the signature and digest
-        // schemes against an explicit allow list.
-        let assertion_signature = assertion.signature.ok_or_else(|| {
-            HttpError::for_bad_request(
-                None,
-                "assertion is missing signature!".to_string(),
-            )
-        })?;
-
-        match assertion_signature.signed_info.signature_method.algorithm.value()  {
-            // List taken from Signature section of
-            // https://www.w3.org/TR/xmldsig-core1/#sec-AlgID, removing
-            // discouraged items.
-
-            // Required
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256" |
-            // Optional
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha224" |
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384" |
-            "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha224" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384" |
-            "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512" |
-            "http://www.w3.org/2009/xmldsig11#dsa-sha256" => {}
-
-            signature_algorithm => {
-                return Err(
-                    HttpError::for_bad_request(
-                        None,
-                        format!("signature algorithm {} is not allowed", signature_algorithm),
-                    )
-                );
-            }
-        }
 
         // What is being asserted? Extract subject
         let subject = assertion.subject.ok_or_else(|| {
@@ -390,4 +387,139 @@ pub struct SamlLoginPost {
 pub struct AuthenticatedSubject {
     pub external_id: String,
     pub groups: Vec<String>,
+}
+
+/// Validate the SAML response, returning a HTTP error if invalid.
+///
+/// Note these errors should be as clear and descriptive as possible:
+/// administrators will be counting on their contents to debug why logging into
+/// our system isn't working, and we want to make that process as straight
+/// forward as possible. SAML is a complicated beast.
+fn validate_saml_response(response: &SAMLResponse) -> Result<(), HttpError> {
+    // Check that all references point to identifiers in the document
+    //
+    // From the SAML core spec, section 5.4.2 References: "Signatures MUST
+    // contain a single <ds:Reference> containing a same-document reference to
+    // the ID attribute value of the root element of the assertion or protocol
+    // message being signed."
+
+    validate_references_in_response(response)?;
+
+    // Check for unacceptable transforms, and return a 400 if found.
+    //
+    // From the SAML core spec, section 5.4.4 Transforms: "Verifiers of
+    // signatures MAY reject signatures that contain other transform algorithms
+    // as invalid."
+
+    other_transform_present_in_response(response)?;
+
+    Ok(())
+}
+
+/// If either Signature block in a SAMLResponse contains multiple references,
+/// reject it. If the expected single reference contains a non-same-document
+/// reference, also reject it. Returns an HttpError if the response is rejected.
+fn validate_references_in_response(
+    response: &SAMLResponse,
+) -> Result<(), HttpError> {
+    if let Some(signature) = &response.signature {
+        validate_references_in_signature(&response.id, &signature)?;
+    }
+
+    if let Some(assertion) = &response.assertion {
+        if let Some(signature) = &assertion.signature {
+            validate_references_in_signature(&assertion.id, &signature)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// If the signature contains multiple references, reject it. If the expected
+/// single reference contains an unexpected URI reference (according to SAML
+/// core section 5.4.2), reject it. Returns an HttpError if the signature is
+/// rejected.
+fn validate_references_in_signature(
+    expected_id: &str,
+    signature: &Signature,
+) -> Result<(), HttpError> {
+    if signature.signed_info.reference.len() != 1 {
+        return Err(HttpError::for_bad_request(
+            None,
+            format!(
+                "{} references in signature, should be 1",
+                signature.signed_info.reference.len()
+            ),
+        ));
+    }
+
+    let Some(uri) = &signature.signed_info.reference[0].uri else {
+        return Err(HttpError::for_bad_request(
+            None,
+            String::from("reference without URI"),
+        ));
+    };
+
+    if *uri != format!("#{expected_id}") {
+        return Err(HttpError::for_bad_request(
+            None,
+            format!("URI {uri} does not match #{expected_id}"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// If either Signature block in a SAMLResponse contains a transform other than
+/// the enveloped signature transform or the exclusive canonicalization
+/// transforms, then return an HttpError.
+fn other_transform_present_in_response(
+    response: &SAMLResponse,
+) -> Result<(), HttpError> {
+    if let Some(signature) = &response.signature {
+        other_transform_present_in_signature(&signature)?;
+    }
+
+    if let Some(assertion) = &response.assertion {
+        if let Some(signature) = &assertion.signature {
+            other_transform_present_in_signature(&signature)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// If a transform other than the enveloped signature transform or the exclusive
+/// canonicalization transforms is present in a Signature, return an HttpError.
+fn other_transform_present_in_signature(
+    signature: &Signature,
+) -> Result<(), HttpError> {
+    for reference in &signature.signed_info.reference {
+        let Some(transforms) = &reference.transforms else {
+            continue;
+        };
+
+        for transform in &transforms.transforms {
+            match transform.algorithm.as_str() {
+                "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
+                | "http://www.w3.org/2001/10/xml-exc-c14n#"
+                | "http://www.w3.org/2001/10/xml-exc-c14n#WithComments" => {
+                    // These transforms are explicitly named in section 5.4.4 as
+                    // accepted.
+                }
+
+                _ => {
+                    return Err(HttpError::for_bad_request(
+                        None,
+                        format!(
+                            "rejecting signature with transform {}",
+                            transform.algorithm
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

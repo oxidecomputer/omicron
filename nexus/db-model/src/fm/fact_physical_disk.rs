@@ -9,16 +9,19 @@
 //! columns are populated.
 
 use crate::DbTypedUuid;
+use crate::fm::FmFactRow;
 use crate::impl_enum_type;
 use crate::inventory::InvZpoolHealth;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_fact_physical_disk;
 use nexus_types::fm;
-use nexus_types::fm::case::FactMetadata;
-use nexus_types::fm::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+use nexus_types::fm::{
+    DiskFact, FactMetadata, FactPayload, ZpoolUnhealthyFactPayload,
+};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
-    CaseKind, CollectionKind, FactKind, PhysicalDiskKind, SitrepKind, ZpoolKind,
+    CaseKind, CaseUuid, CollectionKind, FactKind, FactUuid, PhysicalDiskKind,
+    SitrepKind, SitrepUuid, ZpoolKind,
 };
 
 impl_enum_type!(
@@ -61,12 +64,12 @@ pub struct FmFactPhysicalDisk {
     pub time_observed: Option<DateTime<Utc>>,
 }
 
-impl FmFactPhysicalDisk {
-    /// Build a row from a fact's shared metadata (`metadata`) and its
-    /// physical-disk payload (`disk_fact`).
-    pub fn from_sitrep(
-        sitrep_id: impl Into<DbTypedUuid<SitrepKind>>,
-        case_id: impl Into<DbTypedUuid<CaseKind>>,
+impl FmFactRow for FmFactPhysicalDisk {
+    type Payload = DiskFact;
+
+    fn from_sitrep(
+        sitrep_id: SitrepUuid,
+        case_id: CaseUuid,
         metadata: &FactMetadata,
         disk_fact: &DiskFact,
     ) -> Self {
@@ -100,11 +103,17 @@ impl FmFactPhysicalDisk {
         row
     }
 
-    /// Reconstruct an in-memory fact from a row.
-    ///
+    fn id(&self) -> FactUuid {
+        self.id.into()
+    }
+
+    fn case_id(&self) -> CaseUuid {
+        self.case_id.into()
+    }
+
     /// A NULL in a column the CHECK constraint requires for this `kind`
     /// yields an internal error rather than a panic.
-    pub fn into_fact(self) -> Result<fm::case::Fact, Error> {
+    fn into_fact(self) -> Result<fm::case::Fact, Error> {
         let kind = self.kind;
         let payload = match kind {
             FmFactPhysicalDiskKind::ZpoolUnhealthy => {
@@ -156,9 +165,11 @@ fn db_kind(disk_fact: &DiskFact) -> FmFactPhysicalDiskKind {
 }
 
 fn missing_column(kind: FmFactPhysicalDiskKind, column: &str) -> Error {
-    Error::internal_error(&format!(
-        "fm_fact_physical_disk row of kind {kind:?} has a NULL {column}, \
-         violating the CHECK constraint requiring it to be non-NULL for \
-         this kind"
-    ))
+    Error::InternalError {
+        internal_message: format!(
+            "fm_fact_physical_disk row of kind {kind:?} has a NULL {column}, \
+             violating the CHECK constraint requiring it to be non-NULL for \
+             this kind"
+        ),
+    }
 }

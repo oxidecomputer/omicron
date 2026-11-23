@@ -40,7 +40,8 @@ impl RetryableMgsError for GatewaySpComponentResetError {
         match self {
             gateway_client::Error::CommunicationError(_) => true,
             gateway_client::Error::ErrorResponse(resp) => match resp.as_ref() {
-                SpComponentResetError::ResetSpOfLocalSled => true,
+                SpComponentResetError::ResetSpOfLocalSled
+                | SpComponentResetError::ResetSpOfLocalSwitch => true,
                 SpComponentResetError::Other { .. } => false,
             },
             _ => false,

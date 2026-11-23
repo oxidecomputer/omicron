@@ -10,6 +10,7 @@ use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::sled_cpu_family::SledCpuFamily;
 use crate::to_db_typed_uuid;
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -34,16 +35,18 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_fmd_host_case, inv_fmd_resource, inv_fmd_status,
-    inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
-    inv_internal_dns, inv_last_reconciliation_dataset_result,
+    inv_discovered_rack, inv_discovered_sled, inv_fmd_host_case,
+    inv_fmd_resource, inv_fmd_status, inv_host_phase_1_active_slot,
+    inv_host_phase_1_flash_hash, inv_internal_dns,
+    inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_measurement_manifest_non_boot,
     inv_mupdate_override_non_boot, inv_ntp_timesync, inv_nvme_disk_firmware,
     inv_omicron_sled_config, inv_omicron_sled_config_dataset,
     inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
-    inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
+    inv_omicron_sled_config_zone_external_ip, inv_omicron_sled_config_zone_nic,
+    inv_physical_disk, inv_power_shelf_psu, inv_root_of_trust,
     inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
     inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_svc_enabled_not_online, inv_svc_enabled_not_online_parse_error,
@@ -52,17 +55,19 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::inventory::HostPhase1ActiveSlot;
 use nexus_types::inventory::{
-    Caboose, CockroachStatus, Collection, InternalDnsGenerationStatus,
-    NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
+    self, Caboose, CockroachStatus, Collection, DiscoveredRack, DiscoveredSled,
+    InternalDnsGenerationStatus, NvmeFirmware, PowerState, PsuSlot, RotPage,
+    RotSlot, TimeSync,
 };
-use omicron_common::api::external;
-use omicron_common::disk::DatasetConfig;
+use omicron_common::address::{
+    Ipv6Subnet, RACK_PREFIX_LENGTH, SLED_PREFIX_LENGTH,
+};
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::{
+    SledConfigGeneration, SledConfigGenerationKind,
+};
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::FmdHostCaseKind;
@@ -74,6 +79,8 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SvcEnabledNotOnlineKind;
@@ -85,15 +92,23 @@ use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::CurrentUpdateDisposition;
+use sled_agent_types::inventory::ExternalDnsAddrs;
 use sled_agent_types::inventory::FmdHostCase;
 use sled_agent_types::inventory::FmdInventory;
 use sled_agent_types::inventory::FmdInventoryError;
 use sled_agent_types::inventory::FmdResource;
 use sled_agent_types::inventory::HostPhase2DesiredContents;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::InstanceManagerStatus;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::ManifestInventory;
 use sled_agent_types::inventory::ManifestNonBootInventory;
@@ -101,24 +116,28 @@ use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::MupdateOverrideInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
+use sled_agent_types::inventory::NexusExternalIps;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_agent_types::inventory::SingleMeasurementInventory;
-use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::SourceNatConfig;
 use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::ZoneArtifactInventory;
+use sled_agent_types::inventory::ZoneSnatConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
+use sled_agent_types::multirack::SledAgentStartState;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use std::net::{IpAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash as ExternalArtifactHash;
@@ -659,6 +678,8 @@ pub struct InvServiceProcessor {
     pub baseboard_revision: BaseboardRevision,
     pub hubris_archive_id: String,
     pub power_state: HwPowerState,
+
+    pub rack_id: DbTypedUuid<RackKind>,
 }
 
 impl From<InvServiceProcessor> for nexus_types::inventory::ServiceProcessor {
@@ -671,6 +692,7 @@ impl From<InvServiceProcessor> for nexus_types::inventory::ServiceProcessor {
             baseboard_revision: **row.baseboard_revision,
             hubris_archive: row.hubris_archive_id,
             power_state: PowerState::from(row.power_state),
+            rack_id: row.rack_id.into(),
         }
     }
 }
@@ -940,6 +962,73 @@ pub struct InvSledAgent {
 
     #[diesel(embed)]
     pub file_source_resolver: InvOmicronFileSourceResolver,
+
+    instance_manager_update_disposition: Option<DbInvSledUpdateDisposition>,
+    instance_manager_num_registered_vmms: SqlU32,
+
+    pub rack_id: DbTypedUuid<RackKind>,
+}
+
+/// Helper for breaking an [`InstanceManagerStatus`] up into its DB columns.
+#[derive(Debug, Clone, Copy)]
+pub struct InvInstanceManagerStatusCols {
+    pub update_disposition: Option<DbInvSledUpdateDisposition>,
+    pub num_registered_vmms: SqlU32,
+}
+
+impl TryFrom<InstanceManagerStatus> for InvInstanceManagerStatusCols {
+    type Error = anyhow::Error;
+
+    fn try_from(status: InstanceManagerStatus) -> Result<Self, Self::Error> {
+        let InstanceManagerStatus { update_disposition, num_registered_vmms } =
+            status;
+
+        // "no config" becomes NULL; `Known(_)` becomes non-NULL.
+        let update_disposition = match update_disposition {
+            CurrentUpdateDisposition::ConfigNotAvailable => None,
+            CurrentUpdateDisposition::Known(disposition) => {
+                Some(disposition.into())
+            }
+        };
+
+        // We never expect this to fail; there are many practial limits to the
+        // number of VMMs registered on a sled far lower than `u32::MAX`.
+        let num_registered_vmms =
+            SqlU32::new(u32::try_from(num_registered_vmms).map_err(|_| {
+                anyhow!(
+                    "inventory claims there are {num_registered_vmms} \
+                     on a sled; this doesn't fit in a SqlU32"
+                )
+            })?);
+
+        Ok(Self { update_disposition, num_registered_vmms })
+    }
+}
+
+impl From<InvInstanceManagerStatusCols> for InstanceManagerStatus {
+    fn from(cols: InvInstanceManagerStatusCols) -> Self {
+        let InvInstanceManagerStatusCols {
+            update_disposition,
+            num_registered_vmms,
+        } = cols;
+
+        // See the comments in the `From<InstanceManagerStatus>` impl; we do the
+        // reverse here.
+        let update_disposition = match update_disposition {
+            None => CurrentUpdateDisposition::ConfigNotAvailable,
+            Some(disposition) => {
+                CurrentUpdateDisposition::Known(disposition.into())
+            }
+        };
+
+        // usize can always contain a u32; saturate instead of unwrapping to
+        // suppress the error branch.
+        let num_registered_vmms: u32 = *num_registered_vmms;
+        let num_registered_vmms =
+            usize::try_from(num_registered_vmms).unwrap_or(usize::MAX);
+
+        InstanceManagerStatus { update_disposition, num_registered_vmms }
+    }
 }
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
@@ -1310,6 +1399,7 @@ impl InvSledAgent {
         ledgered_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
         file_source_resolver: InvOmicronFileSourceResolver,
+        rack_id: DbTypedUuid<RackKind>,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
@@ -1329,6 +1419,11 @@ impl InvSledAgent {
                 non-null baseboard id"
             ))
         } else {
+            let InvInstanceManagerStatusCols {
+                update_disposition: instance_manager_update_disposition,
+                num_registered_vmms: instance_manager_num_registered_vmms,
+            } = sled_agent.instance_manager_status.try_into()?;
+
             Ok(InvSledAgent {
                 inv_collection_id: collection_id.into(),
                 time_collected: sled_agent.time_collected,
@@ -1351,8 +1446,21 @@ impl InvSledAgent {
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
                 reconciler_status,
                 file_source_resolver,
+                instance_manager_update_disposition,
+                instance_manager_num_registered_vmms,
+                rack_id,
             })
         }
+    }
+
+    /// Reassemble an [`InstanceManagerStatus`] from the database
+    /// representation held by `self`.
+    pub fn instance_manager_status(&self) -> InstanceManagerStatus {
+        InvInstanceManagerStatusCols {
+            update_disposition: self.instance_manager_update_disposition,
+            num_registered_vmms: self.instance_manager_num_registered_vmms,
+        }
+        .into()
     }
 }
 
@@ -2292,6 +2400,212 @@ impl From<InvFmdResource> for FmdResource {
     }
 }
 
+// See [`nexus_types::inventory::PsuSlot`].
+impl_enum_type!(
+    InvPsuSlotEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvPsuSlot;
+
+    Psu0 => b"PSU0"
+    Psu1 => b"PSU1"
+    Psu2 => b"PSU2"
+    Psu3 => b"PSU3"
+    Psu4 => b"PSU4"
+    Psu5 => b"PSU5"
+);
+
+impl From<PsuSlot> for InvPsuSlot {
+    fn from(value: PsuSlot) -> Self {
+        match value {
+            PsuSlot::Psu0 => Self::Psu0,
+            PsuSlot::Psu1 => Self::Psu1,
+            PsuSlot::Psu2 => Self::Psu2,
+            PsuSlot::Psu3 => Self::Psu3,
+            PsuSlot::Psu4 => Self::Psu4,
+            PsuSlot::Psu5 => Self::Psu5,
+        }
+    }
+}
+
+impl From<InvPsuSlot> for PsuSlot {
+    fn from(value: InvPsuSlot) -> Self {
+        match value {
+            InvPsuSlot::Psu0 => Self::Psu0,
+            InvPsuSlot::Psu1 => Self::Psu1,
+            InvPsuSlot::Psu2 => Self::Psu2,
+            InvPsuSlot::Psu3 => Self::Psu3,
+            InvPsuSlot::Psu4 => Self::Psu4,
+            InvPsuSlot::Psu5 => Self::Psu5,
+        }
+    }
+}
+
+/// Represents a PSU observed in a PSC's inventory of the power shelf.
+///
+/// This record may represent one of the following possible states:
+///
+/// 1. `presence` is `NotPresent`, in which case, all the PMBus VPD fields *and*
+///    `vpd_error` will be `None` (indicating that the inventory collector did
+///    not attempt to read the device's VPD because it was not present),
+/// 2. the PMBus VPD was read successfully, in which case the VPD fields will be
+///    `Some`, and `vpd_error` will be `None`,
+/// 3. the PSU was not `NotPresent`, but reading the PMBus VPD failed, in which
+///    case, the VPD fields will be `None` and `vpd_error` will be `Some`.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_power_shelf_psu)]
+pub struct InvPowerShelfPsu {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    /// Baseboard ID of the PSC.
+    pub psc_baseboard_id: Uuid,
+    pub location: InvPsuSlot,
+    pub presence: SpComponentPresence,
+    /// The Hubris device type string in the SP's inventory. This identifies
+    /// which Hubris driver is used to communicate with the PSU, and is a
+    /// property of the SP's Hubris image, not a value reported by the PSU
+    /// itself.
+    ///
+    /// For the model number reported by the PSU, use
+    /// [`InvPowerShelfPsu::mfr_model`].
+    pub hubris_device_type: String,
+
+    // PMBus VPD fields
+    pub mfr_id: Option<String>,
+    pub mfr_model: Option<String>,
+    pub mfr_location: Option<String>,
+    pub mfr_revision: Option<String>,
+    pub mfr_date: Option<String>,
+    pub mfr_serial: Option<String>,
+
+    /// `Some` if the inventory collector requested PMBus VPD from this PSU and
+    /// the request failed. If this is `Some`, the VPD fields will be `None`.
+    pub vpd_error: Option<String>,
+}
+
+impl TryFrom<InvPowerShelfPsu> for inventory::Psu {
+    type Error = anyhow::Error;
+
+    fn try_from(row: InvPowerShelfPsu) -> Result<Self> {
+        let InvPowerShelfPsu {
+            inv_collection_id: _,
+            time_collected,
+            source,
+            psc_baseboard_id,
+            location,
+            presence,
+            hubris_device_type,
+            mfr_id,
+            mfr_model,
+            mfr_location,
+            mfr_revision,
+            mfr_date,
+            mfr_serial,
+            vpd_error,
+        } = row;
+        let slot = PsuSlot::from(location);
+
+        let identity = match (
+            mfr_id,
+            mfr_model,
+            mfr_location,
+            mfr_revision,
+            mfr_date,
+            mfr_serial,
+            vpd_error,
+        ) {
+            (
+                Some(mfr_id),
+                Some(mfr_model),
+                Some(mfr_location),
+                Some(mfr_revision),
+                Some(mfr_date),
+                Some(mfr_serial),
+                None,
+            ) => Some(Ok(inventory::PsuIdentity {
+                mfr_id,
+                mfr_model,
+                mfr_revision,
+                mfr_location,
+                mfr_date,
+                mfr_serial,
+            })),
+            (None, None, None, None, None, None, Some(error)) => {
+                Some(Err(error))
+            }
+            (None, None, None, None, None, None, None) => None,
+            _ => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: VPD fields and \
+                 vpd_error are partially populated",
+            ),
+        };
+
+        let status = inventory::PsuStatus::from_presence(presence.into());
+        let state = match (status, identity) {
+            (Some(status), Some(identity)) => {
+                Some(inventory::PsuState { status, identity })
+            }
+            (None, None) => None,
+            (Some(_), None) => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: presence is \
+                 {presence:?}, but neither VPD nor vpd_error is present",
+            ),
+            (None, Some(_)) => bail!(
+                "inv_power_shelf_psu row for PSC {psc_baseboard_id} {slot} \
+                 violates vpd_result_valid constraint: presence is \
+                 {presence:?}, but VPD or vpd_error is present",
+            ),
+        };
+
+        Ok(Self { time_collected, source, slot, hubris_device_type, state })
+    }
+}
+
+// See [`gateway_types::component::SpComponentPresence`].
+impl_enum_type!(
+    SpComponentPresenceEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum SpComponentPresence;
+
+    // Enum values
+    Present => b"present"
+    NotPresent => b"not_present"
+    Failed => b"failed"
+    Unavailable => b"unavailable"
+    Timeout => b"timeout"
+    Error => b"error"
+);
+
+impl From<inventory::SpComponentPresence> for SpComponentPresence {
+    fn from(value: inventory::SpComponentPresence) -> Self {
+        match value {
+            inventory::SpComponentPresence::Present => Self::Present,
+            inventory::SpComponentPresence::NotPresent => Self::NotPresent,
+            inventory::SpComponentPresence::Failed => Self::Failed,
+            inventory::SpComponentPresence::Unavailable => Self::Unavailable,
+            inventory::SpComponentPresence::Timeout => Self::Timeout,
+            inventory::SpComponentPresence::Error => Self::Error,
+        }
+    }
+}
+
+impl From<SpComponentPresence> for inventory::SpComponentPresence {
+    fn from(value: SpComponentPresence) -> Self {
+        match value {
+            SpComponentPresence::Present => Self::Present,
+            SpComponentPresence::NotPresent => Self::NotPresent,
+            SpComponentPresence::Failed => Self::Failed,
+            SpComponentPresence::Unavailable => Self::Unavailable,
+            SpComponentPresence::Timeout => Self::Timeout,
+            SpComponentPresence::Error => Self::Error,
+        }
+    }
+}
+
 // See [`sled_agent_types::inventory::SvcEnabledNotOnlineState`].
 impl_enum_type!(
     InvSvcEnabledNotOnlineStateEnum:
@@ -2303,6 +2617,7 @@ impl_enum_type!(
     Offline => b"offline"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
+    Unrecognized => b"unrecognized"
 );
 
 impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
@@ -2316,6 +2631,9 @@ impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
             }
             SvcEnabledNotOnlineState::Maintenance => {
                 InvSvcEnabledNotOnlineState::Maintenance
+            }
+            SvcEnabledNotOnlineState::Unrecognized => {
+                InvSvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
@@ -2333,6 +2651,9 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
             InvSvcEnabledNotOnlineState::Maintenance => {
                 SvcEnabledNotOnlineState::Maintenance
             }
+            InvSvcEnabledNotOnlineState::Unrecognized => {
+                SvcEnabledNotOnlineState::Unrecognized
+            }
         }
     }
 }
@@ -2343,11 +2664,18 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
 pub struct InvPhysicalDisk {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub slot: i64,
+    /// See [`nexus_types::inventory::PhysicalDisk::pcie_slot`]. The column
+    /// was originally named `slot`, but we try to reference it as `pcie_slot`
+    /// to disambiguate it from `location`. It cannot be actually renamed,
+    /// however, because columns cannot be renamed idempotently.
+    #[diesel(column_name = slot)]
+    pub pcie_slot: i64,
     pub vendor: String,
     pub model: String,
     pub serial: String,
     pub variant: PhysicalDiskKind,
+    /// The location of the disk in the chassis, as identified by libtopo.
+    pub location: Option<String>,
 }
 
 impl InvPhysicalDisk {
@@ -2359,11 +2687,12 @@ impl InvPhysicalDisk {
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: disk.slot,
+            pcie_slot: disk.pcie_slot,
             vendor: disk.identity.vendor,
             model: disk.identity.model,
             serial: disk.identity.serial,
             variant: disk.variant.into(),
+            location: disk.location,
         }
     }
 }
@@ -2394,11 +2723,26 @@ pub enum InvNvmeDiskFirmwareError {
 pub struct InvNvmeDiskFirmware {
     inv_collection_id: DbTypedUuid<CollectionKind>,
     sled_id: DbTypedUuid<SledKind>,
-    slot: i64,
+    /// The PCIe slot number for the disk.
+    ///
+    /// Note that PCIe slots are specific to the board topology,
+    /// and are unrelated to NVMe firmware slots.
+    #[diesel(column_name = slot)]
+    pcie_slot: i64,
+    /// The NVMe firmware slot being used.
     active_slot: SqlU8,
+    /// The next NVMe firmware slot to be used after a reset.
     next_active_slot: Option<SqlU8>,
+    /// The number of NVMe firmware slots that are accessible.
     number_of_slots: SqlU8,
+    /// Returns true if the first firmware slot is locked-down
+    /// as read-only. (This is sometimes the case for locked-down
+    /// factory firmware slots).
     slot1_is_read_only: bool,
+    /// The per-slot version string list.
+    ///
+    /// NVMe slots are generally one-indexed, but this Vec is zero-indexed.
+    /// Be aware that NVMe slot N is stored in slot_firmware_versions[N - 1].
     slot_firmware_versions: Vec<Option<String>>,
 }
 
@@ -2406,7 +2750,7 @@ impl InvNvmeDiskFirmware {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        sled_slot: i64,
+        pcie_slot: i64,
         firmware: &NvmeFirmware,
     ) -> Result<Self, InvNvmeDiskFirmwareError> {
         // NB: We first validate that the data given to us from an NVMe disk
@@ -2480,7 +2824,7 @@ impl InvNvmeDiskFirmware {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            slot: sled_slot,
+            pcie_slot,
             active_slot: firmware.active_slot.into(),
             next_active_slot: firmware.next_active_slot.map(|nas| nas.into()),
             number_of_slots: firmware.number_of_slots.into(),
@@ -2522,8 +2866,8 @@ impl InvNvmeDiskFirmware {
         self.sled_id
     }
 
-    pub fn slot(&self) -> i64 {
-        self.slot
+    pub fn pcie_slot(&self) -> i64 {
+        self.pcie_slot
     }
 
     pub fn number_of_slots(&self) -> SqlU8 {
@@ -2701,37 +3045,77 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
+impl_enum_type!(
+    InvSledUpdateDispositionEnum:
+
+    /// Database representation of a sled's `update_disposition`.
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbInvSledUpdateDisposition;
+
+    Available => b"available"
+    Evacuating => b"evacuating"
+);
+
+impl From<OmicronSledUpdateDisposition> for DbInvSledUpdateDisposition {
+    fn from(value: OmicronSledUpdateDisposition) -> Self {
+        match value {
+            OmicronSledUpdateDisposition::Available => Self::Available,
+            OmicronSledUpdateDisposition::Evacuating => Self::Evacuating,
+        }
+    }
+}
+
+impl From<DbInvSledUpdateDisposition> for OmicronSledUpdateDisposition {
+    fn from(value: DbInvSledUpdateDisposition) -> Self {
+        match value {
+            DbInvSledUpdateDisposition::Available => Self::Available,
+            DbInvSledUpdateDisposition::Evacuating => Self::Evacuating,
+        }
+    }
+}
+
 /// Top-level information contained in an [`OmicronSledConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config)]
 pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub id: DbTypedUuid<OmicronSledConfigKind>,
-    pub generation: Generation,
+    pub generation: DbTypedGeneration<SledConfigGenerationKind>,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 
     #[diesel(embed)]
     pub host_phase_2: DbHostPhase2DesiredSlots,
     #[diesel(embed)]
     pub measurements: DbOmicronMeasurements,
+
+    pub update_disposition: DbInvSledUpdateDisposition,
 }
 
 impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: OmicronSledConfigUuid,
-        generation: external::Generation,
+        generation: SledConfigGeneration,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
         host_phase_2: HostPhase2DesiredSlots,
         measurements: BTreeSet<OmicronSingleMeasurement>,
+        update_disposition: OmicronSledUpdateDisposition,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
             id: id.into(),
-            generation: Generation(generation),
+            generation: generation.into(),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
             host_phase_2: host_phase_2.into(),
             measurements: measurements.into(),
+            update_disposition: update_disposition.into(),
         }
     }
 }
@@ -2880,7 +3264,7 @@ impl From<sled_agent_types::inventory::ZoneKind> for ZoneType {
     }
 }
 
-/// See [`omicron_common::disk::OmicronPhysicalDiskConfig`].
+/// See [`OmicronPhysicalDiskConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
@@ -2927,7 +3311,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
     }
 }
 
-/// See [`omicron_common::disk::DatasetConfig`].
+/// See [`DatasetConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
@@ -2979,7 +3363,7 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
         Ok(Self {
             id: dataset.id.into(),
             name: DatasetName::new(pool, kind),
-            inner: omicron_common::disk::SharedDatasetConfig {
+            inner: SharedDatasetConfig {
                 quota: dataset.quota.map(|b| b.into()),
                 reservation: dataset.reservation.map(|b| b.into()),
                 compression: dataset.compression.parse()?,
@@ -3020,9 +3404,6 @@ pub struct InvOmicronSledConfigZone {
     pub ntp_domain: Option<String>,
     pub nexus_external_tls: Option<bool>,
     pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
-    pub snat_ip: Option<IpNetwork>,
-    pub snat_first_port: Option<SqlU16>,
-    pub snat_last_port: Option<SqlU16>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub image_source: InvZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
@@ -3075,9 +3456,6 @@ impl InvOmicronSledConfigZone {
             ntp_domain: None,
             nexus_external_tls: None,
             nexus_external_dns_servers: None,
-            snat_ip: None,
-            snat_first_port: None,
-            snat_last_port: None,
             image_source,
             image_artifact_sha256,
             nexus_lockstep_port: None,
@@ -3090,13 +3468,14 @@ impl InvOmicronSledConfigZone {
                 dns_servers,
                 domain,
                 nic,
-                snat_cfg,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                snat: _,
             } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
 
                 // Set the zone specific fields
-                let (first_port, last_port) = snat_cfg.port_range_raw();
                 inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
                 inv_omicron_zone.ntp_dns_servers = Some(
                     dns_servers
@@ -3106,10 +3485,6 @@ impl InvOmicronSledConfigZone {
                         .collect(),
                 );
                 inv_omicron_zone.ntp_domain.clone_from(domain);
-                inv_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
-                inv_omicron_zone.snat_first_port =
-                    Some(SqlU16::from(first_port));
-                inv_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
                 inv_omicron_zone.nic_id = Some(nic.id);
             }
             OmicronZoneType::Clickhouse { address, dataset } => {
@@ -3144,7 +3519,9 @@ impl InvOmicronSledConfigZone {
             OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
-                dns_address,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                dns_addresses: _,
                 nic,
             } => {
                 // Set the common fields
@@ -3153,10 +3530,6 @@ impl InvOmicronSledConfigZone {
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
-                inv_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(dns_address.ip()));
-                inv_omicron_zone.second_service_port =
-                    Some(SqlU16::from(dns_address.port()));
             }
             OmicronZoneType::InternalDns {
                 dataset,
@@ -3187,7 +3560,9 @@ impl InvOmicronSledConfigZone {
             OmicronZoneType::Nexus {
                 internal_address,
                 lockstep_port,
-                external_ip,
+                // Stored in the inv_omicron_sled_config_zone_external_ip child
+                // table, not here.
+                external_ips: _,
                 nic,
                 external_tls,
                 external_dns_servers,
@@ -3198,8 +3573,6 @@ impl InvOmicronSledConfigZone {
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
-                inv_omicron_zone.second_service_ip =
-                    Some(IpNetwork::from(*external_ip));
                 inv_omicron_zone.nexus_external_tls = Some(*external_tls);
                 inv_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -3234,6 +3607,7 @@ impl InvOmicronSledConfigZone {
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronSledConfigZoneNic>,
+        external_ip_rows: Vec<InvOmicronSledConfigZoneExternalIp>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
         // Build up a set of common fields for our `OmicronZoneType`s
         //
@@ -3277,22 +3651,59 @@ impl InvOmicronSledConfigZone {
 
         let zone_type = match self.zone_type {
             ZoneType::BoundaryNtp => {
-                let snat_cfg = match (
-                    self.snat_ip,
-                    self.snat_first_port,
-                    self.snat_last_port,
-                ) {
-                    (Some(ip), Some(first_port), Some(last_port)) => {
-                        SourceNatConfigGeneric::new(
-                            ip.ip(),
-                            *first_port,
-                            *last_port,
-                        )
-                        .context("bad SNAT config for boundary NTP")?
+                // Boundary NTP has a source-NAT config per IP family, at most
+                // one each and at least one overall.
+                let mut ipv4 = None;
+                let mut ipv6 = None;
+                for row in external_ip_rows {
+                    let (Some(first_port), Some(last_port)) =
+                        (row.snat_first_port, row.snat_last_port)
+                    else {
+                        bail!(
+                            "expected non-NULL SNAT ports for boundary NTP \
+                             external IP {}",
+                            row.ip,
+                        );
+                    };
+                    match row.ip.ip() {
+                        IpAddr::V4(ip) => {
+                            let cfg = SourceNatConfig::new(
+                                ip,
+                                *first_port,
+                                *last_port,
+                            )
+                            .context("bad SNAT config for boundary NTP")?;
+                            if ipv4.replace(cfg).is_some() {
+                                bail!(
+                                    "multiple IPv4 SNAT configs for boundary \
+                                     NTP"
+                                );
+                            }
+                        }
+                        IpAddr::V6(ip) => {
+                            let cfg = SourceNatConfig::new(
+                                ip,
+                                *first_port,
+                                *last_port,
+                            )
+                            .context("bad SNAT config for boundary NTP")?;
+                            if ipv6.replace(cfg).is_some() {
+                                bail!(
+                                    "multiple IPv6 SNAT configs for boundary \
+                                     NTP"
+                                );
+                            }
+                        }
                     }
-                    _ => bail!(
-                        "expected non-NULL snat properties, \
-                         found at least one NULL"
+                }
+                let snat = match (ipv4, ipv6) {
+                    (Some(ipv4), Some(ipv6)) => {
+                        ZoneSnatConfig::DualStack { ipv4, ipv6 }
+                    }
+                    (Some(ipv4), None) => ZoneSnatConfig::Ipv4Only(ipv4),
+                    (None, Some(ipv6)) => ZoneSnatConfig::Ipv6Only(ipv6),
+                    (None, None) => bail!(
+                        "expected at least one SNAT config for boundary NTP"
                     ),
                 };
                 OmicronZoneType::BoundaryNtp {
@@ -3301,7 +3712,7 @@ impl InvOmicronSledConfigZone {
                     dns_servers: ntp_dns_servers?,
                     domain: self.ntp_domain,
                     nic: nic?,
-                    snat_cfg,
+                    snat,
                 }
             }
             ZoneType::Clickhouse => OmicronZoneType::Clickhouse {
@@ -3327,12 +3738,29 @@ impl InvOmicronSledConfigZone {
             ZoneType::CruciblePantry => {
                 OmicronZoneType::CruciblePantry { address: primary_address }
             }
-            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
-                dataset: dataset?,
-                http_address: primary_address,
-                dns_address: dns_address?,
-                nic: nic?,
-            },
+            ZoneType::ExternalDns => {
+                let addrs = external_ip_rows
+                    .into_iter()
+                    .map(|row| {
+                        let Some(port) = row.port else {
+                            bail!(
+                                "expected non-NULL port for external DNS \
+                                 external IP {}",
+                                row.ip,
+                            );
+                        };
+                        Ok(SocketAddr::new(row.ip.ip(), *port))
+                    })
+                    .collect::<Result<Vec<_>, anyhow::Error>>()?;
+                let dns_addresses = ExternalDnsAddrs::new(addrs)
+                    .context("invalid external DNS addresses")?;
+                OmicronZoneType::ExternalDns {
+                    dataset: dataset?,
+                    http_address: primary_address,
+                    dns_addresses,
+                    nic: nic?,
+                }
+            }
             ZoneType::InternalDns => OmicronZoneType::InternalDns {
                 dataset: dataset?,
                 http_address: primary_address,
@@ -3349,26 +3777,33 @@ impl InvOmicronSledConfigZone {
             ZoneType::InternalNtp => {
                 OmicronZoneType::InternalNtp { address: primary_address }
             }
-            ZoneType::Nexus => OmicronZoneType::Nexus {
-                internal_address: primary_address,
-                lockstep_port: *self
-                    .nexus_lockstep_port
-                    .ok_or_else(|| anyhow!("expected 'nexus_lockstep_port'"))?,
-                external_ip: self
-                    .second_service_ip
-                    .ok_or_else(|| anyhow!("expected second service IP"))?
-                    .ip(),
-                nic: nic?,
-                external_tls: self
-                    .nexus_external_tls
-                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
-                external_dns_servers: self
-                    .nexus_external_dns_servers
-                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
+            ZoneType::Nexus => {
+                let ips = external_ip_rows
                     .into_iter()
-                    .map(|i| i.ip())
-                    .collect(),
-            },
+                    .map(|row| row.ip.ip())
+                    .collect::<BTreeSet<_>>();
+                let external_ips = NexusExternalIps::new(ips)
+                    .context("invalid Nexus external IPs")?;
+                OmicronZoneType::Nexus {
+                    internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
+                    external_ips,
+                    nic: nic?,
+                    external_tls: self
+                        .nexus_external_tls
+                        .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                    external_dns_servers: self
+                        .nexus_external_dns_servers
+                        .ok_or_else(|| {
+                            anyhow!("expected 'external_dns_servers'")
+                        })?
+                        .into_iter()
+                        .map(|i| i.ip())
+                        .collect(),
+                }
+            }
             ZoneType::Oximeter => {
                 OmicronZoneType::Oximeter { address: primary_address }
             }
@@ -3400,6 +3835,84 @@ impl InvOmicronSledConfigZone {
             zone_type,
             image_source,
         })
+    }
+}
+
+/// The external IP addresses of a zone in an `inv_omicron_sled_config_zone`.
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config_zone_external_ip)]
+pub struct InvOmicronSledConfigZoneExternalIp {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub ip: IpNetwork,
+    pub port: Option<SqlU16>,
+    pub snat_first_port: Option<SqlU16>,
+    pub snat_last_port: Option<SqlU16>,
+}
+
+impl InvOmicronSledConfigZoneExternalIp {
+    /// Build the external IP rows for a zone.
+    ///
+    /// Zones without external networking return an empty array.
+    pub fn for_zone(
+        inv_collection_id: CollectionUuid,
+        sled_config_id: OmicronSledConfigUuid,
+        zone: &OmicronZoneConfig,
+    ) -> Vec<InvOmicronSledConfigZoneExternalIp> {
+        // Extract an SNAT config into the data for an external IP row.
+        let snat_row = |ip: IpAddr, ports: (u16, u16)| {
+            (
+                IpNetwork::from(ip),
+                None,
+                Some(SqlU16::from(ports.0)),
+                Some(SqlU16::from(ports.1)),
+            )
+        };
+        let entries = match &zone.zone_type {
+            OmicronZoneType::Nexus { external_ips, .. } => external_ips
+                .iter()
+                .map(|ip| (IpNetwork::from(*ip), None, None, None))
+                .collect(),
+            OmicronZoneType::ExternalDns { dns_addresses, .. } => dns_addresses
+                .iter()
+                .map(|addr| {
+                    (
+                        IpNetwork::from(addr.ip()),
+                        Some(SqlU16::from(addr.port())),
+                        None,
+                        None,
+                    )
+                })
+                .collect(),
+            OmicronZoneType::BoundaryNtp { snat, .. } => match snat {
+                ZoneSnatConfig::Ipv4Only(c) => {
+                    vec![snat_row(IpAddr::V4(c.ip), c.port_range_raw())]
+                }
+                ZoneSnatConfig::Ipv6Only(c) => {
+                    vec![snat_row(IpAddr::V6(c.ip), c.port_range_raw())]
+                }
+                ZoneSnatConfig::DualStack { ipv4, ipv6 } => vec![
+                    snat_row(IpAddr::V4(ipv4.ip), ipv4.port_range_raw()),
+                    snat_row(IpAddr::V6(ipv6.ip), ipv6.port_range_raw()),
+                ],
+            },
+            _ => return Vec::new(),
+        };
+        entries
+            .into_iter()
+            .map(|(ip, port, snat_first_port, snat_last_port)| {
+                InvOmicronSledConfigZoneExternalIp {
+                    inv_collection_id: inv_collection_id.into(),
+                    sled_config_id: sled_config_id.into(),
+                    zone_id: zone.id.into(),
+                    ip,
+                    port,
+                    snat_first_port,
+                    snat_last_port,
+                }
+            })
+            .collect()
     }
 }
 
@@ -3627,6 +4140,155 @@ impl From<InvNtpTimesync> for nexus_types::inventory::TimeSync {
     }
 }
 
+/// See [`nexus_types::inventory::DiscoveredRack`].
+///
+/// The rack's discovered sleds are stored separately, in
+/// [`InvDiscoveredSled`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_discovered_rack)]
+pub struct InvDiscoveredRack {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub rack_subnet: IpNetwork,
+    pub join_service_ip: ipv6::Ipv6Addr,
+}
+
+impl InvDiscoveredRack {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        rack: &DiscoveredRack,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            rack_id: rack.rack_id.into(),
+            rack_subnet: IpNetwork::V6(rack.rack_subnet.into()),
+            join_service_ip: ipv6::Ipv6Addr::from(&rack.join_service_ip),
+        }
+    }
+
+    /// Converts this row into a [`DiscoveredRack`], given the already-converted
+    /// sleds that belong to it.
+    pub fn into_inventory(
+        self,
+        discovered_sleds: IdOrdMap<DiscoveredSled>,
+    ) -> Result<DiscoveredRack> {
+        let rack_id: RackUuid = self.rack_id.into();
+        let rack_subnet = match self.rack_subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "inv_discovered_rack row for rack {rack_id} violates \
+                 rack_subnet_family constraint: {subnet} is not Ipv6"
+            ),
+            IpNetwork::V6(subnet) => {
+                if subnet.prefix() != RACK_PREFIX_LENGTH {
+                    bail!(
+                        "inv_discovered_rack row for rack {rack_id} violates \
+                         rack_subnet_prefix constraint: {subnet} has prefix \
+                         length {}, expected {RACK_PREFIX_LENGTH}",
+                        subnet.prefix(),
+                    );
+                }
+                Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(subnet)
+            }
+        };
+        Ok(DiscoveredRack {
+            rack_id,
+            rack_subnet,
+            join_service_ip: self.join_service_ip.into(),
+            discovered_sleds,
+        })
+    }
+}
+
+/// See [`nexus_types::inventory::DiscoveredSled`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_discovered_sled)]
+pub struct InvDiscoveredSled {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    /// ID of the rack this sled was discovered on
+    /// (see [`InvDiscoveredRack::rack_id`]).
+    pub rack_id: DbTypedUuid<RackKind>,
+    pub part_number: String,
+    pub serial_number: String,
+    pub sled_subnet: IpNetwork,
+    pub sled_agent_started: bool,
+    /// Last error seen during the sled-agent start process.
+    ///
+    /// Always `None` once `sled_agent_started` is true.
+    pub last_start_error_seen: Option<String>,
+}
+
+impl InvDiscoveredSled {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        rack_id: RackUuid,
+        sled: &DiscoveredSled,
+    ) -> Self {
+        let (sled_agent_started, last_start_error_seen) =
+            match &sled.sled_agent_start_state {
+                SledAgentStartState::Started => (true, None),
+                SledAgentStartState::InProgress { last_error } => {
+                    (false, last_error.clone())
+                }
+            };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled.sled_id.into(),
+            rack_id: rack_id.into(),
+            part_number: sled.baseboard_id.part_number.clone(),
+            serial_number: sled.baseboard_id.serial_number.clone(),
+            sled_subnet: IpNetwork::V6(sled.sled_subnet.into()),
+            sled_agent_started,
+            last_start_error_seen,
+        }
+    }
+}
+
+impl TryFrom<InvDiscoveredSled> for DiscoveredSled {
+    type Error = anyhow::Error;
+
+    fn try_from(row: InvDiscoveredSled) -> anyhow::Result<Self> {
+        let sled_id: SledUuid = row.sled_id.into();
+        let sled_subnet = match row.sled_subnet {
+            IpNetwork::V4(subnet) => bail!(
+                "inv_discovered_sled row for sled {sled_id} violates \
+                 sled_subnet_family constraint: {subnet} is not Ipv6"
+            ),
+            IpNetwork::V6(subnet) => {
+                if subnet.prefix() != SLED_PREFIX_LENGTH {
+                    bail!(
+                        "inv_discovered_sled row for sled {sled_id} violates \
+                         sled_subnet_prefix constraint: {subnet} has prefix \
+                         length {}, expected {SLED_PREFIX_LENGTH}",
+                        subnet.prefix(),
+                    );
+                }
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::from(subnet)
+            }
+        };
+        let sled_agent_start_state =
+            match (row.sled_agent_started, row.last_start_error_seen) {
+                (true, Some(_)) => bail!(
+                    "inv_discovered_sled row for sled {sled_id} violates \
+                     start_error_is_null_if_started constraint"
+                ),
+                (true, None) => SledAgentStartState::Started,
+                (false, last_error) => {
+                    SledAgentStartState::InProgress { last_error }
+                }
+            };
+        Ok(DiscoveredSled {
+            sled_id,
+            baseboard_id: BaseboardId {
+                part_number: row.part_number,
+                serial_number: row.serial_number,
+            },
+            sled_subnet,
+            sled_agent_start_state,
+        })
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_internal_dns)]
 pub struct InvInternalDns {
@@ -3659,8 +4321,17 @@ impl From<InvInternalDns> for InternalDnsGenerationStatus {
 
 #[cfg(test)]
 mod test {
-    use nexus_types::inventory::NvmeFirmware;
+    use iddqd::IdOrdMap;
+    use nexus_types::inventory::{
+        DiscoveredRack, DiscoveredSled, NvmeFirmware,
+    };
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::{CollectionKind, SledUuid, TypedUuid};
+    use sled_agent_types::multirack::SledAgentStartState;
+    use sled_hardware_types::BaseboardId;
+
+    use crate::{InvDiscoveredRack, InvDiscoveredSled};
 
     use crate::InvOmicronSledConfigZoneNic;
     use crate::{InvNvmeDiskFirmware, InvNvmeDiskFirmwareError, typed_uuid};
@@ -3674,6 +4345,7 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::NexusExternalIps;
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
@@ -3921,7 +4593,9 @@ mod test {
             zone_type: OmicronZoneType::Nexus {
                 internal_address: "[::1]:12345".parse().unwrap(),
                 lockstep_port: 12346,
-                external_ip: "192.0.2.1".parse().unwrap(),
+                external_ips: NexusExternalIps::from_single(
+                    "192.0.2.1".parse().unwrap(),
+                ),
                 nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: vec![],
@@ -3940,5 +4614,121 @@ mod test {
             .into_network_interface_for_zone(zone_id)
             .expect("rebuilt NIC from inventory row");
         assert_eq!(nic, round_tripped);
+    }
+
+    fn make_discovered_sled(
+        sled_agent_start_state: SledAgentStartState,
+    ) -> DiscoveredSled {
+        DiscoveredSled {
+            sled_id: SledUuid::new_v4(),
+            baseboard_id: BaseboardId {
+                part_number: "913-0000019".to_string(),
+                serial_number: "BRM42220001".to_string(),
+            },
+            sled_subnet: Ipv6Subnet::new(
+                "fd00:1122:3344:101::".parse().unwrap(),
+            ),
+            sled_agent_start_state,
+        }
+    }
+
+    fn make_discovered_rack(sleds: Vec<DiscoveredSled>) -> DiscoveredRack {
+        DiscoveredRack {
+            rack_id: RackUuid::new_v4(),
+            rack_subnet: Ipv6Subnet::new("fd00:1122:3344::".parse().unwrap()),
+            join_service_ip: "fd00:1122:3344:101::1".parse().unwrap(),
+            discovered_sleds: IdOrdMap::from_iter_unique(sleds)
+                .expect("sled IDs are unique"),
+        }
+    }
+
+    #[test]
+    fn discovered_rack_and_sleds_round_trip_through_inventory() {
+        let collection_id = CollectionUuid::new_v4();
+        let rack = make_discovered_rack(vec![
+            make_discovered_sled(SledAgentStartState::Started),
+            make_discovered_sled(SledAgentStartState::InProgress {
+                last_error: None,
+            }),
+            make_discovered_sled(SledAgentStartState::InProgress {
+                last_error: Some("oof ouch owie my sled".to_string()),
+            }),
+        ]);
+
+        let rack_row = InvDiscoveredRack::new(collection_id, &rack);
+        let sleds = IdOrdMap::from_iter_unique(
+            rack.discovered_sleds.iter().map(|sled| {
+                let row =
+                    InvDiscoveredSled::new(collection_id, rack.rack_id, sled);
+                assert_eq!(row.rack_id, rack.rack_id.into());
+                DiscoveredSled::try_from(row)
+                    .expect("valid sled row should convert")
+            }),
+        )
+        .unwrap();
+        let round_tripped = rack_row
+            .into_inventory(sleds)
+            .expect("valid rack row should convert");
+        assert_eq!(rack, round_tripped);
+    }
+
+    #[test]
+    fn discovered_rack_rejects_invalid_subnet() {
+        let rack = make_discovered_rack(vec![]);
+        let valid = InvDiscoveredRack::new(CollectionUuid::new_v4(), &rack);
+
+        // IPv4 subnet violates `rack_subnet_family` constraint
+        let mut row = valid.clone();
+        row.rack_subnet = "10.0.0.0/24".parse().unwrap();
+        row.into_inventory(IdOrdMap::new())
+            .expect_err("IPv4 rack subnet should be rejected");
+
+        // Wrong prefix length violates `rack_subnet_prefix` constraint
+        for bad in ["fd00:1122:3344::/48", "fd00:1122:3344::/64"] {
+            let mut row = valid.clone();
+            row.rack_subnet = bad.parse().unwrap();
+            row.into_inventory(IdOrdMap::new()).expect_err(
+                "rack subnet with wrong prefix length should be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn discovered_sled_rejects_invalid_subnet() {
+        let sled = make_discovered_sled(SledAgentStartState::Started);
+        let valid = InvDiscoveredSled::new(
+            CollectionUuid::new_v4(),
+            RackUuid::new_v4(),
+            &sled,
+        );
+
+        // Any IPv4 subnet violates the `sled_subnet_family` constraint
+        let mut row = valid.clone();
+        row.sled_subnet = "10.0.0.0/24".parse().unwrap();
+        DiscoveredSled::try_from(row)
+            .expect_err("IPv4 sled subnet should be rejected");
+
+        // Wrong prefix length violates the `sled_subnet_prefix` constraint
+        for bad in ["fd00:1122:3344:101::/56", "fd00:1122:3344:101::/96"] {
+            let mut row = valid.clone();
+            row.sled_subnet = bad.parse().unwrap();
+            DiscoveredSled::try_from(row).expect_err(
+                "sled subnet with wrong prefix length should be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn discovered_sled_rejects_error_when_started() {
+        // Violates `start_error_is_null_if_started` constraint
+        let sled = make_discovered_sled(SledAgentStartState::Started);
+        let mut row = InvDiscoveredSled::new(
+            CollectionUuid::new_v4(),
+            RackUuid::new_v4(),
+            &sled,
+        );
+        row.last_start_error_seen = Some("oof ouch owie my sled".to_string());
+        DiscoveredSled::try_from(row)
+            .expect_err("started sled with an error should be rejected");
     }
 }

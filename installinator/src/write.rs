@@ -20,18 +20,16 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{
-    disk::M2Slot,
-    update::{
-        MupdateOverrideInfo, OmicronInstallManifest,
-        OmicronInstallManifestSource, OmicronInstallMetadata,
-    },
+use omicron_common::update::{
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
+    OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use oxide_update_engine_types::errors::NestedEngineError;
 use oxide_update_engine_types::events::ProgressUnits;
 use oxide_update_engine_types::spec::EngineSpec;
 use sha2::{Digest, Sha256};
+use sled_agent_types::disk::M2Slot;
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use tokio::{
@@ -124,10 +122,10 @@ impl WriteDestination {
         let mut drives = BTreeMap::new();
 
         for disk in hardware.m2_disks() {
-            let Ok(slot) = M2Slot::try_from(disk.slot()) else {
+            let Ok(slot) = M2Slot::try_from(disk.pcie_slot()) else {
                 warn!(
-                    log, "skipping M.2 drive with unexpected slot number";
-                    "slot" => disk.slot(),
+                    log, "skipping M.2 drive with unexpected PCIe slot number";
+                    "pcie_slot" => disk.pcie_slot(),
                 );
                 continue;
             };
@@ -138,7 +136,7 @@ impl WriteDestination {
                         log, "found target M.2 disk";
                         "identity" => ?disk.identity(),
                         "path" => disk.devfs_path().as_str(),
-                        "slot" => disk.slot(),
+                        "pcie_slot" => disk.pcie_slot(),
                         "boot_image_path" => path.as_str(),
                         "zpool" => %disk.zpool_name(),
                     );
@@ -167,7 +165,7 @@ impl WriteDestination {
                                 log, "skipping duplicate M.2 drive entry";
                                 "identity" => ?disk.identity(),
                                 "path" => disk.devfs_path().as_str(),
-                                "slot" => disk.slot(),
+                                "pcie_slot" => disk.pcie_slot(),
                                 "boot_image_path" => path.as_str(),
                                 "zpool" => %disk.zpool_name(),
                             );
@@ -180,7 +178,7 @@ impl WriteDestination {
                         log, "found M.2 disk but failed to find boot image path";
                         "identity" => ?disk.identity(),
                         "path" => disk.devfs_path().as_str(),
-                        "slot" => disk.slot(),
+                        "pcie_slot" => disk.pcie_slot(),
                         "boot_image_path_err" => err,
                         "zpool" => %disk.zpool_name(),
                     );

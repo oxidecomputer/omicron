@@ -15,6 +15,7 @@ use http::StatusCode;
 use iddqd::{IdOrdMap, id_ord_map};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use semver::Version;
+use sp_sim::FAKE_SIDECAR_MODEL;
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
 use tufaceous::edit::RepositoryEditor;
 use wicket_common::example::ExampleRackSetupData;
@@ -31,8 +32,10 @@ use wicketd_commission_types_versions::latest::rack_setup::{
     PutRecoveryUserPasswordHash, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types_versions::latest::update::{
-    StartUpdateOptions, StartUpdateParams, UpdateState, UpdateTargets,
+    GetUpdateProgressResponse, RepositoryDescription, StartUpdateOptions,
+    StartUpdateParams, UpdateState, UpdateTargets,
 };
+use zeroize::Zeroizing;
 
 /// Wait for the SP inventory to become ready.
 async fn wait_for_sp_inventory(
@@ -76,6 +79,7 @@ async fn test_commission_inventory() {
     let gateway =
         gateway_setup::test_setup("test_commission_inventory", SpPort::One)
             .await;
+    let n_sps = gateway.simrack.num_sps();
     let ctx = WicketdTestContext::setup(gateway).await;
 
     // Wait for MGS inventory, ignition, and cabooses.
@@ -91,7 +95,7 @@ async fn test_commission_inventory() {
     })
     .await;
 
-    assert_eq!(sps.len(), 4, "four simulated SPs");
+    assert_eq!(sps.len(), n_sps, "{n_sps} simulated SPs");
 
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
@@ -153,8 +157,8 @@ async fn test_commission_inventory() {
     );
     assert_eq!(
         refreshed.sps.len(),
-        4,
-        "four simulated SPs after forced refresh"
+        n_sps,
+        "{n_sps} simulated SPs after forced refresh"
     );
     assert!(
         refreshed.transceivers.is_empty(),
@@ -257,7 +261,7 @@ async fn test_commission_inventory() {
     assert_eq!(
         location.switch_baseboard,
         Some(BaseboardId {
-            part_number: "FAKE_SIM_SIDECAR".to_string(),
+            part_number: FAKE_SIDECAR_MODEL.to_string(),
             serial_number: "SimSidecar0".to_string(),
         }),
         "switch 0 baseboard reported by sp-sim"
@@ -284,6 +288,21 @@ async fn test_commission_start_update() {
     assert_eq!(
         repo.system_version, None,
         "no repository uploaded yet, so no system version"
+    );
+    let progress = ctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert_eq!(
+        progress,
+        GetUpdateProgressResponse {
+            repository: RepositoryDescription { system_version: None },
+            sps: IdOrdMap::new(),
+        },
+        "no repository uploaded yet, so progress has no system version and \
+         no updates",
     );
 
     // Wait until sled 0's SP is populated.
@@ -347,15 +366,15 @@ async fn test_commission_start_update() {
         &ctx,
         "sled 0 reached Running with a running step",
         |p| {
-            p.progress.state == UpdateState::Running
+            matches!(p.progress.state, UpdateState::Running { .. })
                 && p.progress.innermost_running_steps().next().is_some()
         },
     )
     .await;
-    assert_eq!(
+    assert!(
+        matches!(entry.progress.state, UpdateState::Running { .. }),
+        "sled 0 rolls up to Running: {:?}",
         entry.progress.state,
-        UpdateState::Running,
-        "sled 0 rolls up to Running",
     );
     assert!(
         !entry.progress.steps.is_empty(),
@@ -399,7 +418,9 @@ async fn test_commission_rss_config() {
     // 400.
     let err = ctx
         .commission_client
-        .post_rss_config_key(&PrivateKeyPem("a garbage key".to_string()))
+        .post_rss_config_key(&PrivateKeyPem(Zeroizing::new(
+            "a garbage key".to_string(),
+        )))
         .await
         .expect_err("post_rss_config_key rejects an invalid pair");
     assert_client_error(&err, StatusCode::BAD_REQUEST);

@@ -26,10 +26,10 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::SpType;
-use omicron_common::disk::M2Slot;
-use omicron_repl_utils::run_repl_on_stdin;
+use omicron_repl_utils::{parsed, run_repl_on_stdin};
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware_types::BaseboardId;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
@@ -158,9 +158,9 @@ impl ReconfiguratorSpUpdater {
         let mut updater_state =
             UpdaterState { requests_tx, status_rx, inventory };
 
-        run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+        run_repl_on_stdin(parsed(|cmd: TopLevelArgs| {
             process_cmd(&mut updater_state, cmd)
-        })?;
+        }))?;
 
         info!(&log, "waiting for qorb to shut down");
         mgs_resolver.terminate().await;

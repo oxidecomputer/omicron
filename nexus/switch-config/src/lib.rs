@@ -53,6 +53,9 @@ pub struct RackNetworkConfigInput {
     pub infra_ip_last: IpAddr,
     /// The BFD sessions to configure.
     pub bfd: Vec<BfdPeerConfig>,
+    /// The bootstore generation number at the time the inputs above were read.
+    /// `None` if it hasn't yet been bumped by Nexus.
+    pub bootstore_generation: Option<i64>,
 }
 
 /// Per-switch BGP configuration.
@@ -143,6 +146,8 @@ pub struct PortInput {
     pub lldp: Vec<LldpInput>,
     /// The port's TX-EQ overrides. Only the first entry is used today.
     pub tx_eq: Vec<TxEqConfig>,
+    /// Whether DDM traffic is permitted on this port.
+    pub allow_ddm_traffic: bool,
 }
 
 /// An IP address assigned to a port.
@@ -280,6 +285,7 @@ pub fn build_rack_network_config(
         infra_ip_first,
         infra_ip_last,
         bfd,
+        bootstore_generation: _,
     } = input;
 
     let mut problems = Vec::new();
@@ -460,6 +466,7 @@ pub fn build_rack_network_config(
                     management_addrs: c.management_ip.map(|ip| vec![ip]),
                 }),
             tx_eq,
+            allow_ddm_traffic: port.allow_ddm_traffic,
         };
 
         ports.push(port_config);
@@ -500,8 +507,8 @@ mod tests {
     use omicron_common::api::external::NameOrId;
     use proptest::prelude::*;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::NumberedRouter;
     use sled_agent_types::early_networking::RouterPeerIpAddr;
-    use sled_agent_types::early_networking::RouterPeerType;
     use test_strategy::proptest;
 
     fn valid_bgp_config() -> BgpConfigInput {
@@ -526,6 +533,7 @@ mod tests {
             infra_ip_first: "fd00:1122:3344:1::1".parse().unwrap(),
             infra_ip_last: "fd00:1122:3344:1::2".parse().unwrap(),
             bfd: vec![],
+            bootstore_generation: None,
         }
     }
 
@@ -539,6 +547,7 @@ mod tests {
             routes: vec![],
             lldp: vec![],
             tx_eq: vec![],
+            allow_ddm_traffic: false,
         }
     }
 
@@ -550,12 +559,15 @@ mod tests {
             // This is arbitrary, since configs are matched by switch slot and
             // not this name.
             bgp_config: NameOrId::Name("test-bgp".parse().unwrap()),
-            addr: RouterPeerType::Numbered {
-                ip: RouterPeerIpAddr::try_from(
+            addr: NumberedRouter::new(
+                RouterPeerIpAddr::try_from(
                     "192.0.2.1".parse::<IpAddr>().unwrap(),
                 )
                 .expect("192.0.2.1 is a valid router peer ip"),
-            },
+                None,
+            )
+            .unwrap()
+            .into(),
             hold_time: 6,
             idle_hold_time: 3,
             delay_open: 0,

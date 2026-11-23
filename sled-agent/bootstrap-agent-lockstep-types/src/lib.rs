@@ -13,28 +13,45 @@ use anyhow::Context as _;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use iddqd::{BiHashItem, BiHashMap, bi_upcast};
 use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::multirack::{
+    MultirackJoinServiceStatus, SledAgentStartState,
+};
 use sled_hardware_types::BaseboardId;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use trust_quorum_types::membership::TrustQuorumMembers;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::types::Epoch;
+use trust_quorum_types::types::Threshold;
+pub use wicketd_commission_types::rack_setup::MultirackJoinRequest;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolError;
+
+pub mod scrimlet_reconcilers;
 
 /// Configuration for the "rack setup service".
 ///
@@ -48,7 +65,7 @@ pub struct RackInitializeRequest {
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
-    pub trust_quorum_peers: Option<Vec<BaseboardId>>,
+    pub trust_quorum_peers: Option<TrustQuorumMembers>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -155,7 +172,7 @@ impl RackInitializeRequest {
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    trust_quorum_peers: Option<Vec<BaseboardId>>,
+    trust_quorum_peers: Option<TrustQuorumMembers>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
@@ -261,6 +278,7 @@ pub struct RecoverySiloConfig {
 )]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
+    Uninitialized,
     Initializing {
         id: RackInitUuid,
         step: RssStep,
@@ -276,7 +294,20 @@ pub enum RackOperationStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-    Uninitialized,
+    MultirackJoinInProgress {
+        // Status is queried via a different API
+        id: MultirackJoinUuid,
+    },
+    MultirackJoinCompleted {
+        id: Option<MultirackJoinUuid>,
+    },
+    MultirackJoinFailed {
+        id: MultirackJoinUuid,
+        message: String,
+    },
+    MultirackJoinPanicked {
+        id: MultirackJoinUuid,
+    },
 }
 
 /// Steps we go through during initial rack setup.
@@ -404,4 +435,130 @@ impl IdOrdItem for BootstrapIpOfBaseboardId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BaseboardIds {
     pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
+}
+
+/// The status of starting sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum SledAgentStartStatus {
+    NotStarted,
+    WaitingForTrustQuorumConfig {
+        connected_peers: BTreeSet<BaseboardId>,
+    },
+    WaitingForRackUnlock {
+        connected_peers: BTreeSet<BaseboardId>,
+        latest_committed_epoch: Epoch,
+    },
+    Expunged {
+        epoch: Epoch,
+        from: BaseboardId,
+    },
+    Started {
+        sled_id: SledUuid,
+    },
+}
+
+/// The state of the commit phase of the trust quorum protocol
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct CommitState {
+    pub rack_id: RackUuid,
+    pub members: BTreeSet<BaseboardId>,
+    pub epoch: Epoch,
+    pub last_committed_epoch: Option<Epoch>,
+    pub threshold: Threshold,
+    pub commit_crash_tolerance: u8,
+    pub acked: BTreeSet<BaseboardId>,
+    pub fatal_errors: BTreeMap<BaseboardId, String>,
+    pub transient_errors: BTreeMap<BaseboardId, String>,
+}
+
+/// Status information for a given sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct SledAgentInfo {
+    pub baseboard_id: BaseboardId,
+    pub sled_id: SledUuid,
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    pub start_state: SledAgentStartState,
+}
+
+impl BiHashItem for SledAgentInfo {
+    type K1<'a> = &'a BaseboardId;
+    type K2<'a> = &'a SledUuid;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.baseboard_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        &self.sled_id
+    }
+
+    bi_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct StartSledAgentsStatus {
+    pub this_nodes_sled_id: SledUuid,
+    pub rack_id: RackUuid,
+    pub sleds: BiHashMap<SledAgentInfo>,
+}
+
+impl From<StartSledAgentsStatus> for MultirackJoinServiceStatus {
+    fn from(value: StartSledAgentsStatus) -> Self {
+        let sled_id = value.this_nodes_sled_id;
+        let rack_id = value.rack_id;
+        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+            value
+                .sleds
+                .iter()
+                .next()
+                .expect("at least one sled")
+                .sled_subnet
+                .net()
+                .addr(),
+        );
+        let sled_agents = value
+            .sleds
+            .into_iter()
+            .map(|s| sled_agent_types::multirack::SledAgentInfo {
+                baseboard_id: s.baseboard_id,
+                sled_id: s.sled_id,
+                address: *get_sled_address(s.sled_subnet).ip(),
+                start_state: s.start_state,
+            })
+            .collect();
+
+        MultirackJoinServiceStatus {
+            sled_id,
+            rack_id,
+            rack_subnet,
+            sled_agents,
+        }
+    }
+}
+
+/// The current state of the `MultirackJoinService` as retrieved from the
+/// `output_rx` watch channel.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum MultirackJoinServiceState {
+    Uninitialized,
+    Requested,
+    Starting,
+    TrustQuorumReconfigure(TqReconfigureMsg),
+    TrustQuorumPreparing(CoordinatorStatus),
+    TrustQuorumCommitting(CommitState),
+    ConfigureNetworking {
+        start_sled_agent_status: Option<StartSledAgentsStatus>,
+    },
+    StartSledAgents(StartSledAgentsStatus),
+    WaitForCompletion(StartSledAgentsStatus),
+    Completed,
+    Failed {
+        message: String,
+    },
+    InvalidMembershipSize {
+        message: String,
+    },
+    TaskPanicked,
 }

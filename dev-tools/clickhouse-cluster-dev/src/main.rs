@@ -14,7 +14,7 @@ use clickhouse_admin_test_utils::{
     default_clickhouse_log_ctx_and_path,
 };
 use clickward::KeeperId;
-use oximeter_db::Client;
+use oximeter_db::{Client, User};
 use oximeter_test_utils::{wait_for_keepers, wait_for_ping};
 use scopeguard::ScopeGuard;
 use std::time::Duration;
@@ -68,11 +68,13 @@ async fn main_impl() -> Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(1.into()),
         &logctx.log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
+        User::Admin,
         deployment.native_addr(2.into()),
         &logctx.log,
         request_timeout,

@@ -16,10 +16,7 @@ use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
 use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
-use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -33,6 +30,9 @@ use sled_agent_config_reconciler::NestedDatasetDestroyError;
 use sled_agent_config_reconciler::NestedDatasetEnsureError;
 use sled_agent_config_reconciler::NestedDatasetListError;
 use sled_agent_config_reconciler::NestedDatasetMountError;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
@@ -218,7 +218,9 @@ impl LocalStorage for ConfigReconcilerHandle {
         let sled_config =
             self.ledgered_sled_config().map_err(Error::LedgeredSledConfig)?;
         sled_config
-            .and_then(|mut sled_config| sled_config.datasets.remove(dataset_id))
+            .and_then(|mut sled_config| {
+                sled_config.datasets.remove(*dataset_id)
+            })
             .ok_or(Error::DatasetNotFound)
     }
 
@@ -303,7 +305,7 @@ impl LocalStorage for sim::Storage {
         let mut config = self.lock().omicron_sled_config().ok_or(
             HttpError::for_not_found(None, "No control plane datasets".into()),
         )?;
-        config.datasets.remove(dataset_id).ok_or(Error::DatasetNotFound)
+        config.datasets.remove(*dataset_id).ok_or(Error::DatasetNotFound)
     }
 
     async fn dyn_dataset_get(
@@ -1117,13 +1119,13 @@ mod tests {
         ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
     };
     use iddqd::id_ord_map;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use sha2::Sha256;
+    use sled_agent_types::disk::DatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
     use uuid::Uuid;
     use zip::ZipWriter;

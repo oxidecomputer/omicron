@@ -10,11 +10,13 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::api::external::Generation;
+use omicron_common::api::external::ByteCount;
+use omicron_generation_kinds::ArtifactConfigGeneration;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -25,7 +27,9 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
+use slog::Key;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::Ipv6Addr;
@@ -34,6 +38,15 @@ use swrite::SWrite;
 use swrite::swriteln;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+/// The status of a `capacity_metrics` background task activation.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CapacityMetricsStatus {
+    /// Number of silo quota samples retrieved.
+    pub silo_samples: usize,
+    /// Number of project quota samples retrieved.
+    pub project_samples: usize,
+}
 
 /// The status of a `region_replacement` background task activation
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -103,6 +116,47 @@ pub struct AbandonedVmmReaperStatus {
     pub vmms_deleted: usize,
     pub vmms_already_deleted: usize,
     pub errors: Vec<String>,
+}
+
+/// VMMs on a single sled
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmsBySled {
+    pub sled_id: SledUuid,
+    pub vmm_ids: BTreeSet<PropolisUuid>,
+}
+
+impl IdOrdItem for VmmsBySled {
+    type Key<'a> = SledUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+
+    id_upcast!();
+}
+
+/// The status of a `vmm_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VmmStopForUpdateStatus {
+    /// Disabled by configuration (`vmm_stop_for_update.disable`). The task did
+    /// nothing.
+    Disabled,
+    /// The task was enabled and ran, with the details of what it did provided.
+    Enabled(VmmStopForUpdateDetails),
+}
+
+/// Details of an enabled `vmm_stop_for_update` activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmStopForUpdateDetails {
+    /// Number of VMMs stopped in this activation, keyed by the sled they were
+    /// running on.
+    pub vmms_stopped_by_sled: IdOrdMap<VmmsBySled>,
+    /// Number of VMMs that failed to stop in this activation, keyed by the sled
+    /// they are running on.
+    pub vmms_failed_to_stop_by_sled: IdOrdMap<VmmsBySled>,
+    /// Errors encountered during this activation, if any.
+    pub error_messages: Vec<String>,
 }
 
 /// The status of an `instance_updater` background task activation.
@@ -228,6 +282,8 @@ pub enum ReincarnationReason {
     Failed,
     /// A previous instance-start saga for this instance has failed.
     SagaUnwound,
+    /// A sled has been evacuated and its instances need to be started again.
+    SledEvacuation,
 }
 
 impl std::fmt::Display for ReincarnationReason {
@@ -235,6 +291,7 @@ impl std::fmt::Display for ReincarnationReason {
         f.write_str(match self {
             Self::Failed => "instance failed",
             Self::SagaUnwound => "start saga failed",
+            Self::SledEvacuation => "sled evacuated",
         })
     }
 }
@@ -283,6 +340,29 @@ pub struct SupportBundleCollectionReport {
     /// All steps taken, alongside their timing information, when collecting the
     /// bundle.
     pub steps: Vec<SupportBundleCollectionStep>,
+
+    /// Set if collection stopped at the bundle's size limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_limit_exceeded: Option<SupportBundleSizeLimitExceeded>,
+}
+
+/// Describes a support bundle collection that stopped early because the
+/// bundle reached its size limit.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleSizeLimitExceeded {
+    /// The bundle's size limit.
+    pub limit_bytes: ByteCount,
+    /// The number of bytes collected into the bundle.
+    pub used_bytes: u64,
+    /// When the limit was first reached.
+    pub exceeded_at: DateTime<Utc>,
+    /// Files refused because they would exceed the limit, relative to the
+    /// bundle's root, in the order refused.
+    pub refused_paths: Vec<String>,
+    /// Steps which stopped before finishing.
+    pub incomplete_steps: BTreeSet<String>,
+    /// Steps which never started because the limit was reached.
+    pub skipped_steps: BTreeSet<String>,
 }
 
 /// Pairs a [`SupportBundleCollectionReport`] with facts known only after
@@ -325,6 +405,8 @@ impl SupportBundleCollectionStep {
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
     pub const STEP_SPAWN_SP_DUMPS: &'static str =
         "spawn steps to query all SP dumps";
+    pub const STEP_SPAWN_SP_COMPONENTS: &'static str =
+        "spawn steps to query all SP components";
     pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
 }
 
@@ -332,6 +414,9 @@ impl SupportBundleCollectionStep {
 pub enum SupportBundleCollectionStepStatus {
     Ok,
     Skipped,
+    /// The step stopped before finishing, because the bundle reached its
+    /// size limit or was cancelled.
+    Stopped,
     Failed(String),
 }
 
@@ -341,6 +426,7 @@ impl std::fmt::Display for SupportBundleCollectionStepStatus {
         match self {
             Ok => write!(f, "ok"),
             Skipped => write!(f, "skipped"),
+            Stopped => write!(f, "stopped"),
             Failed(why) => write!(f, "failed: {why}"),
         }
     }
@@ -364,14 +450,14 @@ pub struct SupportBundleEreportStatus {
 
 impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
-        Self { bundle, steps: vec![] }
+        Self { bundle, steps: vec![], size_limit_exceeded: None }
     }
 }
 
 /// The status of a `tuf_artifact_replication` background task activation
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TufArtifactReplicationStatus {
-    pub generation: Generation,
+    pub generation: ArtifactConfigGeneration,
     pub last_run_counters: TufArtifactReplicationCounters,
     pub lifetime_counters: TufArtifactReplicationCounters,
     pub request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
@@ -471,7 +557,7 @@ pub struct TufArtifactReplicationRequest {
 )]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum TufArtifactReplicationOperation {
-    PutConfig { generation: Generation },
+    PutConfig { generation: ArtifactConfigGeneration },
     List,
     Put { hash: ArtifactHash },
     Copy { hash: ArtifactHash, source_sled: SledUuid },
@@ -613,23 +699,149 @@ impl IdOrdItem for TufRepoInfo {
     id_upcast!();
 }
 
-/// The status of an `blueprint_rendezvous` background task activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The status of a `blueprint_rendezvous` background task activation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStatus {
     /// ID of the target blueprint during this activation.
     pub blueprint_id: BlueprintUuid,
-    /// ID of the inventory collection used by this activation.
-    pub inventory_collection_id: CollectionUuid,
-    /// Counts of operations performed.
-    pub stats: BlueprintRendezvousStats,
+    /// Outcome of reconciling sled availability from the blueprint.
+    pub sled_blueprint_availability: SledBlueprintAvailabilityRendezvousOutcome,
+    /// Outcome of reconciling the dataset rendezvous tables from the blueprint
+    /// and inventory.
+    pub datasets: DatasetRendezvousOutcome,
+}
+
+/// Outcome of reconciling `rendezvous_bp_sled_availability`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SledBlueprintAvailabilityRendezvousOutcome {
+    /// Reconciliation ran to completion.
+    Reconciled(SledBlueprintAvailabilityRendezvousStats),
+    /// Reconciliation failed partway through; rows written before the
+    /// failure stay written.
+    Error(String),
+}
+
+/// Outcome of reconciling the rendezvous dataset tables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatasetRendezvousOutcome {
+    /// No inventory collection has been loaded yet, so dataset reconciliation
+    /// was skipped. (It needs inventory to confirm a dataset exists before
+    /// making it available to other subsystems.)
+    NoInventoryCollection,
+    /// Reconciliation ran to completion against `inventory_collection_id`.
+    Reconciled {
+        inventory_collection_id: CollectionUuid,
+        stats: DatasetRendezvousStats,
+    },
+    /// Reconciliation against `inventory_collection_id` failed partway through.
+    /// The rows written before the failure stay written.
+    Error { inventory_collection_id: CollectionUuid, error: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlueprintRendezvousStats {
+pub struct DatasetRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
     pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
+}
+
+/// Stats for a sled availability rendezvous run.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct SledBlueprintAvailabilityRendezvousStats {
+    /// Number of sleds recorded as available for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_available: usize,
+
+    /// Number of sleds recorded as unavailable for provisioning.
+    ///
+    /// This can be a fresh row or an update at a newer generation; the
+    /// availability value itself may be unchanged.
+    pub num_marked_unavailable: usize,
+
+    /// Number of sleds whose row was left as-is.
+    ///
+    /// This can be for any of the following reasons:
+    ///
+    /// * The blueprint's update generation wasn't newer.
+    /// * The row is already in a terminal state (while the blueprint still
+    ///   lists the sled as active).
+    /// * A concurrent Nexus won the write.
+    pub num_unchanged: usize,
+
+    /// Number of active sleds whose stored row and blueprint entry together
+    /// violate the generation invariant (equal generation but different
+    /// availability, indicating a planner bug). These rows are left untouched.
+    pub num_invariant_violations: usize,
+
+    /// Number of sleds newly moved to the terminal `decommissioned` state.
+    pub num_decommissioned: usize,
+
+    /// Number of decommissioned sleds in the blueprint whose row was already a
+    /// tombstone (possibly written by a concurrent Nexus during this pass).
+    pub num_already_decommissioned: usize,
+
+    /// Number of active rows for sleds the target blueprint doesn't mention.
+    /// These are left untouched.
+    ///
+    /// This can only happen if this Nexus is acting on a stale blueprint that
+    /// predates a sled another Nexus already recorded.
+    pub num_not_in_blueprint: usize,
+
+    /// Number of decommissioned rows for sleds the target blueprint doesn't
+    /// mention. These are terminal tombstones and are left untouched.
+    ///
+    /// Today the blueprint never prunes decommissioned sleds, so this is
+    /// expected to be zero; once it does, this becomes the steady state for
+    /// every pruned sled.
+    pub num_decommissioned_not_in_blueprint: usize,
+}
+
+impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            num_marked_available,
+            num_marked_unavailable,
+            num_unchanged,
+            num_invariant_violations,
+            num_decommissioned,
+            num_already_decommissioned,
+            num_not_in_blueprint,
+            num_decommissioned_not_in_blueprint,
+        } = *self;
+        serializer
+            .emit_usize("num_marked_available".into(), num_marked_available)?;
+        serializer.emit_usize(
+            "num_marked_unavailable".into(),
+            num_marked_unavailable,
+        )?;
+        serializer.emit_usize("num_unchanged".into(), num_unchanged)?;
+        serializer.emit_usize(
+            "num_invariant_violations".into(),
+            num_invariant_violations,
+        )?;
+        serializer
+            .emit_usize("num_decommissioned".into(), num_decommissioned)?;
+        serializer.emit_usize(
+            "num_already_decommissioned".into(),
+            num_already_decommissioned,
+        )?;
+        serializer
+            .emit_usize("num_not_in_blueprint".into(), num_not_in_blueprint)?;
+        serializer.emit_usize(
+            "num_decommissioned_not_in_blueprint".into(),
+            num_decommissioned_not_in_blueprint,
+        )?;
+        Ok(())
+    }
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets
@@ -749,6 +961,12 @@ pub enum BlueprintPlannerStatus {
     /// by the config file.
     Disabled,
 
+    /// The reconfigurator config has not been loaded yet, so the planner did
+    /// not run.
+    ///
+    /// This is expected briefly after Nexus starts up.
+    ConfigNotYetLoaded,
+
     /// The blueprint limit was reached, so automatic blueprint planning was
     /// disabled.
     ///
@@ -786,6 +1004,117 @@ pub enum BlueprintPlannerStatus {
         blueprint_count: u64,
         limit: u64,
     },
+}
+
+/// High-level status of the blueprint pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BlueprintPrunerStatus {
+    /// The blueprint pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The blueprint pruner is enabled and ran successfully.
+    Enabled(BlueprintPrunerDetails),
+}
+
+impl std::fmt::Display for BlueprintPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlueprintPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            BlueprintPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
+    }
+}
+
+/// The status of a `blueprint_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlueprintPrunerDetails {
+    /// count of blueprints that were kept by policy
+    ///
+    /// More may be kept because of an error or because the maximum number
+    /// deleted per activation was hit.
+    pub nkept_by_policy: usize,
+    /// blueprints deleted
+    pub deleted: Vec<DeletedBlueprint>,
+    /// count of `bp_target` rows that were determined to be removable
+    pub ntargets_removable: usize,
+    /// count of `bp_target` rows deleted
+    pub ntargets_deleted: usize,
+    /// errors encountered while pruning
+    ///
+    /// Note that errors may have been encountered while some blueprints and
+    /// `bp_target` rows were also deleted.
+    pub errors: Vec<String>,
+}
+
+impl std::fmt::Display for BlueprintPrunerDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "    blueprints kept by policy: {}", self.nkept_by_policy)?;
+        writeln!(
+            f,
+            "    bp_target rows that can be deleted: {}",
+            self.ntargets_removable
+        )?;
+        writeln!(f, "    bp_target rows deleted: {}", self.ntargets_deleted)?;
+        writeln!(f, "    blueprints deleted: {}", self.deleted.len())?;
+        for b in &self.deleted {
+            writeln!(
+                f,
+                "        {} (made target at {})",
+                b.id,
+                humantime::format_rfc3339_millis(b.time_made_target.into())
+            )?;
+        }
+        writeln!(f, "    errors: {}", self.errors.len())?;
+        for w in &self.errors {
+            writeln!(f, "        {}", w)?;
+        }
+        Ok(())
+    }
+}
+
+impl slog::KV for BlueprintPrunerDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            nkept_by_policy,
+            deleted,
+            ntargets_removable,
+            ntargets_deleted,
+            errors,
+        } = self;
+
+        serializer
+            .emit_usize(Key::from("nkept_by_policy"), *nkept_by_policy)?;
+        serializer
+            .emit_usize(Key::from("ntargets_removable"), *ntargets_removable)?;
+        serializer
+            .emit_usize(Key::from("ntargets_deleted"), *ntargets_deleted)?;
+        // slog does not support nested values out-of-the-box so we settle for
+        // just the counts for now.
+        serializer.emit_usize(Key::from("ndeleted"), deleted.len())?;
+        serializer.emit_usize(Key::from("nerrors"), errors.len())?;
+        Ok(())
+    }
+}
+
+/// Describes a blueprint that was deleted by the pruner task
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeletedBlueprint {
+    pub id: BlueprintUuid,
+    pub time_made_target: DateTime<Utc>,
 }
 
 /// The status of a `alert_dispatcher` background task activation.
@@ -880,8 +1209,10 @@ pub struct SpEreporterStatus {
     pub status: EreporterStatus,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct EreporterStatus {
+    /// the UUID of the rack in which this thing lives.
+    pub rack_id: RackUuid,
     /// total number of ereports received from this reporter
     pub ereports_received: usize,
     /// number of new ereports ingested from this reporter (this may be less
@@ -938,6 +1269,10 @@ pub enum SitrepLoadStatus {
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
+    /// If `true`, then sitrep garbage collection has been explicitly disabled
+    /// by the config file.
+    #[serde(default)]
+    pub disabled: bool,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
@@ -1032,15 +1367,87 @@ pub struct FmAnalysisStatus {
 pub mod fm_analysis {
     use super::*;
     use crate::fm::FmConfigSource;
-    use crate::fm::analysis_reports;
+    use iddqd::{IdOrdItem, IdOrdMap};
     use std::num::{NonZeroU32, NonZeroU64};
+    use std::time::Duration;
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
+        /// The total duration of this preparation phase.
+        pub total_duration: Duration,
+        /// The status of each preparation step that ran during this preparation
+        /// phase.
+        #[serde(default)]
+        pub steps: IdOrdMap<PreparationStepStatus>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    pub struct PreparationStepStatus {
+        pub name: String,
+        /// How long each input-loading step took to complete, whether it
+        /// succeeded or failed.
+        ///
+        /// Steps run concurrently, so these durations overlap, and their sum
+        /// may exceed the wall-clock time spent preparing inputs.
+        pub duration: Duration,
         /// Errors encountered during the preparation step which did *not*
-        /// prevent the analysis step from completing.
+        /// prevent preparation from completing successfully.
         pub warnings: Vec<String>,
-        pub report: analysis_reports::InputReport,
+    }
+
+    impl IdOrdItem for PreparationStepStatus {
+        type Key<'a> = &'a str;
+
+        fn key(&self) -> Self::Key<'_> {
+            &self.name
+        }
+
+        iddqd::id_upcast!();
+    }
+
+    impl std::fmt::Display for PreparationStatus {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let Self { total_duration, steps } = self;
+            let name_width =
+                steps.iter().map(|step| step.name.len()).max().unwrap_or(0);
+            if steps.iter().any(|step| !step.warnings.is_empty()) {
+                writeln!(
+                    f,
+                    "/!\\ non-fatal errors preparing analysis inputs:"
+                )?;
+                for step in steps {
+                    for warning in &step.warnings {
+                        writeln!(f, "      > {}: {warning}", step.name)?;
+                    }
+                }
+            }
+            writeln!(
+                f,
+                "    input preparation took {}ms",
+                total_duration.as_millis()
+            )?;
+            for PreparationStepStatus { name, duration, warnings: _ } in steps {
+                writeln!(
+                    f,
+                    "      {name}:{:pad$}{}ms",
+                    "",
+                    duration.as_millis(),
+                    pad = name_width - name.len() + 1,
+                )?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Describes why preparing analysis inputs failed.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum PreparationFailure {
+        /// One or more input-loading steps failed. Each failed step is
+        /// recorded with its error; steps which succeeded are absent.
+        StepsFailed(BTreeMap<String, String>),
+        /// Every input-loading step succeeded, but the loaded inputs could
+        /// not be assembled into analysis inputs.
+        InvalidInputs(String),
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1061,14 +1468,14 @@ pub mod fm_analysis {
         /// Fault management analysis was not performed, as the currently-loaded
         /// inventory collection was collected prior to the earliest newer start
         /// time indicated by the current sitrep.
-        WaitingForNewerInventory {
-            parent_inv_id: CollectionUuid,
-            next_inv_min_time_started: DateTime<Utc>,
-            input_inv_time_started: DateTime<Utc>,
-        },
+        WaitingForNewerInventory(crate::fm::InventoryStale),
 
         /// Preparing analysis input failed.
-        PreparationError(String),
+        PreparationError {
+            /// Warnings and timings from any input-loading steps which ran.
+            prep_status: PreparationStatus,
+            failure: PreparationFailure,
+        },
 
         /// Preparation succeeded and analysis was performed.
         RanAnalysis {
@@ -1081,7 +1488,6 @@ pub mod fm_analysis {
     pub struct AnalysisStatus {
         pub start_time: DateTime<Utc>,
         pub end_time: DateTime<Utc>,
-        pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
         pub capacity: Option<SitrepCapacity>,
     }
@@ -1277,14 +1683,28 @@ pub enum TrustQuorumManagerStatus {
     Error(String),
 }
 
-#[derive(Default, Deserialize, Serialize)]
-pub struct AttachedSubnetManagerStatus {
-    /// Error reaching the database to fetch attached subnets.
-    pub db_error: Option<String>,
-    /// Details about attached subnets sent to Dendrite instances.
-    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
-    /// Details about attached subnets sent to sleds.
-    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AttachedSubnetManagerStatus {
+    /// An error occurred while querying the database to fetch attached subnets,
+    /// so nothing was sent to Dendrite or Sled Agents.
+    DatabaseError {
+        /// The error that occurred.
+        error: String,
+    },
+    /// Querying the database the fetch attached subnets succeeded, and the task
+    /// then attempted to make requests to Dendrite and Sled Agents.
+    Listed {
+        /// Details about attached subnets sent to Dendrite instances, or an
+        /// error if dpd clients could not be looked up.
+        ///
+        /// Even in the `Ok` case, there could be errors; see
+        /// [`DendriteSubnetDetails::errors`].
+        #[serde(with = "omicron_common::snake_case_result")]
+        dendrite: Result<HashMap<SwitchSlot, DendriteSubnetDetails>, String>,
+        /// Details about attached subnets sent to sleds.
+        sled: HashMap<SledUuid, SledSubnetDetails>,
+    },
 }
 
 /// Details about attached subnets sent to a single Dendrite instance.
@@ -1332,6 +1752,31 @@ pub struct AuditLogCleanupStatus {
     pub cutoff: DateTime<Utc>,
     /// Configured max rows to delete in this activation.
     pub max_deleted_per_activation: u32,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
+/// The status of a `vmm_mark_stop_for_update` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum VmmMarkStopForUpdateStatus {
+    /// Disabled by configuration (`vmm_mark_stop_for_update.disable`). The task
+    /// did nothing, and in particular did not trigger `vmm_stop_for_update`.
+    Disabled,
+    /// The task was enabled and ran, with the details of what it did provided.
+    Enabled(VmmMarkStopForUpdateDetails),
+}
+
+/// Details of an enabled `vmm_mark_stop_for_update` activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct VmmMarkStopForUpdateDetails {
+    /// Number of VMMs that were marked as needing to be stopped for update in
+    /// this activation.
+    pub vmms_marked: usize,
+    /// The number of batches that marked at least one VMM in this activation.
+    pub batches: usize,
+    /// The maximum number of VMMs marked per batch.
+    pub batch_size: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }
@@ -1411,8 +1856,14 @@ mod test {
     use super::TufRepoInfo;
     use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
+    use crate::internal_api::background::BlueprintPrunerDetails;
+    use crate::internal_api::background::BlueprintPrunerStatus;
+    use crate::internal_api::background::DeletedBlueprint;
+    use crate::internal_api::background::fm_analysis::PreparationStatus;
+    use crate::internal_api::background::fm_analysis::PreparationStepStatus;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
+    use std::time::Duration;
 
     #[test]
     fn test_display_tuf_repo_pruner_status_enabled() {
@@ -1455,6 +1906,99 @@ mod test {
 
         assert_contents(
             "output/tuf_repo_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_enabled() {
+        let blueprint1 = DeletedBlueprint {
+            id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
+            time_made_target: "2025-09-30T01:23:45Z".parse().unwrap(),
+        };
+        let blueprint2 = DeletedBlueprint {
+            id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
+            time_made_target: "2025-09-30T02:34:56Z".parse().unwrap(),
+        };
+
+        let details = BlueprintPrunerDetails {
+            deleted: vec![blueprint1, blueprint2],
+            ntargets_deleted: 17,
+            ntargets_removable: 18,
+            nkept_by_policy: 12,
+            errors: vec![String::from("fake-oh problem-oh")],
+        };
+        let status = BlueprintPrunerStatus::Enabled(details);
+
+        assert_contents(
+            "output/blueprint_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_disabled() {
+        let status = BlueprintPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/blueprint_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    fn fm_preparation_step(
+        name: impl ToString,
+        millis: u64,
+        warnings: &[&str],
+    ) -> PreparationStepStatus {
+        PreparationStepStatus {
+            name: name.to_string(),
+            duration: Duration::from_millis(millis),
+            warnings: warnings.iter().map(|w| w.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_display_fm_preparation_status_with_warnings() {
+        let status = PreparationStatus {
+            total_duration: Duration::from_millis(125),
+            steps: [
+                fm_preparation_step(
+                    "ereports",
+                    120,
+                    &["ereport 1 is invalid", "ereport 2 is also invalid"],
+                ),
+                fm_preparation_step("in_service_disks", 8, &[]),
+                fm_preparation_step(
+                    "silo_certificates",
+                    3,
+                    &["certificate 1 cannot be served"],
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_contents(
+            "output/fm_preparation_status_with_warnings.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_fm_preparation_status_no_warnings() {
+        let status = PreparationStatus {
+            total_duration: Duration::from_millis(42),
+            steps: ["ereports", "in_service_disks", "silo_certificates"]
+                .iter()
+                .map(|step| fm_preparation_step(step, 5, &[]))
+                .collect(),
+        };
+
+        assert_contents(
+            "output/fm_preparation_status_no_warnings.out",
             &status.to_string(),
         );
     }

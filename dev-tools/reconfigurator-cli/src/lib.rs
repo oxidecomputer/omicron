@@ -34,8 +34,12 @@ use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
-use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+use nexus_types::deployment::ReflectsCollection;
+use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
@@ -45,17 +49,20 @@ use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
+use nexus_types::deployment::{ExpectedVersion, ReconfiguratorStateInput};
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::inventory::CollectionDisplayCliFilter;
 use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronInstallManifestSource;
+use omicron_generation_kinds::{
+    Generation, NexusGeneration, TargetReleaseGeneration,
+};
+use omicron_repl_utils::parsed;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
@@ -67,6 +74,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use semver::Version;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -153,12 +161,13 @@ impl ReconfiguratorSim {
 
         // Handle zone networking setup first
         for (_, zone) in parent_blueprint.in_service_zones() {
-            if let Some((external_ip, nic)) =
-                zone.zone_type.external_networking()
-            {
-                builder
-                    .add_omicron_zone_external_ip(zone.id, external_ip)
-                    .context("adding omicron zone external IP")?;
+            if let Some(networking) = zone.zone_type.external_networking() {
+                for external_ip in networking.external_ips() {
+                    builder
+                        .add_omicron_zone_external_ip(zone.id, external_ip)
+                        .context("adding omicron zone external IP")?;
+                }
+                let nic = networking.nic();
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
@@ -387,13 +396,16 @@ impl CmdReconfiguratorSim {
         }
 
         if let Some(input_file) = &self.input_file {
-            run_repl_from_file(input_file, &mut |cmd: TopLevelArgs| {
-                process_command(&mut sim, cmd, &log_capture)
-            })
+            run_repl_from_file(
+                input_file,
+                parsed(|cmd: TopLevelArgs| {
+                    process_command(&mut sim, cmd, &log_capture)
+                }),
+            )
         } else {
-            run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+            run_repl_on_stdin(parsed(|cmd: TopLevelArgs| {
                 process_command(&mut sim, cmd, &log_capture)
-            })
+            }))
         }
     }
 }
@@ -615,6 +627,15 @@ enum SledSetCommand {
     Visibility(SledSetVisibilityCommand),
     /// set the mupdate override for this sled
     MupdateOverride(SledSetMupdateOverrideArgs),
+    /// set the number of VMMs this sled's instance manager reports as
+    /// registered (relevant when the sled is being evacuated)
+    RegisteredVmms(SledSetRegisteredVmmsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledSetRegisteredVmmsArgs {
+    /// the number of registered VMMs to report
+    count: usize,
 }
 
 #[derive(Debug, Args)]
@@ -908,7 +929,7 @@ enum BlueprintEditCommands {
         sled_id: SledOpt,
 
         /// generation of the new Nexus instance
-        nexus_generation: Generation,
+        nexus_generation: NexusGeneration,
 
         /// image source for the new zone
         ///
@@ -955,6 +976,15 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the update disposition for a sled
+    SetUpdateDisposition {
+        /// sled to set the field on
+        sled_id: SledOpt,
+
+        /// the disposition to set the sled to
+        #[command(subcommand)]
+        command: SledUpdateDispositionTarget,
+    },
     /// set the minimum generation for which target releases are accepted
     ///
     /// At the moment, this just sets the field to the given value. In the
@@ -963,7 +993,7 @@ enum BlueprintEditCommands {
     #[clap(visible_alias = "set-target-release-min-gen")]
     SetTargetReleaseMinimumGeneration {
         /// the minimum target release generation
-        generation: Generation,
+        generation: TargetReleaseGeneration,
     },
     /// expunge a zone
     ExpungeZones { zone_ids: Vec<OmicronZoneUuid> },
@@ -1019,6 +1049,39 @@ enum SledMeasurementTarget {
     InstallDataset,
     // Unlike Omicron zones we don't have a need for the
     // `Artifact` kind for now
+}
+
+#[derive(Debug, Subcommand)]
+enum SledUpdateDispositionTarget {
+    /// mark the sled available for provisioning
+    Available,
+    /// mark the sled as evacuating, with the given disruption policy
+    Evacuating {
+        /// the disruption policy to apply while the sled is evacuating
+        #[clap(value_enum)]
+        policy: DisruptionPolicyOpt,
+    },
+}
+
+/// A clap-friendly mirror of [`ReconfiguratorDisruptionPolicy`].
+///
+/// We keep this local to the CLI (rather than deriving `ValueEnum` on the type
+/// itself) so the API type stays free of clap.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<DisruptionPolicyOpt> for ReconfiguratorDisruptionPolicy {
+    fn from(value: DisruptionPolicyOpt) -> Self {
+        match value {
+            DisruptionPolicyOpt::Terminate => Self::Terminate,
+            DisruptionPolicyOpt::MigrateOrTerminate => Self::MigrateOrTerminate,
+            DisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1512,7 +1575,7 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
-    ActiveNexusGen { r#gen: Generation },
+    ActiveNexusGen { r#gen: NexusGeneration },
     /// Control the set of Nexus zones seen as input to the planner
     NexusZones {
         #[clap(long, conflicts_with = "active")]
@@ -1537,6 +1600,8 @@ enum SetArgs {
     },
     /// CockroachDB settings
     CockroachdbSettings(SetCockroachdbSettingsArgs),
+    /// Planner config settings
+    PlannerConfig(SetPlannerConfigArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -1601,6 +1666,80 @@ impl CockroachdbSettingsOpts {
 }
 
 #[derive(Debug, Args)]
+struct SetPlannerConfigArgs {
+    #[clap(flatten)]
+    opts: PlannerConfigOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct PlannerConfigOpts {
+    /// sled reboot policy
+    #[clap(long)]
+    sled_update_reboot_policy: Option<SledUpdateRebootPolicyOpt>,
+    /// disruption policy
+    #[clap(long)]
+    disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
+}
+
+impl PlannerConfigOpts {
+    fn update_if_modified(
+        &self,
+        current: &PlannerConfig,
+    ) -> Option<PlannerConfig> {
+        let new = PlannerConfig {
+            sled_update_reboot_policy: self
+                .sled_update_reboot_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.sled_update_reboot_policy),
+            disruption_policy: self
+                .disruption_policy
+                .map(From::from)
+                .unwrap_or_else(|| current.disruption_policy),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReconfiguratorDisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<ReconfiguratorDisruptionPolicyOpt>
+    for ReconfiguratorDisruptionPolicy
+{
+    fn from(value: ReconfiguratorDisruptionPolicyOpt) -> Self {
+        match value {
+            ReconfiguratorDisruptionPolicyOpt::Terminate => Self::Terminate,
+            ReconfiguratorDisruptionPolicyOpt::MigrateOrTerminate => {
+                Self::MigrateOrTerminate
+            }
+            ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SledUpdateRebootPolicyOpt {
+    ImmediateNoEvacuation,
+    Evacuate,
+}
+
+impl From<SledUpdateRebootPolicyOpt> for SledUpdateRebootPolicy {
+    fn from(value: SledUpdateRebootPolicyOpt) -> Self {
+        match value {
+            SledUpdateRebootPolicyOpt::ImmediateNoEvacuation => {
+                Self::ImmediateNoEvacuation
+            }
+            SledUpdateRebootPolicyOpt::Evacuate => Self::Evacuate,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
 struct GenerateFakeRepoArgs {
     /// System version of generated repository
     version: Version,
@@ -1617,10 +1756,11 @@ struct GenerateFakeRepoArgs {
 #[derive(Debug, Args)]
 struct LoadArgs {
     /// input file
-    filename: Utf8PathBuf,
+    globs: Vec<glob::Pattern>,
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
+    #[clap(long)]
     collection_id: Option<CollectionUuid>,
 }
 
@@ -2094,6 +2234,23 @@ fn cmd_sled_set(
                 sled_id, prev_desc, desc,
             )))
         }
+        SledSetCommand::RegisteredVmms(SledSetRegisteredVmmsArgs { count }) => {
+            let description = system.description_mut();
+            let prev = description
+                .sled_instance_manager_status(sled_id)?
+                .num_registered_vmms;
+            description.sled_set_num_registered_vmms(sled_id, count)?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set registered-vmms: \
+                     {sled_id}: {prev} -> {count}",
+                ),
+                state,
+            );
+            Ok(Some(format!(
+                "set sled {sled_id} registered VMMs: {prev} -> {count}",
+            )))
+        }
     }
 }
 
@@ -2550,9 +2707,24 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder =
-        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
-            .context("creating blueprint builder")?;
+    // Specify an indeterminate value for `reflects_collection`.  This field
+    // normally indicates what inventory collection the planner used when
+    // constructing the blueprint, which implies that the blueprint reflects the
+    // state of the world described in that collection.  But we're changing the
+    // blueprint in some arbitrary way and it's no longer accurate to say that
+    // the new blueprint does reflect any particular state of the world.
+    // (That's not to say we couldn't allow the caller to specify a different
+    // value here.  After all, they're editing the blueprint to say whatever
+    // they want.  But it's not obviously useful to do this yet, either.)
+    let reflects_collection = ReflectsCollection::Indeterminate;
+    let mut builder = BlueprintBuilder::new_based_on(
+        &sim.log,
+        blueprint,
+        reflects_collection,
+        creator,
+        rng,
+    )
+    .context("creating blueprint builder")?;
 
     // We're acting as the planner here, so we need to update the builder for
     // any static changes in the input (e.g., new sleds, new DNS versions, ...).
@@ -2638,6 +2810,23 @@ fn cmd_blueprint_edit(
                     format!("set remove_mupdate_override to {uuid}")
                 }
             }
+        }
+        BlueprintEditCommands::SetUpdateDisposition { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let kind = match command {
+                SledUpdateDispositionTarget::Available => {
+                    BlueprintSledUpdateDispositionKind::Available
+                }
+                SledUpdateDispositionTarget::Evacuating { policy } => {
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: policy.into(),
+                    }
+                }
+            };
+            builder
+                .sled_set_update_disposition_kind(sled_id, kind)
+                .context("failed to set update disposition")?;
+            format!("set sled {sled_id} update disposition kind to {kind}")
         }
         BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
             generation,
@@ -3391,11 +3580,7 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
-    swrite!(
-        s,
-        "{}",
-        state.system().description().get_planner_config().display()
-    );
+    swrite!(s, "{}", state.system().description().planner_config().display());
 
     Ok(Some(s))
 }
@@ -3518,6 +3703,19 @@ fn cmd_set(
                     "no changes to cockroachdb settings:\n{}",
                     current.display()
                 )
+            }
+        }
+        SetArgs::PlannerConfig(args) => {
+            let current = state.system_mut().description().planner_config();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "planner config updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state.system_mut().description_mut().set_planner_config(new);
+                rv
+            } else {
+                format!("no changes to planner config:\n{}", current.display())
             }
         }
     };
@@ -3664,20 +3862,64 @@ fn cmd_load(
         );
     }
 
-    let input_path = args.filename;
     let collection_id = args.collection_id;
-    let loaded = read_file(&input_path)?;
 
-    let result = state.load_serialized(loaded, collection_id)?;
+    let mut inputs = Vec::new();
+    for pattern in args.globs {
+        // Work around the lack of rust-lang/glob#148: there is no way to
+        // iterate the paths matching a compiled `Pattern`.  We have to pass the
+        // underlying string to `glob::glob` and have it compile the pattern
+        // again.  It would be very surprising to get an error here since we
+        // have already parsed the string as a pattern before.
+        let paths = glob::glob(pattern.as_str())
+            .with_context(|| format!("parsing glob pattern {pattern:?}"))?;
+        for maybe_path in paths {
+            let input_path = maybe_path.with_context(|| {
+                format!("error globbing pattern {pattern:?}")
+            })?;
+            let input_path = Utf8PathBuf::from_path_buf(input_path).map_err(
+                |input_path| {
+                    anyhow!(
+                        "path was not valid UTF-8: {:?}",
+                        input_path.display()
+                    )
+                },
+            )?;
+            let file = std::fs::File::open(&input_path)
+                .with_context(|| format!("open {:?}", input_path))?;
+            let bufread = std::io::BufReader::new(file);
+            let input = ReconfiguratorStateInput {
+                label: input_path.as_str().to_owned(),
+                reader: bufread,
+            };
+            inputs.push(input);
+        }
+    }
+
+    let mut s = String::new();
+    let count = inputs.len();
+    let plural = if count == 1 { "" } else { "s" };
+    let loaded = UnstableReconfiguratorState::read_series(inputs)
+        .with_context(|| format!("loading {count} input{plural}"))?;
+    for warning in loaded.warnings {
+        swriteln!(s, "  {}", warning);
+    }
+    if count > 1 {
+        swriteln!(s, "latest of {count} file{plural}: {}", loaded.latest);
+    }
+
+    let result = state.load_serialized(loaded.state, collection_id)?;
 
     sim.commit_and_bump(
-        format!("reconfigurator-sim: load {:?}", input_path),
+        format!("reconfigurator-sim: load {count} file{plural}",),
         state,
     );
 
-    let mut s = String::new();
-
-    swriteln!(s, "loaded data from {:?}", input_path);
+    if count == 1 {
+        swriteln!(s, "loaded data from {:?}", loaded.latest);
+    } else {
+        swriteln!(s, "loaded data from {count} files");
+    }
 
     if !result.warnings.is_empty() {
         swriteln!(s, "warnings:");
@@ -3797,6 +4039,6 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
 /// second case above, this is always correct.  In the first case, this is
 /// basically equivalent to assuming that the Nexus handoff had happened
 /// instantaneously when the blueprint was created.
-fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> Generation {
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> NexusGeneration {
     blueprint.nexus_generation
 }

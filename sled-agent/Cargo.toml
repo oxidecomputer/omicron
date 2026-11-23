@@ -29,16 +29,14 @@ chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
 derive_more.workspace = true
-dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
+dice-verifier.workspace = true
 display-error-chain.workspace = true
-# XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
-# This is the R20 dpd client
-# dpd-client.workspace = true
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
 futures.workspace = true
+gateway-client.workspace = true
+gateway-types.workspace = true
 glob.workspace = true
 hex.workspace = true
 http.workspace = true
@@ -62,10 +60,13 @@ nexus-lockstep-client.workspace = true
 nexus-types.workspace = true
 nix = { workspace = true, features = ["signal"] }
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-ledger.workspace = true
 omicron-ddm-admin-client.workspace = true
+omicron-sush-proxy.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-rot = { workspace = true, features = ["ipcc", "mock"] }
 oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
@@ -86,11 +87,12 @@ sha2.workspace = true
 sha3.workspace = true
 signal-hook.workspace = true
 sled-agent-api.workspace = true
+sled-agent-bootstrap-common.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
-sled-agent-early-networking.workspace = true
 sled-agent-health-monitor.workspace = true
 sled-agent-measurements.workspace = true
+sled-agent-multirack-join.workspace = true
 sled-agent-rack-setup.workspace = true
 sled-agent-resolvable-files.workspace = true
 sled-agent-scrimlet-reconcilers.workspace = true
@@ -108,14 +110,17 @@ slog-dtrace.workspace = true
 slog-error-chain.workspace = true
 slog-term.workspace = true
 smf.workspace = true
-sprockets-tls.workspace = true
+sprockets-tls = { workspace = true, features = ["ipcc"] }
 strum.workspace = true
+sush-api.workspace = true
+sush-common.workspace = true
+sush-server.workspace = true
 tar.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
@@ -126,7 +131,7 @@ tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
-x509-cert.workspace = true
+x509-cert = { workspace = true, features = ["std"] }
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true
@@ -144,6 +149,7 @@ opte-ioctl.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+attest-mock.workspace = true
 expectorate.workspace = true
 guppy.workspace = true
 hex-literal.workspace = true
@@ -152,11 +158,14 @@ hyper.workspace = true
 omicron-test-utils.workspace = true
 progenitor.workspace = true
 pretty_assertions.workspace = true
+proptest.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+sprockets-tls-test-utils.workspace = true
+test-strategy.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 zfs-test-harness.workspace = true
@@ -179,6 +188,3 @@ doc = false
 
 [features]
 image-trampoline = []
-switch-asic = []
-switch-stub = []
-switch-softnpu = []

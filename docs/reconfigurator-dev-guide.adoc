@@ -674,19 +674,12 @@ wrote reconfigurator.out
 
 ```
 
-You can copy that file around as needed and then import it into `reconfigurator-cli`.  For historical reasons (that should be fixed), when you do this, you need to pick an inventory collection to use as the basis for creating `reconfigurator-cli`'s model of the sleds in the system.  You can usually pick any one.  Usually, you can just try the import:
+You can copy that file around as needed and then import it into `reconfigurator-cli`:
 
 ```
 # ./reconfigurator-cli
 generated RNG seed: reportedly-vivacious-scad
 〉load reconfigurator.out
-error: no collection_id specified and file contains 4 collections: 1f397505-6ec3-4d23-9aae-bb331e2caf9f, 5febd3ec-e68d-48f5-966f-c88990d14ef3, 346d8c4d-7b99-4af7-a76e-f7a37c8780b5, 80ae5780-1806-438b-ad64-7a6b1d4e8543
-```
-
-then pick one of the ones from the error message:
-
-```
-〉load reconfigurator.out 80ae5780-1806-438b-ad64-7a6b1d4e8543
 loaded data from "reconfigurator.out"
 result:
   system:
@@ -1372,3 +1365,13 @@ omicron-dev: internal DNS:          [::1]:63673
 ```
 
 This is a handy summary, but it only gets updated when inventory is collected.  This is more cumbersome than `faux-mgs` when you only need to get one piece of information and need it to be up-to-date.
+
+== Sled evacuation during update
+
+To enable evacuating instances from sleds during an update (more on this in https://rfd.shared.oxide.computer/rfd/0739[RFD 739]), first, make sure your system is running a build that contains at least https://github.com/oxidecomputer/omicron/commit/2ba9f0a9915effdcd5abc65a2264abafa56a5b69[commit 2ba9f0a]. *This part is important:* enabling this feature on a build that does not contain this commit will stop all instances and never restart them.
+
+Then, use omdb to change the update reboot policy: `omdb --destructive nexus reconfigurator-config set --sled-update-reboot-policy evacuate`.
+
+Start an update and watch your instances get evacuated!
+
+To disable it, simply set the policy back with `omdb --destructive nexus reconfigurator-config set --sled-update-reboot-policy immediate-no-evacuation`. The policy change takes effect the next time the planner runs. Once that happens, all remaining instances on sleds that have not been marked for evacuation yet will continue to run until their sled reboots.

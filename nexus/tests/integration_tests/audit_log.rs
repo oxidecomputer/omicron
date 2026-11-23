@@ -9,20 +9,17 @@ use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    DiskTest, create_console_session, create_default_ip_pools, create_disk,
-    create_instance_with, create_local_user, create_project, create_silo,
-    get_device_token, grant_iam, object_create_error, object_create_no_body,
-    object_delete, objects_list_page_authz, test_params,
+    DiskTest, InstanceCreateBuilder, create_console_session,
+    create_default_ip_pools, create_disk, create_instance_from_body,
+    create_local_user, create_project, create_silo, get_device_token,
+    grant_iam, object_create_error, object_create_no_body, object_delete,
+    objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::audit::{
     self, AuditLogEntry, AuditLogEntryActor, AuditLogEntryResult,
 };
 use nexus_types::external_api::device;
-use nexus_types::external_api::instance::{
-    ExternalIpCreate, InstanceAutoRestartPolicy, InstanceCpuPlatform,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-};
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project::ProjectCreate;
 use nexus_types::external_api::scim;
@@ -32,6 +29,7 @@ use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, Name, UserId,
 };
+use omicron_uuid_kinds::GenericUuid;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -89,6 +87,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
             name: "test-proj2".parse().unwrap(),
             description: "a pier".to_string(),
         },
+        defaults: None,
     };
     let long_user_agent = "A".repeat(300);
     let long_query_value = "B".repeat(600);
@@ -124,7 +123,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         e1.actor,
         AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into_untyped_uuid(),
         }
     );
 
@@ -284,7 +283,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     // Create test silo and user first
     let silo_name = Name::from_str("test-silo").unwrap();
     let local = SiloIdentityMode::LocalOnly;
-    let silo = create_silo(client, silo_name.as_str(), true, local).await;
+    let silo = create_silo(client, silo_name.as_str(), local).await;
 
     let test_user = UserId::from_str("test-user").unwrap();
     let params = test_params::UserPassword::Password("correct-password".into());
@@ -397,17 +396,13 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let t1 = Utc::now();
 
     let _project = create_project(client, "test-project").await;
-    let _instance = create_instance_with(
+    let _instance = create_instance_from_body(
         client,
         "test-project",
-        "test-instance",
-        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        false, // start=false, so instance is created in stopped state
-        None::<InstanceAutoRestartPolicy>,
-        None::<InstanceCpuPlatform>,
-        Vec::new(),
+        InstanceCreateBuilder::new("test-instance")
+            // create the instance in the stopped state
+            .with_start(false)
+            .finish(),
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;
@@ -515,6 +510,7 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket
+                | AllowedMethod::GetWebsocketUnavailable
                 | AllowedMethod::Head
                 | AllowedMethod::HeadNonexistent => false,
             };
@@ -536,14 +532,27 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 .url
                 .replace("{id}", "00000000-0000-0000-0000-000000000000");
 
-            let result = NexusRequest::new(
+            let mut builder =
                 RequestBuilder::new(client, http_method.clone(), &url)
                     .body(body.as_ref())
-                    .expect_status(None), // accept any status
-            )
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await;
+                    .expect_status(None); // accept any status
+
+            // A websocket endpoint rejects a request without handshake
+            // headers before it reaches authorization, and thus before
+            // any audit entry is made; send the headers so its coverage
+            // is actually measured.
+            if matches!(
+                method,
+                AllowedMethod::GetWebsocket
+                    | AllowedMethod::GetWebsocketUnavailable
+            ) {
+                builder = builder.websocket_handshake_headers();
+            }
+
+            let result = NexusRequest::new(builder)
+                .authn_as(AuthnMode::UnprivilegedUser)
+                .execute()
+                .await;
 
             if result.is_err() {
                 // Request itself failed (connection error, etc), skip
@@ -786,7 +795,11 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     }
 
     // GET endpoints that are intentionally audit-logged (should be rare).
-    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> =
+        BTreeMap::from([(
+            "rack_support_shell_tunnel",
+            ("get", "/v1/system/hardware/racks/{rack_id}/support-shell/tunnel"),
+        )]);
 
     let unexpected_audited: Vec<_> = unexpected_get_audit
         .keys()
@@ -819,6 +832,29 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         "Unexpected audited GET endpoints: {:?}",
         unexpected_audited,
     );
+
+    // Check that every allowed_audited_gets entry was in fact observed
+    // to produce an audit entry, so that dropping the audit logging from
+    // such an endpoint fails this test.
+    for (op, (method, path)) in &allowed_audited_gets {
+        match unexpected_get_audit.get(*op) {
+            None => {
+                panic!(
+                    "Stale allowed_audited_gets entry: {} ({} {:?}); \
+                     endpoint lost its audit logging or no longer exists",
+                    op, method, path,
+                );
+            }
+            Some((actual_method, actual_path)) => {
+                assert_eq!(
+                    (actual_method.as_str(), actual_path.as_str()),
+                    (*method, *path),
+                    "allowed_audited_gets entry for {} has wrong method/path",
+                    op,
+                );
+            }
+        }
+    }
 }
 
 fn verify_entry(
@@ -840,7 +876,7 @@ fn verify_entry(
         entry.actor,
         AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into_untyped_uuid(),
         }
     );
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
@@ -863,6 +899,7 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
             name: "token-project".parse().unwrap(),
             description: "created with access token".to_string(),
         },
+        defaults: None,
     };
     RequestBuilder::new(client, Method::POST, "/v1/projects")
         .body(Some(&body))
@@ -890,7 +927,7 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
         entry.actor,
         AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
-            silo_id: DEFAULT_SILO_ID,
+            silo_id: DEFAULT_SILO_ID.into_untyped_uuid(),
         }
     );
     assert_eq!(
@@ -907,8 +944,7 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
     // Create a SAML+SCIM silo (required for SCIM tokens)
     const SILO_NAME: &str = "scim-audit-test-silo";
     let silo =
-        create_silo(client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
-            .await;
+        create_silo(client, SILO_NAME, silo::SiloIdentityMode::SamlScim).await;
 
     // Grant the privileged user admin role on this silo so they can create tokens
     grant_iam(

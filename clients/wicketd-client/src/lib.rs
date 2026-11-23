@@ -8,16 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/wicketd.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     patch = {
         CurrentRssUserConfig = { derives = [PartialEq] },
@@ -30,6 +21,7 @@ progenitor::generate_api!(
         UplinkConfig = { derives = [PartialEq, Eq, PartialOrd, Ord] },
     },
     crates = {
+        "iddqd" = "*",
         "omicron-uuid-kinds" = "*",
         "oxide-update-engine-types" = "*",
     },
@@ -39,7 +31,6 @@ progenitor::generate_api!(
         ArtifactId = wicket_common::artifact::ArtifactId,
         Baseboard = sled_hardware_types::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,
-        BgpAuthKey = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKey,
         BgpAuthKeyId = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKeyId,
         BgpAuthKeyInfo = wicket_common::rack_setup::BgpAuthKeyInfo,
         BgpAuthKeyStatus = wicket_common::rack_setup::BgpAuthKeyStatus,
@@ -47,7 +38,6 @@ progenitor::generate_api!(
         BgpPeerAuthKind = wicket_common::rack_setup::BgpPeerAuthKind,
         BgpPeerConfig = omicron_common::api::internal::shared::BgpPeerConfig,
         BootstrapSledDescription = wicket_common::rack_setup::BootstrapSledDescription,
-        CertificateUploadResponse = wicketd_commission_types_versions::latest::rack_setup::CertificateUploadResponse,
         ClearUpdateStateOptions = wicket_common::rack_update::ClearUpdateStateOptions,
         ClearUpdateStateResponse = wicketd_commission_types_versions::latest::update::ClearUpdateStateResponse,
         CurrentRssUserConfigInsensitive = wicket_common::rack_setup::CurrentRssUserConfigInsensitive,
@@ -61,12 +51,11 @@ progenitor::generate_api!(
         Ipv6Range = omicron_common::address::Ipv6Range,
         LinkFec = sled_agent_types::early_networking::LinkFec,
         LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
-        M2Slot = installinator_common::M2Slot,
+        M2Slot = sled_agent_types::disk::M2Slot,
         PortConfigV2 = omicron_common::api::internal::shared::PortConfigV2,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         ProgressEventForUplinkPreflightSpec = wicket_common::preflight_check::ProgressEvent,
         ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,
-        PutRssUserConfigInsensitive = wicketd_commission_types_versions::latest::rack_setup::PutRssUserConfigInsensitive,
         RackV1Inventory = wicket_common::inventory::RackV1Inventory,
         RotInventory = wicket_common::inventory::RotInventory,
         RotSlot = wicket_common::inventory::RotSlot,
@@ -74,6 +63,7 @@ progenitor::generate_api!(
         RssStep = bootstrap_agent_lockstep_types::RssStep,
         SpComponentCaboose = wicket_common::inventory::SpComponentCaboose,
         SpComponentInfo = wicket_common::inventory::SpComponentInfo,
+        SpEventReport = wicket_common::update_events::SpEventReport,
         SpIdentifier = wicket_common::inventory::SpIdentifier,
         SpIgnition = wicket_common::inventory::SpIgnition,
         SpIgnitionSystemType = wicket_common::inventory::SpIgnitionSystemType,
@@ -101,6 +91,8 @@ progenitor::generate_api!(
         } = semver::Version,
     }
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 /// A type alias for errors returned by this crate.
 pub type ClientError = crate::Error<crate::types::Error>;

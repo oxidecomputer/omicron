@@ -13,16 +13,18 @@ use nexus_auth::context::OpContext;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
+use nexus_db_queries::db::datastore::TqPrepareStatusOutcome;
 use nexus_networking::{
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned,
-    sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext,
+    InServiceSledClientError,
+    sled_client_by_baseboard_id_and_rack_id_if_in_service,
+    sled_client_by_baseboard_id_and_rack_id_if_in_service_ext,
 };
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::trust_quorum::{
-    TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumConfigState,
-    TrustQuorumMemberState,
+    TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::{RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -33,8 +35,9 @@ use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest,
 };
+use sled_agent_types::trust_quorum::TrustQuorumCoordinatorStatusResponse;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, error, info, o};
+use slog::{Logger, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -42,7 +45,7 @@ use std::time::Duration;
 use swrite::{SWrite, swrite, swriteln};
 use tokio::task::JoinSet;
 use trust_quorum_types::messages::{CommitRequest, PrepareAndCommitRequest};
-use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::{CommitStatus, NotCoordinatingStatus};
 use trust_quorum_types::types::Epoch;
 
 const MAX_SLED_AGENT_REQUEST_CONCURRENCY: usize = 5;
@@ -162,10 +165,10 @@ impl BackgroundTask for TrustQuorumManager {
 // Status of an activation for a single rack's active configuration
 enum Status {
     ConfigInactive,
-    CoordinatorNoLongerCommissioned(BaseboardId),
+    CoordinatorNotInService(BaseboardId),
     Preparing,
     Commit(Vec<CommitOpsResults>),
-    Committed(Vec<CommitOpsResults>, Vec<StartSledAgentResults>),
+    CommitAndStartSledAgents(Vec<CommitOpsResults>, Vec<StartSledAgentResults>),
 }
 
 impl Status {
@@ -183,10 +186,11 @@ impl Status {
                     aborted."
                 );
             }
-            Status::CoordinatorNoLongerCommissioned(coordinator_id) => {
+            Status::CoordinatorNotInService(coordinator_id) => {
                 swriteln!(
                     &mut s,
-                    "    Coordinator ({coordinator_id}) was decommissioned."
+                    "    Coordinator ({coordinator_id}) is not in service: \
+                     configuration is aborted."
                 );
             }
             Status::Preparing => {
@@ -197,7 +201,7 @@ impl Status {
                     r.write_to_string(&mut s);
                 }
             }
-            Status::Committed(op_results, start_results) => {
+            Status::CommitAndStartSledAgents(op_results, start_results) => {
                 for r in op_results {
                     r.write_to_string(&mut s);
                 }
@@ -228,46 +232,92 @@ async fn drive_reconfiguration(
 
     // If we are preparing, then collect from coordinator, otherwise
     // attempt to commit at unacked nodes.
-    if config.state.is_active() {
+    let status = if config.state.is_active() {
         info!(
             log,
-            "Loaded active trust quorum config from database";
+            "Loaded active trust quorum config from database.";
             "rack_id" => %rack_id,
             "epoch" => %epoch,
             "state" => ?config.state
         );
+        if config.state.is_preparing() {
+            prepare(&log, &opctx, &datastore, config.clone()).await?
+        } else {
+            commit(&log, &opctx, &datastore, config.clone()).await?
+        }
     } else {
         info!(
             log,
-            "Loaded inactive trust quorum config from database. Skipping";
+            "Loaded inactive trust quorum config from database.";
             "rack_id" => %rack_id,
             "epoch" => %epoch,
             "state" => ?config.state
         );
-        return Ok(Status::ConfigInactive);
-    }
+        Status::ConfigInactive
+    };
 
-    // Poll the coordinator for commit acks
-    if config.state.is_preparing() {
-        return prepare(log, opctx, datastore, config).await;
-    }
-
-    // For each unacked node, need to send a `Commit` or `PrepareAndCommit'
+    // We may have committed all members, but some of them may not have started
+    // sled-agents yet.
     //
-    // At this point we know that the configuration is active and we are not
-    // preparing. Therefore we must be committing.
-    commit(log, opctx, datastore, config).await
+    // We continue to retry sending them a `StartSledAgentRequest` until it
+    // starts.
+    let added_sleds = datastore
+        .tq_get_committed_members_without_active_sled(&opctx, authz_tq.clone())
+        .await?;
+
+    if added_sleds.is_empty() {
+        return Ok(status);
+    }
+
+    // At this point, We know we've committed at least some members in this or
+    // prior attempts and need to start their sled-agents. Get the results for
+    // this attempt, if they exist.
+    let commit_results = match status {
+        Status::Commit(commit_results) => commit_results,
+        _ => vec![],
+    };
+
+    // Allocate a subnet and start a sled agent for each sled that needs it
+    let rack_id = config.rack_id;
+    let epoch = config.epoch;
+
+    let existing_sleds: BTreeSet<_> = config
+        .members
+        .iter()
+        .filter_map(|m| {
+            if added_sleds.contains(&m.0) { None } else { Some(m.0.clone()) }
+        })
+        .collect();
+
+    let started_sleds = allocate_subnets_and_start_sled_agents(
+        log,
+        opctx,
+        datastore,
+        rack_id,
+        epoch,
+        added_sleds,
+        existing_sleds,
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to start sled agents for added sleds for \
+                    rack {rack_id}, epoch {epoch}"
+        )
+    })?;
+
+    return Ok(Status::CommitAndStartSledAgents(commit_results, started_sleds));
 }
 
 async fn prepare(
-    log: Logger,
-    opctx: OpContext,
-    datastore: Arc<DataStore>,
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
     config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // Get a sled agent for the coordinator
-    let Some(coordinator_sa) =
-        sled_client_by_baseboard_id_and_rack_id_if_commissioned(
+    let coordinator_sa =
+        match sled_client_by_baseboard_id_and_rack_id_if_in_service(
             &datastore,
             &opctx,
             &config.coordinator,
@@ -275,20 +325,21 @@ async fn prepare(
             &log,
         )
         .await
-        .with_context(|| {
-            format!(
-                "failed to retrieve commissioned sled \
-                    by baseboard_id {} and rack_id {}.",
-                config.coordinator, config.rack_id
-            )
-        })?
-    else {
-        return Ok(Status::CoordinatorNoLongerCommissioned(
-            config.coordinator.clone(),
-        ));
-    };
+        {
+            Ok(client) => client,
+            Err(InServiceSledClientError::NotInService { .. }) => {
+                abort_config_with_coordinator_not_in_service(
+                    log, opctx, datastore, &config,
+                )
+                .await?;
+                return Ok(Status::CoordinatorNotInService(config.coordinator));
+            }
+            Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
+                return Err(error.into());
+            }
+        };
 
-    let status = coordinator_sa
+    let response = coordinator_sa
         .trust_quorum_coordinator_status()
         .await
         .with_context(|| {
@@ -298,11 +349,35 @@ async fn prepare(
             )
         })?
         .into_inner();
+    let status = match response {
+        TrustQuorumCoordinatorStatusResponse::Coordinating { status } => status,
+        TrustQuorumCoordinatorStatusResponse::NotCoordinating(
+            NotCoordinatingStatus {
+                latest_config_epoch,
+                latest_committed_epoch: _,
+            },
+        ) => {
+            let latest_config_epoch = match latest_config_epoch {
+                Some(epoch) => epoch.to_string(),
+                None => "none".to_string(),
+            };
+            bail!(
+                "Coordinator {} reported no coordinator status: it is not \
+                 currently coordinating a reconfiguration (latest persisted \
+                 configuration epoch: {latest_config_epoch}).",
+                config.coordinator,
+            );
+        }
+    };
 
     // Write state back to DB
-    let state = datastore
-        .tq_update_prepare_status(&opctx, status.config, status.acked_prepares)
-        .await?;
+    let outcome = record_prepare_status(
+        opctx,
+        datastore,
+        status.config,
+        status.acked_prepares,
+    )
+    .await?;
 
     // If we have started committing then we need to commit at each member.
     // We assume that other Nexuses have not yet committed, but there is
@@ -310,11 +385,74 @@ async fn prepare(
     // safety.
     //
     // Otherwise, we haven't finished preparing, so just return.
-    if state.is_committing() {
-        return commit(log, opctx, datastore, config).await;
-    } else {
-        return Ok(Status::Preparing);
+    match outcome {
+        TqPrepareStatusOutcome::Committing { config } => {
+            commit(log, opctx, datastore, *config).await
+        }
+        TqPrepareStatusOutcome::StillPreparing => Ok(Status::Preparing),
     }
+}
+
+async fn record_prepare_status(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    coordinator_config: trust_quorum_types::configuration::Configuration,
+    acked_prepares: BTreeSet<BaseboardId>,
+) -> Result<TqPrepareStatusOutcome, Error> {
+    let outcome = datastore
+        .tq_update_prepare_status(opctx, coordinator_config, acked_prepares)
+        .await?;
+    Ok(outcome)
+}
+
+/// Abort a trust quorum reconfiguration in the database because the coordinator
+/// is no longer in service.
+///
+/// Returns `Ok(())` if the abort succeeded, including when the configuration
+/// was already aborted.
+///
+/// Returns an error if the abort failed, including the case where the abort
+/// cannot happen because this configuration has already moved past the
+/// preparing stage. The next time the background task is activated, it'll
+/// reload the configuration and act on its current state. (Why not do it in
+/// this activation? Because the race is quite narrow -- this Nexus has to
+/// discover that the coordinator is out of service at the same time that
+/// another Nexus moves this config past the preparing stage. We'll let the
+/// Nexus that moved the config past the preparing stage take charge.)
+async fn abort_config_with_coordinator_not_in_service(
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    config: &NexusTrustQuorumConfig,
+) -> Result<(), Error> {
+    let reason = format!(
+        "Coordinator {} is no longer an in-service sled in rack {}; aborted \
+         by the trust quorum background task.",
+        config.coordinator, config.rack_id
+    );
+    datastore
+        .tq_abort_config(
+            opctx,
+            authz::TrustQuorumConfig::for_rack_id(config.rack_id),
+            config.epoch,
+            reason,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "failed to abort the configuration whose coordinator {} is \
+                 not in service",
+                config.coordinator
+            )
+        })?;
+    warn!(
+        log,
+        "Aborted trust quorum configuration: coordinator is not in service";
+        "rack_id" => %config.rack_id,
+        "epoch" => %config.epoch,
+        "coordinator" => %config.coordinator,
+    );
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -327,9 +465,9 @@ enum CommitOp {
 //
 // Return a unique status for each client that issued operations.
 async fn commit(
-    log: Logger,
-    opctx: OpContext,
-    datastore: Arc<DataStore>,
+    log: &Logger,
+    opctx: &OpContext,
+    datastore: &DataStore,
     nexus_config: NexusTrustQuorumConfig,
 ) -> Result<Status, Error> {
     // All `Commit` or `PrepareAndCommit` requests sent to sled-agents
@@ -407,7 +545,7 @@ async fn commit(
         // Write state back to DB
         let authz_tq =
             authz::TrustQuorumConfig::for_rack_id(nexus_config.rack_id);
-        let state = datastore
+        let _ = datastore
             .tq_update_commit_status(
                 &opctx,
                 authz_tq,
@@ -423,45 +561,7 @@ async fn commit(
                 )
             })?;
 
-        // All sleds have acked commit. Let's see if any are newly added and
-        // therefore require their sled agents to be started.
-        //
-        // TODO: Currently we can only attempt to start sled agents from the
-        // Nexus that committed the configuration. This ensures a single Nexus
-        // issues the attempts, which is necessary because the call to start
-        // sled agents is neither idempotent nor concurrency safe.
-        //
-        // Unfortunately, this means that if the request fails here, it will
-        // never be retried. We'll likely have to debug this by either catching
-        // the error in the current call to the bg task status from omdb
-        // (unlikely), or reading logs.
-        //
-        // We are forced to do this because of urgency. Fixing how
-        // sled-agents get started has been a long standing issue:
-        // https://github.com/oxidecomputer/omicron/issues/4494. We'd like
-        // a reconciler pattern so that we could continuously retry from
-        // nexus in a background task similar to what is described here:
-        // https://github.com/oxidecomputer/omicron/issues/5132. However, this
-        // is a substantial project and will have to come after the initial
-        // trust quorum release.
-        if state == TrustQuorumConfigState::Committed {
-            let rack_id = nexus_config.rack_id;
-            let epoch = nexus_config.epoch;
-            let started_sleds = allocate_subnets_and_start_sled_agents(
-                log,
-                opctx,
-                datastore,
-                nexus_config,
-            )
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to start sled agents for added sleds for \
-                            rack {rack_id}, epoch {epoch}"
-                )
-            })?;
-            return Ok(Status::Committed(client_results, started_sleds));
-        }
+        return Ok(Status::Commit(client_results));
     }
 
     Ok(Status::Commit(client_results))
@@ -471,37 +571,11 @@ async fn allocate_subnets_and_start_sled_agents(
     log: Logger,
     opctx: OpContext,
     datastore: Arc<DataStore>,
-    committed_config: NexusTrustQuorumConfig,
+    rack_id: RackUuid,
+    epoch: Epoch,
+    added_sleds: BTreeSet<BaseboardId>,
+    existing_sleds: BTreeSet<BaseboardId>,
 ) -> Result<Vec<StartSledAgentResults>, Error> {
-    // No sleds could have been added to the trust quorum if there is no prior
-    // committed configuration.
-    let Some(last_committed_epoch) = committed_config.last_committed_epoch
-    else {
-        return Ok(vec![]);
-    };
-
-    let rack_id = committed_config.rack_id;
-    let epoch = committed_config.epoch;
-
-    // Retrieve the last committed configuration so we can diff members and see
-    // who was added.
-    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
-    let Some(last_committed_config) =
-        datastore.tq_get_config(&opctx, authz_tq, last_committed_epoch).await?
-    else {
-        bail!(
-            "Failed to retrieve config from DB for rack {rack_id}, \
-            last_committed_epoch {epoch}",
-        );
-    };
-
-    let added_sleds: BTreeSet<_> = committed_config
-        .members
-        .keys()
-        .filter(|&id| !last_committed_config.members.contains_key(id))
-        .cloned()
-        .collect();
-
     info!(
         log,
         "Looking up hw_baseboard_id for newly added sleds: {added_sleds:?}"
@@ -547,7 +621,7 @@ async fn allocate_subnets_and_start_sled_agents(
         datastore,
         rack_id,
         epoch,
-        last_committed_config.members.keys().cloned().collect(),
+        existing_sleds,
         allocations_by_baseboard_id,
     )
     .await
@@ -559,7 +633,7 @@ async fn start_sled_agents(
     datastore: Arc<DataStore>,
     rack_id: RackUuid,
     epoch: Epoch,
-    all_members: BTreeSet<BaseboardId>,
+    existing_sleds: BTreeSet<BaseboardId>,
     allocations_by_baseboard_id: BTreeMap<
         BaseboardId,
         SledUnderlaySubnetAllocation,
@@ -582,7 +656,7 @@ async fn start_sled_agents(
         &datastore,
         rack_id,
         epoch,
-        &all_members,
+        &existing_sleds,
         num_clients,
         Duration::from_mins(5),
     )
@@ -678,7 +752,7 @@ async fn send_start_sled_agent_requests(
     results
 }
 
-/// Retrieve up to `num_clients` clients for commissioned sled agents.
+/// Retrieve up to `num_clients` clients for in-service sled agents.
 ///
 /// Returns an error if no clients are available.
 #[allow(clippy::too_many_arguments)]
@@ -688,16 +762,16 @@ async fn get_sled_agent_clients(
     datastore: &DataStore,
     rack_id: RackUuid,
     epoch: Epoch,
-    all_members: &BTreeSet<BaseboardId>,
+    existing_sleds: &BTreeSet<BaseboardId>,
     num_clients: usize,
     timeout: Duration,
 ) -> Result<Vec<(BaseboardId, sled_agent_client::Client)>, Error> {
     // First shuffle the possible members
-    let mut randomized: Vec<_> = all_members.iter().cloned().collect();
+    let mut randomized: Vec<_> = existing_sleds.iter().cloned().collect();
     randomized.shuffle(&mut rand::rng());
     let mut clients = Vec::with_capacity(num_clients);
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let reqwest_client = internal_http_client_builder()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()
@@ -710,8 +784,8 @@ async fn get_sled_agent_clients(
 
     // Now try to get a client for `num_clients`
     for id in randomized {
-        let Some(client) =
-            sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
+        let client =
+            match sled_client_by_baseboard_id_and_rack_id_if_in_service_ext(
                 &datastore,
                 opctx,
                 &id,
@@ -719,10 +793,14 @@ async fn get_sled_agent_clients(
                 log,
                 reqwest_client.clone(),
             )
-            .await?
-        else {
-            continue;
-        };
+            .await
+            {
+                Ok(client) => client,
+                Err(InServiceSledClientError::NotInService { .. }) => continue,
+                Err(error @ InServiceSledClientError::LookupFailed { .. }) => {
+                    return Err(error.into());
+                }
+            };
         clients.push((id.clone(), client));
         if clients.len() == num_clients {
             break;
@@ -899,4 +977,190 @@ async fn run_commit_ops(
         }
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use nexus_db_model::HwBaseboardId;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_for_baseboard;
+    use nexus_types::trust_quorum::{
+        IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfigState,
+    };
+    use omicron_test_utils::dev::test_setup_log;
+    use trust_quorum_types::configuration::Configuration;
+    use trust_quorum_types::crypto::{
+        EncryptedRackSecrets, Salt, Sha3_256Digest,
+    };
+    use trust_quorum_types::membership::TrustQuorumMembers;
+    use uuid::Uuid;
+
+    async fn load_config(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> NexusTrustQuorumConfig {
+        datastore
+            .tq_get_config(
+                opctx,
+                authz::TrustQuorumConfig::for_rack_id(rack_id),
+                epoch,
+            )
+            .await
+            .expect("loaded trust quorum config")
+            .unwrap_or_else(|| {
+                panic!("trust quorum config at epoch {epoch} exists")
+            })
+    }
+
+    #[tokio::test]
+    async fn test_record_prepare_status_secrets_after_digests() {
+        let logctx =
+            test_setup_log("test_record_prepare_status_secrets_after_digests");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids: Vec<_> = (0..5)
+            .map(|_| HwBaseboardId {
+                id: Uuid::new_v4(),
+                part_number: "test-part".to_string(),
+                serial_number: Uuid::new_v4().to_string(),
+            })
+            .collect();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        {
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
+            diesel::insert_into(dsl::hw_baseboard_id)
+                .values(hw_ids.clone())
+                .execute_async(&*conn)
+                .await
+                .expect("inserted hw baseboard ids");
+        }
+        let members: BTreeSet<BaseboardId> =
+            hw_ids.into_iter().map(BaseboardId::from).collect();
+
+        let rack_id = RackUuid::new_v4();
+        for baseboard_id in &members {
+            sled_upsert_for_baseboard(datastore, rack_id, baseboard_id).await;
+        }
+        DataStore::tq_insert_rss_config_after_handoff(
+            opctx,
+            &conn,
+            authz::TrustQuorumConfig::for_rack_id(rack_id),
+            TrustQuorumMembers::new(members.clone())
+                .expect("test membership is within the size bounds"),
+            members.first().expect("at least one member").clone(),
+        )
+        .await
+        .expect("inserted epoch 1");
+        datastore
+            .tq_insert_latest_config(
+                opctx,
+                ProposedTrustQuorumConfig {
+                    rack_id,
+                    epoch: Epoch(2),
+                    is_lrtq_upgrade: IsLrtqUpgrade::No {
+                        last_committed_epoch: Epoch(1),
+                    },
+                    members: TrustQuorumMembers::new(members.clone())
+                        .expect("test members are within the size bounds"),
+                },
+            )
+            .await
+            .expect("inserted epoch 2");
+
+        // In this first activation, while the coordinator is still collecting
+        // old shares:
+        //
+        // * digests are known
+        // * secrets are not
+        // * nobody has acked
+        let loaded_config =
+            load_config(opctx, datastore, rack_id, Epoch(2)).await;
+        let collecting_shares = Configuration {
+            rack_id,
+            epoch: Epoch(2),
+            coordinator: loaded_config.coordinator.clone(),
+            members: members
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    let byte = u8::try_from(i + 1).expect("few members");
+                    (id.clone(), Sha3_256Digest([byte; 32]))
+                })
+                .collect(),
+            threshold: loaded_config.threshold,
+            encrypted_rack_secrets: None,
+        };
+        let outcome = record_prepare_status(
+            opctx,
+            datastore,
+            collecting_shares.clone(),
+            BTreeSet::new(),
+        )
+        .await
+        .expect("recorded prepare status");
+        match outcome {
+            TqPrepareStatusOutcome::StillPreparing => {}
+            TqPrepareStatusOutcome::Committing { config: _ } => {
+                panic!("expected StillPreparing, got {outcome:?}")
+            }
+        }
+
+        // In this next activation, after the coordinator collected old shares
+        // and sent prepares:
+        //
+        // * secrets are known
+        // * enough members have acked
+        let secrets =
+            EncryptedRackSecrets::new(Salt([7; 32]), vec![1, 2, 3, 4].into());
+        let preparing = Configuration {
+            encrypted_rack_secrets: Some(secrets.clone()),
+            ..collecting_shares.clone()
+        };
+        let min_acks = loaded_config.threshold.0 as usize
+            + loaded_config.commit_crash_tolerance as usize;
+        let acked: BTreeSet<_> =
+            members.iter().take(min_acks).cloned().collect();
+        let outcome = record_prepare_status(
+            opctx,
+            datastore,
+            preparing.clone(),
+            acked.clone(),
+        )
+        .await
+        .expect("recorded prepare status");
+        let commit_config = match outcome {
+            TqPrepareStatusOutcome::Committing { config } => config,
+            TqPrepareStatusOutcome::StillPreparing => {
+                panic!("expected Committing, got {outcome:?}")
+            }
+        };
+
+        // commit_config is the one written by the update, so it has the
+        // expected secrets, and the acked members are prepared.
+        assert_eq!(
+            *commit_config,
+            load_config(opctx, datastore, rack_id, Epoch(2)).await
+        );
+        assert_eq!(commit_config.state, TrustQuorumConfigState::Committing);
+        let commit_wire_config = Configuration::try_from(&*commit_config)
+            .expect("commit config has share digests");
+        assert_eq!(commit_wire_config.encrypted_rack_secrets, Some(secrets));
+        assert_eq!(commit_wire_config, preparing);
+        for (id, member) in &commit_config.members {
+            let expected = if acked.contains(id) {
+                TrustQuorumMemberState::Prepared
+            } else {
+                TrustQuorumMemberState::Unacked
+            };
+            assert_eq!(member.state, expected, "member {id}");
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }

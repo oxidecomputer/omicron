@@ -214,11 +214,14 @@ mod test {
     use crate::app::background::BackgroundTask;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::{
         Blueprint, BlueprintSource, BlueprintTarget,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
     };
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::{
+        Generation, NexusGeneration, TargetReleaseGeneration,
+    };
     use omicron_uuid_kinds::BlueprintUuid;
     use serde::Deserialize;
     use std::collections::BTreeMap;
@@ -243,10 +246,12 @@ mod test {
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: Some(parent_blueprint_id),
+                reflects_collection: ReflectsCollection::Indeterminate,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
-                target_release_minimum_generation: Generation::new(),
-                nexus_generation: Generation::new(),
+                target_release_minimum_generation: TargetReleaseGeneration::new(
+                ),
+                nexus_generation: NexusGeneration::new(),
                 external_networking_generation: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
                 clickhouse_cluster_config: None,

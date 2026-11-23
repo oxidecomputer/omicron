@@ -14,6 +14,8 @@
 
 use super::impl_enum_type;
 
+use crate::typed_generation::DbTypedGeneration;
+use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -23,12 +25,14 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use nexus_db_schema::schema::{saga, saga_node_event};
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::now_db_precision;
+use omicron_generation_kinds::{SagaAdoptGeneration, SagaAdoptGenerationKind};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::sync::Arc;
+use steno::SagaId;
+use steno::SagaIdKind;
 use uuid::Uuid;
 
 /// Unique identifier for an SEC (saga execution coordinator) instance
@@ -91,41 +95,6 @@ impl From<&SecId> for Uuid {
     }
 }
 
-/// Newtype wrapper around [`steno::SagaId`] which implements
-/// Diesel traits.
-///
-/// This exists because Omicron cannot implement foreign traits
-/// for foreign types.
-#[derive(
-    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd, Ord, Eq,
-)]
-#[diesel(sql_type = sql_types::Uuid)]
-pub struct SagaId(pub steno::SagaId);
-
-NewtypeFrom! { () pub struct SagaId(steno::SagaId); }
-NewtypeDisplay! { () pub struct SagaId(steno::SagaId); }
-
-impl ToSql<sql_types::Uuid, Pg> for SagaId {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        let id = Uuid::from(self.0);
-        <Uuid as ToSql<sql_types::Uuid, Pg>>::to_sql(&id, &mut out.reborrow())
-    }
-}
-
-impl<DB> FromSql<sql_types::Uuid, DB> for SagaId
-where
-    DB: Backend,
-    Uuid: FromSql<sql_types::Uuid, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        let id = Uuid::from_sql(bytes)?;
-        Ok(SagaId(steno::SagaId::from(id)))
-    }
-}
-
 /// Newtype wrapper around [`steno::SagaNodeId`] which implements
 /// Diesel traits.
 ///
@@ -178,6 +147,7 @@ impl_enum_type!(
 
     Omdb => b"omdb"
     Unrecoverable => b"unrecoverable"
+    Orphaned => b"orphaned"
 );
 
 impl_enum_type!(
@@ -209,6 +179,14 @@ impl SagaState {
     /// Abandoned have been explicitly opted out of being recovered.
     pub const RECOVERY_CANDIDATE_STATES: &'static [Self] =
         &[Self::Running, Self::Unwinding];
+
+    /// A saga must be in this set of states to be a candidate for orphan
+    /// saga abandonment.
+    ///
+    /// Sagas that are Done finished successfully and are not orphans. Sagas
+    /// that are Abandoned do not need to be abandoned again.
+    pub const ORPHAN_ABANDONMENT_CANDIDATE_STATES: &'static [Self] =
+        &[Self::Running, Self::Unwinding];
 }
 
 impl From<steno::SagaCachedState> for SagaState {
@@ -235,14 +213,14 @@ impl From<steno::SagaCachedState> for SagaState {
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga)]
 pub(crate) struct SagaRow {
-    id: SagaId,
+    id: DbTypedUuid<SagaIdKind>,
     creator: SecId,
     time_created: chrono::DateTime<chrono::Utc>,
     name: String,
     saga_dag: serde_json::Value,
     saga_state: SagaState,
     current_sec: Option<SecId>,
-    adopt_generation: super::Generation,
+    adopt_generation: DbTypedGeneration<SagaAdoptGenerationKind>,
     adopt_time: chrono::DateTime<chrono::Utc>,
 
     // Abandonment metadata. These are only set when `saga_state` is
@@ -254,7 +232,7 @@ pub(crate) struct SagaRow {
 
 impl SagaRow {
     fn id(&self) -> SagaId {
-        self.id
+        self.id.into()
     }
 
     // Reassemble a raw row from the loaded column tuple, so the (private)
@@ -296,14 +274,14 @@ impl SagaRow {
 // `SagaRow`'s fields. Used as `Queryable::Row` for `Saga` and `LoadedSaga`.
 // Spelled out in public types so it doesn't leak the crate-private `SagaRow`.
 type SagaRowColumns = (
-    SagaId,
+    DbTypedUuid<SagaIdKind>,
     SecId,
     DateTime<Utc>,
     String,
     serde_json::Value,
     SagaState,
     Option<SecId>,
-    super::Generation,
+    DbTypedGeneration<SagaAdoptGenerationKind>,
     DateTime<Utc>,
     Option<DateTime<Utc>>,
     Option<SagaReasonAbandoned>,
@@ -448,7 +426,7 @@ pub struct Saga {
     pub saga_dag: serde_json::Value,
     pub saga_state: SagaExecState,
     pub current_sec: Option<SecId>,
-    pub adopt_generation: super::Generation,
+    pub adopt_generation: SagaAdoptGeneration,
     pub adopt_time: DateTime<Utc>,
 }
 
@@ -465,7 +443,7 @@ impl Saga {
         let steno::SagaCreateParams { id, name, dag, state } = params;
 
         Self {
-            id: id.into(),
+            id,
             creator,
             time_created: now,
             name: name.to_string(),
@@ -474,7 +452,7 @@ impl Saga {
             // `SagaCachedState` only contains non-abandoned variants.
             saga_state: state.into(),
             current_sec: Some(creator),
-            adopt_generation: Generation::new().into(),
+            adopt_generation: SagaAdoptGeneration::new(),
             adopt_time: now,
         }
     }
@@ -500,7 +478,7 @@ impl Saga {
             saga_dag: dag,
             saga_state: SagaExecState::Abandoned(abandon_metadata),
             current_sec: Some(creator),
-            adopt_generation: Generation::new().into(),
+            adopt_generation: SagaAdoptGeneration::new(),
             adopt_time: now,
         }
     }
@@ -525,6 +503,8 @@ impl TryFrom<SagaRow> for Saga {
             abandon_comment,
         } = row;
 
+        let id = SagaId::from(id);
+
         // The abandon metadata must be present exactly when the saga is
         // abandoned.
         let saga_state = SagaExecState::try_from_columns(
@@ -543,7 +523,7 @@ impl TryFrom<SagaRow> for Saga {
             saga_dag,
             saga_state,
             current_sec,
-            adopt_generation,
+            adopt_generation: adopt_generation.into(),
             adopt_time,
         })
     }
@@ -567,14 +547,14 @@ impl From<&Saga> for SagaRow {
             };
 
         SagaRow {
-            id: saga.id,
+            id: saga.id.into(),
             creator: saga.creator,
             time_created: saga.time_created,
             name: saga.name.clone(),
             saga_dag: saga.saga_dag.clone(),
             saga_state: saga.saga_state.clone().into(),
             current_sec: saga.current_sec,
-            adopt_generation: saga.adopt_generation,
+            adopt_generation: saga.adopt_generation.into(),
             adopt_time: saga.adopt_time,
             abandon_time,
             abandon_reason,
@@ -617,14 +597,17 @@ where
 // the `Insertable` impl on `&Saga` can delegate its `Values` to it without
 // naming the crate-private `SagaRow`.
 type SagaInsertValues = (
-    diesel::dsl::Eq<saga::id, SagaId>,
+    diesel::dsl::Eq<saga::id, DbTypedUuid<SagaIdKind>>,
     diesel::dsl::Eq<saga::creator, SecId>,
     diesel::dsl::Eq<saga::time_created, DateTime<Utc>>,
     diesel::dsl::Eq<saga::name, String>,
     diesel::dsl::Eq<saga::saga_dag, serde_json::Value>,
     diesel::dsl::Eq<saga::saga_state, SagaState>,
     diesel::dsl::Eq<saga::current_sec, Option<SecId>>,
-    diesel::dsl::Eq<saga::adopt_generation, super::Generation>,
+    diesel::dsl::Eq<
+        saga::adopt_generation,
+        DbTypedGeneration<SagaAdoptGenerationKind>,
+    >,
     diesel::dsl::Eq<saga::adopt_time, DateTime<Utc>>,
     diesel::dsl::Eq<saga::abandon_time, Option<DateTime<Utc>>>,
     diesel::dsl::Eq<saga::abandon_reason, Option<SagaReasonAbandoned>>,
@@ -731,11 +714,99 @@ where
     }
 }
 
+/// The subset of a `saga` row needed to identify and classify a saga,
+/// omitting the DAG (by far the widest column in the table).
+///
+/// Used by queries that inspect saga state in bulk, like fault-management
+/// analysis, where fetching the DAG for every row would be wasteful.
+///
+/// As with [`Saga`], the flat `saga_state` column and the three nullable
+/// abandon columns are bundled into a [`SagaExecState`], validated during
+/// deserialization. Loading is all-or-nothing: a row that fails validation
+/// fails the entire query.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SagaSummary {
+    pub id: SagaId,
+    pub name: String,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub saga_state: SagaExecState,
+    pub current_sec: Option<SecId>,
+}
+
+// The columns backing a `SagaSummary`, in `Selectable` (expression) and
+// `Queryable::Row` (deserialized value) form.
+type SagaSummarySelection = (
+    saga::id,
+    saga::name,
+    saga::time_created,
+    saga::saga_state,
+    saga::current_sec,
+    saga::abandon_time,
+    saga::abandon_reason,
+    saga::abandon_comment,
+);
+type SagaSummaryColumns = (
+    DbTypedUuid<SagaIdKind>,
+    String,
+    DateTime<Utc>,
+    SagaState,
+    Option<SecId>,
+    Option<DateTime<Utc>>,
+    Option<SagaReasonAbandoned>,
+    Option<String>,
+);
+
+impl diesel::Selectable<Pg> for SagaSummary {
+    type SelectExpression = SagaSummarySelection;
+
+    fn construct_selection() -> Self::SelectExpression {
+        (
+            saga::id,
+            saga::name,
+            saga::time_created,
+            saga::saga_state,
+            saga::current_sec,
+            saga::abandon_time,
+            saga::abandon_reason,
+            saga::abandon_comment,
+        )
+    }
+}
+
+impl<ST> diesel::deserialize::Queryable<ST, Pg> for SagaSummary
+where
+    SagaSummaryColumns: diesel::deserialize::FromStaticSqlRow<ST, Pg>,
+{
+    type Row = SagaSummaryColumns;
+
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        let (
+            id,
+            name,
+            time_created,
+            saga_state,
+            current_sec,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        ) = row;
+        let id = SagaId::from(id);
+        let saga_state = SagaExecState::try_from_columns(
+            id,
+            saga_state,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        )?;
+        Ok(SagaSummary { id, name, time_created, saga_state, current_sec })
+    }
+}
+
 /// Represents a row in the "SagaNodeEvent" table
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga_node_event)]
 pub struct SagaNodeEvent {
-    pub saga_id: SagaId,
+    pub saga_id: DbTypedUuid<SagaIdKind>,
     pub node_id: SagaNodeId,
     pub event_type: String,
     pub data: Option<serde_json::Value>,
@@ -819,14 +890,14 @@ mod test {
         abandon_comment: Option<String>,
     ) -> SagaRow {
         SagaRow {
-            id: SagaId(steno::SagaId(Uuid::new_v4())),
+            id: SagaId::new_v4().into(),
             creator: SecId(Uuid::new_v4()),
             time_created: Utc::now(),
             name: "test-saga".to_string(),
             saga_dag: serde_json::Value::Null,
             saga_state,
             current_sec: Some(SecId(Uuid::new_v4())),
-            adopt_generation: Generation::new().into(),
+            adopt_generation: SagaAdoptGeneration::new().into(),
             adopt_time: Utc::now(),
             abandon_time,
             abandon_reason,

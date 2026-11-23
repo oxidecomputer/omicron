@@ -111,7 +111,8 @@ impl RawDisksSender {
                 InventoryDisk {
                     identity: disk.identity().clone(),
                     variant: disk.variant(),
-                    slot: disk.slot(),
+                    pcie_slot: disk.pcie_slot(),
+                    location: disk.location().map(str::to_string),
                     active_firmware_slot: firmware.active_slot(),
                     next_active_firmware_slot: firmware.next_active_slot(),
                     number_of_firmware_slots: firmware.number_of_slots(),
@@ -142,13 +143,13 @@ fn can_remove_disk(disk: &RawDisk, log: &Logger) -> bool {
 mod tests {
     use super::*;
     use camino::Utf8PathBuf;
-    use omicron_common::disk::DiskIdentity;
-    use omicron_common::disk::DiskVariant;
     use omicron_test_utils::dev;
     use proptest::collection::btree_map;
     use proptest::prelude::*;
     use proptest::sample::Index;
     use proptest::sample::size_range;
+    use sled_agent_types::disk::DiskIdentity;
+    use sled_agent_types::disk::DiskVariant;
     use sled_hardware::DiskFirmware;
     use sled_hardware::UnparsedDisk;
     use sled_storage::disk::RawSyntheticDisk;
@@ -208,8 +209,9 @@ mod tests {
                                 path,
                                 identity,
                                 variant,
-                                slot,
+                                pcie_slot: slot,
                                 firmware,
+                                location: "N0".to_string(),
                             })
                         }
                     }

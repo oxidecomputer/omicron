@@ -37,6 +37,7 @@ use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
     MulticastGroupMember,
 };
+use nexus_types::internal_api::params::InstanceMigrateDestination;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use omicron_common::api::external::{
@@ -842,7 +843,11 @@ async fn test_multicast_migration_scenarios(
     let migrate_url = format!("/instances/{instance1_id}/migrate");
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateRequest { dst_sled_id: target_sled }))
+            .body(Some(&InstanceMigrateRequest {
+                destination: InstanceMigrateDestination::ById {
+                    dst_sled_id: target_sled,
+                },
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -961,7 +966,11 @@ async fn test_multicast_migration_scenarios(
             let url = format!("/instances/{id}/migrate");
             NexusRequest::new(
                 RequestBuilder::new(lockstep_client, Method::POST, &url)
-                    .body(Some(&InstanceMigrateRequest { dst_sled_id: target }))
+                    .body(Some(&InstanceMigrateRequest {
+                        destination: InstanceMigrateDestination::ById {
+                            dst_sled_id: target,
+                        },
+                    }))
                     .expect_status(Some(StatusCode::OK)),
             )
             .authn_as(AuthnMode::PrivilegedUser)

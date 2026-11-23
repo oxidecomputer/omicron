@@ -18,11 +18,11 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::backoff::Backoff as _;
 use omicron_common::backoff::ExponentialBackoffBuilder;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::M2Slot;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::InternalZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware::PooledDiskError;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CLUSTER_DATASET;
@@ -486,7 +486,7 @@ mod internal_disk_details {
     // have the same contents but they disagree; we'll at least try to have
     // callers prefer the boot disk if they're performing a "check the first
     // disk that succeeds" kind of operation.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct InternalDiskDetailsId {
         pub(super) is_boot_disk: bool,
         pub(super) identity: Arc<DiskIdentity>,
@@ -544,7 +544,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 is_boot_disk: disk.is_boot_disk(),
             },
             zpool_id,
-            slot: M2Slot::try_from(disk.slot()).ok(),
+            slot: M2Slot::try_from(disk.pcie_slot()).ok(),
             boot_image_raw_devfs_path: disk
                 .boot_image_devfs_path(true)
                 .map_err(Arc::new),
@@ -993,9 +993,10 @@ mod tests {
                     devfs_path: "/fake-disk".into(),
                     dev_path: None,
                 },
-                slot: raw_disk.slot(),
+                pcie_slot: raw_disk.pcie_slot(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
+                location: raw_disk.location().map(str::to_string),
                 partitions: vec![],
                 zpool_name: ZpoolName::Internal(InternalZpoolUuid::new_v4()),
                 firmware: raw_disk.firmware().clone(),

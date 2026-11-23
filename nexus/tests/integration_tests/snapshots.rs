@@ -24,6 +24,7 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
@@ -45,6 +46,7 @@ use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
@@ -67,10 +69,10 @@ fn get_disk_url(name: &str) -> String {
     format!("/v1/disks/{}?project={}", name, PROJECT_NAME)
 }
 
-async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+async fn create_project_and_pool(client: &ClientTestContext) -> ProjectUuid {
     create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
-    project.identity.id
+    ProjectUuid::from_untyped_uuid(project.identity.id)
 }
 
 #[nexus_test]
@@ -115,37 +117,19 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
     let instance_name = "base-instance";
 
-    let instance: Instance = object_create(
-        client,
-        &instances_url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: instance::InstanceCpuCount(2),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "base-instance".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::None,
-            boot_disk: Some(instance::InstanceDiskAttachment::Attach(
-                instance::InstanceDiskAttach { name: base_disk_name.clone() },
-            )),
-            cpu_platform: None,
-            disks: Vec::new(),
-            external_ips: vec![],
-            start: true,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-        },
-    )
-    .await;
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_ncpus(instance::InstanceCpuCount(2))
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name)
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
+        .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: base_disk_name.clone() },
+        )))
+        .with_start(true)
+        .finish();
+
+    let instance: Instance =
+        object_create(client, &instances_url, &instance_params).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // cannot snapshot attached disk for instance in state starting
@@ -298,37 +282,19 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
     let instance_name = "base-instance";
 
-    let instance: Instance = object_create(
-        client,
-        &instances_url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: instance::InstanceCpuCount(2),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "base-instance".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::None,
-            boot_disk: Some(instance::InstanceDiskAttachment::Attach(
-                instance::InstanceDiskAttach { name: base_disk_name.clone() },
-            )),
-            cpu_platform: None,
-            disks: Vec::new(),
-            external_ips: vec![],
-            start: false,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-        },
-    )
-    .await;
+    let instance_params = InstanceCreateBuilder::new(instance_name)
+        .with_ncpus(instance::InstanceCpuCount(2))
+        .with_memory(ByteCount::from_gibibytes_u32(1))
+        .with_hostname(instance_name)
+        .with_nics(instance::InstanceNetworkInterfaceAttachment::None)
+        .with_boot_disk(Some(instance::InstanceDiskAttachment::Attach(
+            instance::InstanceDiskAttach { name: base_disk_name.clone() },
+        )))
+        .with_start(false)
+        .finish();
+
+    let instance: Instance =
+        object_create(client, &instances_url, &instance_params).await;
 
     assert_eq!(instance.runtime.run_state, instance::InstanceState::Stopped);
 
@@ -392,7 +358,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
@@ -416,7 +385,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.disk_id, base_disk.identity.id);
     assert_eq!(snapshot.size, base_disk.size);
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -453,7 +425,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -475,7 +450,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -492,7 +470,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
@@ -506,7 +487,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete disk");
     let provision = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id)
+        .virtual_provisioning_collection_get(
+            &opctx,
+            project_id.into_untyped_uuid(),
+        )
         .await
         .unwrap();
     assert_eq!(provision.virtual_disk_bytes_provisioned.to_bytes(), 0);
@@ -549,7 +533,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     time_deleted: None,
                 },
 
-                project_id,
+                project_id: project_id.into(),
                 disk_id: Uuid::new_v4(),
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -711,7 +695,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                     time_deleted: None,
                 },
 
-                project_id,
+                project_id: project_id.into(),
                 disk_id: Uuid::new_v4(),
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -810,7 +794,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                     time_deleted: None,
                 },
 
-                project_id,
+                project_id: project_id.into(),
                 disk_id: Uuid::new_v4(),
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
@@ -1024,7 +1008,7 @@ async fn test_create_snapshot_record_idempotent(
             time_deleted: None,
         },
 
-        project_id,
+        project_id: project_id.into(),
         disk_id,
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
@@ -1075,7 +1059,7 @@ async fn test_create_snapshot_record_idempotent(
             time_deleted: None,
         },
 
-        project_id,
+        project_id: project_id.into(),
         disk_id,
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
@@ -1176,7 +1160,7 @@ async fn test_create_snapshot_record_idempotent(
             time_deleted: None,
         },
 
-        project_id,
+        project_id: project_id.into(),
         disk_id,
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),

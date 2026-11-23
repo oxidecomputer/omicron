@@ -29,15 +29,16 @@ use gateway_messages::ROT_PAGE_SIZE;
 use gateway_messages::SpComponent;
 use gateway_types::rot::RotImageError;
 use gateway_types::rot::RotState;
+use iddqd::IdOrdMap;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::WriteOutput;
 use lpc55_areas::CMPAPage;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
 use oxide_update_engine::AbortHandle;
 use oxide_update_engine_types::events::ProgressUnits;
 use oxide_update_engine_types::spec::{EngineSpec, GenericSpec};
 use semver::Version;
+use sled_agent_types::disk::M2Slot;
 use sled_hardware_types::OxideSled;
 use slog::Logger;
 use slog::error;
@@ -89,6 +90,7 @@ use wicket_common::update_events::SpComponentUpdateSpec;
 use wicket_common::update_events::SpComponentUpdateStage;
 use wicket_common::update_events::SpComponentUpdateStepId;
 use wicket_common::update_events::SpComponentUpdateTerminalError;
+use wicket_common::update_events::SpEventReport;
 use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
 use wicket_common::update_events::StepProgress;
@@ -436,10 +438,14 @@ impl UpdateTracker {
         self.sp_update_data.lock().await.artifact_store.system_version()
     }
 
-    pub(crate) async fn event_reports(
+    pub(crate) async fn system_version_and_event_reports(
         &self,
-    ) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
-        self.sp_update_data.lock().await.event_reports()
+    ) -> SystemVersionAndEventReports {
+        let update_data = self.sp_update_data.lock().await;
+        SystemVersionAndEventReports {
+            system_version: update_data.artifact_store.system_version(),
+            event_reports: update_data.event_reports(),
+        }
     }
 
     pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
@@ -451,6 +457,12 @@ impl UpdateTracker {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct SystemVersionAndEventReports {
+    pub(crate) system_version: Option<Version>,
+    pub(crate) event_reports: IdOrdMap<SpEventReport>,
 }
 
 /// A trait that represents a backend implementation for spawning the update
@@ -719,17 +731,14 @@ impl UpdateTrackerData {
         Self { artifact_store, sp_update_data: BTreeMap::new() }
     }
 
-    // TODO: once rkdeploy is on the published API, change the return type here
-    // and elsewhere to be an `IdOrdMap<SpEventReport>` where `SpEventReport`'s
-    // key is an `SpIdentifier`.
-    fn event_reports(&self) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
-        let mut event_reports = BTreeMap::new();
+    fn event_reports(&self) -> IdOrdMap<SpEventReport> {
+        let mut event_reports = IdOrdMap::new();
         for (sp, update_data) in &self.sp_update_data {
             let event_report =
                 update_data.event_buffer.lock().unwrap().generate_report();
-            let inner: &mut BTreeMap<_, _> =
-                event_reports.entry(sp.typ).or_default();
-            inner.insert(sp.slot, event_report);
+            event_reports
+                .insert_unique(SpEventReport { sp: *sp, event_report })
+                .expect("sp_update_data is keyed by SpIdentifier");
         }
         event_reports
     }
@@ -1484,10 +1493,10 @@ impl UpdateDriver {
                         // A zeroed control plane image hash indicates that
                         // Installinator should fetch an Installinator document,
                         // with the hash stored as `host_phase_2`.
-                        control_plane: ArtifactHash([0; 32]).to_string(),
+                        control_plane: [0; 32].into(),
                         // The Installinator document hash, since
                         // `control_plane` is a zero hash.
-                        host_phase_2: hash.to_string(),
+                        host_phase_2: hash.0.into(),
                     };
 
                     update_cx

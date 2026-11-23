@@ -62,6 +62,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service,
 };
+use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -94,6 +95,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_service_ip_pool;
 mod external_subnet;
 pub mod fm;
 mod fm_config;
@@ -114,6 +116,7 @@ mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
+mod problem;
 mod project;
 mod quota;
 mod rack;
@@ -123,6 +126,7 @@ mod region_replacement;
 mod region_snapshot;
 pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
+mod rendezvous_sled_bp_availability;
 mod role;
 mod saga;
 mod scim;
@@ -159,9 +163,12 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use alert::AlertFilters;
 pub use alert::FmRendezvousAlertCreateError;
+pub use bootstore::BootstoreGenerationBump;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
+pub use deployment::BpTargetPruneable;
 pub use deployment::ExternalServiceNetworkingConfig;
+pub use deployment::KeepWhat;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
 pub use disk::LocalStorageAllocation;
@@ -185,6 +192,11 @@ pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
 pub use region_snapshot_replacement::NewRegionVolumeId;
 pub use region_snapshot_replacement::OldSnapshotVolumeId;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityDecommissionOutcome;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityUpsertOutcome;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWrite;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWriteError;
+pub use rendezvous_sled_bp_availability::SledBpAvailabilityWriteOutcome;
 pub use saga::NewSagaState;
 pub use saga::SagaStateDbFields;
 pub use scim_provider_store::CrdbScimProviderStore;
@@ -205,8 +217,10 @@ pub use support_bundle::SupportBundleCreateParams;
 pub use support_bundle::SupportBundleExpungementReport;
 pub use switch_port::SwitchConfigData;
 pub use switch_port::SwitchPortSettingsCombinedResult;
+pub use trust_quorum::TqPrepareStatusOutcome;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
+pub use vmm::VmmBulkMarkStopForUpdateResult;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
 pub use webhook_delivery::WebhookDeliveryFilters;
@@ -267,6 +281,11 @@ pub struct DataStore {
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
     transaction_retry_producer: crate::transaction_retry::Producer,
+    // The Git commit hash + dirty info of the binary using this datastore,
+    //
+    // This is passed in so that nexus-db-model and this crate don't perform
+    // unnecessary rebuilds if the underlying Git commit changes. See #10692.
+    git_version: GitVersion,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -278,7 +297,11 @@ impl DataStore {
     /// Ignores the underlying DB version. Should be used with caution, as usage
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
-    pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Self {
+    pub fn new_unchecked(
+        log: Logger,
+        pool: Arc<Pool>,
+        git_version: GitVersion,
+    ) -> Self {
         DataStore {
             log,
             pool,
@@ -286,6 +309,7 @@ impl DataStore {
                 crate::provisioning::Producer::new(),
             transaction_retry_producer: crate::transaction_retry::Producer::new(
             ),
+            git_version,
         }
     }
 
@@ -298,8 +322,17 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&AllSchemaVersions>,
         identity_check: IdentityCheckPolicy,
+        git_version: GitVersion,
     ) -> Result<Self, String> {
-        Self::new_with_timeout(log, pool, config, None, identity_check).await
+        Self::new_with_timeout(
+            log,
+            pool,
+            config,
+            None,
+            identity_check,
+            git_version,
+        )
+        .await
     }
 
     pub async fn new_with_timeout(
@@ -308,12 +341,16 @@ impl DataStore {
         config: Option<&AllSchemaVersions>,
         try_for: Option<std::time::Duration>,
         identity_check: IdentityCheckPolicy,
+        git_version: GitVersion,
     ) -> Result<Self, String> {
         use db_metadata::DatastoreSetupAction;
         use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
 
-        let datastore =
-            Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
+        let datastore = Self::new_unchecked(
+            log.new(o!("component" => "datastore")),
+            pool,
+            git_version,
+        );
 
         let start = std::time::Instant::now();
 
@@ -434,11 +471,15 @@ impl DataStore {
     pub async fn new_failfast(
         log: &Logger,
         pool: Arc<Pool>,
+        git_version: GitVersion,
     ) -> Result<Self, anyhow::Error> {
         use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
 
-        let datastore =
-            Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
+        let datastore = Self::new_unchecked(
+            log.new(o!("component" => "datastore")),
+            pool,
+            git_version,
+        );
         let (found_version, found_target) = datastore
             .database_schema_version()
             .await
@@ -481,6 +522,11 @@ impl DataStore {
     /// Terminates the underlying pool, stopping it from connecting to backends.
     pub async fn terminate(&self) {
         self.pool.terminate().await
+    }
+
+    /// Returns the Git version passed in at construction time.
+    pub fn git_version(&self) -> &GitVersion {
+        &self.git_version
     }
 
     pub fn register_producers(&self, registry: &ProducerRegistry) {
@@ -682,6 +728,7 @@ mod test {
     };
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
     use futures::StreamExt;
@@ -689,7 +736,6 @@ mod test {
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::IpAttachState;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -767,6 +813,7 @@ mod test {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),
                 },
+                defaults: None,
             },
         );
         datastore.project_create(&opctx, project).await.unwrap();
@@ -816,7 +863,7 @@ mod test {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         datastore
             .silo_user_create(
@@ -836,7 +883,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
+        assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id());
 
         // fetch the one we just created
         let (.., fetched) = datastore
@@ -992,7 +1039,7 @@ mod test {
     async fn create_test_sled(datastore: &DataStore) -> SledUuid {
         let sled_id = SledUuid::new_v4();
         let sled_update = SledUpdateBuilder::new().sled_id(sled_id).build();
-        datastore.sled_upsert(sled_update).await.unwrap();
+        sled_upsert_expect_written(datastore, sled_update).await;
         sled_id
     }
 
@@ -1978,7 +2025,7 @@ mod test {
             .repo_depot_port(REPO_DEPOT_PORT)
             .rack_id(rack_id)
             .build();
-        datastore.sled_upsert(sled1).await.unwrap();
+        sled_upsert_expect_written(datastore, sled1).await;
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
@@ -1988,7 +2035,7 @@ mod test {
             .repo_depot_port(REPO_DEPOT_PORT)
             .rack_id(rack_id)
             .build();
-        datastore.sled_upsert(sled2).await.unwrap();
+        sled_upsert_expect_written(datastore, sled2).await;
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
@@ -2015,7 +2062,7 @@ mod test {
         let authz_silo = authz::Silo::new(
             authz::FLEET,
             DEFAULT_SILO_ID,
-            LookupType::ById(DEFAULT_SILO_ID),
+            LookupType::by_id(DEFAULT_SILO_ID),
         );
         let silo_user_id = SiloUserUuid::new_v4();
         datastore
@@ -2287,254 +2334,6 @@ mod test {
                 .await
                 .is_err()
         );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_external_ip_check_constraints() {
-        use crate::db::model::IpKind;
-        use diesel::result::DatabaseErrorKind::CheckViolation;
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
-        use diesel::result::Error::DatabaseError;
-        use nexus_db_schema::schema::external_ip::dsl;
-
-        let logctx = dev::test_setup_log("test_external_ip_check_constraints");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let now = Utc::now();
-
-        // Create a mostly-populated record, for a floating IP
-        let subnet = ipnetwork::IpNetwork::new(
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-            8,
-        )
-        .unwrap();
-        let mut addresses = subnet.iter();
-        let ip = ExternalIp {
-            id: Uuid::new_v4(),
-            name: None,
-            description: None,
-            time_created: now,
-            time_modified: now,
-            time_deleted: None,
-            ip_pool_id: Uuid::new_v4(),
-            ip_pool_range_id: Uuid::new_v4(),
-            project_id: None,
-            is_service: false,
-            parent_id: Some(Uuid::new_v4()),
-            kind: IpKind::Floating,
-            ip: addresses.next().unwrap().into(),
-            first_port: crate::db::model::SqlU16(0),
-            last_port: crate::db::model::SqlU16(10),
-            state: nexus_db_model::IpAttachState::Attached,
-            is_probe: false,
-        };
-
-        // Combinations of NULL and non-NULL for:
-        // - name
-        // - description
-        // - parent (instance / service) UUID
-        // - project UUID
-        // - attach state
-        let names = [None, Some("foo")];
-        let descriptions = [None, Some("foo".to_string())];
-        let parent_ids = [None, Some(Uuid::new_v4())];
-        let project_ids = [None, Some(Uuid::new_v4())];
-
-        let mut seen_pairs = HashSet::new();
-
-        // For Floating IPs, both name and description must be non-NULL
-        // If they are instance FIPs, they *must* have a project id.
-        for (
-            name,
-            description,
-            parent_id,
-            is_service,
-            project_id,
-            modify_name,
-        ) in itertools::iproduct!(
-            &names,
-            &descriptions,
-            &parent_ids,
-            [false, true],
-            &project_ids,
-            [false, true]
-        ) {
-            // Both choices of parent_id are valid, so we need a unique name for each.
-            let name_local = name.map(|v| {
-                let name = if modify_name {
-                    v.to_string()
-                } else {
-                    format!("{v}-with-parent")
-                };
-                nexus_db_model::Name(Name::try_from(name).unwrap())
-            });
-
-            // We do name duplicate checking on the `Some` branch, don't steal the
-            // name intended for another floating IP.
-            if parent_id.is_none() && modify_name {
-                continue;
-            }
-
-            let state = if parent_id.is_some() {
-                IpAttachState::Attached
-            } else {
-                IpAttachState::Detached
-            };
-
-            let new_ip = ExternalIp {
-                id: Uuid::new_v4(),
-                name: name_local.clone(),
-                description: description.clone(),
-                ip: addresses.next().unwrap().into(),
-                is_service,
-                parent_id: *parent_id,
-                project_id: *project_id,
-                state,
-                ..ip
-            };
-
-            let key = (*project_id, name_local);
-
-            let res = diesel::insert_into(dsl::external_ip)
-                .values(new_ip)
-                .execute_async(&*conn)
-                .await;
-
-            let project_as_expected = (is_service && project_id.is_none())
-                || (!is_service && project_id.is_some());
-
-            let valid_expression =
-                name.is_some() && description.is_some() && project_as_expected;
-            let name_exists = seen_pairs.contains(&key);
-
-            if valid_expression && !name_exists {
-                // Name/description must be non-NULL, instance ID can be
-                // either
-                // Names must be unique at fleet level and at project level.
-                // Project must be NULL if service, non-NULL if instance.
-                res.unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to insert Floating IP with valid \
-                         name, description, project ID, and {} ID:\
-                         {name:?} {description:?} {project_id:?} {:?}\n{e}",
-                        if is_service { "Service" } else { "Instance" },
-                        ip.parent_id
-                    )
-                });
-
-                seen_pairs.insert(key);
-            } else if !valid_expression {
-                // Several permutations are invalid and we want to detect them all.
-                // NOTE: CHECK violation will supersede UNIQUE violation below.
-                let err = res.expect_err(
-                    "Expected a CHECK violation when inserting a \
-                     Floating IP record with NULL name and/or description, \
-                     and incorrect project parent relation",
-                );
-                assert!(
-                    matches!(err, DatabaseError(CheckViolation, _)),
-                    "Expected a CHECK violation when inserting a \
-                     Floating IP record with NULL name and/or description, \
-                     and incorrect project parent relation",
-                );
-            } else {
-                let err = res.expect_err(
-                    "Expected a UNIQUE violation when inserting a \
-                     Floating IP record with existing (name, project_id)",
-                );
-                assert!(
-                    matches!(err, DatabaseError(UniqueViolation, _)),
-                    "Expected a UNIQUE violation when inserting a \
-                     Floating IP record with existing (name, project_id)",
-                );
-            }
-        }
-
-        // For other IP types: name, description and project must be NULL
-        for (kind, name, description, parent_id, is_service, project_id) in itertools::iproduct!(
-            [IpKind::SNat, IpKind::Ephemeral],
-            &names,
-            &descriptions,
-            &parent_ids,
-            [false, true],
-            &project_ids
-        ) {
-            let name_local = name.map(|v| {
-                nexus_db_model::Name(Name::try_from(v.to_string()).unwrap())
-            });
-            let state = if parent_id.is_some() {
-                IpAttachState::Attached
-            } else {
-                IpAttachState::Detached
-            };
-            let new_ip = ExternalIp {
-                id: Uuid::new_v4(),
-                name: name_local,
-                description: description.clone(),
-                kind,
-                ip: addresses.next().unwrap().into(),
-                is_service,
-                parent_id: *parent_id,
-                project_id: *project_id,
-                state,
-                ..ip
-            };
-            let res = diesel::insert_into(dsl::external_ip)
-                .values(new_ip.clone())
-                .execute_async(&*conn)
-                .await;
-            let ip_type = if is_service { "Service" } else { "Instance" };
-            let null_snat_parent = parent_id.is_none() && kind == IpKind::SNat;
-            if name.is_none()
-                && description.is_none()
-                && !null_snat_parent
-                && project_id.is_none()
-            {
-                // Name/description must be NULL, instance ID cannot
-                // be NULL.
-
-                if kind == IpKind::Ephemeral && is_service {
-                    // Ephemeral Service IPs aren't supported.
-                    let err = res.unwrap_err();
-                    assert!(
-                        matches!(err, DatabaseError(CheckViolation, _)),
-                        "Expected a CHECK violation when inserting an \
-                         Ephemeral Service IP",
-                    );
-                } else {
-                    assert!(
-                        res.is_ok(),
-                        "Failed to insert {:?} IP with valid \
-                         name, description, and {} ID",
-                        kind,
-                        ip_type,
-                    );
-                }
-            } else {
-                // One is not valid, we expect a check violation
-                assert!(
-                    res.is_err(),
-                    "Expected a CHECK violation when inserting a \
-                     {:?} IP record with non-NULL name, description, \
-                     and/or {} ID",
-                    kind,
-                    ip_type,
-                );
-                let err = res.unwrap_err();
-                assert!(
-                    matches!(err, DatabaseError(CheckViolation, _)),
-                    "Expected a CHECK violation when inserting a \
-                     {:?} IP record with non-NULL name, description, \
-                     and/or {} ID",
-                    kind,
-                    ip_type,
-                );
-            }
-        }
 
         db.terminate().await;
         logctx.cleanup_successful();

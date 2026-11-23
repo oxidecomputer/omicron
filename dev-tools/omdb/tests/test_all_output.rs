@@ -8,24 +8,38 @@
 //! sure you're only breaking what you intend.
 
 use dropshot::Method;
-use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
+use nexus_db_model::DnsGroup;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_db_queries::db::datastore::fm::InsertSitrepError;
 use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use nexus_types::fm;
+use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepSupportBundleGeneration;
+use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
+use omicron_test_utils::dev::test_cmds::OutputSnapshot;
 use omicron_test_utils::dev::test_cmds::Redactor;
+use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::TypedUuidKind;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
-use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use subprocess::Exec;
 use uuid::Uuid;
@@ -66,7 +80,7 @@ fn assert_oximeter_list_producers_output(
 async fn test_omdb_usage_errors() {
     clear_omdb_env();
     let cmd_path = path_to_executable(CMD_OMDB);
-    let mut output = String::new();
+    let mut output = OutputSnapshot::new();
     let invocations: &[&[&'static str]] = &[
         // No arguments
         &[],
@@ -130,6 +144,7 @@ async fn test_omdb_usage_errors() {
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
+        &["sled-agent", "network-config"],
         &["oximeter", "--help"],
         &["oxql", "--help"],
         // Mispelled argument
@@ -148,7 +163,7 @@ async fn test_omdb_usage_errors() {
         do_run(&mut output, |exec| exec, &cmd_path, args).await;
     }
 
-    assert_contents("tests/usage_errors.out", &output);
+    output.assert_contents("tests/usage_errors.out");
 }
 
 #[tokio::test]
@@ -161,6 +176,9 @@ async fn test_omdb_success_cases() {
             .with_extra_sled_agents(1)
             .customize_nexus_config(&|config| {
                 config.pkg.background_tasks.sp_ereport_ingester.disable = false;
+                // `fm_sitrep_gc` would delete the example sitrep inserted
+                // below.
+                config.pkg.background_tasks.fm.sitrep_gc_disable = true;
             })
             .start::<omicron_nexus::Server>()
             .await;
@@ -246,7 +264,42 @@ async fn test_omdb_success_cases() {
     activate_background_task(lockstep_client, "fm_rendezvous").await;
     activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
 
-    let mut output = String::new();
+    // Make sure the planner loaded its config and ran at least once to ensure a
+    // consistent status output.
+    activate_background_task(lockstep_client, "reconfigurator_config_watcher")
+        .await;
+    activate_background_task(lockstep_client, "blueprint_planner").await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it. Run
+    // this twice: the first pass populates the table (unless a watch-triggered
+    // activation already did), and the second reaches the steady state
+    // asserted by the expectorate output.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+
+    // Update DNS to remove some names so that we can later verify the
+    // removed-names limit.
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+    let mut update = DnsVersionUpdateBuilder::new(
+        DnsGroup::External,
+        "test removed-names fetch limit".to_string(),
+        "test_omdb_success_cases".to_string(),
+    );
+    update.remove_name("@".to_string()).unwrap();
+    update.remove_name("ns1".to_string()).unwrap();
+    datastore
+        .dns_update_from_version(
+            &opctx,
+            update,
+            nexus_db_model::Generation::try_from(2).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let mut output = OutputSnapshot::new();
 
     let invocations: &[&[&str]] = &[
         &["db", "db-metadata", "ls-nexus"],
@@ -267,10 +320,15 @@ async fn test_omdb_success_cases() {
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
+        &["db", "dns", "diff", "external", "2", "--fetch-limit", "2"],
+        &["db", "dns", "diff", "external", "3", "--fetch-limit", "2"],
+        &["db", "dns", "diff", "external", "3", "--fetch-limit", "3"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
+        &["db", "sitrep", "show", "current"],
+        &["db", "sitrep", "show", "current", "--all-cases"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         // Hide "currently executing" to avoid a test flake in case a task is
@@ -335,6 +393,9 @@ async fn test_omdb_success_cases() {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // reconfigurator config: show and set
         &["nexus", "reconfigurator-config", "show", "current"],
+        // An explicit version that does not exist is an error, unlike something
+        // like "current" on a rack that has never had a config.
+        &["nexus", "reconfigurator-config", "show", "4294967295"],
         &["nexus", "update-status"],
         &["nexus", "update-status", "--details"],
         // NOTE: Enabling the planner here _may_ cause Nexus to start creating
@@ -356,6 +417,14 @@ async fn test_omdb_success_cases() {
             "set",
             "--disruption-policy",
             "migrate-or-terminate",
+        ],
+        &[
+            "-w",
+            "nexus",
+            "reconfigurator-config",
+            "set",
+            "--sled-update-reboot-policy",
+            "evacuate",
         ],
         &["nexus", "reconfigurator-config", "show", "current"],
         &["reconfigurator", "export", tmppath.as_str()],
@@ -463,19 +532,6 @@ async fn test_omdb_success_cases() {
         r" --> (same collection as parent sitrep|different from parent sitrep \(collection [-a-f0-9]+\))",
     );
 
-    // The `fm_sitrep_gc` task's orphan counts are racy. When two `fm_analysis`
-    // activations overlap (e.g. the boot-time activation and the explicit drive
-    // above), both can insert a first sitrep before either is made current; the
-    // loser's sitrep and its stashed analysis report are inserted but orphaned
-    // (see `DataStore::fm_sitrep_insert`'s `ParentNotCurrent` path), and a
-    // later GC pass deletes them. Whether that race happened before this
-    // snapshot is timing-dependent, so redact both counts. Other child tables
-    // stay zero: with no faults, orphaned sitreps carry no cases, facts,
-    // ereports, or bundles.
-    redactor
-        .field("orphaned sitreps deleted:", r"\d+")
-        .field("orphaned fm_sitrep_analysis_report rows deleted:", r"\d+");
-
     // The `sp_ereport_ingester` task's output depends on how many simulated
     // sled agents ahppen to register with Nexus before its first execution.
     // These redactions work around the issue described in
@@ -522,7 +578,40 @@ async fn test_omdb_success_cases() {
         .await;
     }
 
-    assert_contents("tests/successes.out", &output);
+    // The sitrep that Nexus produced has no cases, so also show one that
+    // does. Its IDs are all fixed, so they are not redacted.
+    let example_sitrep_id =
+        insert_example_sitrep(&opctx, datastore).await.to_string();
+    let mut example_redactor = Redactor::default();
+    example_redactor.uuids(false);
+    // The open physical disk case in `insert_example_sitrep`.
+    let example_case_id = Uuid::from_u128(10).to_string();
+    let sitrep_show_args: &[&[&str]] = &[
+        &["db", "sitrep", "show", &example_sitrep_id],
+        &["db", "sitrep", "show", &example_sitrep_id, "--all-cases"],
+        &[
+            "db",
+            "sitrep",
+            "show",
+            &example_sitrep_id,
+            "--case",
+            &example_case_id,
+        ],
+    ];
+
+    for args in sitrep_show_args {
+        let p = postgres_url.clone();
+        do_run_extra(
+            &mut output,
+            move |exec| exec.env("OMDB_DB_URL", &p),
+            &cmd_path,
+            args,
+            &example_redactor,
+        )
+        .await;
+    }
+
+    output.assert_contents("tests/successes.out");
 
     // The `reconfigurator-save` output is not easy to compare as a string.  But
     // let's make sure we can at least parse it and that it looks broadly like
@@ -572,9 +661,14 @@ async fn test_omdb_success_cases() {
         "--reason",
         "integration test",
     ];
-    let mut bundle_output = String::new();
+    let mut bundle_output = OutputSnapshot::new();
     let p = postgres_url.clone();
-    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
     do_run_no_redactions(
         &mut bundle_output,
         move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_DNS_SERVER", &dns),
@@ -585,8 +679,9 @@ async fn test_omdb_success_cases() {
     let zip_file = std::fs::File::open(&bundle_path).unwrap_or_else(|err| {
         panic!(
             "bundle zip not produced at {bundle_path}: {}\n\
-             omdb output was:\n{bundle_output}",
+             omdb output was:\n{}",
             InlineErrorChain::new(&err),
+            bundle_output.as_str(),
         )
     });
     let mut archive =
@@ -599,12 +694,35 @@ async fn test_omdb_success_cases() {
         "sp_task_dumps/sled_1/dump-0.zip",
         "sp_task_dumps/switch_0/dump-0.zip",
         "sp_task_dumps/switch_1/dump-0.zip",
+        "sp_components/sled_0.json",
+        "sp_components/sled_1.json",
+        "sp_components/switch_0.json",
+        "sp_components/switch_1.json",
     ] {
         assert!(
             archive.by_name(required).is_ok(),
             "bundle zip is missing expected entry {required}",
         );
     }
+
+    // The simulated sled SP reports details for its components without
+    // error.
+    let sp_components: Vec<serde_json::Value> = serde_json::from_reader(
+        archive
+            .by_name("sp_components/sled_0.json")
+            .expect("bundle zip contains sled 0 SP components"),
+    )
+    .expect("SP components file is valid JSON");
+    assert!(
+        sp_components.iter().all(|c| c.get("error").is_none()),
+        "SP components should have no errors: {sp_components:#?}",
+    );
+    assert!(
+        sp_components.iter().any(|c| c["details"]
+            .as_array()
+            .is_some_and(|details| !details.is_empty())),
+        "SP components should include details: {sp_components:#?}",
+    );
 
     // Now exercise the stdout-streaming path: omit `--output` and
     // capture stdout as bytes. Verifies the data-descriptor zip variant
@@ -615,7 +733,12 @@ async fn test_omdb_success_cases() {
         std::fs::File::create(&stdout_path).expect("create stdout capture");
     let cmd_path_owned = cmd_path.to_path_buf();
     let p = postgres_url.clone();
-    let dns = cptestctx.internal_dns.dns_server.local_address().to_string();
+    let dns = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address")
+        .to_string();
     let stream_tempdir = tmpdir.path().to_owned();
     let exit_status = tokio::task::spawn_blocking(move || {
         Exec::cmd(&cmd_path_owned)
@@ -651,6 +774,10 @@ async fn test_omdb_success_cases() {
         "sp_task_dumps/sled_1/dump-0.zip",
         "sp_task_dumps/switch_0/dump-0.zip",
         "sp_task_dumps/switch_1/dump-0.zip",
+        "sp_components/sled_0.json",
+        "sp_components/sled_1.json",
+        "sp_components/switch_0.json",
+        "sp_components/switch_1.json",
     ] {
         assert!(
             archive.by_name(required).is_ok(),
@@ -659,7 +786,7 @@ async fn test_omdb_success_cases() {
     }
 
     let ox_invocation = &["oximeter", "list-producers"];
-    let mut ox_output = String::new();
+    let mut ox_output = OutputSnapshot::new();
     let ox = ox_url.clone();
 
     wait_for_producer(
@@ -675,7 +802,7 @@ async fn test_omdb_success_cases() {
     )
     .await;
     assert_oximeter_list_producers_output(
-        &ox_output,
+        ox_output.as_str(),
         &ox_url,
         ox_test_producer,
     );
@@ -703,8 +830,21 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
-    let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
-    let mut output = String::new();
+    let dns_sockaddr = cptestctx
+        .internal_dns
+        .dns_server
+        .sole_local_address()
+        .expect("exactly one internal DNS address");
+    let mut output = OutputSnapshot::new();
+
+    // The blueprint_rendezvous task needs an inventory collection to run.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     // Database URL
     // Case 1: specified on the command line
@@ -809,13 +949,13 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_contents("tests/env.out", &output);
+    output.assert_contents("tests/env.out");
 
     // Oximeter URL
     // Case 1: specified on the command line.
     // Case 2: is covered by the success tests above.
     let ox_args1 = &["oximeter", "--oximeter-url", &ox_url, "list-producers"];
-    let mut ox_output1 = String::new();
+    let mut ox_output1 = OutputSnapshot::new();
     wait_for_producer(
         &cptestctx.oximeter,
         PRODUCER_UUID.parse::<Uuid>().unwrap(),
@@ -829,14 +969,253 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_oximeter_list_producers_output(
-        &ox_output1,
+        ox_output1.as_str(),
         &ox_url,
         ox_test_producer,
     );
 }
 
+/// Inserts a sitrep with example cases, returning its ID.
+///
+/// The sitrep has no parent, so it loses to the sitrep that Nexus already
+/// committed and is left out of the sitrep history.
+async fn insert_example_sitrep(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> SitrepUuid {
+    use nexus_types::fm::ereport::{Ena, EreportData, EreportId, Reporter};
+
+    // Cases and their contents are displayed in ID order, so the IDs are
+    // fixed to keep the output stable.
+    fn id<T: TypedUuidKind>(n: u128) -> TypedUuid<T> {
+        TypedUuid::from_u128(n)
+    }
+
+    let sitrep_id: SitrepUuid = id(1);
+    let earlier_sitrep_id: SitrepUuid = id(2);
+    let even_earlier_sitrep_id: SitrepUuid = id(6);
+    let now = chrono::Utc::now();
+
+    // Reading back a case's ereports requires that they exist in the
+    // `ereport` table. No diagnosis engine consumes these classes.
+    let restart_id = id(3);
+    let collector_id = id(4);
+    let rack_id = id(5);
+    let reporter =
+        Reporter::Sp { sp_type: nexus_types::inventory::SpType::Sled, slot: 7 };
+    let ereport_data = |class: &str| EreportData {
+        part_number: Some("913-0000019".to_string()),
+        serial_number: Some("BRM42220007".to_string()),
+        class: Some(class.to_string()),
+        report: serde_json::json!({}),
+    };
+    let disk_ereport = (Ena(1), ereport_data("ereport.example.disk"));
+    let zpool_ereport = (Ena(2), ereport_data("ereport.example.zpool"));
+    let psu_ereport = (Ena(3), ereport_data("ereport.example.psu"));
+    datastore
+        .ereports_insert(
+            opctx,
+            restart_id,
+            now,
+            collector_id,
+            rack_id,
+            reporter,
+            [disk_ereport.clone(), zpool_ereport.clone(), psu_ereport.clone()],
+        )
+        .await
+        .expect("inserted ereports");
+    let case_ereport = |n: u128, (ena, data): (Ena, EreportData)| {
+        let ereport_id = EreportId { restart_id, ena };
+        fm::case::CaseEreport {
+            id: id(n),
+            ereport: Arc::new(fm::Ereport::new(
+                ereport_id,
+                now,
+                collector_id,
+                data,
+                reporter,
+            )),
+            assigned_sitrep_id: sitrep_id,
+            comment: format!("ereport {ereport_id} looks relevant"),
+        }
+    };
+
+    // An open case with everything a case can hold.
+    let disk_case = fm::Case {
+        id: id(10),
+        metadata: fm::case::Metadata {
+            created_sitrep_id: sitrep_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::PhysicalDisk,
+            comment: "zpool is degraded".to_string(),
+        },
+        ereports: [
+            case_ereport(11, disk_ereport),
+            case_ereport(12, zpool_ereport),
+        ]
+        .into_iter()
+        .collect(),
+        facts: [fm::case::Fact {
+            metadata: fm::FactMetadata {
+                id: id(13),
+                created_sitrep_id: sitrep_id,
+                comment: "zpool health was observed in inventory".to_string(),
+            },
+            payload: fm::DiskFact::ZpoolUnhealthy(
+                fm::ZpoolUnhealthyFactPayload {
+                    physical_disk_id: id(14),
+                    zpool_id: id(15),
+                    last_seen_health:
+                        nexus_types::inventory::ZpoolHealth::Degraded,
+                    observed_in_inv: id(16),
+                    time_observed: now,
+                },
+            )
+            .into(),
+        }]
+        .into_iter()
+        .collect(),
+        alerts_requested: [fm::case::AlertRequest {
+            id: id(17),
+            class: nexus_types::alert::AlertClass::TestFoo,
+            version: 0,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: sitrep_id,
+            comment: "tell someone about the zpool".to_string(),
+        }]
+        .into_iter()
+        .collect(),
+        support_bundles_requested: [fm::case::SupportBundleRequest {
+            id: id(18),
+            requested_sitrep_id: sitrep_id,
+            data_selection:
+                nexus_types::support_bundle::BundleDataSelection::all(),
+            comment: "collect everything".to_string(),
+        }]
+        .into_iter()
+        .collect(),
+    };
+
+    // A case from an earlier sitrep. In this sitrep, an ereport was added and
+    // the case was closed.
+    let psu_case = fm::Case {
+        id: id(20),
+        metadata: fm::case::Metadata {
+            created_sitrep_id: earlier_sitrep_id,
+            closed_sitrep_id: Some(sitrep_id),
+            de: fm::DiagnosisEngineKind::PowerShelf,
+            comment: "PSU was reseated".to_string(),
+        },
+        ereports: [case_ereport(21, psu_ereport)].into_iter().collect(),
+        facts: Default::default(),
+        alerts_requested: Default::default(),
+        support_bundles_requested: Default::default(),
+    };
+
+    let empty_case = |n: u128,
+                      de: fm::DiagnosisEngineKind,
+                      created_sitrep_id: SitrepUuid,
+                      closed_sitrep_id: Option<SitrepUuid>,
+                      comment: &str| fm::Case {
+        id: id(n),
+        metadata: fm::case::Metadata {
+            created_sitrep_id,
+            closed_sitrep_id,
+            de,
+            comment: comment.to_string(),
+        },
+        ereports: Default::default(),
+        facts: Default::default(),
+        alerts_requested: Default::default(),
+        support_bundles_requested: Default::default(),
+    };
+    let unchanged_case = empty_case(
+        40,
+        fm::DiagnosisEngineKind::Saga,
+        earlier_sitrep_id,
+        None,
+        "opened earlier, no changes in this sitrep",
+    );
+    let mut changed_case = empty_case(
+        50,
+        fm::DiagnosisEngineKind::Certificate,
+        earlier_sitrep_id,
+        None,
+        "opened earlier,\nalert requested in this sitrep",
+    );
+    changed_case
+        .alerts_requested
+        .insert_unique(fm::case::AlertRequest {
+            id: id(51),
+            class: nexus_types::alert::AlertClass::TestFoo,
+            version: 0,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: sitrep_id,
+            comment: "the certificate is still bad".to_string(),
+        })
+        .expect("alert request IDs are unique");
+    let transient_case = empty_case(
+        60,
+        fm::DiagnosisEngineKind::SmfService,
+        sitrep_id,
+        Some(sitrep_id),
+        "opened and closed in this sitrep",
+    );
+    let closed_here_case = empty_case(
+        70,
+        fm::DiagnosisEngineKind::PhysicalDisk,
+        earlier_sitrep_id,
+        Some(sitrep_id),
+        "opened earlier, closed in this sitrep",
+    );
+    let closed_earlier_case = empty_case(
+        80,
+        fm::DiagnosisEngineKind::PowerShelf,
+        even_earlier_sitrep_id,
+        Some(earlier_sitrep_id),
+        "closed in an earlier sitrep",
+    );
+
+    let sitrep = fm::Sitrep {
+        metadata: fm::SitrepMetadata {
+            id: sitrep_id,
+            parent_sitrep_id: None,
+            // No such collection exists.
+            inv_collection_id: id(30),
+            next_inv_min_time_started: now,
+            creator_id: collector_id,
+            comment: "an example sitrep with cases".to_string(),
+            time_created: now,
+            alert_generation: SitrepAlertGeneration::new(),
+            support_bundle_generation: SitrepSupportBundleGeneration::new(),
+        },
+        cases: [
+            disk_case,
+            psu_case,
+            unchanged_case,
+            changed_case,
+            transient_case,
+            closed_here_case,
+            closed_earlier_case,
+        ]
+        .into_iter()
+        .collect(),
+        ereports_by_id: Default::default(),
+    };
+    match datastore.fm_sitrep_insert(opctx, sitrep, None).await {
+        Err(InsertSitrepError::ParentNotCurrent(_)) => {}
+        Ok(()) => panic!("the example sitrep was made current"),
+        Err(error) => panic!(
+            "failed to insert the example sitrep: {}",
+            InlineErrorChain::new(&error),
+        ),
+    }
+
+    sitrep_id
+}
+
 async fn do_run<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -847,7 +1226,7 @@ async fn do_run<F>(
 }
 
 async fn do_run_no_redactions<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -858,7 +1237,7 @@ async fn do_run_no_redactions<F>(
 }
 
 async fn do_run_extra<F>(
-    output: &mut String,
+    output: &mut OutputSnapshot,
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
@@ -866,13 +1245,11 @@ async fn do_run_extra<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    write!(
-        output,
-        "EXECUTING COMMAND: {} {:?}\n",
+    let command_line = format!(
+        "EXECUTING COMMAND: {} {:?}",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
         args.iter().map(|r| redactor.do_redact(r)).collect::<Vec<_>>()
-    )
-    .unwrap();
+    );
 
     // Using `subprocess`, the child process will be spawned synchronously.  In
     // some cases it then tries to make an HTTP request back into this process.
@@ -903,16 +1280,51 @@ async fn do_run_extra<F>(
         .await
         .unwrap();
 
-    write!(output, "termination: {:?}\n", exit_status).unwrap();
-    write!(output, "---------------------------------------------\n").unwrap();
-    write!(output, "stdout:\n").unwrap();
-    output.push_str(&redactor.do_redact(&stdout_text));
+    output.push(
+        format_args!("{command_line}\ntermination: {exit_status:?}"),
+        redactor.do_redact(&stdout_text),
+        redactor.do_redact(&stderr_text),
+    );
+}
 
-    write!(output, "---------------------------------------------\n").unwrap();
-    write!(output, "stderr:\n").unwrap();
-    output.push_str(&redactor.do_redact(&stderr_text));
+#[test]
+fn test_omdb_unreachable_nexus_exits_nonzero() {
+    clear_omdb_env();
+    let cmd_path = path_to_executable(CMD_OMDB);
+    // Nothing can listen on port 1 (it is privileged and unassigned), so every
+    // request to this URL is refused immediately.
+    const UNREACHABLE_NEXUS: &str = "http://127.0.0.1:1/";
 
-    write!(output, "=============================================\n").unwrap();
+    let invocations: &[(&[&str], &str)] = &[
+        (
+            &["nexus", "clickhouse-policy", "get"],
+            "Error: retrieving clickhouse policy",
+        ),
+        (
+            &["nexus", "oximeter-read-policy", "get"],
+            "Error: retrieving oximeter read policy",
+        ),
+        (
+            &["nexus", "reconfigurator-config", "show", "current"],
+            "Error: retrieving reconfigurator config",
+        ),
+    ];
+
+    for &(invocation, expected_error) in invocations {
+        let exec = Exec::cmd(&cmd_path)
+            .args(invocation)
+            .env("OMDB_NEXUS_URL", UNREACHABLE_NEXUS);
+        let (exit_status, stdout_text, stderr_text) = run_command(exec);
+        assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
+        assert_eq!(
+            stdout_text, "",
+            "{invocation:?} should print nothing on stdout"
+        );
+        assert!(
+            stderr_text.lines().any(|line| line == expected_error),
+            "{invocation:?}: missing {expected_error:?} in stderr:\n{stderr_text}"
+        );
+    }
 }
 
 // We're testing behavior that can be affected by OMDB-related environment

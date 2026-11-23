@@ -165,7 +165,6 @@ mod test {
         create_silo(
             &cptestctx.external_client,
             new_silo_name,
-            false,
             SiloIdentityMode::LocalOnly,
         )
         .await;

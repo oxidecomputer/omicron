@@ -14,8 +14,8 @@ use sled_agent_types_versions::latest::early_networking::{
 use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
 
 use crate::latest::rack_setup::{
-    BgpAuthKeyId, ManualPortConfig, ServiceIpPoolConfig, ServiceIpPoolError,
-    UplinkAddress, UplinkIpNet, UserSpecifiedBgpPeerConfig,
+    BgpAuthKeyId, ServiceIpPoolConfig, ServiceIpPoolError, UplinkAddress,
+    UplinkIpNet, UplinkPortConfig, UserSpecifiedBgpPeerConfig,
     UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
     UserSpecifiedRackNetworkConfig, UserSpecifiedUplinkAddressConfig,
 };
@@ -49,20 +49,40 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns an iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks(
         &self,
-    ) -> impl Iterator<Item = (SwitchSlot, &str, &ManualPortConfig)> {
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &UplinkPortConfig)> {
         let iter0 = self.switch0.iter().filter_map(|(port, cfg)| match cfg {
-            UserSpecifiedPortConfig::Manual(cfg) => {
+            UserSpecifiedPortConfig::Uplink(cfg) => {
                 Some((SwitchSlot::Switch0, port.as_str(), cfg))
             }
-            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
+            UserSpecifiedPortConfig::Ddm(_) => None,
         });
 
         let iter1 = self.switch1.iter().filter_map(|(port, cfg)| match cfg {
-            UserSpecifiedPortConfig::Manual(cfg) => {
+            UserSpecifiedPortConfig::Uplink(cfg) => {
                 Some((SwitchSlot::Switch1, port.as_str(), cfg))
             }
-            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
+            UserSpecifiedPortConfig::Ddm(_) => None,
         });
+
+        iter0.chain(iter1)
+    }
+
+    /// Returns an iterator over every front port.
+    ///
+    /// Unlike [`Self::iter_uplinks`], this includes DDM ports.
+    pub fn iter_port_configs(
+        &self,
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &UserSpecifiedPortConfig)>
+    {
+        let iter0 = self
+            .switch0
+            .iter()
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
+
+        let iter1 = self
+            .switch1
+            .iter()
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }
@@ -87,17 +107,17 @@ impl UserSpecifiedRackNetworkConfig {
 }
 
 impl UserSpecifiedPortConfig {
-    pub fn manual(&self) -> Option<&ManualPortConfig> {
+    pub fn uplink(&self) -> Option<&UplinkPortConfig> {
         match self {
-            Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig => None,
+            Self::Uplink(cfg) => Some(cfg),
+            Self::Ddm(_) => None,
         }
     }
 
-    pub fn manual_mut(&mut self) -> Option<&mut ManualPortConfig> {
+    pub fn uplink_mut(&mut self) -> Option<&mut UplinkPortConfig> {
         match self {
-            Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig => None,
+            Self::Uplink(cfg) => Some(cfg),
+            Self::Ddm(_) => None,
         }
     }
 }
@@ -204,8 +224,8 @@ impl From<ServiceIpPoolError> for omicron_common::api::external::Error {
 #[cfg(test)]
 mod tests {
     use crate::latest::rack_setup::{
-        LinkFec, LinkSpeed, ManualPortConfig, RackOperation,
-        RackOperationState, RssStepInfo, UplinkAddress,
+        L1PortConfig, LinkFec, LinkSpeed, RackOperation, RackOperationState,
+        RssStepInfo, UplinkAddress, UplinkPortConfig,
         UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
         UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
     };
@@ -400,23 +420,21 @@ mod tests {
         pub addr: UplinkAddress,
     }
 
-    #[test]
-    fn empty_map_deserializes_to_ddm_auto() {
-        let from_json: UserSpecifiedPortConfig =
-            serde_json::from_str("{}").unwrap();
-        assert_eq!(from_json, UserSpecifiedPortConfig::DdmAutoPortConfig);
-
-        let from_toml: PortConfigWrapper =
-            toml::from_str("port = {}\n").unwrap();
-        assert_eq!(from_toml.port, UserSpecifiedPortConfig::DdmAutoPortConfig);
+    fn ddm_l1_config() -> L1PortConfig {
+        L1PortConfig {
+            speed: LinkSpeed::Speed100G,
+            fec: Some(LinkFec::Rs),
+            autoneg: true,
+            lldp: None,
+            tx_eq: None,
+        }
     }
 
     #[test]
-    fn ddm_auto_serializes_to_empty_map() {
-        let config = UserSpecifiedPortConfig::DdmAutoPortConfig;
+    fn ddm_roundtrips() {
+        let config = UserSpecifiedPortConfig::Ddm(ddm_l1_config());
 
         let json = serde_json::to_string(&config).unwrap();
-        assert_eq!(json, "{}");
         let roundtripped: UserSpecifiedPortConfig =
             serde_json::from_str(&json).unwrap();
         assert_eq!(roundtripped, config);
@@ -429,8 +447,8 @@ mod tests {
     }
 
     #[test]
-    fn manual_config_roundtrips() {
-        let expected = UserSpecifiedPortConfig::Manual(ManualPortConfig {
+    fn uplink_config_roundtrips() {
+        let expected = UserSpecifiedPortConfig::Uplink(UplinkPortConfig {
             routes: vec![],
             addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
                 "1.1.1.0/24".parse().unwrap(),
@@ -449,10 +467,10 @@ mod tests {
         let from_json: UserSpecifiedPortConfig =
             serde_json::from_str(&json).unwrap();
         assert_eq!(from_json, expected);
-        assert!(from_json.manual().is_some());
+        assert!(from_json.uplink().is_some());
 
         eprintln!("** testing TOML deserialization");
-        let toml_manual = r#"
+        let toml_uplink = r#"
             routes = []
             addresses = [{ address = "1.1.1.0/24" }]
             uplink_port_speed = "speed40_g"
@@ -460,36 +478,8 @@ mod tests {
             autoneg = false
         "#;
         let from_toml: UserSpecifiedPortConfig =
-            toml::from_str(toml_manual).unwrap();
+            toml::from_str(toml_uplink).unwrap();
         assert_eq!(from_toml, expected);
-    }
-
-    #[test]
-    fn misspelled_field_names_unknown_field() {
-        let err =
-            serde_json::from_str::<UserSpecifiedPortConfig>(r#"{"route": []}"#)
-                .expect_err("misspelled field should fail to deserialize");
-        let err = err.to_string();
-        assert!(
-            err.contains("unknown field `route`"),
-            "error should name the unknown field, got: {err}"
-        );
-        assert!(
-            err.contains("expected one of"),
-            "error should list the expected fields, got: {err}"
-        );
-    }
-
-    #[test]
-    fn non_map_input_fails_cleanly() {
-        let err =
-            serde_json::from_str::<UserSpecifiedPortConfig>(r#""not-a-map""#)
-                .expect_err("a string is not a valid port configuration");
-        let err = err.to_string();
-        assert!(
-            err.contains("invalid type: string"),
-            "error should report an invalid type, got: {err}"
-        );
     }
 
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

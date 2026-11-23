@@ -312,24 +312,6 @@ impl Display for ComponentId {
     }
 }
 
-pub struct ParsableComponentId<'a> {
-    pub sp_type: &'a str,
-    pub i: &'a str,
-}
-
-impl<'a> TryFrom<ParsableComponentId<'a>> for ComponentId {
-    type Error = ();
-    fn try_from(value: ParsableComponentId<'a>) -> Result<Self, Self::Error> {
-        let i: u8 = value.i.parse().map_err(|_| ())?;
-        match (value.sp_type, i) {
-            ("sled", 0..=31) => Ok(ComponentId::Sled(i)),
-            ("switch", 0..=1) => Ok(ComponentId::Switch(i)),
-            ("power", 0..=1) => Ok(ComponentId::Psc(i)),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum PowerState {
     /// Working

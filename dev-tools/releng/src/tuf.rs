@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::error::Error as _;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -14,12 +15,10 @@ use chrono::Duration;
 use chrono::Timelike;
 use chrono::Utc;
 use fs_err::tokio as fs;
-use fs_err::tokio::File;
 use omicron_zone_package::config::Config;
 use semver::Version;
 use slog::Logger;
 use tufaceous::RepositoryLoader;
-use tufaceous_artifact_v1::ArtifactHash;
 use tufaceous_artifact_v1::ArtifactVersion;
 use tufaceous_artifact_v1::KnownArtifactKind;
 use tufaceous_lib_v1::Key;
@@ -29,9 +28,6 @@ use tufaceous_lib_v1::assemble::DeserializedArtifactSource;
 use tufaceous_lib_v1::assemble::DeserializedControlPlaneZoneSource;
 use tufaceous_lib_v1::assemble::DeserializedManifest;
 use tufaceous_lib_v1::assemble::OmicronRepoAssembler;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -41,8 +37,8 @@ pub(crate) async fn build_tuf_repo(
     extra_manifest: Option<Utf8PathBuf>,
     threads: usize,
 ) -> Result<()> {
-    let repo_path = output_dir.join("repo.zip");
-    let sha256_path = output_dir.join("repo.zip.sha256.txt");
+    let repo_path = output_dir.join("repo-v1-deprecated.zip");
+    let sha256_path = output_dir.join("repo-v1-deprecated.zip.sha256.txt");
 
     // We currently go about this somewhat strangely; the old release
     // engineering process produced a Tufaceous manifest, and (the now very many
@@ -56,15 +52,31 @@ pub(crate) async fn build_tuf_repo(
             format!("failed to parse artifact version from {}", version)
         })?;
 
-    // Start a new manifest by loading the Hubris staging manifest.
-    let mut manifest = DeserializedManifest::from_path(
+    let mut manifest = DeserializedManifest {
+        system_version: version,
+        artifacts: BTreeMap::new(),
+    };
+
+    for hubris in ["hubris-sp"] {
+        let artifacts_toml: BTreeMap<_, Vec<_>> = serde_json::from_slice(
+            &tokio::fs::read(&output_dir.join(hubris).join("artifacts.json"))
+                .await?,
+        )?;
+        for (kind, artifacts) in artifacts_toml {
+            manifest.artifacts.entry(kind).or_default().extend(artifacts);
+        }
+    }
+
+    // Load the Hubris (legacy) staging manifest and merge it in.
+    let hubris_staging = DeserializedManifest::from_path(
         &output_dir.join("hubris-staging/manifest.toml"),
     )
     .context("failed to open intermediate hubris staging manifest")?;
-    // Set the version.
-    manifest.system_version = version;
+    for (kind, artifacts) in hubris_staging.artifacts {
+        manifest.artifacts.entry(kind).or_default().extend(artifacts);
+    }
 
-    // Load the Hubris production manifest and merge it in.
+    // Load the Hubris production (legacy) manifest and merge it in.
     let hubris_production = DeserializedManifest::from_path(
         &output_dir.join("hubris-production/manifest.toml"),
     )
@@ -130,13 +142,6 @@ pub(crate) async fn build_tuf_repo(
         }],
     );
 
-    // Serialize the manifest out.
-    fs::write(
-        output_dir.join("manifest.toml"),
-        toml::to_string_pretty(&manifest)?.into_bytes(),
-    )
-    .await?;
-
     // Convert the manifest.
     let manifest = ArtifactManifest::from_deserialized(&output_dir, manifest)?;
     manifest.verify_all_semver()?;
@@ -178,26 +183,6 @@ pub(crate) async fn build_tuf_repo(
         }
     }
     ensure!(problems.is_empty(), "found compatibility problems:{problems}",);
-
-    // Check that we haven't stepped on any rakes by attempting to generate a
-    // plan from the zip
-    for mode in [ControlPlaneZonesMode::Split, ControlPlaneZonesMode::Composite]
-    {
-        let file = File::open(&repo_path).await?.into_std().await;
-        let repo_hash = ArtifactHash(sha256);
-        let _ = ArtifactsWithPlan::from_zip(
-            file,
-            None,
-            repo_hash,
-            mode,
-            VerificationMode::BlindlyTrustAnything,
-            &logger,
-        )
-        .await
-        .with_context(|| {
-            format!("error reading generated TUF repo ({mode:?} control plane)")
-        })?;
-    }
 
     Ok(())
 }

@@ -19,6 +19,7 @@ use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::alert;
@@ -80,6 +81,10 @@ type DiskTest<'a> =
 
 pub static HARDWARE_RACK_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
+pub static HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/support-shell/tunnel", RACK_UUID)
+    });
 pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: LazyLock<String> =
@@ -110,6 +115,7 @@ pub static DEMO_RACK_ADD_SLEDS_REQUEST: LazyLock<
         serial_number: "demo-serial".to_string(),
         part_number: "demo-part".to_string(),
     }]),
+    override_prechecks: rack::SledAddPrecheckOverrides::no_overrides_enabled(),
 });
 
 pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
@@ -154,8 +160,10 @@ pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
 
-pub const SUPPORT_BUNDLES_URL: &'static str =
-    "/experimental/v1/system/support-bundles";
+pub const MULTIRACK_RACKS_UNADOPTED_URL: &'static str =
+    "/v1/system/hardware/racks-unadopted";
+
+pub const SUPPORT_BUNDLES_URL: &'static str = "/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
 pub static SUPPORT_BUNDLE_DOWNLOAD_URL: LazyLock<String> =
@@ -234,7 +242,6 @@ pub static DEMO_SILO_CREATE: LazyLock<silo::SiloCreate> =
             description: String::from(""),
         },
         quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-        discoverable: true,
         identity_mode: silo::SiloIdentityMode::SamlJit,
         admin_group_name: None,
         tls_certificates: vec![],
@@ -317,6 +324,7 @@ pub static DEMO_PROJECT_CREATE: LazyLock<project::ProjectCreate> =
             name: DEMO_PROJECT_NAME.clone(),
             description: String::from(""),
         },
+        defaults: None,
     });
 
 // VPC used for testing
@@ -342,6 +350,7 @@ pub static DEMO_VPC_CREATE: LazyLock<vpc::VpcCreate> =
         },
         ipv6_prefix: None,
         dns_name: DEMO_VPC_NAME.clone(),
+        defaults: None,
     });
 
 // VPC Subnet used for testing
@@ -770,58 +779,42 @@ pub static DEMO_INSTANCE_EXTERNAL_SUBNETS_URL: LazyLock<String> =
         )
     });
 pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
-    LazyLock::new(|| instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_INSTANCE_NAME.clone(),
-            description: String::from(""),
-        },
-        ncpus: instance::InstanceCpuCount(1),
-        memory: ByteCount::from_gibibytes_u32(16),
-        hostname: "demo-instance".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: Some(Vec::new()),
-        network_interfaces:
-            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![instance::ExternalIpCreate::Ephemeral {
-            pool_selector: ip_pool::PoolSelector::Explicit {
-                pool: DEMO_IP_POOL_NAME.clone().into(),
-            },
-        }],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
+    LazyLock::new(|| {
+        InstanceCreateBuilder::new(DEMO_INSTANCE_NAME.as_str())
+            .with_description("")
+            .with_ncpus(instance::InstanceCpuCount(1))
+            .with_memory(ByteCount::from_gibibytes_u32(16))
+            .with_hostname("demo-instance")
+            .with_user_data(&[])
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .with_external_ips(vec![instance::ExternalIpCreate::Ephemeral {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: DEMO_IP_POOL_NAME.clone().into(),
+                },
+            }])
+            .with_start(true)
+            .finish()
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
-    LazyLock::new(|| instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_STOPPED_INSTANCE_NAME.clone(),
-            description: String::from(""),
-        },
-        ncpus: instance::InstanceCpuCount(1),
-        memory: ByteCount::from_gibibytes_u32(16),
-        hostname: "demo-instance".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: Some(Vec::new()),
-        network_interfaces:
-            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![instance::ExternalIpCreate::Ephemeral {
-            pool_selector: ip_pool::PoolSelector::Explicit {
-                pool: DEMO_IP_POOL_NAME.clone().into(),
-            },
-        }],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
+    LazyLock::new(|| {
+        InstanceCreateBuilder::new(DEMO_STOPPED_INSTANCE_NAME.as_str())
+            .with_description("")
+            .with_ncpus(instance::InstanceCpuCount(1))
+            .with_memory(ByteCount::from_gibibytes_u32(16))
+            .with_hostname("demo-instance")
+            .with_user_data(&[])
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .with_external_ips(vec![instance::ExternalIpCreate::Ephemeral {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: DEMO_IP_POOL_NAME.clone().into(),
+                },
+            }])
+            .with_start(true)
+            .finish()
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {
@@ -870,6 +863,10 @@ pub static DEMO_CERTIFICATE_NAME: LazyLock<Name> =
 pub const DEMO_CERTIFICATES_URL: &'static str = "/v1/certificates";
 pub const DEMO_CERTIFICATE_URL: &'static str =
     "/v1/certificates/demo-certificate";
+pub const DEMO_SYSTEM_CERTIFICATES_URL: &'static str =
+    "/v1/system/certificates?silo=demo-silo";
+pub const DEMO_SYSTEM_CERTIFICATE_URL: &'static str =
+    "/v1/system/certificates/demo-certificate?silo=demo-silo";
 pub static DEMO_CERTIFICATE: LazyLock<CertificateChain> = LazyLock::new(|| {
     CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"))
 });
@@ -1524,7 +1521,25 @@ pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
         system_version: Version::new(0, 0, 0),
     });
 
+// Problems
+pub static PROBLEMS_URL: &'static str = "/v1/system/problems";
+pub static DEMO_PROBLEM_URL: &'static str =
+    "/v1/system/problems/001de000-7768-4000-8000-000000000001";
+pub static DEMO_PROBLEM_CAUSES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/causes"));
+pub static DEMO_PROBLEM_CONSEQUENCES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/consequences"));
+pub static DEMO_PROBLEM_IMPACTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/impacts"));
+pub static DEMO_PROBLEM_SUPPORT_BUNDLES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/support-bundles"));
+pub static DEMO_PROBLEM_ALERTS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_PROBLEM_URL}/alerts"));
+
 // Alerts
+pub static ALERTS_URL: &'static str = "/v1/alerts";
+pub static DEMO_ALERT_URL: &'static str =
+    "/v1/alerts/001de000-7768-4000-8000-000000000001";
 pub static ALERT_CLASSES_URL: &'static str = "/v1/alert-classes";
 pub static ALERT_RECEIVERS_URL: &'static str = "/v1/alert-receivers";
 pub static WEBHOOK_RECEIVERS_URL: &'static str = "/v1/webhook-receivers";
@@ -1750,6 +1765,11 @@ pub enum AllowedMethod {
     GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
+    /// HTTP "GET" method with websocket handshake headers, for an
+    /// endpoint that tunnels to a service the test environment does
+    /// not run. Privileged requests are expected to fail with 503
+    /// after authorization, rather than upgrade.
+    GetWebsocketUnavailable,
     /// HTTP "HEAD" method
     #[allow(dead_code)]
     Head,
@@ -1777,7 +1797,8 @@ impl AllowedMethod {
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
-            | AllowedMethod::GetWebsocket => &Method::GET,
+            | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable => &Method::GET,
             AllowedMethod::Head | AllowedMethod::HeadNonexistent => {
                 &Method::HEAD
             }
@@ -1799,6 +1820,7 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket
+            | AllowedMethod::GetWebsocketUnavailable
             | AllowedMethod::Head
             | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
@@ -1806,6 +1828,36 @@ impl AllowedMethod {
             AllowedMethod::Patch(body) => Some(&body),
         }
     }
+
+    /// Returns what kind of websocket handshake, if any, to use for this method
+    pub fn websocket_handshake(&self) -> Option<WebsocketHandshake> {
+        match self {
+            AllowedMethod::GetWebsocket => {
+                Some(WebsocketHandshake::ExpectUpgrade)
+            }
+            AllowedMethod::GetWebsocketUnavailable => {
+                Some(WebsocketHandshake::HeadersOnly)
+            }
+            AllowedMethod::Delete
+            | AllowedMethod::Get
+            | AllowedMethod::GetNonexistent
+            | AllowedMethod::GetUnimplemented
+            | AllowedMethod::GetVolatile
+            | AllowedMethod::Head
+            | AllowedMethod::HeadNonexistent
+            | AllowedMethod::Post(_)
+            | AllowedMethod::Put(_)
+            | AllowedMethod::Patch(_) => None,
+        }
+    }
+}
+
+/// Describes the websocket handshake a test request should make
+pub enum WebsocketHandshake {
+    /// Send handshake headers and expect an upgrade
+    ExpectUpgrade,
+    /// Send handshake headers but keep the request's expected status
+    HeadersOnly,
 }
 
 pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
@@ -2955,6 +3007,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
+                url: &HARDWARE_RACK_SUPPORT_SHELL_TUNNEL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetWebsocketUnavailable],
+            },
+            VerifyEndpoint {
                 url: &HARDWARE_RACK_MEMBERSHIP_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -2979,6 +3037,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &HARDWARE_UNINITIALIZED_SLEDS,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &MULTIRACK_RACKS_UNADOPTED_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -3330,6 +3394,29 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                 ],
             },
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_CERTIFICATES_URL,
+                // Like the SAML identity provider endpoints, these refer to a
+                // non-default Silo that unprivileged users can't see.
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_CERTIFICATE_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_CERTIFICATE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
             /* External Networking */
             VerifyEndpoint {
                 url: &DEMO_SWITCH_PORT_URL,
@@ -3573,7 +3660,62 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     ),
                 ],
             },
+            // Problems
+            VerifyEndpoint {
+                url: &PROBLEMS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_CAUSES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_CONSEQUENCES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_IMPACTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_SUPPORT_BUNDLES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBLEM_ALERTS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
             // Alerts
+            VerifyEndpoint {
+                url: &ALERTS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ALERT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
             VerifyEndpoint {
                 url: &WEBHOOK_RECEIVERS_URL,
                 visibility: Visibility::Public,

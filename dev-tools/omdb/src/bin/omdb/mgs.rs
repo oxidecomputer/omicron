@@ -8,6 +8,7 @@ use crate::Omdb;
 use crate::db::option_impl_display;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
+use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
@@ -138,6 +139,7 @@ async fn cmd_mgs_inventory(
 
     // Print basic state about each SP that's visible to ignition.
     println!("SERVICE PROCESSOR STATES\n");
+    let mut nfailed = 0usize;
     let mgs_client = std::sync::Arc::new(mgs_client);
     let c = &mgs_client;
     let mut sp_infos =
@@ -165,6 +167,7 @@ async fn cmd_mgs_inventory(
             Ok((sp_id, v)) => Some((sp_id, v.into_inner())),
             Err(error) => {
                 eprintln!("error: {:?}", error);
+                nfailed += 1;
                 None
             }
         })
@@ -175,10 +178,23 @@ async fn cmd_mgs_inventory(
 
     // Print detailed information about each SP that we've found so far.
     for (sp_id, sp_state) in &sp_infos {
-        show_sp_details(&mgs_client, sp_id, sp_state).await?;
+        match show_sp_details(&mgs_client, sp_id, sp_state).await? {
+            ShowSpDetailsOutcome::Complete => {}
+            ShowSpDetailsOutcome::ComponentsUnavailable => nfailed += 1,
+        }
+    }
+
+    if nfailed > 0 {
+        bail!("failed to collect complete details for {nfailed} SP(s)");
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShowSpDetailsOutcome {
+    Complete,
+    ComponentsUnavailable,
 }
 
 fn sp_type_to_str(s: &SpType) -> &'static str {
@@ -334,7 +350,7 @@ async fn show_sp_details(
     mgs_client: &gateway_client::Client,
     sp_id: &SpIdentifier,
     sp_state: &SpState,
-) -> Result<(), anyhow::Error> {
+) -> Result<ShowSpDetailsOutcome, anyhow::Error> {
     println!(
         "SP DETAILS: type {:?} slot {}\n",
         sp_type_to_str(&sp_id.typ),
@@ -489,10 +505,10 @@ async fn show_sp_details(
         .await
         .with_context(|| format!("fetching components for SP {:?}", sp_id));
     let list = match component_list {
-        Ok(l) => l.into_inner(),
-        Err(e) => {
-            eprintln!("error: {:#}", e);
-            return Ok(());
+        Ok(list) => list.into_inner(),
+        Err(error) => {
+            eprintln!("error: {:#}", error);
+            return Ok(ShowSpDetailsOutcome::ComponentsUnavailable);
         }
     };
 
@@ -520,7 +536,7 @@ async fn show_sp_details(
 
     if list.components.is_empty() {
         println!("    COMPONENTS: none found\n");
-        return Ok(());
+        return Ok(ShowSpDetailsOutcome::Complete);
     }
 
     let table_rows = list.components.iter().map(SpComponentRow::from);
@@ -600,7 +616,7 @@ async fn show_sp_details(
 
     if cabooses.is_empty() {
         println!("    CABOOSES: none found\n");
-        return Ok(());
+        return Ok(ShowSpDetailsOutcome::Complete);
     }
 
     let table = tabled::Table::new(cabooses)
@@ -611,5 +627,5 @@ async fn show_sp_details(
     println!("{}", textwrap::indent(&table.to_string(), "        "));
     println!("");
 
-    Ok(())
+    Ok(ShowSpDetailsOutcome::Complete)
 }

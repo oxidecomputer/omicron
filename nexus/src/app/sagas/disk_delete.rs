@@ -18,6 +18,7 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::backon_retry_policy_internal_service;
+use omicron_uuid_kinds::ProjectUuid;
 use progenitor_extras::retry::{
     GoneCheckResult, retry_operation_while_indefinitely,
 };
@@ -26,14 +27,13 @@ use serde::Serialize;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use steno::ActionError;
 use steno::Node;
-use uuid::Uuid;
 
 // disk delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_id: Uuid,
+    pub project_id: ProjectUuid,
     pub disk: datastore::Disk,
 }
 
@@ -366,6 +366,7 @@ pub(crate) mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ExternalZpoolUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use uuid::Uuid;
 
@@ -438,7 +439,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(client, PROJECT_NAME).await.identity.id,
+        );
         let disk = create_disk(&cptestctx, new_disk_create_params).await;
 
         // Build the saga DAG with the provided test parameters and run it.
@@ -460,7 +463,9 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(client, PROJECT_NAME).await.identity.id,
+        );
         let disk = create_disk(&cptestctx, new_disk_create_params).await;
 
         // Build the saga DAG with the provided test parameters
@@ -670,7 +675,9 @@ pub(crate) mod test {
             datastore.clone(),
         );
 
-        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(client, PROJECT_NAME).await.identity.id,
+        );
         let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
 
         // Create a local storage disk, manually create an allocation for that
@@ -715,7 +722,9 @@ pub(crate) mod test {
             datastore.clone(),
         );
 
-        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
+        let project_id = ProjectUuid::from_untyped_uuid(
+            create_project(client, PROJECT_NAME).await.identity.id,
+        );
         let disk = create_disk(&cptestctx, new_local_disk_create_params).await;
 
         // Create a local storage disk, manually create an allocation for that

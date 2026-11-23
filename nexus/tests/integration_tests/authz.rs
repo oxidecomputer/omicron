@@ -29,8 +29,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo with a two unprivileged users
     let silo =
-        create_silo(&client, "authz", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "authz", silo::SiloIdentityMode::LocalOnly).await;
 
     let user1 = create_local_user(
         client,
@@ -131,8 +130,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo with an unprivileged user
     let silo =
-        create_silo(&client, "authz", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "authz", silo::SiloIdentityMode::LocalOnly).await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -145,8 +143,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Create another silo with another unprivileged user
     let silo =
-        create_silo(&client, "other", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "other", silo::SiloIdentityMode::LocalOnly).await;
 
     create_local_user(
         client,
@@ -180,8 +177,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo with an unprivileged user
     let silo =
-        create_silo(&client, "authz", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "authz", silo::SiloIdentityMode::LocalOnly).await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -212,8 +208,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo with an unprivileged user
     let silo =
-        create_silo(&client, "authz", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "authz", silo::SiloIdentityMode::LocalOnly).await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -238,8 +233,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo with an unprivileged user
     let silo =
-        create_silo(&client, "authz", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "authz", silo::SiloIdentityMode::LocalOnly).await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -252,8 +246,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Create another silo
     let _silo =
-        create_silo(&client, "other", true, silo::SiloIdentityMode::LocalOnly)
-            .await;
+        create_silo(&client, "other", silo::SiloIdentityMode::LocalOnly).await;
 
     // That user can access their own silo
     let _silo: silo::Silo =

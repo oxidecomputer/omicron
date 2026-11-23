@@ -18,8 +18,8 @@ use nexus_types::internal_api::views::{
     RotBootloaderStatus, RotStatus, SledAgentUpdateStatus, SpStatus,
     TufRepoVersion, UpdateStatus, ZoneStatus,
 };
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::M2Slot;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 

@@ -21,6 +21,7 @@ use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolType;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
@@ -60,6 +61,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ProjectUuid;
 use ref_cast::RefCast;
 use sled_agent_types::inventory::ZoneKind;
 use slog::debug;
@@ -294,7 +296,7 @@ impl DataStore {
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
-        project_id: Uuid,
+        project_id: ProjectUuid,
         identity: IdentityMetadataCreateParams,
         allocation: FloatingIpAllocation,
     ) -> CreateResult<ExternalIp> {
@@ -1121,7 +1123,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
         .filter(dsl::time_deleted.is_null())
         .select(FloatingIp::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -1708,7 +1710,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -1780,7 +1782,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -1818,6 +1820,7 @@ mod tests {
                         },
                         ipv6_prefix: Some("fd00::/48".parse().unwrap()),
                         dns_name: "foo".parse().unwrap(),
+                        defaults: None,
                     },
                 )
                 .unwrap(),
@@ -1838,7 +1841,9 @@ mod tests {
                         time_deleted: None,
                     },
                     vpc_id: authz_vpc.id(),
-                    rcgen: Generation(external::Generation::new()),
+                    rcgen: Generation(
+                        omicron_generation_kinds::Generation::new(),
+                    ),
                     ipv4_block: Ipv4Net("192.168.1.0/24".parse().unwrap()),
                     ipv6_block: Ipv6Net("fd00::/64".parse().unwrap()),
                     custom_router_id: None,
@@ -1962,7 +1967,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: multicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -2034,7 +2039,7 @@ mod tests {
                 IncompleteIpPoolResource {
                     ip_pool_id: unicast_pool.id(),
                     resource_type: IpPoolResourceType::Silo,
-                    resource_id: authz_silo.id(),
+                    resource_id: authz_silo.id().into_untyped_uuid(),
                     is_default: true,
                 },
             )
@@ -2068,6 +2073,460 @@ mod tests {
             unicast_pool.id(),
             "Floating IP should be from unicast pool"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This test exhaustively looks at every per-row CHECK constraint on the
+    // `external_ip` table.
+    //
+    // These constraints have grown over time, and are fairly complicated
+    // because we store IPs for services and instances, of several different
+    // kinds and attachment states. Here, we write out all the combinations that
+    // we expect to be _valid_ explicitly; assert that's true; and then every
+    // other combination generates a CHECK violation error from the database.
+    #[tokio::test]
+    async fn all_external_ip_check_constraints() {
+        use crate::db::model::IpAttachState::*;
+        use crate::db::model::IpKind::*;
+        use diesel::result::DatabaseErrorKind::CheckViolation;
+        use diesel::result::Error::DatabaseError;
+        use nexus_db_schema::schema::external_ip::dsl;
+
+        let logctx = dev::test_setup_log("all_external_ip_check_constraints");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let now = Utc::now();
+
+        // What we expect each row to result in.
+        enum Expect {
+            Valid,
+            CheckViolation,
+        }
+
+        // Create a big subnet for everything, so we have lots of addresses.
+        let subnet = ipnetwork::IpNetwork::new(
+            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
+            8,
+        )
+        .unwrap();
+        let mut addresses = subnet.iter();
+
+        // Create a template record, which we fill in with the parameters under
+        // test.
+        let template = ExternalIp {
+            id: Uuid::new_v4(),
+            name: None,
+            description: None,
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            is_service: false,
+            parent_id: None,
+            kind: SNat,
+            ip: addresses.next().unwrap().into(),
+            first_port: 0.try_into().unwrap(),
+            last_port: 10.try_into().unwrap(),
+            project_id: None,
+            state: Detached,
+            is_probe: false,
+        };
+
+        // The space we're testing.
+        let kinds = [Floating, Ephemeral, SNat];
+        let services = [false, true];
+        let present = [false, true];
+        let states = [Attached, Detached];
+
+        // Try every combination
+        for (
+            i,
+            (
+                &kind,
+                &is_service,
+                &has_name,
+                &has_description,
+                &has_parent,
+                &has_project,
+                &state,
+            ),
+        ) in itertools::iproduct!(
+            &kinds, &services, &present, // has a name
+            &present, // has a description,
+            &present, // has a parent ID
+            &present, // has a project ID
+            &states,
+        )
+        .enumerate()
+        {
+            let expect = match (
+                kind,
+                is_service,
+                has_name,
+                has_description,
+                has_parent,
+                has_project,
+                state,
+            ) {
+                // Instance Floating:
+                //
+                // - Must have a name, description, and project
+                // - If it's attached, it must have a parent
+                // - If it's detached, it may or may not have a parent.
+                (Floating, false, true, true, true, true, Attached) => {
+                    Expect::Valid
+                }
+                (Floating, false, true, true, true, true, Detached) => {
+                    Expect::Valid
+                }
+                (Floating, false, true, true, false, true, Detached) => {
+                    Expect::Valid
+                }
+
+                // Service Floating:
+                //
+                // - Must have a name and description
+                // - Must not have a project
+                // - If it's attached, it must have a parent
+                // - If it's detached, it may or may not have a parent
+                (Floating, true, true, true, true, false, Attached) => {
+                    Expect::Valid
+                }
+                (Floating, true, true, true, true, false, Detached) => {
+                    Expect::Valid
+                }
+                (Floating, true, true, true, false, false, Detached) => {
+                    Expect::Valid
+                }
+
+                // Instance Ephemeral:
+                //
+                // - Must not have a name, description, or project
+                // - If it's attached, it must have a parent
+                // - If it's detached, it may or may not have a parent
+                //
+                // Note that service Ephemeral IPs are not valid at all, so
+                // should raise a check violation.
+                (Ephemeral, false, false, false, true, false, Attached) => {
+                    Expect::Valid
+                }
+                (Ephemeral, false, false, false, true, false, Detached) => {
+                    Expect::Valid
+                }
+                (Ephemeral, false, false, false, false, false, Detached) => {
+                    Expect::Valid
+                }
+
+                // Instance SNAT:
+                //
+                // - Must not have a name, description, or project
+                // - Must always have a parent, regardless of attach state
+                //
+                // NOTE: We don't support detached SNAT IPs today, but that's an
+                // application check, not a DB check.
+                (SNat, false, false, false, true, false, Attached) => {
+                    Expect::Valid
+                }
+                (SNat, false, false, false, true, false, Detached) => {
+                    Expect::Valid
+                }
+
+                // Service SNAT:
+                //
+                // - Must have a name and description
+                // - Must not have a project
+                // - Must have a parent
+                //
+                // NOTE: We don't support detached SNAT IPs today, but that's an
+                // application check, not a DB check.
+                (SNat, true, true, true, true, false, Attached) => {
+                    Expect::Valid
+                }
+                (SNat, true, true, true, true, false, Detached) => {
+                    Expect::Valid
+                }
+
+                // Everything else is a CHECK violation.
+                _ => Expect::CheckViolation,
+            };
+
+            // Build and insert the row.
+            let to_insert = ExternalIp {
+                id: Uuid::new_v4(),
+                ip: addresses.next().unwrap().into(),
+                name: has_name.then(|| {
+                    nexus_db_model::Name(format!("eip-{i}").parse().unwrap())
+                }),
+                description: has_description.then(|| format!("eip {i}")),
+                parent_id: has_parent.then(Uuid::new_v4),
+                project_id: has_project.then(|| ProjectUuid::new_v4().into()),
+                is_service,
+                kind,
+                state,
+                ..template
+            };
+
+            let result = diesel::insert_into(dsl::external_ip)
+                .values(to_insert.clone())
+                .execute_async(&*conn)
+                .await;
+
+            match expect {
+                Expect::Valid => {
+                    if let Err(e) = &result {
+                        panic!(
+                            "Expected to insert a valid IP row, but it failed\n\
+                            row: {to_insert:#?}\nerror: {e:#?}"
+                        );
+                    }
+                }
+                Expect::CheckViolation => {
+                    let Err(DatabaseError(CheckViolation, _)) = &result else {
+                        panic!(
+                            "Expected a CHECK violation inserting IP row, but \
+                            got something else.\nrow: {to_insert:#?}\n\
+                            result: {result:#?}",
+                        );
+                    };
+                }
+            }
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn at_most_one_ephemeral_ip_per_instance_per_version() {
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
+        use diesel::result::Error::DatabaseError;
+        use nexus_db_model::IpKind;
+        use nexus_db_schema::schema::external_ip::dsl;
+
+        let logctx = dev::test_setup_log(
+            "at_most_one_ephemeral_ip_per_instance_per_version",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let now = Utc::now();
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            name: None,
+            description: None,
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            is_service: false,
+            parent_id: Some(Uuid::new_v4()),
+            kind: IpKind::Ephemeral,
+            ip: "10.0.0.1".parse().unwrap(),
+            first_port: 0.try_into().unwrap(),
+            last_port: 10.try_into().unwrap(),
+            project_id: None,
+            state: IpAttachState::Attached,
+            is_probe: false,
+        };
+
+        diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // Inserting another Ephemeral for the same instance should fail.
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            ip: "10.0.0.2".parse().unwrap(),
+            ..eip
+        };
+        let result = diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await;
+        let Err(DatabaseError(UniqueViolation, info)) = &result else {
+            panic!(
+                "Expected a UNIQUE violation inserting a second Ephemeral \
+                IP for the same instance.\nrow: {eip:#?}\nresult: {result:#?}",
+            );
+        };
+        assert_eq!(
+            info.constraint_name().unwrap(),
+            "one_ephemeral_ip_per_instance_per_version",
+        );
+
+        // But another of a different version is fine.
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            ip: "fd00::1".parse().unwrap(),
+            ..eip
+        };
+        let result = diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await;
+        let Ok(_) = &result else {
+            panic!(
+                "Expected to be able to insert a second Ephemeral IP \
+                for the same instance, with a different IP version. \n\
+                row: {eip:#?}\nresult: {result:#?}",
+            );
+        };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_unique_service_floating_ip_names() {
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
+        use diesel::result::Error::DatabaseError;
+        use nexus_db_model::IpKind;
+        use nexus_db_schema::schema::external_ip::dsl;
+
+        let logctx =
+            dev::test_setup_log("ensure_unique_service_floating_ip_names");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let now = Utc::now();
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            name: Some(nexus_db_model::Name("foo".parse().unwrap())),
+            description: Some(String::new()),
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            is_service: true,
+            parent_id: Some(Uuid::new_v4()),
+            kind: IpKind::Floating,
+            ip: "10.0.0.1".parse().unwrap(),
+            first_port: 0.try_into().unwrap(),
+            last_port: 10.try_into().unwrap(),
+            project_id: None,
+            state: IpAttachState::Attached,
+            is_probe: false,
+        };
+
+        diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // Inserting another service Floating IP with the same name should fail.
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            ip: "10.0.0.2".parse().unwrap(),
+            ..eip
+        };
+        let result = diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await;
+        let Err(DatabaseError(UniqueViolation, info)) = &result else {
+            panic!(
+                "Expected a UNIQUE violation inserting a second service Floating \
+                IP with the same name.\nrow: {eip:#?}\nresult: {result:#?}",
+            );
+        };
+        assert_eq!(
+            info.constraint_name().unwrap(),
+            "lookup_floating_ip_by_name",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_unique_instance_floating_ip_names_within_a_project() {
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
+        use diesel::result::Error::DatabaseError;
+        use nexus_db_model::IpKind;
+        use nexus_db_schema::schema::external_ip::dsl;
+
+        let logctx = dev::test_setup_log(
+            "ensure_unique_instance_floating_ip_names_within_a_project",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let now = Utc::now();
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            name: Some(nexus_db_model::Name("foo".parse().unwrap())),
+            description: Some(String::new()),
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            is_service: false,
+            parent_id: Some(Uuid::new_v4()),
+            kind: IpKind::Floating,
+            ip: "10.0.0.1".parse().unwrap(),
+            first_port: 0.try_into().unwrap(),
+            last_port: 10.try_into().unwrap(),
+            project_id: Some(ProjectUuid::new_v4().into()),
+            state: IpAttachState::Attached,
+            is_probe: false,
+        };
+
+        diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // Inserting another instance Floating IP with the same name in the same
+        // project should fail.
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            ip: "10.0.0.2".parse().unwrap(),
+            ..eip
+        };
+        let result = diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await;
+        let Err(DatabaseError(UniqueViolation, info)) = &result else {
+            panic!(
+                "Expected a UNIQUE violation inserting a second service Floating \
+                IP with the same name.\nrow: {eip:#?}\nresult: {result:#?}",
+            );
+        };
+        assert_eq!(
+            info.constraint_name().unwrap(),
+            "lookup_floating_ip_by_name_and_project",
+        );
+
+        // But the same name in a different project is fine.
+        let eip = ExternalIp {
+            id: Uuid::new_v4(),
+            ip: "10.0.0.2".parse().unwrap(),
+            project_id: Some(ProjectUuid::new_v4().into()),
+            ..eip
+        };
+        let result = diesel::insert_into(dsl::external_ip)
+            .values(eip.clone())
+            .execute_async(&*conn)
+            .await;
+        let Ok(_) = &result else {
+            panic!(
+                "Expected to be able to insert an instance Floating IP \
+                with the same name as another but in a different project. \n\
+                \nrow: {eip:#?}\nresult: {result:#?}",
+            );
+        };
 
         db.terminate().await;
         logctx.cleanup_successful();

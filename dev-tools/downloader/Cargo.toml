@@ -9,8 +9,8 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+byte-wrapper.workspace = true
 camino.workspace = true
-camino-tempfile.workspace = true
 clap.workspace = true
 flate2.workspace = true
 futures.workspace = true

@@ -8,16 +8,7 @@ progenitor::generate_api!(
     spec = "../../openapi/wicketd-commission/wicketd-commission-latest.json",
     interface = Positional,
     inner_type = slog::Logger,
-    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-        slog::debug!(log, "client request";
-            "method" => %request.method(),
-            "uri" => %request.url(),
-            "body" => ?&request.body(),
-        );
-    }),
-    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-        slog::debug!(log, "client response"; "result" => ?result);
-    }),
+    hooks = Expected,
     derives = [schemars::JsonSchema],
     crates = {
         "iddqd" = "*",
@@ -52,13 +43,14 @@ progenitor::generate_api!(
         LaneMonitors = wicketd_commission_types_versions::latest::inventory::LaneMonitors,
         Ipv4Range = wicketd_commission_types_versions::latest::rack_setup::Ipv4Range,
         Ipv6Range = wicketd_commission_types_versions::latest::rack_setup::Ipv6Range,
+        L1PortConfig = wicketd_commission_types_versions::latest::rack_setup::L1PortConfig,
         LinkFec = wicketd_commission_types_versions::latest::rack_setup::LinkFec,
         LinkSpeed = wicketd_commission_types_versions::latest::rack_setup::LinkSpeed,
         LldpAdminStatus = wicketd_commission_types_versions::latest::rack_setup::LldpAdminStatus,
         LldpPortConfig = wicketd_commission_types_versions::latest::rack_setup::LldpPortConfig,
         LocationInfo = wicketd_commission_types_versions::latest::inventory::LocationInfo,
-        ManualPortConfig = wicketd_commission_types_versions::latest::rack_setup::ManualPortConfig,
         MaxPathConfig = wicketd_commission_types_versions::latest::rack_setup::MaxPathConfig,
+        MultirackJoinRequest = wicketd_commission_types_versions::latest::rack_setup::MultirackJoinRequest,
         PowerState = wicketd_commission_types_versions::latest::inventory::PowerState,
         PrivateKeyPem = wicketd_commission_types_versions::latest::rack_setup::PrivateKeyPem,
         PutRecoveryUserPasswordHash = wicketd_commission_types_versions::latest::rack_setup::PutRecoveryUserPasswordHash,
@@ -78,6 +70,7 @@ progenitor::generate_api!(
         RouteConfig = wicketd_commission_types_versions::latest::rack_setup::RouteConfig,
         RouterLifetimeConfig = wicketd_commission_types_versions::latest::rack_setup::RouterLifetimeConfig,
         RssStepInfo = wicketd_commission_types_versions::latest::rack_setup::RssStepInfo,
+        RunMultirackJoinResponse = wicketd_commission_types_versions::latest::rack_setup::RunMultirackJoinResponse,
         RunRackSetupResponse = wicketd_commission_types_versions::latest::rack_setup::RunRackSetupResponse,
         RunningProgress = wicketd_commission_types_versions::latest::update::RunningProgress,
         SetBgpAuthKeyStatus = wicketd_commission_types_versions::latest::rack_setup::SetBgpAuthKeyStatus,
@@ -103,6 +96,7 @@ progenitor::generate_api!(
         TransceiverPowerMode = wicketd_commission_types_versions::latest::inventory::TransceiverPowerMode,
         TransceiverStatus = wicketd_commission_types_versions::latest::inventory::TransceiverStatus,
         TransceiverVendor = wicketd_commission_types_versions::latest::inventory::TransceiverVendor,
+        TrustQuorumMembers = trust_quorum_types_versions::latest::membership::TrustQuorumMembers,
         TxEqConfig = wicketd_commission_types_versions::latest::rack_setup::TxEqConfig,
         UnmatchedBootstrapPeer = wicketd_commission_types_versions::latest::inventory::UnmatchedBootstrapPeer,
         UpdateProgress = wicketd_commission_types_versions::latest::update::UpdateProgress,
@@ -110,6 +104,7 @@ progenitor::generate_api!(
         UpdateStep = wicketd_commission_types_versions::latest::update::UpdateStep,
         UpdateTargets = wicketd_commission_types_versions::latest::update::UpdateTargets,
         UpdateStepStatus = wicketd_commission_types_versions::latest::update::UpdateStepStatus,
+        UplinkPortConfig = wicketd_commission_types_versions::latest::rack_setup::UplinkPortConfig,
         UserSpecifiedBgpPeerConfig = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedBgpPeerConfig,
         UserSpecifiedImportExportPolicy = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedImportExportPolicy,
         UserSpecifiedPortConfig = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedPortConfig,
@@ -118,5 +113,7 @@ progenitor::generate_api!(
         UserSpecifiedUplinkAddressConfig = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedUplinkAddressConfig,
     },
 );
+
+progenitor_extras::slog_hooks::impl_slog_client_hooks!(Client);
 
 pub type ClientError = crate::Error<crate::types::Error>;

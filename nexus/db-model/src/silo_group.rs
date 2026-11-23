@@ -9,9 +9,10 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{silo_group, silo_group_membership};
 use omicron_uuid_kinds::SiloGroupKind;
 use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloKind;
 use omicron_uuid_kinds::SiloUserKind;
 use omicron_uuid_kinds::SiloUserUuid;
-use uuid::Uuid;
+use omicron_uuid_kinds::SiloUuid;
 
 /// Describes a silo group within the database.
 #[derive(Asset, Queryable, Insertable, Debug, Selectable)]
@@ -22,7 +23,7 @@ pub struct SiloGroup {
     pub identity: SiloGroupIdentity,
     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 
     /// If the user provision type is ApiOnly or JIT, then the external id is
     /// the identity provider's ID for this group. There is a database
@@ -42,15 +43,19 @@ pub struct SiloGroup {
 }
 
 impl SiloGroup {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
+
     pub fn new_api_only(
         id: SiloGroupUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         external_id: String,
     ) -> Self {
         Self {
             identity: SiloGroupIdentity::new(id),
             time_deleted: None,
-            silo_id,
+            silo_id: silo_id.into(),
             user_provision_type: UserProvisionType::ApiOnly,
             external_id: Some(external_id),
             display_name: None,
@@ -59,13 +64,13 @@ impl SiloGroup {
 
     pub fn new_jit(
         id: SiloGroupUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         external_id: String,
     ) -> Self {
         Self {
             identity: SiloGroupIdentity::new(id),
             time_deleted: None,
-            silo_id,
+            silo_id: silo_id.into(),
             user_provision_type: UserProvisionType::Jit,
             external_id: Some(external_id),
             display_name: None,
@@ -74,14 +79,14 @@ impl SiloGroup {
 
     pub fn new_scim(
         id: SiloGroupUuid,
-        silo_id: Uuid,
+        silo_id: SiloUuid,
         display_name: String,
         external_id: Option<String>,
     ) -> Self {
         Self {
             identity: SiloGroupIdentity::new(id),
             time_deleted: None,
-            silo_id,
+            silo_id: silo_id.into(),
             user_provision_type: UserProvisionType::Scim,
             external_id,
             display_name: Some(display_name),

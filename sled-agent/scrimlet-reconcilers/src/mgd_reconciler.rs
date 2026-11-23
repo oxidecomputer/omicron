@@ -6,8 +6,10 @@
 //! zone.
 
 use crate::ScrimletReconcilersMode;
+use crate::handle::BgpSocketConfig;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::mgd::MgdReconcilerStatus;
 use mg_admin_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
@@ -17,37 +19,11 @@ mod bfd_reconciler;
 mod bgp_reconciler;
 mod static_route_reconciler;
 
-pub use bfd_reconciler::MgdBfdOperationFailure;
-pub use bfd_reconciler::MgdBfdReconcilerStatus;
-pub use bgp_reconciler::MgdBgpReconcilerStatus;
-pub use bgp_reconciler::MgdBgpReconcilerStatusOpCount;
-pub use static_route_reconciler::MgdStaticRouteReconcilerStatus;
-
-#[derive(Debug, Clone)]
-pub struct MgdReconcilerStatus {
-    pub bfd_status: MgdBfdReconcilerStatus,
-    pub bgp_status: MgdBgpReconcilerStatus,
-    pub static_routes_status: MgdStaticRouteReconcilerStatus,
-}
-
-impl slog::KV for MgdReconcilerStatus {
-    fn serialize(
-        &self,
-        record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let Self { bfd_status, bgp_status, static_routes_status } = self;
-        bfd_status.serialize(record, serializer)?;
-        bgp_status.serialize(record, serializer)?;
-        static_routes_status.serialize(record, serializer)?;
-        Ok(())
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct MgdReconciler {
     client: Client,
     switch_slot: ThisSledSwitchSlot,
+    bgp_socket_config: BgpSocketConfig,
 }
 
 impl Reconciler for MgdReconciler {
@@ -61,7 +37,19 @@ impl Reconciler for MgdReconciler {
         switch_slot: ThisSledSwitchSlot,
         parent_log: &Logger,
     ) -> Self {
-        Self { client: mode.mgd_client(parent_log), switch_slot }
+        let bgp_socket_config = match mode {
+            ScrimletReconcilersMode::SwitchZone(_) => {
+                BgpSocketConfig::default()
+            }
+            ScrimletReconcilersMode::Test { bgp_socket_config, .. } => {
+                bgp_socket_config
+            }
+        };
+        Self {
+            client: mode.mgd_client(parent_log),
+            switch_slot,
+            bgp_socket_config,
+        }
     }
 
     async fn do_reconciliation(
@@ -81,6 +69,7 @@ impl Reconciler for MgdReconciler {
             &self.client,
             &system_networking_config.rack_network_config,
             self.switch_slot,
+            self.bgp_socket_config,
             log,
         )
         .await;

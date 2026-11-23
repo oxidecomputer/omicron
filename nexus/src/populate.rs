@@ -344,6 +344,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
     use nexus_db_queries::db::datastore::IdentityCheckPolicy;
+    use nexus_db_queries::db::pub_test_utils::TEST_GIT_VERSION;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -367,13 +368,18 @@ mod test {
         let logctx = dev::test_setup_log("test_populator");
         let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
         let cfg = db::Config { url: db.crdb().pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(
+            &logctx.log,
+            &cfg,
+            db::ClaimBacktraceSetting::Capture,
+        ));
         let datastore = Arc::new(
             db::DataStore::new(
                 &logctx.log,
                 pool,
                 None,
                 IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
             )
             .await
             .unwrap(),
@@ -432,6 +438,7 @@ mod test {
                 pool,
                 None,
                 IdentityCheckPolicy::DontCare,
+                TEST_GIT_VERSION,
             )
             .await
             .unwrap(),

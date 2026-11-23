@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::HttpErrorResponseBody;
 use futures::prelude::*;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
@@ -45,7 +44,7 @@ async fn serial_console_communication() {
 
         // confirm messages sent to the websocket are received on the console
         // TCP connection
-        ws.send(Message::Binary(msg_from_mgs.clone())).await.unwrap();
+        ws.send(Message::Binary(msg_from_mgs.clone().into())).await.unwrap();
         assert_eq!(console_read.recv().await.unwrap(), msg_from_mgs);
 
         // confirm messages sent to the console TCP connection are received by
@@ -53,7 +52,7 @@ async fn serial_console_communication() {
         console_write.send(msg_from_sp.clone()).await.unwrap();
         assert_eq!(
             ws.next().await.unwrap().unwrap(),
-            Message::Binary(msg_from_sp)
+            Message::Binary(msg_from_sp.into())
         );
     }
 
@@ -90,20 +89,19 @@ async fn serial_console_detach() {
         .sp_component_serial_console_attach(&SpType::Sled, 0, "sp3-host-cpu")
         .await
         .unwrap_err();
-    let gateway_client::Error::UnexpectedResponse(response) = err else {
+    let gateway_client::Error::ErrorResponse(response) = err else {
         panic!("unexpected error");
     };
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let err: HttpErrorResponseBody = response.json().await.unwrap();
-    assert!(err.message.contains("serial console already attached"));
+    assert!(response.message.contains("serial console already attached"));
 
     // the original websocket should still work
-    ws.send(Message::Binary(b"hello".to_vec())).await.unwrap();
+    ws.send(Message::Binary(b"hello".to_vec().into())).await.unwrap();
     assert_eq!(console_read.recv().await.unwrap(), b"hello");
     console_write.send(b"world".to_vec()).await.unwrap();
     assert_eq!(
         ws.next().await.unwrap().unwrap(),
-        Message::Binary(b"world".to_vec())
+        Message::Binary(b"world".to_vec().into())
     );
 
     // hit the detach endpoint, which should disconnect `ws`
@@ -126,12 +124,12 @@ async fn serial_console_detach() {
         .into_inner();
     let mut ws =
         WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
-    ws.send(Message::Binary(b"hello".to_vec())).await.unwrap();
+    ws.send(Message::Binary(b"hello".to_vec().into())).await.unwrap();
     assert_eq!(console_read.recv().await.unwrap(), b"hello");
     console_write.send(b"world".to_vec()).await.unwrap();
     assert_eq!(
         ws.next().await.unwrap().unwrap(),
-        Message::Binary(b"world".to_vec())
+        Message::Binary(b"world".to_vec().into())
     );
 
     testctx.teardown().await;

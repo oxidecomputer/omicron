@@ -18,7 +18,7 @@ use super::cte_utils::{
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
-use diesel::expression::{AsExpression, Expression};
+use diesel::expression::{AsExpression, Expression, IntoSql};
 use diesel::helper_types::*;
 use diesel::pg::Pg;
 use diesel::prelude::*;

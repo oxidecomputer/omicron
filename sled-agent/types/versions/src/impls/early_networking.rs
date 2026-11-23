@@ -11,6 +11,8 @@ use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::NumberedRouter;
+use crate::latest::early_networking::PortConfig;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
 use crate::latest::early_networking::RouterPeerIpAddr;
@@ -21,6 +23,7 @@ use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use crate::latest::early_networking::UplinkIpNet;
 use crate::latest::early_networking::UplinkIpNetError;
+use crate::latest::early_networking::UplinkPorts;
 use ipnetwork::IpNetwork;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
@@ -30,6 +33,16 @@ use std::net::AddrParseError;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
+
+impl NumberedRouter {
+    pub fn target_addr(&self) -> RouterPeerIpAddr {
+        self.target_addr
+    }
+
+    pub fn src_addr(&self) -> Option<RouterPeerIpAddr> {
+        self.src_addr
+    }
+}
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
@@ -158,6 +171,18 @@ impl FromStr for RouterPeerIpAddr {
     }
 }
 
+impl RouterPeerIpAddr {
+    /// Returns true if `Self` contains an IPv4 address; false otherwise.
+    pub fn is_ipv4(&self) -> bool {
+        self.0.is_ipv4()
+    }
+
+    /// Returns true if `Self` contains an IPv6 address; false otherwise.
+    pub fn is_ipv6(&self) -> bool {
+        self.0.is_ipv6()
+    }
+}
+
 impl RouterPeerType {
     /// Returns true if `Self` describes a numbered peer; false otherwise.
     pub fn is_numbered(&self) -> bool {
@@ -170,6 +195,15 @@ impl RouterPeerType {
     /// Returns true if `Self` describes an unnumbered peer; false otherwise.
     pub fn is_unnumbered(&self) -> bool {
         !self.is_numbered()
+    }
+
+    /// Source address to use for peering session.
+    /// Value is `None` for unnumbered peers.
+    pub fn src_addr(&self) -> Option<RouterPeerIpAddr> {
+        match self {
+            RouterPeerType::Unnumbered(_) => None,
+            RouterPeerType::Numbered(peer) => peer.src_addr(),
+        }
     }
 }
 
@@ -304,6 +338,25 @@ impl fmt::Display for LinkFec {
     }
 }
 
+impl PortConfig {
+    /// Create a placeholder `PortConfig` for use in tests.
+    pub fn empty_for_tests(port: &str) -> Self {
+        Self {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: SwitchSlot::Switch0,
+            port: port.to_string(),
+            uplink_port_speed: LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+            allow_ddm_traffic: false,
+        }
+    }
+}
+
 // proptest `Arbitrary` impls that are too complex for
 // `#[derive(test_strategy::Arbitrary)]`
 #[cfg(any(test, feature = "testing"))]
@@ -313,6 +366,8 @@ mod complicated_arbitrary_impls {
     use crate::latest::early_networking::BfdPeerConfig;
     use crate::latest::early_networking::BgpConfig;
     use crate::latest::early_networking::ImportExportPolicy;
+    use crate::v47::early_networking::NumberedRouter;
+    use crate::v47::early_networking::UnnumberedRouter;
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
@@ -378,6 +433,57 @@ mod complicated_arbitrary_impls {
                     Self::try_from(ip).expect(
                         "unspecial IPs should produce valid RouterPeerIpAddrs",
                     )
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RouterPeerType {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Start with either numbered or unnumbered.
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            enum Kind {
+                Numbered(RouterPeerIpAddr),
+                Unnumbered(RouterLifetimeConfig),
+            }
+
+            // Converts an IP into a `RotuerPeerType::Numbered` value by gluing
+            // on an (optional) src_addr that, if Some(_), matches the IP
+            // family of `ip`.
+            fn glue_src_addr_matching_family(
+                ip: RouterPeerIpAddr,
+            ) -> impl Strategy<Value = RouterPeerType> {
+                let src_addr = match IpAddr::from(ip) {
+                    IpAddr::V4(_) => {
+                        arb_unspecial_ipv4().prop_map(IpAddr::V4).boxed()
+                    }
+                    IpAddr::V6(_) => {
+                        arb_unspecial_ipv6().prop_map(IpAddr::V6).boxed()
+                    }
+                };
+                let src_addr = src_addr.prop_flat_map(|src_addr| {
+                    let src_addr = RouterPeerIpAddr::try_from(src_addr).expect(
+                        "unspecial IPs should produce valid RouterPeerIpAddrs",
+                    );
+                    prop_oneof![Just(None), Just(Some(src_addr))]
+                });
+                src_addr.prop_map(move |src_addr| {
+                    NumberedRouter::new(ip, src_addr).unwrap().into()
+                })
+            }
+
+            any::<Kind>()
+                .prop_flat_map(|kind| match kind {
+                    Kind::Numbered(ip) => {
+                        glue_src_addr_matching_family(ip).boxed()
+                    }
+                    Kind::Unnumbered(router_lifetime) => {
+                        Just(UnnumberedRouter { router_lifetime }.into())
+                            .boxed()
+                    }
                 })
                 .boxed()
         }
@@ -642,6 +748,52 @@ mod complicated_arbitrary_impls {
 
             bfd_peer_config_strategy().boxed()
         }
+    }
+}
+
+impl UplinkPorts {
+    /// Returns the first port.
+    pub fn first(&self) -> &PortConfig {
+        &self.0[0]
+    }
+
+    /// Returns the number of ports, which is always at least one.
+    #[expect(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns an iterator over the ports.
+    pub fn iter(&self) -> std::slice::Iter<'_, PortConfig> {
+        self.0.iter()
+    }
+
+    /// Returns the ports as a (non-empty) slice.
+    pub fn as_slice(&self) -> &[PortConfig] {
+        &self.0
+    }
+
+    /// Consumes `self`, returning the inner (non-empty) list of ports.
+    pub fn into_vec(self) -> Vec<PortConfig> {
+        self.0
+    }
+}
+
+impl IntoIterator for UplinkPorts {
+    type Item = PortConfig;
+    type IntoIter = std::vec::IntoIter<PortConfig>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a UplinkPorts {
+    type Item = &'a PortConfig;
+    type IntoIter = std::slice::Iter<'a, PortConfig>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
     }
 }
 

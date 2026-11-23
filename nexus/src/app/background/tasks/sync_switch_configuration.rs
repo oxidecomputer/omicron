@@ -5,53 +5,44 @@
 //! Background task for propagating user provided switch configurations
 //! to the bootstore via sled-agent
 
-use crate::app::{
-    background::LoadedTargetBlueprint, switch_zone_address_mappings,
-};
+use crate::app::background::LoadedTargetBlueprint;
+use omicron_common::http_client::internal_http_client;
 
-use internal_dns_resolver::Resolver;
 use nexus_db_model::{BootstoreConfig, NETWORK_KEY};
+use nexus_types::deployment::SledFilter;
 use tokio::sync::watch;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use nexus_db_queries::{context::OpContext, db::DataStore};
+use nexus_db_queries::{
+    context::OpContext, db::DataStore, db::datastore::BootstoreGenerationBump,
+};
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
-use omicron_common::{
-    address::{Ipv6Subnet, get_sled_address},
-    api::external::DataPageParams,
-};
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
 use slog_error_chain::InlineErrorChain;
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    sync::Arc,
-};
+use std::{collections::HashSet, hash::Hash, sync::Arc};
 
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
-    resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl SwitchPortSettingsManager {
     pub fn new(
         datastore: Arc<DataStore>,
-        resolver: Resolver,
         rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
     ) -> Self {
-        Self { datastore, resolver, rx_blueprint }
+        Self { datastore, rx_blueprint }
     }
 }
 
@@ -79,6 +70,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 },
             };
 
+
             let mut status = SwitchPortSettingsManagerStatus::default();
 
             // TODO: https://github.com/oxidecomputer/omicron/issues/3090
@@ -89,24 +81,36 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let rack_id = rack.id().to_string();
                 let log = log.new(slog::o!("rack_id" => rack_id));
 
-                // lookup switch zones via DNS
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let mappings = match
-                    switch_zone_address_mappings(&self.resolver, &log).await
+                let sleds = match self
+                    .datastore
+                    .sled_list_all_batched(opctx, SledFilter::Commissioned)
+                    .await
                 {
-                    Ok(mappings) => mappings,
+                    Ok(sleds) => sleds,
                     Err(e) => {
-                        error!(
-                            log,
-                            "failed to resolve addresses for switch services";
-                            "error" => %e);
-                        continue;
-                    },
+                        error!(log, "failed to retrieve sleds from database";
+                               "error" => %DisplayErrorChain::new(&e)
+                        );
+                        return json!({
+                            "error":
+                            format!(
+                                "failed to retrieve sleds from database : {}",
+                                DisplayErrorChain::new(&e)
+                            )
+                        });
+                    }
                 };
 
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build sled agent clients for sleds that are connected to the switches
-                let scrimlet_sled_agent_clients = build_sled_agent_clients(&mappings, &log);
+                let scrimlet_clients = sleds
+                    .into_iter()
+                    .filter(|s| s.is_scrimlet())
+                    .map(|s| {
+                        sled_agent_client::Client::new_with_client(
+                            &format!("http://{}", s.address()),
+                            internal_http_client(),
+                            log.clone(),
+                        )
+                    });
 
                 //
                 // calculate and apply bootstore changes
@@ -131,6 +135,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     }
                 };
+                let expected_generation = input.bootstore_generation;
 
                 let rack_network_config =
                     match nexus_switch_config::build_rack_network_config(
@@ -281,6 +286,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //   again during the next run
                 // * We are able to accomplish the above without inspecting
                 //   the bootstore on the sled-agents
+                // * We never overwrite the bootstore with an older rack network
+                //   config.
                 //
                 // For example, in the event that we crash after pushing to
                 // the sled-agents successfully, but before writing the
@@ -295,11 +302,32 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // 7. RPW will record the update in the db
                 // 8. We are now back on the happy path
                 if bootstore_needs_update {
+                    // We should only write if we manage to bump the bootstore
+                    // gen number from `expected_generation`, which is done
+                    // atomically with a "compare-and-swap" approach. This
+                    // guarantees that we never write a `RackNetworkConfig`
+                    // older than one already written.
                     let generation = match self.datastore
-                        .bump_bootstore_generation(opctx, NETWORK_KEY.into())
+                        .try_bump_bootstore_generation(
+                            opctx,
+                            NETWORK_KEY.into(),
+                            expected_generation,
+                        )
                         .await
                     {
-                        Ok(value) => value,
+                        Ok(BootstoreGenerationBump::Bumped(value)) => value,
+                        Ok(BootstoreGenerationBump::UnexpectedGeneration) => {
+                            // Lost the race to another nexus.
+                            info!(
+                                log,
+                                "bootstore generation changed since the config \
+                                 was read (another Nexus likely wrote first); \
+                                 skipping";
+                                "key" => %NETWORK_KEY,
+                                "expected_generation" => ?expected_generation,
+                            );
+                            continue;
+                        },
                         Err(e) => {
                             error!(
                                 log,
@@ -335,15 +363,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
-                    // push the updates to both scrimlets
-                    // if both scrimlets are down, bootstore updates aren't happening anyway
+                    // Update the bootstore. We eagerly push updates to both scrimlets.
                     let mut one_succeeded = false;
-                    for (switch_slot, client) in &scrimlet_sled_agent_clients {
+                    for client in scrimlet_clients {
                         if let Err(e) = client.write_network_bootstore_config(&write_request).await {
                             error!(
                                 log,
                                 "error updating bootstore";
-                                "switch_slot" => ?switch_slot,
+                                "scrimlet_client" => ?client,
                                 "request" => ?write_request,
                                 "error" => %e,
                             )
@@ -407,26 +434,6 @@ where
     left == right
 }
 
-fn build_sled_agent_clients(
-    mappings: &HashMap<SwitchSlot, std::net::Ipv6Addr>,
-    log: &slog::Logger,
-) -> HashMap<SwitchSlot, sled_agent_client::Client> {
-    let sled_agent_clients: HashMap<SwitchSlot, sled_agent_client::Client> =
-        mappings
-            .iter()
-            .map(|(switch_slot, addr)| {
-                // build sled agent address from switch zone address
-                let addr = get_sled_address(Ipv6Subnet::new(*addr));
-                let client = sled_agent_client::Client::new(
-                    &format!("http://{}", addr),
-                    log.clone(),
-                );
-                (*switch_slot, client)
-            })
-            .collect();
-    sled_agent_clients
-}
-
 // Helper to decide whether we should update the replicated bootstore.
 //
 // `current_contents` are the most-recently-written bootstore contents; it
@@ -451,9 +458,10 @@ fn build_sled_agent_clients(
 // 3. Our desired config is different from `current_contents` and we are not
 //    operating on stale data. We return `true`.
 //
-// Today, we only partially handle case 2. We store generation numbers that
-// allow us to detect a stale `desired_blueprint_networking_config`, but we have
-// no way of detecting a stale `desired_rack_network_config`. If
+// We store generation numbers that allow us to detect a stale
+// `desired_blueprint_networking_config`. A stale `desired_rack_network_config`
+// is never written, because the caller only bumps the bootstore generation if
+// it hasn't changed since the config was read. If
 // `desired_blueprint_networking_config` is not stale and either desired config
 // is different from `current_contents`, we'll return true.
 fn does_bootstore_need_update(
@@ -536,8 +544,9 @@ fn does_bootstore_need_update(
     // Compute staleness and "are there changes" for
     // `desired_rack_network_config`.
     //
-    // TODO-correctness We have no way of computing staleness! We must always
-    // assume `desired_rack_network_config` is not out of date.
+    // We always assume `desired_rack_network_config` is not out of date at
+    // this point. The caller only writes it if its compare-and-swap on the
+    // bootstore generation succeeds.
     let is_network_config_out_of_date = DesiredConfigOutOfDate::No;
     let is_network_config_different = {
         let RackNetworkConfig {
@@ -636,8 +645,8 @@ fn does_bootstore_need_update(
 mod tests {
     use super::*;
     use iddqd::IdOrdMap;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::UplinkPorts;

@@ -13,6 +13,7 @@ use futures::future::BoxFuture;
 use futures::stream;
 use internal_dns_types::config::DnsConfigParams;
 use nexus_db_queries::context::OpContext;
+use omicron_common::http_client::internal_http_client;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -151,7 +152,11 @@ async fn dns_propagate_one(
 ) -> anyhow::Result<()> {
     let url = format!("http://{}", server_addr);
     let log = log.new(o!("dns_server_url" => url.clone()));
-    let client = dns_service_client::Client::new(&url, log.clone());
+    let client = dns_service_client::Client::new_with_client(
+        &url,
+        internal_http_client(),
+        log.clone(),
+    );
 
     let result = client.dns_config_put(dns_config).await.with_context(|| {
         format!(
@@ -186,7 +191,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params::DnsConfigParams;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;

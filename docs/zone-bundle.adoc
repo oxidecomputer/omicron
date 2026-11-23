@@ -10,7 +10,7 @@ including current, rotated and archived files. It also runs a series of
 debugging commands in the target zone, such as `netstat -an`. All of these items
 are packaged into a tarball that can be fetched from the system.
 
-= Running
+== Running
 
 `zone-bundle` is a binary from the `omicron-sled-agent` crate. It relies on the
 sled-agent's HTTP API, making requests to it for creating or fetching zone
@@ -30,7 +30,7 @@ commands are:
 NOTE: Internal storage for Gimlets refers to debug datasets on the internal M.2
 drives.
 
-= Basic usage
+== Basic usage
 
 `zone-bundle` talks to the sled-agent's HTTP API. The sled-agent manages the
 bundles internally, though most of its operations are exposed in the API. As
@@ -44,7 +44,7 @@ ADDROBJ           TYPE     STATE        ADDR
 underlay0/sled6   static   ok           fd00:1122:3344:101::1/64
 ----
 
-== List zones
+=== List zones
 
 Once we've found the sled-agent, we can identify the zones available for
 bundling:
@@ -82,7 +82,7 @@ oxz_switch
 These are the zones managed by the sled-agent on this system. As they're
 created, Propolis zones will also show up in this list.
 
-== Creating and listing zone bundles
+=== Creating and listing zone bundles
 
 Once a target zone has been identified, a bundle can be created with
 
@@ -98,7 +98,7 @@ oxz_clickhouse_273d445b-0c96-4191-bcc6-116ea18d93f3              d3f1479e-a1a0-4
 We can then list the bundles as well. This takes an optional string on which to
 filter the bundles that are listed, based on a simple substring match.
 
-== Fetching bundles
+=== Fetching bundles
 
 This bundle lives on internal storage on the host machine. We need to ask the
 sled-agent to send it to us for inspection. Note that bundles are also cleaned
@@ -115,7 +115,7 @@ d3f1479e-a1a0-468e-aa43-9956471e039f.tar.gz
 TIP: You can create and fetch a bundle at the same time, using `zone-bundle get
 --create <ZONE_NAME>`.
 
-== Contents
+=== Contents
 
 The zone-bundles are gzip-compressed TAR archives. They contain text files with
 debugging information from the target zone. Here are the contents of an example
@@ -166,7 +166,7 @@ file (e.g., `svcs -L service-name`); any on-disk rotated log files (e.g,
 archived by the sled-agent. These will have names ending in Unix timestamps,
 e.g., `oxide-clickhouse:default.log.1692385019`.
 
-=== Zone-wide debugging commands
+==== Zone-wide debugging commands
 
 There are also a number of other files. These include the output of some
 debugging commands that apply to the whole zone, such as `netstat`. We can see
@@ -219,7 +219,7 @@ output or error of the file is written in the remainder. One can use a normal
 workflow for processing the output by just ignoring the first line, e.g., `cat
 netstat | tail +1 | <normal netstat processing pipeline>`.
 
-=== Process-specific commands
+==== Process-specific commands
 
 In addition to the zone-wide commands, there are a number of operations run
 against the Oxide-managed binaries running inside the zone. These end with the

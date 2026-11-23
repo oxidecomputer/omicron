@@ -25,6 +25,7 @@ mod nexus_test;
 pub mod resource_helpers;
 pub mod sql;
 mod starter;
+pub mod trust_quorum;
 
 pub use nexus_test::ControlPlaneBuilder;
 pub use nexus_test::ControlPlaneTestContext;
@@ -36,8 +37,6 @@ pub use starter::ControlPlaneTestContextSledAgent;
 pub use starter::register_test_producer;
 pub use starter::start_oximeter;
 pub use starter::start_producer_server;
-pub use starter::start_sled_agent;
-pub use starter::start_sled_agent_with_config;
 
 // TODO: Convert all the UUIDs here to be (typed) constants, similar to
 // RACK_UUID, and using the pattern

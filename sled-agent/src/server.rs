@@ -7,9 +7,11 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
+use crate::bootstrap::MultirackJoinAccessor;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
+use crate::sush::SushHandles;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
@@ -24,6 +26,9 @@ use std::sync::Arc;
 pub struct Server {
     /// Dropshot server for the API.
     http_server: dropshot::HttpServer<SledAgent>,
+
+    /// The Support Shell's task handles, if it is running.
+    sush: Option<SushHandles>,
 }
 
 impl Server {
@@ -36,13 +41,14 @@ impl Server {
     }
 
     /// Starts a SledAgent server
-    pub async fn start(
+    pub(crate) async fn start(
         config: &Config,
         log: Logger,
         request: StartSledAgentRequest,
         long_running_tasks_handles: LongRunningTaskHandles,
         config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
         services: ServiceManager,
+        multirack_join_accessor: MultirackJoinAccessor,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -57,6 +63,7 @@ impl Server {
 
         let nexus_client = make_nexus_client(&log, resolver);
 
+        let sush = long_running_tasks_handles.sush.clone();
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
@@ -65,6 +72,7 @@ impl Server {
             services,
             long_running_tasks_handles,
             config_reconciler_spawn_token,
+            multirack_join_accessor,
         )
         .await
         .map_err(|e| InlineErrorChain::new(&e).to_string())?;
@@ -82,11 +90,13 @@ impl Server {
                     dropshot::ClientSpecifiesVersionInHeader::new(
                         omicron_common::api::VERSION_HEADER,
                         sled_agent_api::latest_version(),
-                    ),
+                    )
+                    .min_version(sled_agent_api::oldest_version()),
                 )))
                 .start()
                 .map_err(|error| format!("initializing server: {}", error))?;
-        Ok(Server { http_server })
+
+        Ok(Server { http_server, sush })
     }
 
     pub(crate) fn sled_agent(&self) -> &SledAgent {
@@ -103,6 +113,9 @@ impl Server {
     }
 
     pub async fn close(self) -> Result<(), String> {
+        if let Some(sush) = &self.sush {
+            sush.shutdown();
+        }
         self.http_server.close().await
     }
 }

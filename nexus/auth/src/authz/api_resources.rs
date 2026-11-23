@@ -42,7 +42,7 @@ use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
-use omicron_uuid_kinds::{GenericUuid, RackUuid};
+use omicron_uuid_kinds::{BlueprintUuid, GenericUuid, RackUuid};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -231,7 +231,7 @@ impl ApiResourceWithRoles for Fleet {
         Ok(if silo_authn_policy.mapped_fleet_roles().is_empty() {
             None
         } else {
-            Some((ResourceType::Silo, silo_id))
+            Some((ResourceType::Silo, silo_id.into_untyped_uuid()))
         })
     }
 }
@@ -1442,7 +1442,7 @@ impl AuthorizedResource for SubnetPoolList {
 authz_resource! {
     name = "Project",
     parent = "Silo",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = ProjectKind },
     roles_allowed = true,
     polar_snippet = Custom,
 }
@@ -1701,6 +1701,16 @@ authz_resource! {
     polar_snippet = FleetChild,
 }
 
+impl Blueprint {
+    pub fn new_for_id(id: BlueprintUuid) -> Self {
+        Self::new(
+            FLEET,
+            *id.as_untyped_uuid(),
+            LookupType::ById(*id.as_untyped_uuid()),
+        )
+    }
+}
+
 authz_resource! {
     name = "ConsoleSession",
     parent = "Fleet",
@@ -1744,7 +1754,7 @@ authz_resource! {
 authz_resource! {
     name = "Silo",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = SiloKind },
     roles_allowed = true,
     polar_snippet = Custom,
 }
@@ -1910,6 +1920,14 @@ authz_resource! {
     name = "Alert",
     parent = "Fleet",
     primary_key = { uuid_kind = AlertKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Problem",
+    parent = "Fleet",
+    primary_key = { uuid_kind = ProblemKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

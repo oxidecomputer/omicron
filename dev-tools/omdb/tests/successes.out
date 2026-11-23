@@ -37,7 +37,7 @@ termination: Exited(0)
 stdout:
 GROUP    ZONE                         ver UPDATED              REASON                         
 internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup                     
-external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo" 
+external oxide-dev.test               3   <REDACTED_TIMESTAMP> test removed-names fetch limit 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -56,6 +56,59 @@ changes:                    names added: 3, names removed: 0
 +  @                                                  NS   ns1.oxide-dev.test
 +  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          2 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   ..........<REDACTED_UUID>...........
+version created because:    create silo: "test-suite-silo"
+changes:                    names added: 2, names removed: 0
+
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading added names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "2"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+WARN: loading removed names: found 2 items (the limit).  There may be more items that were ignored.  Consider overriding with --fetch-limit.
+=============================================
+EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "3", "--fetch-limit", "3"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+DNS zone:                   oxide-dev.test (External)
+requested version:          3 (created at <REDACTED_TIMESTAMP>)
+version created by Nexus:   test_omdb_success_cases
+version created because:    test removed-names fetch limit
+changes:                    names added: 0, names removed: 2
+
+-  @                                                  NS   ns1.oxide-dev.test
+-  ns1                                                AAAA ::1
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -89,9 +142,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +155,69 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
+created by:                  ..........<REDACTED_UUID>...........
+created at:                  <REDACTED_TIMESTAMP>
+comment:                     N/A
+
+status:                      this is the current sitrep!
+  version:                   v1
+  made current at:           <REDACTED_TIMESTAMP>
+
+== DIAGNOSIS INPUTS ============================================================
+inventory collection ID:     ..........<REDACTED_UUID>...........
+  started at:                <REDACTED_TIMESTAMP>
+  finished at:               <REDACTED_TIMESTAMP>
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     0
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "current", "--all-cases"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
+created by:                  ..........<REDACTED_UUID>...........
+created at:                  <REDACTED_TIMESTAMP>
+comment:                     N/A
+
+status:                      this is the current sitrep!
+  version:                   v1
+  made current at:           <REDACTED_TIMESTAMP>
+
+== DIAGNOSIS INPUTS ============================================================
+inventory collection ID:     ..........<REDACTED_UUID>...........
+  started at:                <REDACTED_TIMESTAMP>
+  finished at:               <REDACTED_TIMESTAMP>
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -119,6 +232,7 @@ ALL CONFIGURED SPs
     TYPE   SLOT 
     Sled   0    
     Sled   1    
+    Power  0    
     Switch 0    
     Switch 1    
 
@@ -127,6 +241,7 @@ SPs FOUND THROUGH IGNITION
     TYPE   SLOT SYSTEM_TYPE SP 
     Sled   0    Gimlet      on 
     Sled   1    Gimlet      on 
+    Power  0    PSC         on 
     Switch 0    Sidecar     on 
     Switch 1    Sidecar     on 
 
@@ -135,6 +250,7 @@ SERVICE PROCESSOR STATES
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
     Sled   0    i86pc            SimGimlet00 0   0000000000000000 A0  slot A     
     Sled   1    i86pc            SimGimlet01 0   0000000000000000 A0  slot A     
+    Power  0    FAKE_SIM_PSC     SimPsc0     0   0000000000000000 A2  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
@@ -169,6 +285,8 @@ SP DETAILS: type "Sled" slot 0
         dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
         dev-46       CPU temperature sensor                   sbtsi           Present  None   
         dev-53       FAKE Fan controller                      max31790        Present  None   
+        fan-tray-vpd FAKE Fan tray VPD                        at24csw080      Present  None   
+        ibc          FAKE intermediate bus converter          bmr491          Present  None   
 
     CABOOSES: none found
 
@@ -203,6 +321,37 @@ SP DETAILS: type "Sled" slot 1
         dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
         dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
+        ibc          FAKE intermediate bus converter          bmr491       Present  None   
+
+    CABOOSES: none found
+
+SP DETAILS: type "Power" slot 0
+
+    ROOT OF TRUST
+
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
+
+    COMPONENTS
+
+        NAME DESCRIPTION DEVICE  PRESENCE   SERIAL 
+        PSU0 PSU 0 MCU   mwocp68 Present    None   
+        PSU1 PSU 1 MCU   mwocp68 Present    None   
+        PSU2 PSU 2 MCU   mwocp68 NotPresent None   
+        PSU3 PSU 3 MCU   mwocp68 Present    None   
+        PSU4 PSU 4 MCU   mwocp68 Timeout    None   
+        PSU5 PSU 5 MCU   mwocp68 Present    None   
 
     CABOOSES: none found
 
@@ -226,9 +375,10 @@ SP DETAILS: type "Switch" slot 0
 
     COMPONENTS
 
-        NAME  DESCRIPTION               DEVICE          PRESENCE SERIAL 
-        dev-0 FAKE temperature sensor 1 fake-tmp-sensor Present  None   
-        dev-1 FAKE temperature sensor 2 fake-tmp-sensor Failed   None   
+        NAME  DESCRIPTION                     DEVICE          PRESENCE SERIAL 
+        dev-0 FAKE temperature sensor 1       fake-tmp-sensor Present  None   
+        dev-1 FAKE temperature sensor 2       fake-tmp-sensor Failed   None   
+        ibc   FAKE intermediate bus converter bmr491          Present  None   
 
     CABOOSES: none found
 
@@ -250,7 +400,12 @@ SP DETAILS: type "Switch" slot 1
         Stage0 status                      VALID                                                            
         stage0next status                  VALID                                                            
 
-    COMPONENTS: none found
+    COMPONENTS
+
+        NAME DESCRIPTION                     DEVICE PRESENCE SERIAL 
+        ibc  FAKE intermediate bus converter bmr491 Present  None   
+
+    CABOOSES: none found
 
 ---------------------------------------------
 stderr:
@@ -294,9 +449,17 @@ task: "blueprint_planner"
     Updates the target blueprint
 
 
+task: "blueprint_pruner"
+    prunes old blueprints from the database
+
+
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
+
+
+task: "capacity_metrics"
+    periodically emits quota capacity metrics
 
 
 task: "crdb_node_id_collector"
@@ -498,6 +661,14 @@ task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
 
+task: "vmm_mark_stop_for_update"
+    marks VMMs on evacuating sleds as needing to be stopped for an update
+
+
+task: "vmm_stop_for_update"
+    stops VMMs that are marked to be stopped for a sled update
+
+
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
@@ -608,7 +779,8 @@ task: "attached_subnet_manager"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-   no dendrite instances found
+  error looking up dendrite instances:
+    proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
    no sleds found
 
 task: "audit_log_cleanup"
@@ -632,6 +804,12 @@ task: "blueprint_planner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
+
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -661,6 +839,22 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
+
+task: "capacity_metrics"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -703,20 +897,15 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -726,10 +915,11 @@ task: "fm_config_loader"
     config last loaded at:       <REDACTED_TIMESTAMP>
       loaded by this activation: false
     current config:
-      source:                    default
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      source:                          default
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -774,36 +964,17 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    task explicitly disabled by config!
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -823,6 +994,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -1015,6 +1187,7 @@ task: "sp_ereport_ingester"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     SPs found via ignition:       0
+    total racks:                  0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -1093,6 +1266,19 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
+    VMMs marked to be stopped for an update: 0
+
+task: "vmm_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs stopped for sled evacuation: 0 total
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1333,7 +1519,8 @@ task: "attached_subnet_manager"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-   no dendrite instances found
+  error looking up dendrite instances:
+    proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
    no sleds found
 
 task: "audit_log_cleanup"
@@ -1357,6 +1544,12 @@ task: "blueprint_planner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     blueprint planning explicitly disabled by config!
+
+task: "blueprint_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: Internal Error: no bp_target rows found
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1386,6 +1579,22 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
+
+task: "capacity_metrics"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    silo samples: 0
+    project samples: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1428,20 +1637,15 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
+    input preparation took <REDACTED DURATION>ms
+      alert_markers:          <REDACTED DURATION>ms
+      ereporter_restarts:     <REDACTED DURATION>ms
+      ereports:               <REDACTED DURATION>ms
+      in_service_disks:       <REDACTED DURATION>ms
+      in_service_sleds:       <REDACTED DURATION>ms
+      observed_sagas:         <REDACTED DURATION>ms
+      silo_certificates:      <REDACTED DURATION>ms
+      support_bundle_markers: <REDACTED DURATION>ms
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1451,10 +1655,11 @@ task: "fm_config_loader"
     config last loaded at:       <REDACTED_TIMESTAMP>
       loaded by this activation: false
     current config:
-      source:                    default
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      source:                          default
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1499,36 +1704,17 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    task explicitly disabled by config!
 
 task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:          true (default)
-      sitrep limit:              2500 (default)
-      history pruning threshold: 2000 (default)
+      analysis enabled:                true (default)
+      sitrep limit:                    2500 (default)
+      history pruning threshold:       2000 (default)
+      certificate expiry warning days: 30 (default)
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -1548,6 +1734,7 @@ task: "instance_reincarnation"
     instances eligible for reincarnation:                          0
       instance failed instances:                                   0
       start saga failed instances:                                 0
+      sled evacuated instances:                                    0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -1740,6 +1927,7 @@ task: "sp_ereport_ingester"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     SPs found via ignition:       0
+    total racks:                  0
     total ereports received:      <TOTAL_EREPORTS_RECEIVED_REDACTED>
       new ereports ingested:      <NEW_EREPORTS_INGESTED_REDACTED>
     total HTTP requests sent:     <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
@@ -1818,6 +2006,19 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vmm_mark_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    batch size:                              1000
+    VMMs marked to be stopped for an update: 0
+
+task: "vmm_stop_for_update"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    VMMs stopped for sled evacuation: 0 total
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1902,10 +2103,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1952,10 +2154,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2026,6 +2229,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
@@ -2049,10 +2253,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2099,10 +2304,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2173,6 +2379,7 @@ parent:    <none>
     created by::::::::::::::   nexus-test-utils
     created at::::::::::::::   <REDACTED_TIMESTAMP>
     comment:::::::::::::::::   initial test blueprint
+    reflects collection:::::   (indeterminate)
     internal DNS version::::   1
     external DNS version::::   2
     target release min gen::   1
@@ -2231,11 +2438,25 @@ Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
-    disruption policy: terminate
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
     planner enabled: false
+    planner config:
+        disruption policy : terminate
+        sled update reboot policy: immediate (no evacuation)
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "reconfigurator-config", "show", "4294967295"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: no reconfigurator config with version 4294967295
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "update-status"]
 termination: Exited(0)
@@ -2245,9 +2466,9 @@ Count of each component type by system version:
 
                   |install-dataset |unknown 
 ------------------+----------------+--------
-RoT bootloader    |0               |4       
-RoT               |0               |4       
-SP                |0               |4       
+RoT bootloader    |0               |5       
+RoT               |0               |5       
+SP                |0               |5       
 Host OS (phase 1) |0               |2       
 Host OS (phase 2) |0               |2       
 Zone              |7               |0       
@@ -2263,6 +2484,7 @@ termination: Exited(0)
 stdout:
 Installed RoT Bootloader Software
 BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
 i86pc:SimGimlet00            unknown        unknown             
@@ -2270,6 +2492,7 @@ i86pc:SimGimlet01            unknown        unknown
 
 Installed RoT Software
 BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown (active) unknown        
 FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
 FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
 i86pc:SimGimlet00            unknown (active) unknown        
@@ -2277,6 +2500,7 @@ i86pc:SimGimlet01            unknown (active) unknown
 
 Installed SP Software
 BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_PSC:SimPsc0         unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
 i86pc:SimGimlet00            unknown       unknown       
@@ -2310,9 +2534,12 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-    tuf repo pruner enabled:   true (unchanged)
-*   planner enabled:::::::::   false -> true
-    disruption policy:::::::   terminate (unchanged)
+    tuf repo pruner enabled:::   true (unchanged)
+*   planner enabled:::::::::::   false -> true
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
+    disruption policy:::::::::   terminate (unchanged)
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2322,9 +2549,27 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    tuf repo pruner enabled:   true (unchanged)
-    planner enabled:::::::::   true (unchanged)
-*   disruption policy:::::::   terminate -> live-migrate or terminate
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
+*   disruption policy:::::::::   terminate -> live-migrate or terminate
+    sled update reboot policy:   immediate (no evacuation) (unchanged)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--sled-update-reboot-policy", "evacuate"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+reconfigurator config updated to version 4:
+    tuf repo pruner enabled:::   true (unchanged)
+    planner enabled:::::::::::   true (unchanged)
+    blueprint pruner enabled::   true (unchanged)
+    blueprint pruner nkeep::::   1000 (unchanged)
+    disruption policy:::::::::   live-migrate or terminate (unchanged)
+*   sled update reboot policy:   immediate (no evacuation) -> evacuate
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2334,11 +2579,16 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Reconfigurator config:
-    version: 3
+    version: 4
     modified time: <REDACTED_TIMESTAMP>
     tuf repo pruner enabled: true
-    disruption policy: live-migrate or terminate
+    blueprint pruner enabled: true
+    blueprint pruner nkeep: 1000
     planner enabled: true
+    planner config:
+        disruption policy : live-migrate or terminate
+        sled update reboot policy: evacuate
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2403,10 +2653,11 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    default
-  analysis enabled:          true (default)
-  sitrep limit:              2500 (default)
-  history pruning threshold: 2000 (default)
+  source:                          default
+  analysis enabled:                true (default)
+  sitrep limit:                    2500 (default)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2417,9 +2668,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 1:
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2430,13 +2682,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    version 1
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 1
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       I am altering the config. Pray I do not alter it further.
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2447,9 +2700,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 2:
-  analysis enabled:          false (overriden)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                false (overriden)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2460,13 +2714,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 current fault management configuration:
-  source:                    version 2
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 2
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       oops i altered it further
-  analysis enabled:          false (overriden)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                false (overriden)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
@@ -2477,15 +2732,239 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration v1:
-  source:                    version 1
-    modified at:             <REDACTED_TIMESTAMP>
-    comment:                
+  source:                          version 1
+    modified at:                   <REDACTED_TIMESTAMP>
+    comment:                      
       I am altering the config. Pray I do not alter it further.
-  analysis enabled:          true (default)
-  sitrep limit:              3000 (overriden)
-  history pruning threshold: 2000 (default)
+  analysis enabled:                true (default)
+  sitrep limit:                    3000 (overriden)
+  history pruning threshold:       2000 (default)
+  certificate expiry warning days: 30 (default)
 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
+created by:                  00000000-0000-0000-0000-000000000004
+created at:                  <REDACTED_TIMESTAMP>
+comment:
+  an example sitrep with cases
+status:                      not committed to the sitrep history
+
+== DIAGNOSIS INPUTS ============================================================
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     3
+
+== CASES =======================================================================
+3 open, 4 closed
+
+(i) activity in this sitrep: + opened, * changed, - closed
+
+*  case 00000000-0000-0000-0000-000000000032 open   certificate   // opened earlier, alert requested in this sitrep
++  case 00000000-0000-0000-0000-00000000000a open   physical_disk // zpool is degraded
+ - case 00000000-0000-0000-0000-000000000046 closed physical_disk // opened earlier, closed in this sitrep
+*- case 00000000-0000-0000-0000-000000000014 closed power_shelf   // PSU was reseated
+   case 00000000-0000-0000-0000-000000000050 closed power_shelf   // closed in an earlier sitrep
+   case 00000000-0000-0000-0000-000000000028 open   saga          // opened earlier, no changes in this sitrep
++- case 00000000-0000-0000-0000-00000000003c closed smf_service   // opened and closed in this sitrep
+
+(i) to view details for a single case, use:
+    $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --case <CASE_ID>
+(i) or, to show details for all cases in this sitrep, use:
+    $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --all-cases
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001", "--all-cases"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
+created by:                  00000000-0000-0000-0000-000000000004
+created at:                  <REDACTED_TIMESTAMP>
+comment:
+  an example sitrep with cases
+status:                      not committed to the sitrep history
+
+== DIAGNOSIS INPUTS ============================================================
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+ereports in this sitrep:     3
+
+== CASES =======================================================================
+
+  * case 00000000-0000-0000-0000-00000000000a
+    // zpool is degraded
+    diagnosis engine: physical_disk
+    opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+    ereports:
+    * ereport 00000000-0000-0000-0000-000000000003:1
+      // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
+      class:         ereport.example.disk
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-00000000000b
+    * ereport 00000000-0000-0000-0000-000000000003:2
+      // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
+      class:         ereport.example.zpool
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-00000000000c
+    facts:
+    * fact 00000000-0000-0000-0000-00000000000d
+      // zpool health was observed in inventory
+      added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+      * payload:
+        * engine: physical_disk
+        * kind: zpool_unhealthy
+        * last_seen_health: degraded
+        * observed_in_inv: 00000000-0000-0000-0000-000000000010
+        * physical_disk_id: 00000000-0000-0000-0000-00000000000e
+        * time_observed: <REDACTED_TIMESTAMP>
+        * zpool_id: 00000000-0000-0000-0000-00000000000f
+    alerts requested:
+    * alert 00000000-0000-0000-0000-000000000011
+      // tell someone about the zpool
+      class:        test.foo, v0
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+    support bundles requested:
+    * bundle 00000000-0000-0000-0000-000000000012
+      // collect everything
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+      data:
+        - reconfigurator
+        - host_info(all)
+        - sled_cubby_info
+        - sp_dumps
+        - sp_components
+        - ereports(none)
+
+  * case 00000000-0000-0000-0000-000000000014
+    // PSU was reseated
+    diagnosis engine: power_shelf
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+    ereports:
+    * ereport 00000000-0000-0000-0000-000000000003:3
+      // ereport 00000000-0000-0000-0000-000000000003:3 looks relevant
+      class:         ereport.example.psu
+      reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+      added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+      assignment ID: 00000000-0000-0000-0000-000000000015
+
+  * case 00000000-0000-0000-0000-000000000028
+    // opened earlier, no changes in this sitrep
+    diagnosis engine: saga
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+
+  * case 00000000-0000-0000-0000-000000000032
+    // opened earlier,
+    // alert requested in this sitrep
+    diagnosis engine: certificate
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    alerts requested:
+    * alert 00000000-0000-0000-0000-000000000033
+      // the certificate is still bad
+      class:        test.foo, v0
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+  * case 00000000-0000-0000-0000-00000000003c
+    // opened and closed in this sitrep
+    diagnosis engine: smf_service
+    opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+  * case 00000000-0000-0000-0000-000000000046
+    // opened earlier, closed in this sitrep
+    diagnosis engine: physical_disk
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+  * case 00000000-0000-0000-0000-000000000050
+    // closed in an earlier sitrep
+    diagnosis engine: power_shelf
+    opened in sitrep: 00000000-0000-0000-0000-000000000006
+    closed in sitrep: 00000000-0000-0000-0000-000000000002
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001", "--case", "00000000-0000-0000-0000-00000000000a"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+case 00000000-0000-0000-0000-00000000000a
+// zpool is degraded
+diagnosis engine: physical_disk
+opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+ereports:
+* ereport 00000000-0000-0000-0000-000000000003:1
+  // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
+  class:         ereport.example.disk
+  reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+  added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+  assignment ID: 00000000-0000-0000-0000-00000000000b
+* ereport 00000000-0000-0000-0000-000000000003:2
+  // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
+  class:         ereport.example.zpool
+  reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+  added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+  assignment ID: 00000000-0000-0000-0000-00000000000c
+facts:
+* fact 00000000-0000-0000-0000-00000000000d
+  // zpool health was observed in inventory
+  added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+  * payload:
+    * engine: physical_disk
+    * kind: zpool_unhealthy
+    * last_seen_health: degraded
+    * observed_in_inv: 00000000-0000-0000-0000-000000000010
+    * physical_disk_id: 00000000-0000-0000-0000-00000000000e
+    * time_observed: <REDACTED_TIMESTAMP>
+    * zpool_id: 00000000-0000-0000-0000-00000000000f
+alerts requested:
+* alert 00000000-0000-0000-0000-000000000011
+  // tell someone about the zpool
+  class:        test.foo, v0
+  requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+support bundles requested:
+* bundle 00000000-0000-0000-0000-000000000012
+  // collect everything
+  requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+  data:
+    - reconfigurator
+    - host_info(all)
+    - sled_cubby_info
+    - sp_dumps
+    - sp_components
+    - ereports(none)
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
 =============================================

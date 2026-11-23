@@ -13,6 +13,7 @@ use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use anyhow::anyhow;
 use anyhow::bail;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::lldpd::LldpdReconcilerStatus;
 use scuffle::AddPropertyGroupFlags;
 use scuffle::EditPropertyGroups;
 use scuffle::HasComposedPropertyGroups;
@@ -53,31 +54,6 @@ mod property_name {
     pub(super) const MANAGEMENT_ADDRS: &str = "management_addrs";
 }
 
-#[derive(Debug, Clone)]
-pub enum LldpdReconcilerStatus {
-    Failed(String),
-    SkippedConfigUpToDate,
-    Reconciled { ports: BTreeMap<String, LldpAdminStatus> },
-}
-
-impl slog::KV for LldpdReconcilerStatus {
-    fn serialize(
-        &self,
-        _record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        match self {
-            LldpdReconcilerStatus::Failed(reason) => {
-                serializer.emit_str("lldpd".into(), reason)
-            }
-            LldpdReconcilerStatus::SkippedConfigUpToDate => serializer
-                .emit_str("lldpd".into(), "skipped: config up-to-date"),
-            LldpdReconcilerStatus::Reconciled { ports } => serializer
-                .emit_usize("lldpd-reconciled-ports".into(), ports.len()),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct LldpdReconciler {
     switch_slot: ThisSledSwitchSlot,
@@ -97,7 +73,6 @@ impl Reconciler for LldpdReconciler {
     ) -> Self {
         let is_running_in_test_mode = match mode {
             ScrimletReconcilersMode::SwitchZone(_) => false,
-            #[cfg(any(test, feature = "testing"))]
             ScrimletReconcilersMode::Test { .. } => true,
         };
         Self { switch_slot, is_running_in_test_mode }

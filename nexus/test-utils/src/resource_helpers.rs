@@ -34,10 +34,6 @@ use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::hardware::Baseboard;
 use nexus_types::external_api::image;
-use nexus_types::external_api::instance;
-use nexus_types::external_api::instance::{
-    InstanceAutoRestartPolicy, InstanceCpuCount,
-};
 use nexus_types::external_api::internet_gateway;
 use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
@@ -46,7 +42,6 @@ use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolRange, IpRange, IpVersion,
 };
-use nexus_types::external_api::multicast;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
@@ -62,8 +57,6 @@ use nexus_types::external_api::vpc;
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
-use nexus_types_versions::latest::instance::Instance;
-use nexus_types_versions::latest::instance::InstanceCpuPlatform;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -74,17 +67,14 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::UserId;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -93,6 +83,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use slog::debug;
 use std::collections::BTreeMap;
@@ -100,6 +94,12 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
+
+mod instance;
+pub use instance::{
+    InstanceCreateBuilder, create_instance, create_instance_from_body,
+    create_instance_stopped, create_instance_with_error,
+};
 
 pub async fn objects_list_page_authz<ItemType>(
     client: &ClientTestContext,
@@ -394,10 +394,22 @@ pub async fn create_default_ip_pools(
     ];
     let (v4_pool, ..) =
         create_ip_pool(&client, "default-v4", Some(ranges[0])).await;
-    link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default-v4",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
     let (v6_pool, ..) =
         create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
-    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(
+        &client,
+        "default-v6",
+        &DEFAULT_SILO.id().into_untyped_uuid(),
+        true,
+    )
+    .await;
     (v4_pool, v6_pool)
 }
 
@@ -450,7 +462,7 @@ pub async fn create_default_subnet_pool(
     link_subnet_pool(
         client,
         pool_name,
-        &nexus_types::silo::DEFAULT_SILO_ID,
+        &nexus_types::silo::DEFAULT_SILO_ID.into_untyped_uuid(),
         true,
     )
     .await;
@@ -593,23 +605,15 @@ pub async fn create_switch(
 pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
 ) -> Silo {
-    create_silo_with_admin_group_name(
-        client,
-        silo_name,
-        discoverable,
-        identity_mode,
-        None,
-    )
-    .await
+    create_silo_with_admin_group_name(client, silo_name, identity_mode, None)
+        .await
 }
 
 pub async fn create_silo_with_admin_group_name(
     client: &ClientTestContext,
     silo_name: &str,
-    discoverable: bool,
     identity_mode: silo::SiloIdentityMode,
     admin_group_name: Option<String>,
 ) -> Silo {
@@ -622,7 +626,6 @@ pub async fn create_silo_with_admin_group_name(
                 description: "a silo".to_string(),
             },
             quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
-            discoverable,
             identity_mode,
             admin_group_name,
             tls_certificates: vec![],
@@ -695,6 +698,7 @@ pub async fn create_project(
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
+            defaults: None,
         },
     )
     .await
@@ -877,96 +881,6 @@ pub async fn delete_image(
     object_delete(client, &url).await
 }
 
-/// Creates an instance with a default NIC and no disks.
-///
-/// Wrapper around [`create_instance_with`].
-pub async fn create_instance(
-    client: &ClientTestContext,
-    project_name: &str,
-    instance_name: &str,
-) -> Instance {
-    create_instance_with(
-        client,
-        project_name,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        // Disks=
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        // External IPs=
-        Vec::<instance::ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        // Multicast groups=
-        Vec::<multicast::MulticastGroupJoinSpec>::new(),
-    )
-    .await
-}
-
-/// Creates an instance with attached resources.
-// I know, Clippy. I don't like it either...
-#[allow(clippy::too_many_arguments)]
-pub async fn create_instance_with(
-    client: &ClientTestContext,
-    project_name: &str,
-    instance_name: &str,
-    nics: &instance::InstanceNetworkInterfaceAttachment,
-    disks: Vec<instance::InstanceDiskAttachment>,
-    external_ips: Vec<instance::ExternalIpCreate>,
-    start: bool,
-    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
-    cpu_platform: Option<InstanceCpuPlatform>,
-    multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
-) -> Instance {
-    let url = format!("/v1/instances?project={}", project_name);
-
-    object_create(
-        client,
-        &url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: instance_name.parse().unwrap(),
-                description: format!("instance {:?}", instance_name),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces: nics.clone(),
-            external_ips,
-            disks,
-            boot_disk: None,
-            cpu_platform,
-            start,
-            auto_restart_policy,
-            anti_affinity_groups: Vec::new(),
-            multicast_groups,
-            enable_jumbo_frames: false,
-        },
-    )
-    .await
-}
-
-/// Creates an instance, asserting a status code and returning the error.
-///
-/// Note that this accepts any serializable body, which allows users to create
-/// invalid inputs to test our parameter validation.
-pub async fn create_instance_with_error<T>(
-    client: &ClientTestContext,
-    project_name: &str,
-    body: &T,
-    status: StatusCode,
-) -> HttpErrorResponseBody
-where
-    T: serde::Serialize,
-{
-    let url = format!("/v1/instances?project={project_name}");
-    object_create_error(client, &url, body, status).await
-}
-
 pub async fn attach_disk_to_instance(
     client: &ClientTestContext,
     project_name: &str,
@@ -1047,6 +961,7 @@ pub async fn create_vpc(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         },
     )
     .await
@@ -1073,6 +988,7 @@ pub async fn create_vpc_with_error(
             },
             ipv6_prefix: None,
             dns_name: "abc".parse().unwrap(),
+            defaults: None,
         }))
         .expect_status(Some(status)),
     )

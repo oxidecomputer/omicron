@@ -168,7 +168,7 @@ mod test {
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use serde_json::json;
 
     type ControlPlaneTestContext =

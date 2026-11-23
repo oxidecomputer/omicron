@@ -15,11 +15,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use rustix::fd::AsRawFd;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::InventoryDataset;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
@@ -595,10 +595,9 @@ pub struct DatasetProperties {
     pub reservation: Option<ByteCount>,
     /// The compression algorithm used for this dataset.
     ///
-    /// This probably aligns with a value from
-    /// [omicron_common::disk::CompressionAlgorithm], but is left as an untyped
-    /// string so that unexpected compression formats don't prevent inventory
-    /// from being collected.
+    /// This probably aligns with a value from [`CompressionAlgorithm`], but is
+    /// left as an untyped string so that unexpected compression formats don't
+    /// prevent inventory from being collected.
     pub compression: String,
     /// The encryption key epoch for this dataset.
     ///
@@ -1984,11 +1983,15 @@ impl Zfs {
                 size.to_bytes().to_string(),
                 "-o".to_string(),
                 "rawvol=on".to_string(),
-                // No need to set volblocksize for raw zvols: either the default
-                // record size will be used, or after stlouis#915 integrates an
-                // optimized allocation size will be automatically selected no
-                // matter what volblocksize is set (in this case, volblocksize
-                // sets the minimum allowed record size).
+                // Don't let `zfs create` set a temporary refreservation. The
+                // space is already reserved by the parent dataset, based on
+                // Nexus's accounting, and older ZFS versions' automatic
+                // refreservation may not fit under the parent's quota.
+                "-o".to_string(),
+                "refreservation=none".to_string(),
+                // No need to set volblocksize for raw zvols: ZFS will
+                // automatically select the appropriate volblocksize, with a
+                // minimum of the volblocksize property, which defaults to 8KB.
                 name.to_string(),
             ],
 
@@ -2543,6 +2546,7 @@ pub async fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>
 #[cfg(test)]
 mod test {
     use super::*;
+    use sled_agent_types::disk::GzipLevel;
 
     #[cfg(target_os = "illumos")]
     #[tokio::test]
@@ -2869,7 +2873,7 @@ mod test {
             quota: Some(hundred_gib),
             reservation: None,
             compression: CompressionAlgorithm::GzipN {
-                level: omicron_common::disk::GzipLevel::new::<9>(),
+                level: GzipLevel::new::<9>(),
             },
         });
 

@@ -16,12 +16,13 @@ use wicketd_commission_api::{
 };
 use wicketd_commission_types::inventory::{
     BaseboardId, GetBootstrapSledsResponse, Inventory, InventoryParams,
-    LocationInfo, SpIdentifier, SpType, SwitchSlot,
+    LocationInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
     BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
-    PrivateKeyPem, PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
-    RackSetupStatus, RunRackSetupResponse, SetBgpAuthKeyStatus,
+    MultirackJoinRequest, PrivateKeyPem, PutRecoveryUserPasswordHash,
+    PutRssUserConfigInsensitive, RackSetupStatus, RunMultirackJoinResponse,
+    RunRackSetupResponse, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types::update::{
     ClearUpdateStateParams, ClearUpdateStateResponse,
@@ -40,6 +41,7 @@ use crate::http_helpers::{
 use crate::mgs::{
     GetInventoryResponse as MgsInventoryResponse, MgsHandle, ShutdownInProgress,
 };
+use crate::update_tracker::SystemVersionAndEventReports;
 
 /// How long to wait for a forced SP refresh.
 ///
@@ -244,28 +246,22 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetUpdateProgressResponse>, HttpError> {
         let ctx = rqctx.context();
-        let event_reports = ctx.update_tracker.event_reports().await;
+        let SystemVersionAndEventReports { system_version, event_reports } =
+            ctx.update_tracker.system_version_and_event_reports().await;
 
-        // event_reports is keyed by (sp_type, slot), so the derived
-        // SpIdentifiers are unique by construction.
-        //
-        // TODO: once rkdeploy is on the published API, we can make
-        // `event_reports` be an IdOrdMap and make this much simpler.
         let mut sps = IdOrdMap::new();
-        for (sp_type, slots) in event_reports {
-            for (slot, report) in slots {
-                sps.insert_unique(progress::sp_update_progress(
-                    SpIdentifier { typ: sp_type, slot },
-                    report,
-                ))
-                .expect(
-                    "event_reports is keyed by (sp_type, slot), so SP ids \
-                     are unique",
-                );
-            }
+        for report in event_reports {
+            sps.insert_unique(progress::sp_update_progress(
+                report.sp,
+                report.event_report,
+            ))
+            .expect("event_reports is keyed by SpIdentifier");
         }
 
-        Ok(HttpResponseOk(GetUpdateProgressResponse { sps }))
+        Ok(HttpResponseOk(GetUpdateProgressResponse {
+            repository: RepositoryDescription { system_version },
+            sps,
+        }))
     }
 
     async fn post_start_update(
@@ -368,7 +364,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         )?;
 
         let response = rss_config
-            .push_cert(body.into_inner().0)
+            .push_cert(body.into_inner())
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
@@ -386,7 +382,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         )?;
 
         let response = rss_config
-            .push_key(body.into_inner().0)
+            .push_key(body.into_inner())
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
@@ -459,5 +455,35 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .into_inner();
 
         Ok(HttpResponseOk(RunRackSetupResponse { id }))
+    }
+
+    async fn post_run_multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinRequest>,
+    ) -> Result<HttpResponseOk<RunMultirackJoinResponse>, HttpError> {
+        let ctx = rqctx.context();
+
+        let client = ba_lockstep_client(ctx);
+        let MultirackJoinRequest { trust_quorum_peers, rack_network_config } =
+            body.into_inner();
+
+        slog::info!(
+            ctx.log,
+            "Sending multirack join request to {}",
+            client.baseurl()
+        );
+
+        let id = client
+            .multirack_join(
+                &bootstrap_agent_lockstep_types::MultirackJoinRequest {
+                    trust_quorum_peers,
+                    rack_network_config,
+                },
+            )
+            .await
+            .map_err(|err| ba_lockstep_error_to_http(err, "multirack join"))?
+            .into_inner();
+
+        Ok(HttpResponseOk(RunMultirackJoinResponse { id }))
     }
 }

@@ -18,6 +18,8 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_networking::GatewayClient;
+use nexus_networking::GatewaysByRack;
+use nexus_networking::RackGateways;
 use nexus_types::fm::ereport::EreportData;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
@@ -41,7 +43,6 @@ pub struct SpEreportIngester {
 struct Ingester {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
-    rack_id: RackUuid,
 }
 
 impl BackgroundTask for SpEreportIngester {
@@ -62,13 +63,12 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
-        rack_id: RackUuid,
         fm_analysis: Activator,
         disabled: bool,
     ) -> Self {
         Self {
             resolver,
-            inner: Ingester { datastore, nexus_id, rack_id },
+            inner: Ingester { datastore, nexus_id },
             fm_analysis,
             disabled,
         }
@@ -78,10 +78,6 @@ impl SpEreportIngester {
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
-        use gateway_client::types::SpIgnitionInfo;
-        use gateway_types::component::SpIdentifier;
-        use gateway_types::ignition::SpIgnition;
-
         let mut status = SpEreportIngesterStatus::default();
         if self.disabled {
             status.disabled = true;
@@ -91,29 +87,99 @@ impl SpEreportIngester {
             );
             return status;
         }
-        // Find MGS clients.
-        // TODO(eliza): reuse the same client across activations; qorb, etc.
-        //
-        // TODO-multirack: eventually, we'll need a way to discover the MGS
-        // clients for *all* the racks in the cluster, along with the rack ID of
-        // the rack those clients will talk to. How this works has yet to be
-        // determined. See also the 'TODO-multirack' comment in the
-        // `mgs_requests()` function for where the rack ID would be used.
-        let mgs_clients = match GatewayClient::resolve_all_gateways(
+        // Find MGS clients partitioned by rack ID.
+        let mgs_clients = match GatewaysByRack::resolve_all_gateways(
             &opctx.log,
             &self.resolver,
         )
         .await
         {
             Err(error) => {
-                const MSG: &str = "no MGS successfully returned SP ID list";
+                const MSG: &str = "no MGS DNS records resolved";
                 let error = InlineErrorChain::new(&*error);
                 error!(opctx.log, "{MSG}"; "error" => &error);
                 status.errors.push(format!("{MSG}: {error}"));
                 return status;
             }
-            Ok(clients) => clients.collect::<Arc<[_]>>(),
+            Ok(clients) => clients,
         };
+        for (GatewayClient { addr, .. }, error) in mgs_clients.unknown() {
+            status.errors.push(format!(
+                "failed to discover rack ID for MGS {addr}: {}",
+                InlineErrorChain::new(&error)
+            ));
+        }
+        // TODO(eliza): what seems like an appropriate parallelism? should we
+        // just do 16?
+        let mut tasks = ParallelTaskSet::new();
+        let mut totals = Totals { ereports: 0, new_ereports: 0, racks: 0 };
+
+        for RackGateways { rack_id, gateways } in mgs_clients.into_discovered()
+        {
+            self.ingest_one_rack(
+                opctx,
+                gateways,
+                rack_id,
+                &mut status,
+                &mut totals,
+                &mut tasks,
+            )
+            .await;
+        }
+
+        // Wait for remaining ingestion tasks to come back.
+        while let Some(sp_status) = tasks.join_next().await {
+            totals.ereports += sp_status.status.ereports_received;
+            totals.new_ereports += sp_status.status.new_ereports;
+            status.sps.push(sp_status);
+        }
+
+        // If any ereports were ingested that were not already in the database,
+        // trigger a new FM analysis run.
+        let Totals { ereports, new_ereports, racks } = totals;
+        if new_ereports > 0 {
+            slog::info!(
+                opctx.log,
+                "ingested {ereports} ({new_ereports} new) ereports from {} \
+                 service processors in {racks} racks",
+                status.sps.len();
+                "total_ereports" => ereports,
+                "new_ereports" => new_ereports,
+                "racks" => racks,
+                "absent_sps" => status.sps_not_present,
+            );
+            self.fm_analysis.activate();
+        } else {
+            slog::debug!(
+                opctx.log,
+                "ingested {ereports} (0 new) ereports from {} service \
+                 processors in {racks} racks",
+                status.sps.len();
+                "total_ereports" => ereports,
+                "new_ereports" => new_ereports,
+                "racks" => racks,
+                "absent_sps" => status.sps_not_present,
+            );
+        }
+
+        // Sort statuses for consistent output in OMDB commands.
+        status.sps.sort_unstable_by_key(|sp| (sp.sp_type, sp.slot));
+
+        status
+    }
+
+    async fn ingest_one_rack(
+        &mut self,
+        opctx: &OpContext,
+        mgs_clients: Vec<GatewayClient>,
+        rack_id: RackUuid,
+        status: &mut SpEreportIngesterStatus,
+        totals: &mut Totals,
+        tasks: &mut ParallelTaskSet<SpEreporterStatus>,
+    ) {
+        use gateway_client::types::SpIgnitionInfo;
+        use gateway_types::component::SpIdentifier;
+        use gateway_types::ignition::SpIgnition;
 
         // Ask MGS for the list of all present SP identifiers. If a request to
         // the first gateway fails, we'll try again for every resolved MGS
@@ -124,9 +190,9 @@ impl SpEreportIngester {
                 let Some(GatewayClient { addr, client }) = gateways.next()
                 else {
                     const MSG: &str = "no MGS successfully returned SP ID list";
-                    error!(opctx.log, "{MSG}");
-                    status.errors.push(MSG.to_string());
-                    return status;
+                    error!(opctx.log, "{MSG}"; "rack_id" => %rack_id);
+                    status.errors.push(format!("rack {rack_id}: {MSG}"));
+                    return;
                 };
                 match client.ignition_list().await {
                     Ok(ids) => break ids.into_inner(),
@@ -137,19 +203,20 @@ impl SpEreportIngester {
                             "{MSG}";
                             "error" => %err,
                             "gateway_addr" => %addr,
+                            "rack_id" => %rack_id
                         );
-                        status.errors.push(format!("{MSG} ({addr}): {err}"));
+                        status.errors.push(format!(
+                            "rack {rack_id}: {MSG} ({addr}): {err}"
+                        ));
                     }
                 }
             }
         };
 
-        // TODO(eliza): what seems like an appropriate parallelism? should we
-        // just do 16?
-        let mut tasks = ParallelTaskSet::new();
-        let mut total_ereports = 0;
-        let mut total_new_ereports = 0;
+        let mgs_clients = Arc::new(mgs_clients);
+        totals.racks += 1;
 
+        let mut this_rack_sps_found = 0;
         for SpIgnitionInfo { details, id } in sps {
             let ignition_type = match details {
                 SpIgnition::Present { id, .. } if details.is_sp_running() => id,
@@ -161,12 +228,14 @@ impl SpEreportIngester {
             };
 
             status.sps_found += 1;
+            this_rack_sps_found += 1;
 
             let SpIdentifier { typ: type_, slot } = id;
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
                         // XXX(eliza): that's so many little strings... :(
+                        ("rack_id".to_string(), rack_id.to_string()),
                         ("sp_type".to_string(), type_.to_string()),
                         (
                             "ignition_type".to_string(),
@@ -178,7 +247,9 @@ impl SpEreportIngester {
                     let ingester = self.inner.clone();
                     async move {
                         let status = ingester
-                            .ingest_sp_ereports(opctx, &clients, type_, slot)
+                            .ingest_sp_ereports(
+                                opctx, &clients, rack_id, type_, slot,
+                            )
                             .await;
                         SpEreporterStatus {
                             sp_type: type_,
@@ -190,49 +261,26 @@ impl SpEreportIngester {
                 })
                 .await;
             if let Some(sp_status) = sp_result {
-                total_ereports += sp_status.status.ereports_received;
-                total_new_ereports += sp_status.status.new_ereports;
+                totals.ereports += sp_status.status.ereports_received;
+                totals.new_ereports += sp_status.status.new_ereports;
                 status.sps.push(sp_status);
             }
         }
 
-        // Wait for remaining ingestion tasks to come back.
-        while let Some(sp_status) = tasks.join_next().await {
-            total_ereports += sp_status.status.ereports_received;
-            total_new_ereports += sp_status.status.new_ereports;
-            status.sps.push(sp_status);
-        }
-
-        // If any ereports were ingested that were not already in the database,
-        // trigger a new FM analysis run.
-        if total_new_ereports > 0 {
-            slog::info!(
-                opctx.log,
-                "ingested {total_ereports} ({total_new_ereports} new) \
-                 ereports from {} service processors",
-                status.sps.len();
-                "total_ereports" => total_ereports,
-                "new_ereports" => total_new_ereports,
-                "absent_sps" => status.sps_not_present,
-            );
-            self.fm_analysis.activate();
-        } else {
+        if this_rack_sps_found > 0 {
             slog::debug!(
-                opctx.log,
-                "ingested {total_ereports} (0 new) \
-                 ereports from {} service processors",
-                status.sps.len();
-                "total_ereports" => total_ereports,
-                "new_ereports" => total_new_ereports,
-                "absent_sps" => status.sps_not_present,
+                &opctx.log,
+                "spawned {} tasks to ingest SP ereports", this_rack_sps_found;
+                "rack_id" => %rack_id,
             );
         }
-
-        // Sort statuses for consistent output in OMDB commands.
-        status.sps.sort_unstable_by_key(|sp| (sp.sp_type, sp.slot));
-
-        status
     }
+}
+
+struct Totals {
+    ereports: usize,
+    new_ereports: usize,
+    racks: usize,
 }
 
 const LIMIT: std::num::NonZeroU32 = match std::num::NonZeroU32::new(255) {
@@ -245,6 +293,7 @@ impl Ingester {
         &self,
         opctx: OpContext,
         clients: &[GatewayClient],
+        rack_id: RackUuid,
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
     ) -> EreporterStatus {
@@ -258,13 +307,22 @@ impl Ingester {
                         errors: vec![format!(
                             "failed to query for latest ereport: {error:#}"
                         )],
-                        ..Default::default()
+                        rack_id,
+                        ereports_received: 0,
+                        new_ereports: 0,
+                        requests: 0,
                     };
                 }
             };
 
         let mut params = EreportQueryParams::from_latest(latest);
-        let mut status = EreporterStatus::default();
+        let mut status = EreporterStatus {
+            rack_id,
+            ereports_received: 0,
+            new_ereports: 0,
+            requests: 0,
+            errors: Vec::new(),
+        };
 
         // Continue requesting ereports from this SP in a loop until we have
         // received all its ereports.
@@ -300,24 +358,7 @@ impl Ingester {
                     restart_id,
                     time_collected,
                     self.nexus_id,
-                    // TODO-multirack: this argument to `ereports_insert` is
-                    // used to determine the rack ID of the SP that generated
-                    // this batch of ereports. Currently, using `self.rack_id`
-                    // (the rack ID of the Nexus instance ingesting the
-                    // ereports) is always correct, since this Nexus is only
-                    // ingesting ereports from SPs in its own rack. This will
-                    // not be the case if we begin ingesting ereports from SPs
-                    // in other racks.
-                    //
-                    // If this code changes to ingest ereports from the
-                    // management gateways in multiple racks, we'll need to
-                    // change this to pass the rack ID of the target rack, not
-                    // the one this Nexus lives in. Eventually, the rack ID will
-                    // become a property of the MGS clients that are passed into
-                    // this function: they'll have to become a type that says
-                    // "here are the clients for talking to the management
-                    // gateways in *that* rack, in particular".
-                    self.rack_id,
+                    rack_id,
                     reporter,
                     db_ereports,
                 )
@@ -456,6 +497,8 @@ mod tests {
 
     #[nexus_test(server = crate::Server)]
     async fn test_sp_ereport_ingestion(cptestctx: &ControlPlaneTestContext) {
+        let n_sps = cptestctx.num_sps();
+
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
@@ -472,7 +515,6 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
-            nexus.rack_id(),
             fm_analysis_activator.clone(),
             false,
         );
@@ -486,11 +528,11 @@ mod tests {
         dbg!(&activation1);
         assert_eq!(
             activation1.sps.len(),
-            4,
-            "ereports from 4 SPs should be observed: {:?}",
+            n_sps,
+            "ereports from {n_sps} SPs should be observed: {:?}",
             activation1.sps,
         );
-        assert_eq!(activation1.sps_found, 4);
+        assert_eq!(activation1.sps_found, n_sps);
         fm_analysis_activator
             .assert_activated("fm analysis task should be activated");
 
@@ -517,15 +559,20 @@ mod tests {
             "55e30cc7-a109-492f-aca9-735ed725df3c"
         ));
 
-        let sled0 =
-            ExpectedReporter { serial: "SimGimlet00", part: "SimGimletSp" };
+        let sled0 = ExpectedReporter {
+            serial: "SimGimlet00",
+            part: sp_sim::FAKE_GIMLET_MODEL,
+        };
         let sled0_ereports = [
             sled0.ereport(
                 1,
                 "ereport.data_loss.possible",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "packrat",
                     "hubris_task_gen": 0,
                     "hubris_uptime_ms": 666,
@@ -537,8 +584,11 @@ mod tests {
                 2,
                 "gov.nasa.apollo.o2_tanks.stir.begin",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1233,
@@ -551,8 +601,11 @@ mod tests {
                 3,
                 "io.discovery.ae35.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "drv_ae35_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1234,
@@ -574,8 +627,11 @@ mod tests {
                 4,
                 "gov.nasa.apollo.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_apollo_server",
                     "hubris_task_gen": 13,
                     "hubris_uptime_ms": 1237,
@@ -593,8 +649,11 @@ mod tests {
                 5,
                 "flagrant_error",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "drv_thingy_server",
                     "hubris_task_gen": 2,
                     "hubris_uptime_ms": 1240,
@@ -607,8 +666,11 @@ mod tests {
                 6,
                 "overfull_hbox",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_latex_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1245,
@@ -619,15 +681,20 @@ mod tests {
             ),
         ];
 
-        let sled1 =
-            ExpectedReporter { part: "SimGimletSp", serial: "SimGimlet01" };
+        let sled1 = ExpectedReporter {
+            part: sp_sim::FAKE_GIMLET_MODEL,
+            serial: "SimGimlet01",
+        };
         let sled1_ereports = [
             sled1.ereport(
                 1,
                 "ereport.data_loss.possible",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "packrat",
                     "hubris_task_gen": 0,
                     "hubris_uptime_ms": 666,
@@ -639,8 +706,11 @@ mod tests {
                 2,
                 "computer.oxide.gimlet.chassis_integrity.fault",
                 serde_json::json!({
-                    "hubris_archive_id": "ffffffff",
-                    "hubris_version": "0.0.2",
+                    "hubris_caboose": {
+                        "board": sp_sim::SIM_GIMLET_BOARD,
+                        "commit": "ffffffff",
+                        "version": "0.0.2",
+                    },
                     "hubris_task_name": "task_thermal_server",
                     "hubris_task_gen": 1,
                     "hubris_uptime_ms": 1233,
@@ -692,13 +762,13 @@ mod tests {
              have been ingested",
         );
         assert_eq!(
-            activation2.sps_found, 4,
-            "4 present SPs should have been found via ignition",
+            activation2.sps_found, n_sps,
+            "{n_sps} present SPs should have been found via ignition",
         );
         assert_eq!(
             activation2.sps.len(),
-            4,
-            "all 4 SPs should be reported in the status, even when no new \
+            n_sps,
+            "all {n_sps} SPs should be reported in the status, even when no new \
              ereports were observed: {:?}",
             activation2.sps,
         );
@@ -933,11 +1003,8 @@ mod tests {
                 "ereports from simulated previous restart should be inserted",
             );
 
-        let ingester = Ingester {
-            datastore: datastore.clone(),
-            nexus_id: nexus.id(),
-            rack_id: nexus.rack_id(),
-        };
+        let ingester =
+            Ingester { datastore: datastore.clone(), nexus_id: nexus.id() };
 
         // Generously longer than a terminating ingestion pass (a couple of
         // HTTP requests and a handful of database queries) could ever take.
@@ -947,6 +1014,7 @@ mod tests {
             ingester.ingest_sp_ereports(
                 opctx.child(BTreeMap::new()),
                 &clients,
+                nexus_test_utils::RACK_UUID,
                 sp_type,
                 sp_slot,
             ),

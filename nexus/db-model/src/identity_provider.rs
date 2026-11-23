@@ -7,9 +7,11 @@ use db_macros::Resource;
 use nexus_db_schema::schema::{identity_provider, saml_identity_provider};
 use nexus_types::identity::Resource;
 
+use crate::DbTypedUuid;
 use nexus_types::external_api::identity_provider as idp_types;
+use omicron_uuid_kinds::SiloKind;
+use omicron_uuid_kinds::SiloUuid;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 impl_enum_type!(
     IdentityProviderTypeEnum:
@@ -36,8 +38,14 @@ pub struct IdentityProvider {
     #[diesel(embed)]
     pub identity: IdentityProviderIdentity,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
     pub provider_type: IdentityProviderType,
+}
+
+impl IdentityProvider {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
 }
 
 impl From<IdentityProvider> for idp_types::IdentityProvider {
@@ -55,7 +63,7 @@ pub struct SamlIdentityProvider {
     #[diesel(embed)]
     pub identity: SamlIdentityProviderIdentity,
 
-    pub silo_id: Uuid,
+    pub silo_id: DbTypedUuid<SiloKind>,
 
     /// idp descriptor
     pub idp_metadata_document_string: String,
@@ -82,6 +90,12 @@ pub struct SamlIdentityProvider {
     /// if set, attributes with this name will be considered to denote a user's
     /// group membership, where the values will be the group names.
     pub group_attribute_name: Option<String>,
+}
+
+impl SamlIdentityProvider {
+    pub fn silo_id(&self) -> SiloUuid {
+        self.silo_id.into()
+    }
 }
 
 impl From<SamlIdentityProvider> for idp_types::SamlIdentityProvider {

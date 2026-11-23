@@ -154,6 +154,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::VolumeUuid;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
@@ -653,7 +654,10 @@ async fn check_from_previous_pantry_step(
     // requested activation in a background job. Is it finished?
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     match client.is_job_finished(&job_id.to_string()).await {
         Ok(status) => {
@@ -1324,7 +1328,10 @@ async fn execute_pantry_drive_action(
     // hang on the activation.
 
     let endpoint = format!("http://{}", pantry_address);
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    let client = crucible_pantry_client::Client::new_with_client(
+        &endpoint,
+        internal_http_client(),
+    );
 
     // Check pantry first, to see if this volume is attached already. This can
     // occur if:

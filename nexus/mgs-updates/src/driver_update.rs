@@ -20,6 +20,7 @@ use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::inventory::SpType;
+use omicron_common::http_client::internal_http_client_builder;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
@@ -204,7 +205,7 @@ fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
         // because we've seen sidecars take 20+ seconds to reset). We should
         // therefore wait at least as long as its timeouts; we'll add a buffer
         // here to leave plenty of time for minor weather between us and MGS.
-        let client = reqwest::ClientBuilder::new()
+        let client = internal_http_client_builder()
             .connect_timeout(Duration::from_secs(75))
             .timeout(Duration::from_secs(75))
             .build()

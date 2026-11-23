@@ -20,6 +20,7 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::model::OximeterInfo;
 use nexus_db_queries::db::model::ProducerEndpoint;
 use omicron_common::api::external::Error as DbError;
+use omicron_common::http_client::internal_http_client;
 use oximeter_client::Client as OximeterClient;
 use slog::Logger;
 use slog::info;
@@ -173,8 +174,11 @@ impl ExpiredProducers {
             let client_log =
                 opctx.log.new(o!("oximeter-collector" => info.id.to_string()));
             let address = SocketAddr::new(info.ip.ip(), *info.port);
-            let client =
-                OximeterClient::new(&format!("http://{address}"), client_log);
+            let client = OximeterClient::new_with_client(
+                &format!("http://{address}"),
+                internal_http_client(),
+                client_log,
+            );
             entry.insert(client);
         }
 

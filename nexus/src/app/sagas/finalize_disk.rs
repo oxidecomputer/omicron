@@ -20,19 +20,20 @@ use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::ProjectUuid;
+use omicron_uuid_kinds::SiloUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub silo_id: Uuid,
-    pub project_id: Uuid,
+    pub silo_id: SiloUuid,
+    pub project_id: ProjectUuid,
     pub disk: datastore::CrucibleDisk,
     pub snapshot_name: Option<Name>,
 }

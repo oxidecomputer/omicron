@@ -9,6 +9,8 @@ use nexus_types::external_api::probe as probe_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_uuid_kinds::ProjectKind;
+use omicron_uuid_kinds::ProjectUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
@@ -30,12 +32,15 @@ pub struct Probe {
     #[diesel(embed)]
     pub identity: ProbeIdentity,
 
-    pub project_id: Uuid,
+    pub project_id: DbTypedUuid<ProjectKind>,
     pub sled: DbTypedUuid<SledKind>,
 }
 
 impl Probe {
-    pub fn from_create(p: &probe_types::ProbeCreate, project_id: Uuid) -> Self {
+    pub fn from_create(
+        p: &probe_types::ProbeCreate,
+        project_id: ProjectUuid,
+    ) -> Self {
         Self {
             identity: ProbeIdentity::new(
                 Uuid::new_v4(),
@@ -44,9 +49,13 @@ impl Probe {
                     description: p.identity.description.clone(),
                 },
             ),
-            project_id,
+            project_id: project_id.into(),
             sled: p.sled.into(),
         }
+    }
+
+    pub fn project_id(&self) -> ProjectUuid {
+        self.project_id.into()
     }
 
     pub fn sled(&self) -> SledUuid {

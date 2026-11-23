@@ -154,6 +154,7 @@ use nexus_db_queries::db::model::Alert;
 use nexus_db_queries::db::model::AlertClass;
 use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
+use nexus_db_queries::db::model::AlertSubscriptionKind;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_types::external_api::alert;
@@ -238,6 +239,26 @@ impl Nexus {
     }
 
     //
+    // Alerts
+    //
+
+    pub async fn alert_list(
+        &self,
+        opctx: &OpContext,
+        params: &alert::AlertListParams,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<alert::Alert> {
+        let filters = params.clone().try_into()?;
+        Ok(self
+            .datastore()
+            .alert_list_matching(opctx, &filters, pagparams)
+            .await?
+            .into_iter()
+            .map(|(alert, _)| alert.into())
+            .collect())
+    }
+
+    //
     // Alert class API
     //
     pub async fn alert_class_list(
@@ -257,68 +278,33 @@ impl Nexus {
         alert::AlertClassFilter { filter }: alert::AlertClassFilter,
         pagparams: DataPageParams<'_, alert::AlertClassPage>,
     ) -> ListResultVec<alert::AlertClass> {
-        use nexus_db_model::AlertSubscriptionKind;
+        use itertools::Either;
 
-        let regex = if let Some(filter) = filter {
-            let sub = AlertSubscriptionKind::try_from(filter)?;
-            let regex_string = match sub {
-                AlertSubscriptionKind::Exact(class) => class.as_str(),
-                AlertSubscriptionKind::Glob(ref glob) => glob.regex.as_str(),
-            };
-            let re = regex::Regex::new(regex_string).map_err(|e| {
-                // This oughtn't happen, provided the code for producing the
-                // regex for a glob is correct.
-                Error::InternalError {
-                    internal_message: format!(
-                        "valid alert class globs ({sub:?}) should always \
-                         produce a valid regex, and yet: {e:?}"
-                    ),
-                }
-            })?;
-            Some(re)
-        } else {
-            None
-        };
-
-        // If we're resuming a previous scan, figure out where to start.
-        let start = if let Some(alert::AlertClassPage { last_seen }) =
-            pagparams.marker
-        {
-            let start = AlertClass::ALL_CLASSES.iter().enumerate().find_map(
-                |(idx, class)| {
-                    if class.as_str() == last_seen { Some(idx) } else { None }
-                },
-            );
-            match start {
-                Some(start) => start + 1,
-                None => return Ok(Vec::new()),
-            }
-        } else {
-            0
-        };
-
-        // This shouldn't ever happen, but...don't panic I guess.
-        if start > AlertClass::ALL_CLASSES.len() {
-            return Ok(Vec::new());
-        }
-
-        let result = AlertClass::ALL_CLASSES[start..]
-            .iter()
-            .filter_map(|&class| {
+        let subscription =
+            filter.map(AlertSubscriptionKind::try_from).transpose()?;
+        let mut classes = subscription
+            .as_ref()
+            .map(AlertSubscriptionKind::matching_classes)
+            .transpose()?
+            .map(Either::Left)
+            .unwrap_or(Either::Right(AlertClass::ALL_CLASSES.iter().cloned()))
+            .filter(|&class| {
                 // Skip test classes, as they should not be used in the public
                 // API, except in test builds, where we need them
                 // for, you know... testing...
-                if !cfg!(test) && class.is_test() {
-                    return None;
-                }
-                if let Some(ref regex) = regex {
-                    if !regex.is_match(class.as_str()) {
-                        return None;
-                    }
-                }
-                Some(nexus_types::alert::AlertClass::from(class).into())
-            })
+                cfg!(test) || !class.is_test()
+            });
+
+        // If we're resuming a previous scan, advance the iterator to discard
+        // all earlier classes.
+        if let Some(alert::AlertClassPage { last_seen }) = pagparams.marker {
+            classes.by_ref().find(|&class| class.as_str() == last_seen);
+        }
+
+        // Okay, collect the matching classes.
+        let result = classes
             .take(pagparams.limit.get() as usize)
+            .map(|class| nexus_types::alert::AlertClass::from(class).into())
             .collect::<Vec<_>>();
         Ok(result)
     }

@@ -725,49 +725,31 @@ impl DataStore {
         glob: &AlertRxGlob,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<usize, TransactionError<Error>> {
-        let regex = match regex::Regex::new(&glob.glob.regex) {
-            Ok(r) => r,
-            Err(error) => {
-                const MSG: &str =
-                    "alert glob subscription regex was not a valid regex";
+        let subscriptions = glob
+            .glob
+            .matching_classes()
+            .map_err(|error| {
                 slog::error!(
                     &opctx.log,
-                    "{MSG}";
+                    "alert glob subscription regex was not a valid regex";
                     "glob" => ?glob.glob.glob,
                     "regex" => ?glob.glob.regex,
                     "error" => %error,
                 );
-                return Err(TransactionError::CustomError(
-                    Error::internal_error(MSG),
-                ));
-            }
-        };
-        let subscriptions = AlertClass::ALL_CLASSES
-            .iter()
-            .filter_map(|class| {
-                if regex.is_match(class.as_str()) {
-                    slog::debug!(
-                        &opctx.log,
-                        "alert glob matches event class";
-                        "rx_id" => ?glob.rx_id,
-                        "glob" => ?glob.glob.glob,
-                        "regex" => ?regex,
-                        "alert_class" => %class,
-                    );
-                    Some(AlertRxSubscription::for_glob(&glob, *class))
-                } else {
-                    slog::trace!(
-                        &opctx.log,
-                        "alert glob does not match event class";
-                        "rx_id" => ?glob.rx_id,
-                        "glob" => ?glob.glob.glob,
-                        "regex" => ?regex,
-                        "alert_class" => %class,
-                    );
-                    None
-                }
+                TransactionError::CustomError(error)
+            })?
+            .map(|class| {
+                slog::debug!(
+                    &opctx.log,
+                    "alert glob matches event class";
+                    "rx_id" => ?glob.rx_id,
+                    "glob" => ?glob.glob.glob,
+                    "regex" => ?glob.glob.regex,
+                    "alert_class" => %class,
+                );
+                AlertRxSubscription::for_glob(&glob, class)
             })
-            .collect::<Vec<_>>();
+            .collect();
         let created = self
             .add_exact_subscription_batch_on_conn(
                 glob.rx_id.into(),
@@ -781,7 +763,7 @@ impl DataStore {
             "created {created} webhook subscriptions for glob";
             "rx_id" => ?glob.rx_id,
             "glob" => ?glob.glob.glob,
-            "regex" => ?regex,
+            "regex" => ?glob.glob.regex,
         );
 
         Ok(created)

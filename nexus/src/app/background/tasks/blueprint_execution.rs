@@ -234,16 +234,18 @@ mod test {
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::LastAllocatedSubnetIpOffset;
+    use nexus_types::deployment::ReflectsCollection;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
-        BlueprintSledConfig, BlueprintSource, BlueprintTarget,
-        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
@@ -251,8 +253,11 @@ mod test {
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{
+        Generation, NexusGeneration, SledConfigGeneration,
+        SledRegistrationGeneration, TargetReleaseGeneration,
+    };
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -287,10 +292,13 @@ mod test {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
+                        update_disposition:
+                            BlueprintSledUpdateDisposition::initial(),
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         last_allocated_ip_subnet_offset:
                             LastAllocatedSubnetIpOffset::initial(),
-                        sled_agent_generation: Generation::new().next(),
+                        sled_agent_generation: SledConfigGeneration::new()
+                            .next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
                         zones,
@@ -323,10 +331,11 @@ mod test {
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),
+            reflects_collection: ReflectsCollection::Indeterminate,
             internal_dns_version: dns_version,
             external_dns_version: dns_version,
-            target_release_minimum_generation: Generation::new(),
-            nexus_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
+            nexus_generation: NexusGeneration::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
@@ -422,12 +431,9 @@ mod test {
                     cpu_family: SledCpuFamily::AmdMilan,
                 },
                 rack_id,
-                nexus_db_model::Generation::new(),
+                SledRegistrationGeneration::new(),
             );
-            datastore
-                .sled_upsert(update)
-                .await
-                .expect("Failed to insert sled to db");
+            sled_upsert_expect_written(datastore, update).await;
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);

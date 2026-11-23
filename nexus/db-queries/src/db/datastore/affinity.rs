@@ -23,6 +23,7 @@ use crate::db::model::InstanceStateComputer;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VmmState;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -95,7 +96,7 @@ impl DataStore {
             .filter(
                 dsl::id.eq_any(ids.clone()).or(dsl::name.eq_any(names.clone())),
             )
-            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::project_id.eq(to_db_typed_uuid(authz_project.id())))
             .filter(dsl::time_deleted.is_null())
             .select((dsl::id, dsl::name))
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -225,7 +226,9 @@ impl DataStore {
             .sql(AllColumnsOf::<dsl::affinity_group>::as_str())
             .sql(" FROM affinity_group WHERE project_id = ")
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .bind::<diesel::sql_types::Uuid, _>(
+                authz_project.id().into_untyped_uuid(),
+            )
             .sql(" AND time_deleted IS NULL");
         paginator
             .paginate_by_id_or_name(pagparams)
@@ -252,7 +255,9 @@ impl DataStore {
             .sql(AllColumnsOf::<dsl::anti_affinity_group>::as_str())
             .sql(" FROM anti_affinity_group WHERE project_id = ")
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .bind::<diesel::sql_types::Uuid, _>(
+                authz_project.id().into_untyped_uuid(),
+            )
             .sql(" AND time_deleted IS NULL");
         paginator
             .paginate_by_id_or_name(pagparams)
@@ -276,7 +281,7 @@ impl DataStore {
         let name = group.name().as_str().to_string();
 
         let affinity_group: AffinityGroup = Project::insert_resource(
-            authz_project.id(),
+            authz_project.id().into(),
             diesel::insert_into(dsl::affinity_group).values(group),
         )
         .insert_and_get_result_async(&conn)
@@ -307,7 +312,7 @@ impl DataStore {
         let name = group.name().as_str().to_string();
 
         let anti_affinity_group: AntiAffinityGroup = Project::insert_resource(
-            authz_project.id(),
+            authz_project.id().into(),
             diesel::insert_into(dsl::anti_affinity_group).values(group),
         )
         .insert_and_get_result_async(&conn)
@@ -762,10 +767,10 @@ impl DataStore {
 
                 async move {
                     // Check that the group exists
-                    group_dsl::affinity_group
+                    let group_project_id = group_dsl::affinity_group
                         .filter(group_dsl::time_deleted.is_null())
                         .filter(group_dsl::id.eq(authz_affinity_group.id()))
-                        .select(group_dsl::id)
+                        .select(group_dsl::project_id)
                         .first_async::<uuid::Uuid>(&conn)
                         .await
                         .map_err(|e| {
@@ -832,10 +837,10 @@ impl DataStore {
                     // connection than the transaction risks several concurrency
                     // issues, so we do the lookup manually.
 
-                    let _check_instance_exists = instance_dsl::instance
+                    let instance_project_id = instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
                         .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
-                        .select(instance_dsl::id)
+                        .select(instance_dsl::project_id)
                         .get_result_async::<uuid::Uuid>(&conn)
                         .await
                         .map_err(|e| {
@@ -849,6 +854,13 @@ impl DataStore {
                                 )
                             })
                         })?;
+
+                    if instance_project_id != group_project_id {
+                        return Err(err.bail(Error::invalid_request(
+                            "Instance and affinity group must be in the same project".to_string()
+                        )));
+                    }
+
                     let has_reservation: bool = diesel::select(
                             diesel::dsl::exists(
                                 resource_dsl::sled_resource_vmm
@@ -929,10 +941,10 @@ impl DataStore {
 
                 async move {
                     // Check that the group exists
-                    group_dsl::anti_affinity_group
+                    let group_project_id = group_dsl::anti_affinity_group
                         .filter(group_dsl::time_deleted.is_null())
                         .filter(group_dsl::id.eq(authz_anti_affinity_group.id()))
-                        .select(group_dsl::id)
+                        .select(group_dsl::project_id)
                         .first_async::<uuid::Uuid>(&conn)
                         .await
                         .map_err(|e| {
@@ -990,10 +1002,10 @@ impl DataStore {
 
                     // Check that the instance exists, and has no sled
                     // reservation.
-                    let _check_instance_exists = instance_dsl::instance
+                    let instance_project_id = instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
                         .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
-                        .select(instance_dsl::id)
+                        .select(instance_dsl::project_id)
                         .get_result_async::<uuid::Uuid>(&conn)
                         .await
                         .map_err(|e| {
@@ -1007,6 +1019,13 @@ impl DataStore {
                                 )
                             })
                         })?;
+
+                    if instance_project_id != group_project_id {
+                        return Err(err.bail(Error::invalid_request(
+                            "Instance and anti-affinity group must be in the same project".to_string()
+                        )));
+                    }
+
                     let has_reservation: bool = diesel::select(
                             diesel::dsl::exists(
                                 resource_dsl::sled_resource_vmm
@@ -1894,6 +1913,176 @@ mod tests {
             .await
             .unwrap();
         assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn affinity_group_membership_requires_same_project() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "affinity_group_membership_requires_same_project",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let (authz_other_project, ..) =
+            create_project(&opctx, &datastore, "other-project").await;
+
+        let group = create_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // An instance from another project cannot join the group.
+        let other_instance = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &authz_other_project,
+            "other-instance",
+        )
+        .await;
+        let err = datastore
+            .affinity_group_member_instance_add(
+                &opctx,
+                &authz_group,
+                other_instance,
+            )
+            .await
+            .expect_err("should not add an instance from another project");
+        assert!(
+            matches!(err, Error::InvalidRequest { .. }),
+            "unexpected error: {err:?}",
+        );
+        assert!(
+            err.to_string().contains("must be in the same project"),
+            "unexpected error: {err}",
+        );
+
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // An instance from the group's own project still can.
+        let instance = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+        datastore
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .await
+            .unwrap();
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_group_membership_requires_same_project() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_membership_requires_same_project",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let (authz_other_project, ..) =
+            create_project(&opctx, &datastore, "other-project").await;
+
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // An instance from another project cannot join the group.
+        let other_instance = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &authz_other_project,
+            "other-instance",
+        )
+        .await;
+        let err = datastore
+            .anti_affinity_group_member_instance_add(
+                &opctx,
+                &authz_group,
+                other_instance,
+            )
+            .await
+            .expect_err("should not add an instance from another project");
+        assert!(
+            matches!(err, Error::InvalidRequest { .. }),
+            "unexpected error: {err:?}",
+        );
+        assert!(
+            err.to_string().contains("must be in the same project"),
+            "unexpected error: {err}",
+        );
+
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // An instance from the group's own project still can.
+        let instance = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+        datastore
+            .anti_affinity_group_member_instance_add(
+                &opctx,
+                &authz_group,
+                instance,
+            )
+            .await
+            .unwrap();
 
         // Clean up.
         db.terminate().await;

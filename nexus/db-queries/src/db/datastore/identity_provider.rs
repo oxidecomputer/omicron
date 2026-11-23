@@ -12,6 +12,7 @@ use crate::db::identity::Resource;
 use crate::db::model;
 use crate::db::model::IdentityProvider;
 use crate::db::model::Name;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -90,7 +91,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::silo_id.eq(authz_idp_list.silo().id()))
+        .filter(dsl::silo_id.eq(to_db_typed_uuid(authz_idp_list.silo().id())))
         .filter(dsl::time_deleted.is_null())
         .select(IdentityProvider::as_select())
         .load_async::<IdentityProvider>(
@@ -107,7 +108,7 @@ impl DataStore {
         saml_provider: db::model::SamlIdentityProvider,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
         opctx.authorize(authz::Action::CreateChild, authz_idp_list).await?;
-        assert_eq!(saml_provider.silo_id, authz_idp_list.silo().id());
+        assert_eq!(saml_provider.silo_id(), authz_idp_list.silo().id());
 
         let name = saml_provider.identity().name.to_string();
         let conn = self.pool_connection_authorized(opctx).await?;

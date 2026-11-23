@@ -17,7 +17,7 @@
 use crate::v30::early_networking::RackNetworkConfig;
 use crate::v33;
 use crate::v33::system_networking::ServiceZoneNatEntries;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

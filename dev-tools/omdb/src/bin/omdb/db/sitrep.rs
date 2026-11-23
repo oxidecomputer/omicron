@@ -22,7 +22,8 @@ use nexus_db_queries::db::model;
 use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
-use omicron_git_version::GitVersion;
+use omicron_git_version_types::GitVersion;
+use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::fmt;
@@ -46,7 +47,7 @@ enum Commands {
     /// Show the current situation report.
     ///
     /// This is an alias for `omdb db sitrep info current`.
-    Current(ShowOptions),
+    Current(InfoOptions),
 
     /// Show details on a situation report.
     #[clap(alias = "show")]
@@ -62,11 +63,28 @@ enum Commands {
         sitrep: SitrepSelector,
 
         #[clap(flatten)]
-        opts: ShowOptions,
+        opts: InfoOptions,
     },
 
     /// Show the analysis report for the requested sitrep, if one exists.
     AnalysisReport(AnalysisReportArgs),
+
+    /// Run the slippy sitrep linter over the requested sitrep.
+    ///
+    /// Slippy checks a sitrep for states that should be impossible, or that
+    /// would be problematic for the fault management subsystem to consume.
+    #[clap(alias = "lint")]
+    Slippy {
+        /// The sitrep to lint, identified by UUID, version number, or
+        /// "current".
+        ///
+        /// A value of "current" selects the current sitrep. An integer
+        /// (optionally prefixed with "v", e.g. "3" or "v3") selects the
+        /// sitrep with that version number in the sitrep history. Any other
+        /// value is parsed as a sitrep UUID.
+        #[clap(value_name = "UUID|VERSION|current")]
+        sitrep: SitrepSelector,
+    },
 }
 
 #[derive(Debug, Args, Clone)]
@@ -100,6 +118,25 @@ struct AnalysisReportArgs {
 struct ShowOptions {
     #[clap(long, short)]
     json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+struct InfoOptions {
+    /// Show details for only the case with this ID, rather than the sitrep.
+    ///
+    /// With `--json`, only the requested case is serialized.
+    #[clap(long, short, value_name = "CASE_ID", conflicts_with = "all_cases")]
+    case: Option<CaseUuid>,
+
+    /// Show full details for every case in the sitrep, rather than a summary
+    /// table.
+    ///
+    /// This has no effect with `--json`, which always includes every case.
+    #[clap(long, short)]
+    all_cases: bool,
+
+    #[clap(flatten)]
+    show: ShowOptions,
 }
 
 /// Selects a sitrep by UUID, by version number, or the current one.
@@ -254,16 +291,12 @@ pub(super) async fn cmd_db_sitrep(
             cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
         Commands::Info { sitrep, opts: ref args } => {
-            cmd_db_sitrep_show(
-                opctx, datastore, fetch_opts, args, sitrep, colored,
-            )
-            .await
+            cmd_db_sitrep_show(opctx, datastore, args, sitrep, colored).await
         }
         Commands::Current(ref args) => {
             cmd_db_sitrep_show(
                 opctx,
                 datastore,
-                fetch_opts,
                 args,
                 SitrepSelector::Current,
                 colored,
@@ -271,10 +304,10 @@ pub(super) async fn cmd_db_sitrep(
             .await
         }
         Commands::AnalysisReport(ref args) => {
-            cmd_db_sitrep_analysis_report(
-                opctx, datastore, fetch_opts, args, colored,
-            )
-            .await
+            cmd_db_sitrep_analysis_report(opctx, datastore, args, colored).await
+        }
+        Commands::Slippy { sitrep } => {
+            cmd_db_sitrep_slippy(opctx, datastore, sitrep).await
         }
     }
 }
@@ -355,8 +388,7 @@ pub(super) async fn cmd_db_sitrep_history(
 async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
-    opts: &ShowOptions,
+    opts: &InfoOptions,
     sitrep_selector: SitrepSelector,
     colored: bool,
 ) -> anyhow::Result<()> {
@@ -374,7 +406,22 @@ async fn cmd_db_sitrep_show(
         .await
         .with_context(|| format!("failed to look up {err_ctx}"))?;
 
-    if opts.json {
+    if let Some(case_id) = opts.case {
+        let case = sitrep.cases.get(&case_id).ok_or_else(|| {
+            anyhow::anyhow!("case {case_id} does not exist in {err_ctx}")
+        })?;
+        if opts.show.json {
+            serde_json::to_writer_pretty(std::io::stdout(), case)
+                .with_context(|| {
+                    format!("failed to serialize case {case_id} in {err_ctx}")
+                })?;
+        } else {
+            println!("{}", case.display_indented(0, Some(id)).colored(colored));
+        }
+        return Ok(());
+    }
+
+    if opts.show.json {
         serde_json::to_writer_pretty(std::io::stdout(), &sitrep)
             .with_context(|| format!("failed to serialize {err_ctx}"))?;
         return Ok(());
@@ -393,22 +440,21 @@ async fn cmd_db_sitrep_show(
         support_bundle_generation,
     } = metadata;
 
-    const ID: &'static str = "ID";
-    const PARENT_SITREP_ID: &'static str = "parent sitrep ID";
-    const CREATED_BY: &'static str = "created by";
-    const CREATED_AT: &'static str = "created at";
-    const COMMENT: &'static str = "comment";
-    const STATUS: &'static str = "status";
-    const VERSION: &'static str = "  version";
-    const MADE_CURRENT_AT: &'static str = "  made current at";
-    const INV_COLLECTION_ID: &'static str = "inventory collection ID";
-    const INV_STARTED_AT: &'static str = "  started at";
-    const INV_FINISHED_AT: &'static str = "  finished at";
-    const NEXT_INV_MIN_START: &'static str =
-        "  next inventory minimum start time";
-    const ALERT_GEN: &'static str = "alert generation";
-    const SUPPORT_BUNDLE_GEN: &'static str = "support bundle generation";
-    const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
+    const ID: &'static str = "ID:";
+    const PARENT_SITREP_ID: &'static str = "parent sitrep ID:";
+    const CREATED_BY: &'static str = "created by:";
+    const CREATED_AT: &'static str = "created at:";
+    const COMMENT: &'static str = "comment:";
+    const STATUS: &'static str = "status:";
+    const VERSION: &'static str = "  version:";
+    const MADE_CURRENT_AT: &'static str = "  made current at:";
+    const INV_COLLECTION_ID: &'static str = "inventory collection ID:";
+    const INV_STARTED_AT: &'static str = "  started at:";
+    const INV_FINISHED_AT: &'static str = "  finished at:";
+    const NEXT_INV_MIN_START: &'static str = "  next inv must start after:";
+    const ALERT_GEN: &'static str = "  alert generation:";
+    const SUPPORT_BUNDLE_GEN: &'static str = "  support bundle generation:";
+    const TOTAL_EREPORTS: &'static str = "ereports in this sitrep:";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -429,40 +475,44 @@ async fn cmd_db_sitrep_show(
     ]);
 
     println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
-    println!("    {ID:>WIDTH$}: {id:?}");
-    println!("    {PARENT_SITREP_ID:>WIDTH$}: {parent_sitrep_id:?}");
-    println!("    {CREATED_BY:>WIDTH$}: {creator_id}");
-    println!("    {CREATED_AT:>WIDTH$}: {time_created}");
-    if comment.is_empty() {
-        println!("    {COMMENT:>WIDTH$}: N/A\n");
+    println!("{ID:<WIDTH$} {id}");
+    if let Some(parent_id) = parent_sitrep_id {
+        println!("{PARENT_SITREP_ID:<WIDTH$} {parent_id}");
     } else {
-        println!("    {COMMENT:>WIDTH$}:");
-        println!("{}\n", textwrap::indent(&comment, "      "));
+        println!("{PARENT_SITREP_ID:<WIDTH$} N/A");
+    }
+    println!("{CREATED_BY:<WIDTH$} {creator_id}");
+    println!("{CREATED_AT:<WIDTH$} {time_created}");
+    if comment.is_empty() {
+        println!("{COMMENT:<WIDTH$} N/A\n");
+    } else {
+        println!("{COMMENT}");
+        println!("{}", textwrap::indent(&comment, "  "));
     }
 
     match maybe_version {
-        None => println!(
-            "    {STATUS:>WIDTH$}: not committed to the sitrep history"
-        ),
+        None => {
+            println!("{STATUS:<WIDTH$} not committed to the sitrep history")
+        }
         Some(fm::SitrepVersion { version, time_made_current, .. }) => {
             if matches!(current_version, Some(ref v) if v.id == id) {
-                println!("    {STATUS:>WIDTH$}: this is the current sitrep!",);
+                println!("{STATUS:<WIDTH$} this is the current sitrep!",);
             } else {
-                println!("    {STATUS:>WIDTH$}: in the sitrep history");
+                println!("{STATUS:<WIDTH$} in the sitrep history");
             }
-            println!("    {VERSION:>WIDTH$}: v{version}");
-            println!("    {MADE_CURRENT_AT:>WIDTH$}: {time_made_current}");
+            println!("{VERSION:<WIDTH$} v{version}");
+            println!("{MADE_CURRENT_AT:<WIDTH$} {time_made_current}");
             match current_version {
                 Some(v) if v.id == id => {}
                 Some(fm::SitrepVersion { version, id, .. }) => {
                     println!(
-                        "(i)   note: the current sitrep is {id:?} \
-                        (at v{version})",
+                        "  (i) note: the current sitrep is {id} \
+                         (at v{version})",
                     );
                 }
                 None => {
                     eprintln!(
-                        "/!\\ WEIRD: this sitrep is in the sitrep history, \
+                        "  /!\\ WEIRD: this sitrep is in the sitrep history, \
                          but there is no current sitrep. this should not \
                          happen!"
                     );
@@ -472,7 +522,7 @@ async fn cmd_db_sitrep_show(
     }
 
     println!("\n{:=<80}", "== DIAGNOSIS INPUTS ");
-    println!("    {INV_COLLECTION_ID:>WIDTH$}: {inv_collection_id:?}");
+    println!("{INV_COLLECTION_ID:<WIDTH$} {inv_collection_id}");
     let inv_collection = inv_collection_dsl::inv_collection
         .filter(
             inv_collection_dsl::id.eq(inv_collection_id.into_untyped_uuid()),
@@ -484,36 +534,79 @@ async fn cmd_db_sitrep_show(
     match inv_collection {
         Err(err) => {
             eprintln!(
-                "/!\\ failed to fetch inventory collection details: {err}"
+                "  /!\\ failed to fetch inventory collection details: {err}"
             );
         }
         Ok(Some(model::InvCollection { time_started, time_done, .. })) => {
-            println!("    {INV_STARTED_AT:>WIDTH$}: {time_started}");
-            println!("    {INV_FINISHED_AT:>WIDTH$}: {time_done}");
+            println!("{INV_STARTED_AT:<WIDTH$} {time_started}");
+            println!("{INV_FINISHED_AT:<WIDTH$} {time_done}");
         }
         Ok(None) => {
             println!(
-                "      note: this collection no longer exists (perhaps it has \
+                "  (i) note: this collection no longer exists (perhaps it has \
                  been pruned?)"
             )
         }
     }
-    println!("    {NEXT_INV_MIN_START:>WIDTH$}: {next_inv_min_time_started}");
-    println!("    ");
-    println!("    rendezvous resource generation numbers:");
-    println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
-    println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
-    println!("    ");
-    println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
+    println!("{NEXT_INV_MIN_START:<WIDTH$} {next_inv_min_time_started}");
+    println!("rendezvous resource generation numbers:");
+    println!("{ALERT_GEN:<WIDTH$} {alert_generation}");
+    println!("{SUPPORT_BUNDLE_GEN:<WIDTH$} {support_bundle_generation}");
+    println!("{TOTAL_EREPORTS:<WIDTH$} {}", ereports_by_id.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?
 
-    if !cases.is_empty() {
+    if cases.is_empty() {
+        return Ok(());
+    }
+
+    if opts.all_cases {
         println!("\n{:=<80}\n", "== CASES ");
         for case in cases {
             println!("{}", case.display_indented(4, Some(id)).colored(colored));
         }
+        return Ok(());
     }
+
+    let num_open = cases.iter().filter(|case| case.is_open()).count();
+    let num_closed = cases.len() - num_open;
+    let mut cases = cases.iter().collect::<Vec<_>>();
+    cases.sort_by_key(|case| (case.metadata.de.as_str(), case.id));
+
+    println!("\n{:=<80}", "== CASES ");
+    println!("{num_open} open, {num_closed} closed\n");
+    println!(
+        "(i) {}\n",
+        fm::case::DisplayCaseSummary::legend().colored(colored)
+    );
+    for case in cases {
+        println!("{}", case.display_summary(0, Some(id)).colored(colored));
+    }
+    println!(
+        "\n(i) to view details for a single case, use:\n    \
+               $ omdb db sitrep show {id} --case <CASE_ID>\n\
+           (i) or, to show details for all cases in this sitrep, use:\n    \
+               $ omdb db sitrep show {id} --all-cases"
+    );
+
+    Ok(())
+}
+
+async fn cmd_db_sitrep_slippy(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    selector: SitrepSelector,
+) -> anyhow::Result<()> {
+    let (_, id) = selector.resolve(&datastore, &opctx).await?;
+    let err_ctx = selector.display_for_error(&id);
+    let sitrep = datastore
+        .fm_sitrep_read(opctx, id)
+        .await
+        .with_context(|| format!("failed to read {err_ctx}"))?;
+
+    let report = nexus_fm_slippy::Slippy::new(&sitrep)
+        .into_report(nexus_fm_slippy::SlippyReportSortKey::Severity);
+    println!("{}", report.display());
 
     Ok(())
 }
@@ -521,7 +614,6 @@ async fn cmd_db_sitrep_show(
 async fn cmd_db_sitrep_analysis_report(
     opctx: &OpContext,
     datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
     args: &AnalysisReportArgs,
     colored: bool,
 ) -> anyhow::Result<()> {
@@ -551,7 +643,7 @@ fn print_analysis_report(
         analysis_report,
     } = report;
 
-    let our_git_commit = GitVersion::current();
+    let our_git_commit = omicron_git_version::current();
     let git_commit = git_commit.parse::<GitVersion>().expect("infallible");
     if our_git_commit != git_commit {
         eprintln!(

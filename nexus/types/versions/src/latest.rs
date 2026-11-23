@@ -56,6 +56,10 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookSecretCreate;
     pub use crate::v2025_11_20_00::alert::WebhookSecretSelector;
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
+
+    pub use crate::v2026_08_14_00::alert::AlertListParams;
+
+    pub use crate::v2026_09_11_00::alert::Alert;
 }
 
 pub mod audit {
@@ -259,6 +263,11 @@ pub mod multicast {
     pub use crate::impls::multicast::validate_source_ip;
 }
 
+pub mod multirack {
+    pub use crate::v2026_11_04_00::multirack::UnadoptedRack;
+    pub use crate::v2026_11_04_00::multirack::UnadoptedSled;
+}
+
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;
@@ -326,13 +335,14 @@ pub mod networking {
     pub use crate::v2026_03_06_01::networking::SwitchPort;
     pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
 
-    pub use crate::v2026_04_16_00::networking::BgpPeer;
-    pub use crate::v2026_04_16_00::networking::BgpPeerConfig;
     pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
-    pub use crate::v2026_04_16_00::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_05_07_00::networking::SwitchInterfaceConfig;
-    pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
+
+    pub use crate::v2026_08_14_01::networking::BgpPeer;
+    pub use crate::v2026_08_14_01::networking::BgpPeerConfig;
+    pub use crate::v2026_08_14_01::networking::SwitchPortSettings;
+    pub use crate::v2026_08_14_01::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
 }
@@ -363,12 +373,26 @@ pub mod probe {
     pub use crate::v2026_01_05_00::probe::ProbeCreate;
 }
 
+pub mod problem {
+    pub use crate::v2026_11_05_00::problem::ImpactListParams;
+    pub use crate::v2026_11_05_00::problem::ImpactState;
+    pub use crate::v2026_11_05_00::problem::ImpactedResource;
+    pub use crate::v2026_11_05_00::problem::Problem;
+    pub use crate::v2026_11_05_00::problem::ProblemImpact;
+    pub use crate::v2026_11_05_00::problem::ProblemListParams;
+    pub use crate::v2026_11_05_00::problem::ProblemSelector;
+    pub use crate::v2026_11_05_00::problem::ProblemState;
+    pub use crate::v2026_11_05_00::problem::RelatedProblem;
+}
+
 pub mod project {
     pub use crate::v2025_11_20_00::project::OptionalProjectSelector;
     pub use crate::v2025_11_20_00::project::Project;
-    pub use crate::v2025_11_20_00::project::ProjectCreate;
     pub use crate::v2025_11_20_00::project::ProjectSelector;
     pub use crate::v2025_11_20_00::project::ProjectUpdate;
+
+    pub use crate::v2026_09_08_00::project::ProjectCreate;
+    pub use crate::v2026_09_08_00::project::ProjectCreateDefaults;
 }
 
 pub mod saml {
@@ -390,7 +414,6 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::Silo;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettings;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettingsUpdate;
-    pub use crate::v2025_11_20_00::silo::SiloCreate;
     pub use crate::v2025_11_20_00::silo::SiloIdentityMode;
     pub use crate::v2025_11_20_00::silo::SiloQuotas;
     pub use crate::v2025_11_20_00::silo::SiloQuotasCreate;
@@ -400,6 +423,8 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::UserProvisionType;
     pub use crate::v2025_11_20_00::silo::Utilization;
     pub use crate::v2025_11_20_00::silo::VirtualResourceCounts;
+
+    pub use crate::v2026_09_15_00::silo::SiloCreate;
 }
 
 pub mod snapshot {
@@ -442,8 +467,6 @@ pub mod timeseries {
 pub mod update {
     pub use crate::v2025_11_20_00::update::SetTargetReleaseParams;
     pub use crate::v2025_11_20_00::update::TargetRelease;
-    pub use crate::v2025_11_20_00::update::TufRepo;
-    pub use crate::v2025_11_20_00::update::TufRepoUpload;
     pub use crate::v2025_11_20_00::update::TufRepoUploadStatus;
     pub use crate::v2025_11_20_00::update::TufSignedRootRole;
     pub use crate::v2025_11_20_00::update::UpdatesGetRepositoryParams;
@@ -451,6 +474,9 @@ pub mod update {
     pub use crate::v2025_11_20_00::update::UpdatesTrustRoot;
 
     pub use crate::v2026_05_20_00::update::UpdateStatus;
+
+    pub use crate::v2026_10_13_00::update::TufRepo;
+    pub use crate::v2026_10_13_00::update::TufRepoUpload;
 }
 
 pub mod vpc {
@@ -462,7 +488,6 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::RouterSelector;
     pub use crate::v2025_11_20_00::vpc::SubnetSelector;
     pub use crate::v2025_11_20_00::vpc::Vpc;
-    pub use crate::v2025_11_20_00::vpc::VpcCreate;
     pub use crate::v2025_11_20_00::vpc::VpcRouter;
     pub use crate::v2025_11_20_00::vpc::VpcRouterCreate;
     pub use crate::v2025_11_20_00::vpc::VpcRouterKind;
@@ -472,6 +497,11 @@ pub mod vpc {
     pub use crate::v2025_11_20_00::vpc::VpcSubnetCreate;
     pub use crate::v2025_11_20_00::vpc::VpcSubnetUpdate;
     pub use crate::v2025_11_20_00::vpc::VpcUpdate;
+
+    pub use crate::v2026_09_08_00::vpc::SubnetCreateDefaults;
+    pub use crate::v2026_09_08_00::vpc::VpcCreate;
+    pub use crate::v2026_09_08_00::vpc::VpcCreateDefaults;
+    pub use crate::v2026_09_08_00::vpc::VpcCreateDefaultsSelection;
 }
 
 pub mod asset {
@@ -504,12 +534,14 @@ pub mod physical_disk {
 pub mod rack {
     pub use crate::v2025_11_20_00::rack::Rack;
 
-    pub use crate::v2026_01_21_00::rack::RackMembershipAddSledsRequest;
     pub use crate::v2026_01_21_00::rack::RackMembershipChangeState;
     pub use crate::v2026_01_21_00::rack::RackMembershipConfigPathParams;
     pub use crate::v2026_01_21_00::rack::RackMembershipStatus;
     pub use crate::v2026_01_21_00::rack::RackMembershipVersion;
     pub use crate::v2026_01_21_00::rack::RackMembershipVersionParam;
+
+    pub use crate::v2026_10_29_00::rack::RackMembershipAddSledsRequest;
+    pub use crate::v2026_10_29_00::rack::SledAddPrecheckOverrides;
 }
 
 pub mod subnet_pool {
@@ -547,7 +579,6 @@ pub mod external_subnet {
 }
 
 pub mod sled {
-    pub use crate::v2025_11_20_00::sled::Sled;
     pub use crate::v2025_11_20_00::sled::SledId;
     pub use crate::v2025_11_20_00::sled::SledInstance;
     pub use crate::v2025_11_20_00::sled::SledPolicy;
@@ -557,6 +588,7 @@ pub mod sled {
     pub use crate::v2025_11_20_00::sled::SledSelector;
     pub use crate::v2025_11_20_00::sled::SledState;
     pub use crate::v2025_11_20_00::sled::SwitchSelector;
+    pub use crate::v2026_08_12_00::sled::Sled;
 }
 
 pub mod ssh_key {

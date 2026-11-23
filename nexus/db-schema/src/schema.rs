@@ -183,6 +183,7 @@ table! {
     switch_port_settings_port_config (port_settings_id) {
         port_settings_id -> Uuid,
         geometry -> crate::enums::SwitchPortGeometryEnum,
+        allow_ddm_traffic -> Bool,
     }
 }
 
@@ -276,6 +277,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
         router_lifetime -> Int4,
+        src_addr -> Nullable<Inet>,
     }
 }
 
@@ -323,28 +325,6 @@ table! {
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
         max_paths -> Int2,
-    }
-}
-
-table! {
-    bgp_peer_view (switch_slot, port_name) {
-        switch_slot -> crate::enums::SwitchSlotEnum,
-        port_name -> Text,
-        addr -> Nullable<Inet>,
-        hold_time -> Int8,
-        idle_hold_time -> Int8,
-        delay_open -> Int8,
-        connect_retry -> Int8,
-        keepalive -> Int8,
-        remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int2>,
-        md5_auth_key -> Nullable<Text>,
-        multi_exit_discriminator -> Nullable<Int8>,
-        local_pref -> Nullable<Int8>,
-        enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int4>,
-        router_lifetime -> Int4,
-        asn -> Int8,
     }
 }
 
@@ -492,6 +472,7 @@ table! {
         state -> crate::enums::VmmStateEnum,
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
+        stop_for_update_disposition_generation -> Nullable<Int8>,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -593,6 +574,16 @@ table! {
 }
 
 table! {
+    project_utilization(project_id) {
+        project_id -> Uuid,
+        silo_id -> Uuid,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+    }
+}
+
+table! {
     silo_auth_settings(silo_id) {
         silo_id -> Uuid,
         time_created -> Timestamptz,
@@ -687,6 +678,13 @@ table! {
         ip_version -> crate::enums::IpVersionEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
         assignment -> crate::enums::IpPoolAssignmentEnum,
+    }
+}
+
+table! {
+    external_service_ip_pool (service, ip_pool_id) {
+        service -> crate::enums::ExternalServiceKindEnum,
+        ip_pool_id -> Uuid,
     }
 }
 
@@ -933,6 +931,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(silo_group, silo);
 allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_user);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_group);
 
 table! {
     identity_provider (silo_id, id) {
@@ -1279,6 +1279,17 @@ table! {
         pool_id -> Uuid,
         blueprint_id_when_created -> Uuid,
         blueprint_id_when_tombstoned -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    rendezvous_sled_bp_availability (sled_id) {
+        sled_id -> Uuid,
+        bp_availability -> crate::enums::SledBpAvailabilityEnum,
+        update_disposition_generation -> Nullable<Int8>,
+        blueprint_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
     }
 }
 
@@ -1652,6 +1663,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -1666,10 +1678,16 @@ table! {
 table! {
     support_bundle_data_selection_ereports (bundle_id) {
         bundle_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    support_bundle_data_selection_time_range (bundle_id) {
+        bundle_id -> Uuid,
+        start_time -> Timestamptz,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -1677,6 +1695,7 @@ allow_tables_to_appear_in_same_query!(
     support_bundle_data_selection_flags,
     support_bundle_data_selection_host_info,
     support_bundle_data_selection_ereports,
+    support_bundle_data_selection_time_range,
 );
 
 /* hardware inventory */
@@ -1737,6 +1756,8 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::enums::HwPowerStateEnum,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -1874,6 +1895,51 @@ table! {
 }
 
 table! {
+    inv_power_shelf_psu (inv_collection_id, psc_baseboard_id, location) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        psc_baseboard_id -> Uuid,
+        location -> crate::enums::InvPsuSlotEnum,
+        presence -> crate::enums::SpComponentPresenceEnum,
+        hubris_device_type -> Text,
+        mfr_id -> Nullable<Text>,
+        mfr_model -> Nullable<Text>,
+        mfr_location -> Nullable<Text>,
+        mfr_revision -> Nullable<Text>,
+        mfr_date -> Nullable<Text>,
+        mfr_serial -> Nullable<Text>,
+        vpd_error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_discovered_rack (inv_collection_id, rack_id) {
+        inv_collection_id -> Uuid,
+        rack_id -> Uuid,
+
+        rack_subnet -> Inet,
+        join_service_ip -> Inet,
+    }
+}
+
+table! {
+    inv_discovered_sled (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        rack_id -> Uuid,
+
+        part_number -> Text,
+        serial_number -> Text,
+
+        sled_subnet -> Inet,
+        sled_agent_started -> Bool,
+        last_start_error_seen -> Nullable<Text>,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -1910,6 +1976,11 @@ table! {
         measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
         measurement_manifest_mupdate_id -> Nullable<Uuid>,
         measurement_manifest_boot_disk_error -> Nullable<Text>,
+
+        instance_manager_update_disposition -> Nullable<crate::enums::InvSledUpdateDispositionEnum>,
+        instance_manager_num_registered_vmms -> Int8,
+
+        rack_id -> Uuid,
     }
 }
 
@@ -2079,6 +2150,8 @@ table! {
         serial -> Text,
 
         variant -> crate::enums::PhysicalDiskKindEnum,
+
+        location -> Nullable<Text>,
     }
 }
 
@@ -2135,6 +2208,7 @@ table! {
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
         measurements -> Nullable<Array<Text>>,
+        update_disposition -> crate::enums::InvSledUpdateDispositionEnum,
     }
 }
 
@@ -2159,15 +2233,24 @@ table! {
         ntp_domain -> Nullable<Text>,
         nexus_external_tls -> Nullable<Bool>,
         nexus_external_dns_servers -> Nullable<Array<Inet>>,
-        snat_ip -> Nullable<Inet>,
-        snat_first_port -> Nullable<Int4>,
-        snat_last_port -> Nullable<Int4>,
         filesystem_pool -> Nullable<Uuid>,
 
         image_source -> crate::enums::InvZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
 
         nexus_lockstep_port -> Nullable<Int4>,
+    }
+}
+
+table! {
+    inv_omicron_sled_config_zone_external_ip (inv_collection_id, sled_config_id, zone_id, ip) {
+        inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
+        zone_id -> Uuid,
+        ip -> Inet,
+        port -> Nullable<Int4>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
     }
 }
 
@@ -2237,6 +2320,9 @@ table! {
         time_modified -> Timestamptz,
         tuf_repo_pruner_enabled -> Bool,
         disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
+        blueprint_pruner_enabled -> Bool,
+        blueprint_pruner_nkeep -> Int8,
+        sled_update_reboot_policy -> crate::enums::SledUpdateRebootPolicyEnum,
     }
 }
 
@@ -2290,6 +2376,10 @@ table! {
         source -> crate::enums::BpSourceEnum,
 
         external_networking_generation -> Int8,
+
+        reflects_collection_id -> Nullable<Uuid>,
+        reflects_collection_time_started -> Nullable<Timestamptz>,
+        reflects_collection_time_done -> Nullable<Timestamptz>,
     }
 }
 
@@ -2319,6 +2409,9 @@ table! {
         subnet -> Inet,
         last_allocated_ip_subnet_offset -> Int4,
         measurements -> crate::enums::BpSledMeasurementsEnum,
+        update_disposition_generation -> Int8,
+        update_availability -> crate::enums::SledUpdateAvailabilityEnum,
+        update_disruption_policy -> Nullable<crate::enums::ReconfiguratorDisruptionPolicyEnum>,
     }
 }
 
@@ -2397,10 +2490,6 @@ table! {
         ntp_domain -> Nullable<Text>,
         nexus_external_tls -> Nullable<Bool>,
         nexus_external_dns_servers -> Nullable<Array<Inet>>,
-        snat_ip -> Nullable<Inet>,
-        snat_first_port -> Nullable<Int4>,
-        snat_last_port -> Nullable<Int4>,
-        external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Uuid,
         disposition -> crate::enums::BpZoneDispositionEnum,
         disposition_expunged_as_of_generation -> Nullable<Int8>,
@@ -2430,6 +2519,18 @@ table! {
         slot -> Int2,
         ipv6 -> Nullable<Inet>,
         ipv6_subnet -> Nullable<Inet>,
+    }
+}
+
+table! {
+    bp_omicron_zone_external_ip (blueprint_id, zone_id, external_ip_id) {
+        blueprint_id -> Uuid,
+        zone_id -> Uuid,
+        external_ip_id -> Uuid,
+        ip -> Inet,
+        port -> Nullable<Int4>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
     }
 }
 
@@ -2744,6 +2845,7 @@ table! {
 
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
+allow_tables_to_appear_in_same_query!(vmm, rendezvous_sled_bp_availability);
 joinable!(instance -> migration (migration_id));
 
 allow_tables_to_appear_in_same_query!(subnet_pool, subnet_pool_silo_link, silo);
@@ -3088,10 +3190,10 @@ table! {
         multicast_ip -> Inet,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
-        state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
         underlay_salt -> Nullable<Int2>,
+        state -> crate::enums::MulticastGroupStateEnum,
     }
 }
 
@@ -3247,6 +3349,7 @@ table! {
         analysis_enabled -> Nullable<Bool>,
         sitrep_limit -> Nullable<Int8>,
         history_pruning_threshold -> Nullable<Int8>,
+        certificate_expiry_warning_days -> Nullable<Int8>,
     }
 }
 
@@ -3379,6 +3482,52 @@ table! {
 }
 
 table! {
+    fm_fact_saga (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        saga_id -> Uuid,
+        kind -> crate::enums::FmFactSagaKindEnum,
+        saga_state -> Nullable<crate::enums::SagaStateEnum>,
+        last_event_time -> Nullable<Timestamptz>,
+        current_sec -> Nullable<Uuid>,
+        orphan_reason -> Nullable<crate::enums::FmFactSagaOrphanReasonEnum>,
+    }
+}
+
+table! {
+    fm_fact_certificate (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        silo_id -> Uuid,
+        kind -> crate::enums::FmFactCertificateKindEnum,
+        certificate_id -> Uuid,
+        not_after -> Timestamptz,
+    }
+}
+
+table! {
+    fm_fact_smf_service (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        sled_id -> Uuid,
+        zone_name -> Text,
+        fmri -> Text,
+        kind -> crate::enums::FmFactSmfServiceKindEnum,
+        observed_in_inv -> Uuid,
+        time_observed -> Timestamptz,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3395,6 +3544,12 @@ allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_certificate);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_smf_service);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_smf_service);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3431,6 +3586,7 @@ table! {
         include_reconfigurator -> Bool,
         include_sled_cubby_info -> Bool,
         include_sp_dumps -> Bool,
+        include_sp_components -> Bool,
     }
 }
 
@@ -3447,10 +3603,17 @@ table! {
     fm_support_bundle_request_data_selection_ereports (sitrep_id, request_id) {
         sitrep_id -> Uuid,
         request_id -> Uuid,
-        start_time -> Nullable<Timestamptz>,
-        end_time -> Nullable<Timestamptz>,
         only_serials -> Array<Text>,
         only_classes -> Array<Text>,
+    }
+}
+
+table! {
+    fm_support_bundle_request_data_selection_time_range (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
     }
 }
 
@@ -3458,6 +3621,7 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_flags,
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
+    fm_support_bundle_request_data_selection_time_range,
 );
 
 table! {
@@ -3476,6 +3640,32 @@ table! {
         created_at_generation -> Int8,
     }
 }
+
+table! {
+    problem (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        current_revision -> Int8,
+    }
+}
+
+table! {
+    problem_revision (problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        time_created -> Timestamptz,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(problem, problem_revision);
+joinable!(problem_revision -> problem (problem_id));
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {
@@ -3510,3 +3700,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
 joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
+
+// Declared as separate pairs rather than one three-table invocation, which
+// would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
+allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
+allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);

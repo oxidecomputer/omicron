@@ -1,4 +1,13 @@
 WITH
+  sled_bp_available
+    AS (
+      SELECT
+        1
+      FROM
+        rendezvous_sled_bp_availability
+      WHERE
+        sled_id = $1 AND bp_availability = 'available'
+    ),
   sled_has_space
     AS (
       SELECT
@@ -6,22 +15,22 @@ WITH
       FROM
         sled LEFT JOIN sled_resource_vmm ON sled_resource_vmm.sled_id = sled.id
       WHERE
-        sled.id = $1
+        sled.id = $2
         AND sled.time_deleted IS NULL
         AND sled.sled_policy = 'in_service'
         AND sled.sled_state = 'active'
       GROUP BY
         sled.id
       HAVING
-        COALESCE(sum(CAST(sled_resource_vmm.hardware_threads AS INT8)), 0) + $2
+        COALESCE(sum(CAST(sled_resource_vmm.hardware_threads AS INT8)), 0) + $3
         <= sled.usable_hardware_threads
-        AND COALESCE(sum(CAST(sled_resource_vmm.rss_ram AS INT8)), 0) + $3
+        AND COALESCE(sum(CAST(sled_resource_vmm.rss_ram AS INT8)), 0) + $4
           <= sled.usable_physical_ram
-        AND COALESCE(sum(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + $4
+        AND COALESCE(sum(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + $5
           <= sled.reservoir_size
     ),
   our_aa_groups
-    AS (SELECT group_id FROM anti_affinity_group_instance_membership WHERE instance_id = $5),
+    AS (SELECT group_id FROM anti_affinity_group_instance_membership WHERE instance_id = $6),
   other_aa_instances
     AS (
       SELECT
@@ -31,7 +40,7 @@ WITH
         JOIN our_aa_groups ON
             anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
       WHERE
-        instance_id != $6
+        instance_id != $7
     ),
   banned_instances
     AS (
@@ -54,7 +63,7 @@ WITH
         banned_instances
         JOIN sled_resource_vmm ON sled_resource_vmm.instance_id = banned_instances.instance_id
     ),
-  our_a_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $7),
+  our_a_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $8),
   other_a_instances
     AS (
       SELECT
@@ -63,7 +72,7 @@ WITH
         affinity_group_instance_membership
         JOIN our_a_groups ON affinity_group_instance_membership.group_id = our_a_groups.group_id
       WHERE
-        instance_id != $8
+        instance_id != $9
     ),
   required_instances
     AS (
@@ -91,10 +100,11 @@ WITH
       SELECT
         1
       WHERE
-        CAST(IF((EXISTS(SELECT 1 FROM sled_has_space)), 'TRUE', 'SLED_HAS_SPACE') AS BOOL)
+        CAST(IF((EXISTS(SELECT 1 FROM sled_bp_available)), 'TRUE', 'SLED_BP_AVAILABLE') AS BOOL)
+        AND CAST(IF((EXISTS(SELECT 1 FROM sled_has_space)), 'TRUE', 'SLED_HAS_SPACE') AS BOOL)
         AND CAST(
             IF(
-              (NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $9))),
+              (NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $10))),
               'TRUE',
               'BANNED_SLEDS'
             )
@@ -104,7 +114,7 @@ WITH
             IF(
               (
                 (
-                  EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $10)
+                  EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $11)
                   OR NOT EXISTS(SELECT 1 FROM required_sleds)
                 )
               ),
@@ -120,7 +130,7 @@ WITH
                   crucible_dataset.size_used
                   + COALESCE(rendezvous_local_storage_dataset.size_used, 0)
                   + COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0)
-                  + $11
+                  + $12
                 )
               FROM
                 crucible_dataset
@@ -131,7 +141,7 @@ WITH
                     crucible_dataset.pool_id = rendezvous_local_storage_unencrypted_dataset.pool_id
                     AND rendezvous_local_storage_unencrypted_dataset.time_tombstoned IS NULL
               WHERE
-                crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $12
+                crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $13
               GROUP BY
                 crucible_dataset.pool_id
             )
@@ -142,13 +152,13 @@ WITH
                   FROM
                     inv_zpool
                   WHERE
-                    inv_zpool.id = $13
+                    inv_zpool.id = $14
                   ORDER BY
                     inv_zpool.time_collected DESC
                   LIMIT
                     1
                 )
-                - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $14)
+                - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $15)
               )
             AND (
                 SELECT
@@ -161,7 +171,7 @@ WITH
                   JOIN sled ON zpool.sled_id = sled.id
                   JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
                 WHERE
-                  zpool.id = $15
+                  zpool.id = $16
               )
             AND (
                 SELECT
@@ -169,16 +179,16 @@ WITH
                 FROM
                   rendezvous_local_storage_unencrypted_dataset
                 WHERE
-                  rendezvous_local_storage_unencrypted_dataset.id = $16
+                  rendezvous_local_storage_unencrypted_dataset.id = $17
               )
-            AND (SELECT time_deleted IS NULL AND attach_instance_id = $17 FROM disk WHERE id = $18)
+            AND (SELECT time_deleted IS NULL AND attach_instance_id = $18 FROM disk WHERE id = $19)
             AND (
                 SELECT
                   sum(
                     crucible_dataset.size_used
                     + COALESCE(rendezvous_local_storage_dataset.size_used, 0)
                     + COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0)
-                    + $19
+                    + $20
                   )
                 FROM
                   crucible_dataset
@@ -190,7 +200,7 @@ WITH
                       = rendezvous_local_storage_unencrypted_dataset.pool_id
                       AND rendezvous_local_storage_unencrypted_dataset.time_tombstoned IS NULL
                 WHERE
-                  crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $20
+                  crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $21
                 GROUP BY
                   crucible_dataset.pool_id
               )
@@ -201,13 +211,13 @@ WITH
                     FROM
                       inv_zpool
                     WHERE
-                      inv_zpool.id = $21
+                      inv_zpool.id = $22
                     ORDER BY
                       inv_zpool.time_collected DESC
                     LIMIT
                       1
                   )
-                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $22)
+                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $23)
                 )
             AND (
                 SELECT
@@ -220,7 +230,7 @@ WITH
                   JOIN sled ON zpool.sled_id = sled.id
                   JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
                 WHERE
-                  zpool.id = $23
+                  zpool.id = $24
               )
             AND (
                 SELECT
@@ -228,9 +238,9 @@ WITH
                 FROM
                   rendezvous_local_storage_unencrypted_dataset
                 WHERE
-                  rendezvous_local_storage_unencrypted_dataset.id = $24
+                  rendezvous_local_storage_unencrypted_dataset.id = $25
               )
-            AND (SELECT time_deleted IS NULL AND attach_instance_id = $25 FROM disk WHERE id = $26)
+            AND (SELECT time_deleted IS NULL AND attach_instance_id = $26 FROM disk WHERE id = $27)
           )
     ),
   updated_local_storage_disk_records
@@ -239,9 +249,9 @@ WITH
         disk_type_local_storage
       SET
         local_storage_unencrypted_dataset_allocation_id
-          = CASE disk_id WHEN $27 THEN $28 WHEN $29 THEN $30 END
+          = CASE disk_id WHEN $28 THEN $29 WHEN $30 THEN $31 END
       WHERE
-        disk_id IN ($31, $32) AND EXISTS(SELECT 1 FROM insert_valid)
+        disk_id IN ($32, $33) AND EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
         *
     ),
@@ -260,7 +270,7 @@ WITH
             dataset_size
           )
       SELECT
-        $33, now(), NULL, $34, $35, $36, $37
+        $34, now(), NULL, $35, $36, $37, $38
       WHERE
         EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
@@ -281,7 +291,7 @@ WITH
             dataset_size
           )
       SELECT
-        $38, now(), NULL, $39, $40, $41, $42
+        $39, now(), NULL, $40, $41, $42, $43
       WHERE
         EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
@@ -292,9 +302,9 @@ WITH
       UPDATE
         rendezvous_local_storage_unencrypted_dataset
       SET
-        size_used = size_used + CASE pool_id WHEN $43 THEN $44 WHEN $45 THEN $46 END
+        size_used = size_used + CASE pool_id WHEN $44 THEN $45 WHEN $46 THEN $47 END
       WHERE
-        pool_id IN ($47, $48) AND time_tombstoned IS NULL AND EXISTS(SELECT 1 FROM insert_valid)
+        pool_id IN ($48, $49) AND time_tombstoned IS NULL AND EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
         *
     )
@@ -302,6 +312,6 @@ INSERT
 INTO
   sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id, state)
 SELECT
-  $49, $50, $51, $52, $53, $54, $55
+  $50, $51, $52, $53, $54, $55, $56
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)
