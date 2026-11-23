@@ -132,10 +132,17 @@ impl FmRendezvous {
             indicating that they were aborted.
         ";
 
+        // Active problem revisions may reference alerts and/or support bundles
+        // created in the same sitrep, so wait for these tasks to complete
+        // before creating any revisions.
+        let (alerts, support_bundles) =
+            tokio::try_join!(alerts, support_bundles)
+                .expect(TASKS_SHOULDNT_FAIL);
+
         let status = Status {
             sitrep_id: Some(sitrep.1.id()),
-            alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
-            support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
+            alerts,
+            support_bundles,
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
             alert_marker_gc: alert_marker_gc.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundle_marker_gc: support_bundle_marker_gc
@@ -563,6 +570,21 @@ impl FmRendezvous {
         if status.bundles_created > 0 {
             self.support_bundle_collector.activate();
         }
+
+        status
+    }
+
+    async fn ensure_problems(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> ProblemCreationStatus {
+        let (_, ref sitrep) = *sitrep;
+        let mut status = ProblemCreationStatus::default();
+
+        let expected_problem_generation = sitrep.metadata.problem_generation;
+
+        todo!("eliza");
 
         status
     }

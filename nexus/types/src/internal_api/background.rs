@@ -1626,6 +1626,29 @@ pub mod fm_rendezvous {
         pub errors: Vec<String>,
     }
 
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct ProblemCreationStatus {
+        /// The number of new problems in the current sitrep.
+        pub total_problems_requested: usize,
+        /// Of those, the number which were *first* requested in the current
+        /// sitrep (rather than carried forward from an ancestor).
+        pub current_sitrep_problems_requested: usize,
+        /// The number of problem records created by this activation.
+        pub problems_created: usize,
+        /// The number of problem records that were already created by an
+        /// earlier activation (the `SitrepGuardedInsert` short-circuited on
+        /// the `rendezvous_problem_created` marker).
+        pub problems_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining problem requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
+        /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
     /// Per-activation statistics for a `rendezvous_*_created` marker-table
     /// GC sweep.
     ///
