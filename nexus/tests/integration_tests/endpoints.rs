@@ -161,6 +161,8 @@ pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
 
 pub const MULTIRACK_RACKS_UNADOPTED_URL: &'static str =
     "/v1/system/hardware/racks-unadopted";
+pub static DEMO_RACK_ADOPT_REQUEST: LazyLock<rack::RackAdoptRequest> =
+    LazyLock::new(|| rack::RackAdoptRequest { rack_id: RACK_UUID });
 
 pub const SUPPORT_BUNDLES_URL: &'static str = "/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
@@ -3013,7 +3015,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: "/v1/system/hardware/racks",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_RACK_ADOPT_REQUEST)
+                            .unwrap(),
+                    ),
+                ],
             },
             VerifyEndpoint {
                 url: &HARDWARE_RACK_URL,
