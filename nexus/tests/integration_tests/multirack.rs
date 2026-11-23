@@ -5,12 +5,14 @@
 //! Tests for multirack regional cluster APIs.
 
 use super::endpoints::MULTIRACK_RACKS_UNADOPTED_URL;
+use http::StatusCode;
 use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
 use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_inventory::CollectionBuilder;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::multirack::UnadoptedRack;
@@ -304,5 +306,69 @@ async fn test_rack_adopt() {
     assert!(unadopted.is_empty(), "unexpected unadopted racks: {unadopted:#?}");
 
     join_service.verify_and_clear();
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_rack_adopt_not_found() {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_rack_adopt_not_found")
+            .customize_nexus_config(&|config| {
+                // Disable the inventory collection background task to avoid a
+                // race.
+                config.pkg.background_tasks.inventory.disable_collect = true;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Attempting to adopt a rack ID that's neither adopted nor discovered
+    // should fail with a 404
+    let rack_id = RackUuid::new_v4();
+    object_create_error(
+        client,
+        RACKS_URL,
+        &RackAdoptRequest { rack_id },
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
+    // Put a fake rack into inventory, so that we know the 404 below is due to
+    // the rack ID not matching rather than inventory being empty
+    let discovered_rack_id = RackUuid::new_v4();
+    let mut builder = CollectionBuilder::new("multirack-test");
+    builder
+        .found_discovered_rack(DiscoveredRack {
+            rack_id: discovered_rack_id,
+            rack_subnet: Ipv6Subnet::new(
+                format!("{REGION_PREFIX}0::").parse().unwrap(),
+            ),
+            join_service_ip: Ipv6Addr::LOCALHOST,
+            discovered_sleds: make_discovered_sleds(0, 2),
+        })
+        .unwrap();
+    datastore
+        .inventory_insert_collection(&opctx, &builder.build())
+        .await
+        .expect("failed to insert inventory collection");
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    // Rerun the above test and make sure we still get a 404 after adding a fake
+    // rack to the inventory
+    object_create_error(
+        client,
+        RACKS_URL,
+        &RackAdoptRequest { rack_id },
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
     cptestctx.teardown().await;
 }
