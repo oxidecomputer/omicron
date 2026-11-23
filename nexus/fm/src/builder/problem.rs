@@ -39,17 +39,23 @@ pub struct ProblemSetBuilder<'parent> {
     parent_problems: Option<&'parent AllProblems>,
 }
 
-/// A builder for a revision of a problem requested in the current sitrep.
+/// Constructs a new revision of a problem in the sitrep being built.
 ///
-/// The accessors on this type return the problem's state *as of this revision*.
-/// If that field has not changed in this revision, they return the value in the
-/// previous revision. If the current revision *does* change that field, they
-/// return the value that will be set by this revision.
+/// The accessors on this type return the problem's state *as of new revision*.
+/// If that field has not changed in the revision being constructed, revision,
+/// they return its value in the previous revision. If the field has been
+/// changed in the revision being built, they instead return the value that
+/// field it will have in the new revision.
 ///
-/// Setting a field to the value it already has in the most recent revision of
-/// the problem does not record a change for that field (and will undo any
-/// previously set change). If there is no change when the sitrep is built, no
-/// new revision will be created.
+/// When the new sitrep is built, if any diagnosis engine has made changes to
+/// the problem in the pending revision, the new sitrep will contain a revision
+/// request for the new revision. If the pending revision does *not* change any
+/// fields on the problem from the current revision, no new revision is created.
+///
+/// Setting a field to the value it already has in the most current revision of
+/// the problem is not considered a change to field for this purpose (and will
+/// undo any new value previously set on the pending revision by a different
+/// diagnosis engine).
 pub struct RevisionBuilder<'rev> {
     revision: id_ord_map::RefMut<'rev, PendingRevision>,
     sitrep_id: SitrepUuid,
@@ -198,7 +204,7 @@ impl PendingRevision {
             .chain(self.new_support_bundles.iter())
     }
 
-    /// Returns `true` if the alert with the provided alert UUID has been
+    /// Returns `true` if the support bundle with the provided UUID has been
     /// attached to this problem, either in this revision or in an earlier one.
     pub fn contains_support_bundle(
         &self,
@@ -274,8 +280,11 @@ impl PendingRevision {
                  have existed in a previous sitrep",
             );
             // A diagnosis engine may have edited the problem's comment even if
-            // it did not create a revision. Editing the comment of the problem
-            // record in the next sitrep does not change the revisions.
+            // it did not create a revision.
+            //
+            // Editing the comment should change the comment written to the next
+            // sitrep, but does not change any operator-visible external state,
+            // and therefore does not create a revision of the problem.
             let (comment, problem) = match self.problem_comment {
                 Some(comment) => {
                     let SitrepProblem {
@@ -544,6 +553,8 @@ impl<'parent> ProblemSetBuilder<'parent> {
         self.pending_revisions.get(id)
     }
 
+    /// Returns the number of *new* active problem requests that will be
+    /// included in the sitrep being constructed.
     pub fn new_active_problems_requested(&self) -> usize {
         self.new_active_problems_requested
     }
@@ -551,26 +562,29 @@ impl<'parent> ProblemSetBuilder<'parent> {
     /// Builds the set of problems for the new sitrep, along with a report for
     /// each problem with activity in this sitrep.
     ///
-    /// The returned set contains every problem with a pending revision, plus
-    /// every problem in the parent sitrep that was not revised, copied forward
-    /// unchanged.
+    /// The returned [`AllProblems`] contains every problem request that should
+    /// be included in the new sitrep. This includes both problems which have
+    /// been revised in this sitrep by [`Self::revise`], and any problems which
+    /// are carried forward unchanged from the parent sitrep.
     ///
-    /// A problem has activity if its debug log in this sitrep is non-empty:
-    /// it was requested, a field changed, it was resolved, a link was added,
-    /// or a diagnosis engine logged something about it (such as a warning
-    /// about a duplicate link). A problem that a diagnosis engine opened with
-    /// [`Self::revise`] but did nothing to has no activity, and neither does
-    /// a copied-forward problem, so neither gets a report.
+    /// The returned [`IdOrdMap`]`<`[`ActiveProblemReport`]>` contains an entry
+    /// for every problem with activity to report in this sitrep. This includes:
+    ///
+    /// - Problems which were requested by this sitrep,
+    /// - All problems with new revisions in this sitrep (which may change the
+    ///   problem's fields, resolve it, or attach alerts or support bundles),
+    /// - Any problems which have *not* been revised in this sitrep, but which
+    ///   have activity in their debug logs. This may occur if, for example, a
+    ///   diagnosis engine attempted to attach an alert or support bundle that
+    ///   was already attached in a previous revision, or if a DE wished to add
+    ///   an explicit debug log entry.
     ///
     /// # Errors
     ///
-    /// Returns an error if the resulting problem set is invalid: a problem
-    /// with no revisions, or a problem ID that appears twice. Neither should
-    /// be possible. Pending revisions are keyed by problem ID, and
-    /// copied-forward problems are exactly the parent's problems without a
-    /// pending revision, so IDs are unique. A built problem has either a new
-    /// revision or its parent's revisions, which the parent's `AllProblems`
-    /// already required to be non-empty.
+    /// This function returns an error if the resulting problem set is invalid.
+    /// This occurs if a problem has no revisions, or a the same problem ID
+    /// occurs twice in the problem set. Neither of these should be possible and
+    /// indicate a bug in the `ProblemSetBuilder`.
     pub fn build(
         self,
     ) -> anyhow::Result<(AllProblems, IdOrdMap<ActiveProblemReport>)> {
@@ -579,8 +593,9 @@ impl<'parent> ProblemSetBuilder<'parent> {
         let mut reports = IdOrdMap::new();
 
         // Copy forward the parent's problems that have no pending revision.
-        // This must happen before consuming `pending_revisions`, which is
-        // what tells us which problems were revised.
+        // This must happen before consuming `pending_revisions`, because we
+        // need to use that map to check whether there is a pending revision of
+        // the problem that should take precedent.
         for problem in parent_problems.into_iter().flat_map(|p| p.by_id()) {
             if pending_revisions.contains_key(&problem.id) {
                 continue;
