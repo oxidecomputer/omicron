@@ -703,13 +703,14 @@ impl fmt::Display for DisplayCase<'_> {
 /// interesting activity in the sitrep being displayed, if this displayer was
 /// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
 ///
-/// - column 1 is `+` if the case was opened in the current sitrep, `*` if it
-///   was opened in an earlier sitrep and data was added in the current sitrep,
-///   and blank otherwise,
-/// - column 2 is `-` if the case was closed in this sitrep, and blank
-///   otherwise. If a case opened in this sitrep was closed in some earlier
-///   sitrep, the record is inconsistent (how could the case close before it
-///   opened?), and column 2 is `!`.
+/// - `+` if the case was opened in the current sitrep,
+/// - `*` if it was opened in an earlier sitrep and data was added in the
+///   current sitrep,
+/// - `-` if the case was opened in an earlier sitrep and closed in this sitrep,
+/// - `+-` if the case was added and closed in this sitrep,
+/// - `*-` if the case was both modified *and* closed in this sitrep,
+/// - `+!` if the case was opened in this sitrep and closed in an earlier
+///   sitrep, which is probably a bug
 ///
 /// Alongside the `open`/`closed` state that follows, the gutter allows the
 /// reader to determine whether these states are the result of changes in the
@@ -754,7 +755,7 @@ impl fmt::Display for DisplayCaseSummaryLegend {
         let styles = display::Styles::new(colored);
         write!(
             f,
-            "activity in this sitrep: {} opened, {} changed, {} closed",
+            "activity in this sitrep: {} created, {} changed, {} closed",
             styles.added_marker(),
             styles.modified_marker(),
             styles.removed_marker(),
@@ -784,22 +785,34 @@ impl fmt::Display for DisplayCaseSummary<'_> {
         const STATE_WIDTH: usize = display::const_max_len(&[OPEN, CLOSED]);
 
         let state = if closed_sitrep_id.is_some() { CLOSED } else { OPEN };
-        let (opened, closed) = match sitrep_id {
+        let (diff1, diff2) = match sitrep_id {
             Some(this_sitrep) => {
                 let opened_here = *created_sitrep_id == this_sitrep;
-                let opened = if opened_here {
+                let closed_here = closed_sitrep_id == &Some(this_sitrep);
+                let modified_here = case.additions_in_sitrep(this_sitrep);
+                let diff1 = if opened_here {
                     styles.added_marker()
-                } else if case.additions_in_sitrep(this_sitrep) {
+                } else if modified_here {
                     styles.modified_marker()
+                } else if closed_here {
+                    styles.removed_marker()
                 } else {
                     styles.normal().style(' ')
                 };
-                let closed = match closed_sitrep_id {
-                    Some(s) if *s == this_sitrep => styles.removed_marker(),
-                    Some(_) if opened_here => styles.warning().style('!'),
-                    _ => styles.normal().style(' '),
+                let diff2 = if closed_here && (opened_here || modified_here) {
+                    // If we are already displaying an added or modified marker,
+                    // and the case was closed in this sitrep, add the removed
+                    // marker in the second column.
+                    styles.removed_marker()
+                } else if opened_here && closed_sitrep_id.is_some() {
+                    // If the case was opened in this sitrep, and closed in an
+                    // *earlier* sitrep, that...doesn't make sense! Display a
+                    // warning marker.
+                    styles.warning().style('!')
+                } else {
+                    styles.normal().style(' ')
                 };
-                (opened, closed)
+                (diff1, diff2)
             }
             None => (styles.normal().style(' '), styles.normal().style(' ')),
         };
@@ -810,7 +823,7 @@ impl fmt::Display for DisplayCaseSummary<'_> {
             .colored(colored);
         write!(
             f,
-            "{:>indent$}{opened}{closed} {} \
+            "{:>indent$}{diff1}{diff2} {} \
              {state:<STATE_WIDTH$} {de:<de_width$} {comment}",
             "",
             styles.heading().style(format_args!("case {id}")),
