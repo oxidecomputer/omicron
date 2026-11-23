@@ -255,44 +255,70 @@ impl DataStore {
             .sleds
             .iter()
             .map(|(&sled_id, sled)| {
+                let BlueprintSledConfig {
+                    state,
+                    subnet,
+                    last_allocated_ip_subnet_offset,
+                    sled_agent_generation,
+                    remove_mupdate_override,
+                    host_phase_2,
+                    measurements,
+                    update_disposition,
+                    wicket_ssh_auth,
+                    // These are not part of `BpSledMetadata`; we peel them out
+                    // and store them in separate tables below.
+                    disks: _,
+                    datasets: _,
+                    zones: _,
+                } = sled;
+
+                // TODO omicron#11821 We don't yet store `wicket_ssh_auth` in
+                // the database, and reading a blueprint always fills in
+                // `WicketSshAuth::initial()`. As a small seatbelt until we
+                // finish this work, refuse to _insert_ any blueprint whose
+                // setting doesn't match.
+                if *wicket_ssh_auth != WicketSshAuth::initial() {
+                    return Err(Error::internal_error(format!(
+                        "blueprint {blueprint_id} sled {sled_id} \
+                         has unexpected wicket_ssh_auth: {} \
+                         (all sleds are expected to have the initial value \
+                          until omicron#11821 is fully implemented)",
+                        wicket_ssh_auth.display()
+                    )));
+                }
+
                 let (
                     update_disposition_generation,
                     update_availability,
                     update_disruption_policy,
                 ) = BpSledMetadata::update_disposition_columns(
-                    sled.update_disposition,
+                    *update_disposition,
                 );
-                BpSledMetadata {
+                Ok(BpSledMetadata {
                     blueprint_id: blueprint_id.into(),
                     sled_id: sled_id.into(),
-                    sled_state: sled.state.into(),
+                    sled_state: (*state).into(),
                     update_disposition_generation,
                     update_availability,
                     update_disruption_policy,
-                    sled_agent_generation: sled.sled_agent_generation.into(),
-                    remove_mupdate_override: sled
-                        .remove_mupdate_override
+                    sled_agent_generation: (*sled_agent_generation).into(),
+                    remove_mupdate_override: remove_mupdate_override
                         .map(|id| id.into()),
-                    host_phase_2_desired_slot_a: sled
-                        .host_phase_2
+                    host_phase_2_desired_slot_a: host_phase_2
                         .slot_a
                         .artifact_hash()
                         .map(ArtifactHash),
-                    host_phase_2_desired_slot_b: sled
-                        .host_phase_2
+                    host_phase_2_desired_slot_b: host_phase_2
                         .slot_b
                         .artifact_hash()
                         .map(ArtifactHash),
-                    subnet: Ipv6Network::from(sled.subnet).into(),
-                    last_allocated_ip_subnet_offset: sled
-                        .last_allocated_ip_subnet_offset
-                        .into_u16()
-                        .into(),
-
-                    measurements: (&sled.measurements).into(),
-                }
+                    subnet: Ipv6Network::from(*subnet).into(),
+                    last_allocated_ip_subnet_offset:
+                        last_allocated_ip_subnet_offset.into_u16().into(),
+                    measurements: measurements.into(),
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let measurements = blueprint
             .sleds
