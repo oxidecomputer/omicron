@@ -53,6 +53,13 @@
         }
       ]
     },
+    "multirack_join_service_port": {
+      "description": "Port that Nexus uses to contact the multirack join service.\n\nIn production this is always the sled-agent port. It's only configurable here for test purposes, so that we can mock the join service and tell Nexus where to contact it. (The IP address of the join service comes from the inventory collection, so we only need a flag like this for the port.)",
+      "default": 12345,
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
     "rack_id": {
       "description": "Uuid of the Rack where Nexus is executing.",
       "allOf": [

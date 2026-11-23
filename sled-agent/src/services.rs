@@ -74,7 +74,9 @@ use omicron_common::address::{
     CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT,
     get_internal_dns_server_addresses,
 };
-use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
+use omicron_common::address::{
+    Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT, SLED_AGENT_PORT,
+};
 use omicron_common::api::internal::shared::{PrivateIpConfig, SledIdentifiers};
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
@@ -2294,6 +2296,7 @@ impl ServiceManager {
                                 nexus_config::TreatLoopbackAsExternal::No,
                         },
                     record_db_claim_backtraces: true,
+                    multirack_join_service_port: SLED_AGENT_PORT,
                 };
 
                 // Copy the partial config file to the expected
