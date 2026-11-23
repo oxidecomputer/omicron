@@ -557,6 +557,10 @@ pub async fn test_setup_with_simrack(
 /// A simulated rack served by two MGS instances (one per switch).
 ///
 /// This is similar to how a real rack works.
+///
+// TODO: Ideally _this_ would be `SimRack` and used in tests by default, and the
+// existing `SimRack` would be deprecated or kept around for special cases. Do
+// this cleanup at some point.
 pub struct TwoSwitchSimRack {
     pub simrack: Arc<SimRack>,
     pub mgs0: GatewayTestContext,
