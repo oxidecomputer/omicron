@@ -48,6 +48,8 @@ pub struct CapacityMetricsStatus {
     pub project_samples: usize,
     /// Number of sled capacity samples retrieved.
     pub sled_samples: usize,
+    /// Number of zpool capacity samples retrieved.
+    pub zpool_samples: usize,
 }
 
 /// The status of a `region_replacement` background task activation

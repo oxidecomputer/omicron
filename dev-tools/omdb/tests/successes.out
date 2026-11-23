@@ -856,6 +856,7 @@ task: "capacity_metrics"
     silo samples: 0
     project samples: 0
     sled samples: <SLED_SAMPLES_REDACTED>
+    zpool samples: <ZPOOL_SAMPLES_REDACTED>
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1597,6 +1598,7 @@ task: "capacity_metrics"
     silo samples: 0
     project samples: 0
     sled samples: <SLED_SAMPLES_REDACTED>
+    zpool samples: <ZPOOL_SAMPLES_REDACTED>
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
