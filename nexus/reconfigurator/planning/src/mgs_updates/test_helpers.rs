@@ -45,6 +45,8 @@ use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::WicketSshAuth;
+use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
@@ -1424,6 +1426,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                         .get(&board.id.slot)
                         .copied()
                         .unwrap_or(OmicronSledUpdateDisposition::Available),
+                    wicket_ssh_auth: WicketSshAuth::initial(),
                 };
                 let instance_manager_status = self
                     .instance_manager_status_exceptions
@@ -1485,7 +1488,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                     remove_mupdate_override: None,
                                 },
                             ),
-                            // fields we never inspect; filled in with dummy data
+                            // fields we never inspect; filled in with dummy
+                            // data
                             sled_agent_address: "[::1]:0".parse().unwrap(),
                             sled_role: SledRole::Gimlet,
                             usable_hardware_threads: 0,
@@ -1505,6 +1509,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 SvcsEnabledNotOnlineResult::DataUnavailable,
                             reference_measurements: IdOrdMap::new(),
                             fmd: Ok(FmdInventory::default()),
+                            wicket_ssh_auth_status:
+                                WicketSshAuthStatus::NoSwitchZone,
                         },
                     )
                     .unwrap();

@@ -46,6 +46,7 @@ impl InstanceCreateBuilder {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: instance::InstanceShutdownPolicy::HardOff,
         };
 
         Self { interim_body }
@@ -158,6 +159,14 @@ impl InstanceCreateBuilder {
         enable_jumbo_frames: bool,
     ) -> Self {
         self.interim_body.enable_jumbo_frames = enable_jumbo_frames;
+        self
+    }
+
+    pub fn with_shutdown_policy(
+        mut self,
+        shutdown_policy: instance::InstanceShutdownPolicy,
+    ) -> Self {
+        self.interim_body.shutdown_policy = shutdown_policy;
         self
     }
 

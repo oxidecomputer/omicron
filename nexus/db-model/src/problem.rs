@@ -24,8 +24,8 @@ use nexus_types::external_api::problem as api;
 use nexus_types::fm::problem::ProblemCode;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
-use omicron_generation_kinds::ProblemGeneration;
-use omicron_generation_kinds::ProblemGenerationKind;
+use omicron_generation_kinds::ProblemRevKind;
+use omicron_generation_kinds::ProblemRevNum;
 use omicron_uuid_kinds::ProblemKind;
 use omicron_uuid_kinds::ProblemUuid;
 
@@ -43,7 +43,17 @@ pub struct Problem {
     ///
     /// This selects the current revision from the `problem_revision`
     /// table.
-    pub current_revision: DbTypedGeneration<ProblemGenerationKind>,
+    ///
+    /// A problem may have a current revision of zero if and only if it is in
+    /// the process of being created, before its first revision has been made
+    /// current. Such problems are not returned when listing problems.
+    pub current_revision: DbTypedGeneration<ProblemRevKind>,
+}
+
+impl Problem {
+    pub fn current_revision(&self) -> ProblemRevNum {
+        self.current_revision.into()
+    }
 }
 
 /// A revision of a problem.
@@ -53,7 +63,7 @@ pub struct Problem {
 #[diesel(table_name = problem_revision)]
 pub struct ProblemRevision {
     pub problem_id: DbTypedUuid<ProblemKind>,
-    pub revision: DbTypedGeneration<ProblemGenerationKind>,
+    pub revision: DbTypedGeneration<ProblemRevKind>,
     /// The time at which this revision was created.
     ///
     /// This is *not* the time at which the problem itself was created.
@@ -76,7 +86,7 @@ pub struct ProblemView {
     pub identity: ProblemIdentity,
     pub time_deleted: Option<DateTime<Utc>>,
     pub time_resolved: Option<DateTime<Utc>>,
-    pub revision: ProblemGeneration,
+    pub revision: ProblemRevNum,
     pub code: ProblemCode,
     pub summary: String,
     pub description: String,
