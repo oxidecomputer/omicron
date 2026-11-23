@@ -2122,6 +2122,7 @@ parent:    <none>
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -2173,6 +2174,7 @@ parent:    <none>
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -2272,6 +2274,7 @@ parent:    <none>
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -2323,6 +2326,7 @@ parent:    <none>
     config generation::   2
     subnet:::::::::::::   ::/64
     last allocated IP::   ::2
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------

@@ -17,6 +17,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::10
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -156,6 +157,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     config generation::   4
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::10
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -282,6 +284,7 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
 
   sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 2 -> 4):
     update disposition:   available (generation 1) (unchanged)
+    wicket SSH access::   unauthenticated (generation 1) (unchanged)
 
     measurements:
     ---------------------------
@@ -422,6 +425,7 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     config generation::   6
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::10
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -548,6 +552,7 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
 
   sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 4 -> 6):
     update disposition:   available (generation 1) (unchanged)
+    wicket SSH access::   unauthenticated (generation 1) (unchanged)
 
     measurements:
     ---------------------------

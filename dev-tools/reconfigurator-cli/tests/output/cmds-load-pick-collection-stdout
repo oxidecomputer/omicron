@@ -47,6 +47,7 @@ result:
     loaded cockroachdb settings: fingerprint = (none), version = (none), preserve downgrade = (not set)
     loaded internal DNS generations: (none)
     loaded external DNS generations: (none)
+    loaded wicket SSH auth: unauthenticated (generation 1)
   config:
     configured external DNS zone name: oxide.example
     configured silo names: example-silo
@@ -73,6 +74,7 @@ result:
     loaded cockroachdb settings: fingerprint = (none), version = (none), preserve downgrade = (not set)
     loaded internal DNS generations: (none)
     loaded external DNS generations: (none)
+    loaded wicket SSH auth: unauthenticated (generation 1)
   config:
     configured external DNS zone name: oxide.example
     configured silo names: example-silo
