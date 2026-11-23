@@ -778,6 +778,7 @@ mod test {
         ConfigReconcilerInventoryStatus, FmdInventory, InstanceManagerStatus,
         Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
         SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+        WicketSshAuthStatus,
     };
     use std::num::NonZeroU32;
 
@@ -1136,6 +1137,7 @@ mod test {
                         SvcsEnabledNotOnlineResult::DataUnavailable,
                     reference_measurements: IdOrdMap::new(),
                     fmd: Ok(FmdInventory::default()),
+                    wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
                 },
             )
             .unwrap();

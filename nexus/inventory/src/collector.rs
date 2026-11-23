@@ -1079,6 +1079,7 @@ mod test {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::WicketSshAuth;
     use slog::o;
     use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
@@ -1099,6 +1100,7 @@ mod test {
             host_phase_2,
             measurements,
             update_disposition,
+            wicket_ssh_auth,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -1107,6 +1109,7 @@ mod test {
             "        remove_mupdate_override: {remove_mupdate_override:?}"
         );
         swriteln!(s, "        update_disposition: {update_disposition:?}");
+        swriteln!(s, "        wicket_ssh_auth: {}", wicket_ssh_auth.display());
         {
             let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
             swriteln!(s, "        host_phase_2.slot_a: {slot_a:?}");
@@ -1441,6 +1444,7 @@ mod test {
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 measurements: BTreeSet::new(),
                 update_disposition: OmicronSledUpdateDisposition::Available,
+                wicket_ssh_auth: WicketSshAuth::initial(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

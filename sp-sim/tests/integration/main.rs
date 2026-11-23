@@ -4,8 +4,8 @@
 
 mod ereports;
 mod ignition;
-// Defines a small UDP client that the tests in this crate use to talk to
-// simulated SPs.
+/// Defines a small UDP client that the tests in this crate use to talk to
+/// simulated SPs.
 mod sp_client;
 
 /// Path to the sp-sim configuration.
