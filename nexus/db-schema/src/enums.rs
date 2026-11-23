@@ -142,6 +142,7 @@ define_enums! {
     VmmCpuPlatformEnum => "vmm_cpu_platform",
     VmmFailureReasonEnum => "vmm_failure_reason",
     VmmStateEnum => "vmm_state",
+    VmmVirtualPlatformEnum => "vmm_virtual_platform",
     VolumeResourceUsageTypeEnum => "volume_resource_usage_type",
     VpcFirewallRuleActionEnum => "vpc_firewall_rule_action",
     VpcFirewallRuleDirectionEnum => "vpc_firewall_rule_direction",

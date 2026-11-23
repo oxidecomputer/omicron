@@ -676,8 +676,10 @@ mod tests {
     use nexus_db_model::SledBlueprintAvailabilityInput;
     use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_db_model::VmmVirtualPlatform;
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::instance::InstanceVirtualPlatform;
     use nexus_types::external_api::project::ProjectCreate;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState;
@@ -717,6 +719,7 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
+                    virtual_platform: VmmVirtualPlatform::Initial,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: db::model::VmmState::Running,
@@ -739,6 +742,7 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
+                    virtual_platform: VmmVirtualPlatform::Initial,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: db::model::VmmState::Running,
@@ -844,6 +848,7 @@ mod tests {
                     propolis_ip: "10.1.9.69".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
+                    virtual_platform: VmmVirtualPlatform::Initial,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: db::model::VmmState::Running,
@@ -1007,6 +1012,7 @@ mod tests {
                             propolis_ip: "10.1.9.32".parse().unwrap(),
                             propolis_port: 420.into(),
                             cpu_platform: VmmCpuPlatform::SledDefault,
+                            virtual_platform: VmmVirtualPlatform::Initial,
                             time_state_updated: Utc::now(),
                             generation: Generation::new(),
                             state,
@@ -1035,6 +1041,7 @@ mod tests {
                         propolis_ip: "10.1.9.32".parse().unwrap(),
                         propolis_port: 420.into(),
                         cpu_platform: VmmCpuPlatform::SledDefault,
+                        virtual_platform: VmmVirtualPlatform::Initial,
                         time_state_updated: Utc::now(),
                         generation: Generation::new(),
                         state: DbVmmState::Running,
@@ -1371,6 +1378,7 @@ mod tests {
                 propolis_ip: "10.1.9.32".parse().unwrap(),
                 propolis_port: 420.into(),
                 cpu_platform: VmmCpuPlatform::SledDefault,
+                virtual_platform: VmmVirtualPlatform::Initial,
                 time_state_updated: Utc::now(),
                 generation: Generation::new(),
                 state: DbVmmState::Running,
@@ -1531,6 +1539,7 @@ mod tests {
                         propolis_ip: "10.1.9.32".parse().unwrap(),
                         propolis_port: 420.into(),
                         cpu_platform: VmmCpuPlatform::SledDefault,
+                        virtual_platform: VmmVirtualPlatform::Initial,
                         time_state_updated: Utc::now(),
                         generation: Generation::new(),
                         state,
@@ -1575,6 +1584,7 @@ mod tests {
                                 disks: Vec::new(),
                                 boot_disk: None,
                                 cpu_platform: None,
+                                virtual_platform: InstanceVirtualPlatform::Initial,
                                 ssh_public_keys: None,
                                 start: false,
                                 auto_restart_policy: Default::default(),

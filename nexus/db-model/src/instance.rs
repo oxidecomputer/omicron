@@ -864,6 +864,7 @@ impl InstanceUpdate {
         ncpus: instance_types::InstanceCpuCount,
         memory: external::ByteCount,
         cpu_platform: Option<instance_types::InstanceCpuPlatform>,
+        virtual_platform: instance_types::InstanceVirtualPlatform,
         enable_jumbo_frames: bool,
         shutdown_policy: instance_types::InstanceShutdownPolicy,
     ) -> Self {
@@ -875,6 +876,7 @@ impl InstanceUpdate {
             ncpus: ncpus.into(),
             memory: memory.into(),
             cpu_platform: cpu_platform.map(From::from),
+            virtual_platform: virtual_platform.into(),
             enable_jumbo_frames,
             shutdown_policy_action,
             shutdown_policy_timeout,
@@ -921,6 +923,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: instance_types::InstanceVirtualPlatform::Initial,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),

@@ -2021,8 +2021,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
-            virtual_platform:
-                InstanceVirtualPlatform::Generic,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),

@@ -476,6 +476,7 @@ table! {
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
         stop_for_update_disposition_generation -> Nullable<Int8>,
+        virtual_platform -> crate::enums::VmmVirtualPlatformEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));

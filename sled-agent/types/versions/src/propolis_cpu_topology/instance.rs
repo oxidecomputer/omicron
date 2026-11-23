@@ -13,7 +13,7 @@ use crate::v1::instance::VmmRuntimeState;
 use crate::v44;
 use crate::v59;
 use crate::v59::instance::InstanceSledLocalConfig;
-use propolis_api_types_versions::v7::instance_spec::InstanceSpec;
+use propolis_api_types_versions::v9::instance_spec::InstanceSpec;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,8 +25,8 @@ pub struct VmmSpec(pub InstanceSpec);
 
 impl From<v44::instance::VmmSpec> for VmmSpec {
     fn from(other: v44::instance::VmmSpec) -> VmmSpec {
-        let v7_spec: InstanceSpec = other.0.into();
-        VmmSpec(v7_spec)
+        let v9_spec: InstanceSpec = other.0.into();
+        VmmSpec(v9_spec)
     }
 }
 

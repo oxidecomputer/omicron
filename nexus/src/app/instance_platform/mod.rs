@@ -100,14 +100,14 @@ impl super::Nexus {
         nics: &[NetworkInterface],
         ssh_keys: &[db::model::SshKey],
     ) -> Result<VmmSpec, Error> {
-        match instance.virtual_platform {
-            db::model::InstanceVirtualPlatform::Initial => {
+        match vmm.virtual_platform {
+            db::model::VmmVirtualPlatform::Initial => {
                 versions::initial::generate_vmm_spec(
                     self, reason, instance, vmm, disks, nics, ssh_keys,
                 )
                 .await
             }
-            db::model::InstanceVirtualPlatform::Generic => {
+            db::model::VmmVirtualPlatform::Generic20261122 => {
                 versions::generic::generate_vmm_spec(
                     self, reason, instance, vmm, disks, nics, ssh_keys,
                 )

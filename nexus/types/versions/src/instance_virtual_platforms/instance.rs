@@ -22,8 +22,8 @@ use crate::v2025_11_20_00::instance::InstanceAutoRestartStatus;
 use crate::v2025_11_20_00::instance::InstanceCpuCount;
 use crate::v2025_11_20_00::instance::InstanceRuntimeState;
 use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
-use crate::v2026_11_11_00;
 use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
+use crate::v2026_11_11_00;
 use crate::v2026_11_11_00::instance::InstanceShutdownPolicy;
 
 /// TODO: docs
@@ -32,6 +32,7 @@ use crate::v2026_11_11_00::instance::InstanceShutdownPolicy;
 pub enum InstanceVirtualPlatform {
     Initial,
     Generic,
+    Generic20261122,
 }
 
 /// View of an Instance
@@ -107,11 +108,11 @@ impl TryFrom<Instance> for v2026_11_11_00::instance::Instance {
     fn try_from(value: Instance) -> Result<Self, Self::Error> {
         if value.virtual_platform != InstanceVirtualPlatform::Initial {
             return Err(dropshot::HttpError::for_client_error(
-                    Some(String::from("Not Acceptable")),
-                    dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
-                    String::from(
-                        "Virtual platforms other than \"initial\" are not supported for client version",
-                    ),
+                Some(String::from("Not Acceptable")),
+                dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
+                String::from(
+                    "Virtual platforms other than \"initial\" are not supported for client version",
+                ),
             ));
         }
         Ok(v2026_11_11_00::instance::Instance {

@@ -333,6 +333,9 @@ async fn sis_create_vmm_record(
             sled.cpu_family.minimum_compatible_platform()
         };
 
+    let virtual_platform =
+        params.db_instance.virtual_platform.select_vmm_platform();
+
     super::instance_common::create_and_insert_vmm_record(
         osagactx.datastore(),
         &opctx,
@@ -341,6 +344,7 @@ async fn sis_create_vmm_record(
         sled_id,
         propolis_ip,
         cpu_platform,
+        virtual_platform,
     )
     .await
 }

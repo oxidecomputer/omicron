@@ -15,6 +15,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, IpNet, NatEntry,
     SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
+    VmmVirtualPlatform,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
@@ -105,6 +106,7 @@ pub async fn create_and_insert_vmm_record(
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
     cpu_platform: VmmCpuPlatform,
+    virtual_platform: VmmVirtualPlatform,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -113,6 +115,7 @@ pub async fn create_and_insert_vmm_record(
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
         cpu_platform,
+        virtual_platform,
     );
 
     let vmm =

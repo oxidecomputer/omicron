@@ -403,6 +403,7 @@ async fn sim_create_vmm_record(
         sled_id,
         propolis_ip,
         params.src_vmm.cpu_platform,
+        params.src_vmm.virtual_platform,
     )
     .await
 }

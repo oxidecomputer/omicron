@@ -3916,7 +3916,8 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2026_06_08_00::instance::Instance>>,
         HttpError,
     > {
-        let resp = Self::instance_list_v2026_11_11_00(rqctx, query_params).await?;
+        let resp =
+            Self::instance_list_v2026_11_11_00(rqctx, query_params).await?;
         let inner = resp.0;
         Ok(HttpResponseOk(ResultsPage {
             items: inner
@@ -4297,8 +4298,12 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseOk<v2026_06_08_00::instance::Instance>, HttpError>
     {
-        let resp =
-            Self::instance_view_v2026_11_11_00(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_view_v2026_11_11_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseOk(resp.0.try_into()?))
     }
 
@@ -4524,12 +4529,8 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_11_11_00::instance::Instance>,
         HttpError,
     > {
-        let resp = Self::instance_reboot(
-            rqctx,
-            query_params,
-            path_params,
-        )
-        .await?;
+        let resp =
+            Self::instance_reboot(rqctx, query_params, path_params).await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
@@ -4576,8 +4577,12 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
         HttpError,
     > {
-        let resp =
-            Self::instance_reboot_v2026_06_08_00(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_reboot_v2026_06_08_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
@@ -4653,8 +4658,12 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_06_08_00::instance::Instance>,
         HttpError,
     > {
-        let resp =
-            Self::instance_start_v2026_11_11_00(rqctx, query_params, path_params).await?;
+        let resp = Self::instance_start_v2026_11_11_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 
@@ -4734,12 +4743,8 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2026_11_11_00::instance::Instance>,
         HttpError,
     > {
-        let resp = Self::instance_stop(
-            rqctx,
-            query_params,
-            path_params,
-        )
-        .await?;
+        let resp =
+            Self::instance_stop(rqctx, query_params, path_params).await?;
         Ok(HttpResponseAccepted(resp.0.try_into()?))
     }
 

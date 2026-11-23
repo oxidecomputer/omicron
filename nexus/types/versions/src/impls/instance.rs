@@ -6,8 +6,9 @@
 
 use crate::latest::instance::{
     InstanceCpuCount, InstanceDiskAttach, InstanceDiskAttachment,
-    InstanceState, IpAssignment, Ipv4Assignment, Ipv6Assignment,
-    PrivateIpStackCreate, PrivateIpv4StackCreate, PrivateIpv6StackCreate,
+    InstanceState, InstanceVirtualPlatform, IpAssignment, Ipv4Assignment,
+    Ipv6Assignment, PrivateIpStackCreate, PrivateIpv4StackCreate,
+    PrivateIpv6StackCreate,
 };
 use anyhow::Context;
 use omicron_common::api::external::Name;
@@ -199,5 +200,21 @@ impl TryFrom<i64> for InstanceCpuCount {
 impl From<&InstanceCpuCount> for i64 {
     fn from(c: &InstanceCpuCount) -> Self {
         i64::from(c.0)
+    }
+}
+
+impl Display for InstanceVirtualPlatform {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+impl InstanceVirtualPlatform {
+    pub fn name(&self) -> &'static str {
+        match self {
+            InstanceVirtualPlatform::Initial => "initial",
+            InstanceVirtualPlatform::Generic => "generic_x86",
+            InstanceVirtualPlatform::Generic20261122 => "generic_x86_20261122",
+        }
     }
 }

@@ -710,6 +710,7 @@ mod tests {
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmFailureReason;
     use nexus_db_model::VmmState as DbVmmState;
+    use nexus_db_model::VmmVirtualPlatform;
     use nexus_db_model::to_db_typed_generation;
     use nexus_test_utils::ControlPlaneBuilder;
     use nexus_test_utils::resource_helpers::create_anti_affinity_group;
@@ -720,8 +721,8 @@ mod tests {
     use nexus_types::external_api::instance::InstanceShutdownPolicy;
     use nexus_types_versions::latest::instance::Instance;
     use nexus_types_versions::latest::instance::InstanceNetworkInterfaceAttachment;
-    use nexus_types_versions::latest::instance::InstanceVirtualPlatform;
     use nexus_types_versions::latest::instance::InstanceSelector;
+    use nexus_types_versions::latest::instance::InstanceVirtualPlatform;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::NameOrId;
@@ -771,8 +772,7 @@ mod tests {
                 disks: Vec::new(),
                 boot_disk: None,
                 cpu_platform: None,
-                virtual_platform:
-                    InstanceVirtualPlatform::Generic,
+                virtual_platform: InstanceVirtualPlatform::Generic,
                 ssh_public_keys: None,
                 start: true,
                 auto_restart_policy: None,
@@ -862,6 +862,7 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
+                    virtual_platform: VmmVirtualPlatform::Initial,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state,

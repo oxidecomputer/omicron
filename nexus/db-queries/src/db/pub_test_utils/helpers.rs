@@ -632,6 +632,7 @@ pub async fn create_vmm_for_instance(
         "127.0.0.1".parse().unwrap(), // Test IP
         12400,                        // Test port
         nexus_db_model::VmmCpuPlatform::SledDefault, // Test CPU platform
+        nexus_db_model::VmmVirtualPlatform::Generic20261122, // Test virtual platform
     );
     datastore.vmm_insert(opctx, vmm).await.expect("Should create VMM");
     vmm_id

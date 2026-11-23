@@ -58,8 +58,8 @@ use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::instance::PrivateIpv4StackCreate;
 use nexus_types::external_api::instance::PrivateIpv6StackCreate;
 use nexus_types::external_api::instance::{
-    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, InstanceVirtualPlatform,
-    InstanceState,
+    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    InstanceState, InstanceVirtualPlatform,
 };
 use nexus_types::external_api::ip_pool::{
     self, IpRange, Ipv4Range, PoolSelector,
@@ -7410,6 +7410,132 @@ async fn test_can_start_turin_dense_instance_with_cpu_platform(
 
     // The VMM should still be on our new fake Turin sled.
     expect_instance_on_sled(nexus, &instance_id, &new_sled_id).await;
+}
+
+#[nexus_test]
+async fn test_can_start_instance_with_virtual_platform(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    // We'll go ahead and try starting instances under each virtual platform.
+    // The test instance configuration is expected to be suitable for all of
+    // them.
+    const TEST_PLATFORMS: &'static [InstanceVirtualPlatform] = &[
+        InstanceVirtualPlatform::Initial,
+        InstanceVirtualPlatform::Generic,
+        InstanceVirtualPlatform::Generic20261122,
+    ];
+
+    for platform in TEST_PLATFORMS.iter() {
+        let test_name = format!("test-{}", platform.name());
+        let instance_params = InstanceCreateBuilder::new(test_name.as_str())
+            .with_description("probably serving data")
+            .with_ncpus(InstanceCpuCount(2))
+            .with_memory(ByteCount::from_gibibytes_u32(4))
+            .with_hostname(test_name.as_str())
+            .with_cpu_platform(Some(InstanceCpuPlatform::AmdMilan))
+            .with_start(false)
+            .finish();
+        let url_instances = get_instances_url();
+
+        let builder =
+            RequestBuilder::new(client, http::Method::POST, &url_instances)
+                .body(Some(&instance_params))
+                .expect_status(Some(http::StatusCode::CREATED));
+
+        let response = NexusRequest::new(builder)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Expected instance creation to succeed.");
+
+        let instance = response.parsed_body::<Instance>().unwrap();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        // Now that the instance is created, lets try to start it.
+
+        let nexus = &cptestctx.server.server_context().nexus;
+
+        expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+        instance_simulate(nexus, &instance_id).await;
+        instance_wait_for_state(client, instance_id, InstanceState::Running)
+            .await;
+
+        // Stop the instance so there are resources "available" on the tes sled
+        // for later instances.
+        expect_instance_stop_ok(client, instance.identity.name.as_str(), true)
+            .await;
+        instance_simulate(nexus, &instance_id).await;
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
+    }
+}
+
+#[nexus_test]
+async fn test_instance_virtual_platform_shape_constraints(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    // The "generic" virtual platform does not permit even vCPU counts. Creating
+    // this should fail.
+    let instance_params = InstanceCreateBuilder::new("test")
+        .with_ncpus(InstanceCpuCount(3))
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_virtual_platform(InstanceVirtualPlatform::Generic)
+        .with_start(false)
+        .finish();
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    // TODO: this is wrong, since we're getting an error back..
+    let instance = response.parsed_body::<String>().unwrap();
+
+    // Creating an instance with a workable CPU count will work though:
+    let instance_params = InstanceCreateBuilder::new("test")
+        .with_ncpus(InstanceCpuCount(2))
+        .with_memory(ByteCount::from_gibibytes_u32(4))
+        .with_virtual_platform(InstanceVirtualPlatform::Generic)
+        .with_start(false)
+        .finish();
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Changing the CPU count to an unacceptable number should fail,
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &instance.identity.id,
+        instance_compute_update(&instance, |update| {
+            update.ncpus = InstanceCpuCount::try_from(3).unwrap();
+        }),
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.message, "instance must be stopped to set boot disk");
 }
 
 #[nexus_test]
