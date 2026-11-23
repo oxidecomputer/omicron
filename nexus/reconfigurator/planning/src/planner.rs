@@ -219,7 +219,11 @@ impl<'a> Planner<'a> {
         // If `input` has new sleds that weren't in `builder`'s parent
         // blueprint, this will create empty configs for them.
         for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            builder.ensure_sled_exists(sled_id, details.resources.subnet);
+            builder.ensure_sled_exists(
+                sled_id,
+                details.resources.subnet,
+                input.wicket_ssh_auth(),
+            );
         }
 
         // Update various blueprint fields that track changes to the system but

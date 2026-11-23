@@ -85,6 +85,7 @@ use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
@@ -710,9 +711,13 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+        wicket_ssh_auth: &WicketSshAuth,
     ) {
         if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
-            slot.insert(SledEditor::for_new_active(sled_subnet));
+            slot.insert(SledEditor::for_new_active(
+                sled_subnet,
+                wicket_ssh_auth.clone(),
+            ));
         }
     }
 
@@ -2955,7 +2960,11 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
-        builder.ensure_sled_exists(new_sled_id, new_sled_resources.subnet);
+        builder.ensure_sled_exists(
+            new_sled_id,
+            new_sled_resources.subnet,
+            &WicketSshAuth::initial(),
+        );
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(

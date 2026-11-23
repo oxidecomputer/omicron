@@ -247,7 +247,10 @@ impl SledEditor {
         })
     }
 
-    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
+    pub fn for_new_active(
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> Self {
         Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet,
@@ -269,10 +272,7 @@ impl SledEditor {
             measurements: MeasurementEditor::new(
                 BlueprintMeasurements::Unknown,
             ),
-            // TODO omicron#11821 Can we fill this in with the current wicket
-            // ssh auth? Or are we relying on the planner overwriting it with
-            // the correct value later?
-            wicket_ssh_auth: WicketSshAuthEditor::new(WicketSshAuth::initial()),
+            wicket_ssh_auth: WicketSshAuthEditor::new(wicket_ssh_auth),
             debug_force_generation_bump: false,
         }
     }
@@ -1062,7 +1062,10 @@ mod tests {
     use std::net::Ipv6Addr;
 
     fn new_active_editor() -> SledEditor {
-        SledEditor::for_new_active(Ipv6Subnet::new(Ipv6Addr::LOCALHOST))
+        SledEditor::for_new_active(
+            Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            WicketSshAuth::initial(),
+        )
     }
 
     const EVACUATING: BlueprintSledUpdateDispositionKind =
