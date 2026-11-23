@@ -20,6 +20,7 @@ use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
 use anyhow::anyhow;
+use anyhow::bail;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -706,19 +707,42 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
-    /// Ensure a commissioned sled exists in this builder.
+    /// Ensure a commissioned sled exists in this builder with the specified
+    /// `wicket_ssh_auth` setting.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `sled_id` already exists but with a different `sled_subnet`, or
+    /// if applying `wicket_ssh_auth` to this sled is invalid (e.g., if the
+    /// sled's wicket SSH generation is ahead of `wicket_ssh_auth`'s).
     pub fn ensure_sled_exists(
         &mut self,
         sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
-        wicket_ssh_auth: &WicketSshAuth,
-    ) {
-        if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
-            slot.insert(SledEditor::for_new_active(
-                sled_subnet,
-                wicket_ssh_auth.clone(),
-            ));
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> anyhow::Result<()> {
+        match self.sled_editors.entry(sled_id) {
+            Entry::Vacant(slot) => {
+                slot.insert(SledEditor::for_new_active(
+                    sled_subnet,
+                    wicket_ssh_auth.clone(),
+                ));
+            }
+            Entry::Occupied(mut entry) => {
+                let editor = entry.get_mut();
+                if editor.subnet() != sled_subnet {
+                    bail!(
+                        "sled subnet mismatch: \
+                         sled {sled_id} already exists with subnet {}, but \
+                         caller attempted to ensure it exists with subnet \
+                         {sled_subnet}",
+                        editor.subnet(),
+                    );
+                }
+                editor.set_wicket_ssh_auth(wicket_ssh_auth)?;
+            }
         }
+        Ok(())
     }
 
     pub fn set_cockroachdb_fingerprint(&mut self, fingerprint: String) {
@@ -2960,11 +2984,13 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
-        builder.ensure_sled_exists(
-            new_sled_id,
-            new_sled_resources.subnet,
-            &WicketSshAuth::initial(),
-        );
+        builder
+            .ensure_sled_exists(
+                new_sled_id,
+                new_sled_resources.subnet,
+                WicketSshAuth::initial(),
+            )
+            .expect("ensured sled");
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(

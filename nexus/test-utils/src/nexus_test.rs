@@ -469,11 +469,13 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 "sled {sled_id} is not already in target blueprint {}",
                 parent.id
             );
-            builder.ensure_sled_exists(
-                sled_id,
-                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-                &WicketSshAuth::initial(),
-            );
+            builder
+                .ensure_sled_exists(
+                    sled_id,
+                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    WicketSshAuth::initial(),
+                )
+                .expect("ensured sled");
             builder.comment(format!("add sled {sled_id}"));
             Ok(())
         })

@@ -612,6 +612,14 @@ impl SledEditor {
         self.host_phase_2.set_slot(slot, host_phase_2);
     }
 
+    /// Sets the desired wicket SSH auth setting on this sled.
+    pub fn set_wicket_ssh_auth(
+        &mut self,
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> Result<(), SledEditError> {
+        self.wicket_ssh_auth.set_value(wicket_ssh_auth).map_err(From::from)
+    }
+
     /// Backwards compatibility / test helper: If we're given a blueprint that
     /// has zones but wasn't created via `SledEditor`, it might not have
     /// datasets for all its zones. This method backfills them.

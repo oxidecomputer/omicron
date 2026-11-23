@@ -3064,11 +3064,13 @@ pub(in crate::db::datastore) mod test {
         // Simulate another blueprint with the new sled now present in it.
         let with_new_sled =
             child_blueprint(&opctx, &available_again, |builder| {
-                builder.ensure_sled_exists(
-                    new_sled.id(),
-                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-                    &WicketSshAuth::initial(),
-                );
+                builder
+                    .ensure_sled_exists(
+                        new_sled.id(),
+                        Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                        WicketSshAuth::initial(),
+                    )
+                    .expect("ensured sled");
             });
         let writes =
             apply_sled_bp_availability(&datastore, &with_new_sled).await;
@@ -5504,11 +5506,13 @@ pub(in crate::db::datastore) mod test {
         )
         .expect("created BlueprintBuilder from empty blueprint");
         for sled_config in &config.sleds {
-            builder.ensure_sled_exists(
-                sled_config.sled_id,
-                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-                &WicketSshAuth::initial(),
-            );
+            builder
+                .ensure_sled_exists(
+                    sled_config.sled_id,
+                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    WicketSshAuth::initial(),
+                )
+                .expect("ensured sled");
         }
         let blueprint = builder.build(BlueprintSource::Test);
         initialize_sled_bp_availability(datastore, &blueprint).await;

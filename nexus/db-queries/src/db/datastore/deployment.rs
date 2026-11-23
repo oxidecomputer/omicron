@@ -4093,7 +4093,8 @@ mod tests {
         Planner::update_builder_from_planning_input(
             &mut builder,
             &planning_input,
-        );
+        )
+        .expect("updated builder from planning input");
 
         // Ensure disks on our sled
         assert_eq!(

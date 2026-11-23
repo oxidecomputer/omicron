@@ -2728,7 +2728,8 @@ fn cmd_blueprint_edit(
 
     // We're acting as the planner here, so we need to update the builder for
     // any static changes in the input (e.g., new sleds, new DNS versions, ...).
-    Planner::update_builder_from_planning_input(&mut builder, &planning_input);
+    Planner::update_builder_from_planning_input(&mut builder, &planning_input)
+        .context("updating builder from planning input")?;
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
