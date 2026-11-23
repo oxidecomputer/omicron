@@ -91,10 +91,12 @@ pub struct DeleteInternetGatewayElementSelector {
     pub vpc: Option<NameOrId>,
     /// Name or ID of the internet gateway
     pub gateway: Option<NameOrId>,
-    /// Detach even if the attachment is in use. Without `cascade`, detach
-    /// fails if a route targets this gateway and an instance in the VPC has
-    /// an external IP from the IP pool or matching the IP address. Detaching
-    /// never deletes routes.
+    /// Detach without checking whether the attachment is in use. An attachment
+    /// is in use when a route targets this gateway and an instance in the VPC
+    /// has an external IP from the IP pool or matching the IP address. Without
+    /// `cascade`, the server performs a best-effort check and refuses the
+    /// request if the attachment appears to be in use. Detaching never deletes
+    /// routes.
     #[serde(default)]
     pub cascade: bool,
 }

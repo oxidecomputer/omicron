@@ -5111,7 +5111,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach even if the attachment is in use. Without `cascade`, detach fails if a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Detaching never deletes routes.",
+            "description": "Detach without checking whether the attachment is in use. An attachment is in use when a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Without `cascade`, the server performs a best-effort check and refuses the request if the attachment appears to be in use. Detaching never deletes routes.",
             "schema": {
               "type": "boolean"
             }
@@ -5321,7 +5321,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach even if the attachment is in use. Without `cascade`, detach fails if a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Detaching never deletes routes.",
+            "description": "Detach without checking whether the attachment is in use. An attachment is in use when a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Without `cascade`, the server performs a best-effort check and refuses the request if the attachment appears to be in use. Detaching never deletes routes.",
             "schema": {
               "type": "boolean"
             }
