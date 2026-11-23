@@ -12,9 +12,9 @@ use std::mem::MaybeUninit;
 use std::net::{
     IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6, UdpSocket,
 };
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{sleep, spawn};
+use std::thread::{JoinHandle, sleep, spawn};
 use std::time::{Duration, Instant};
 
 const HIDE_CURSOR: &str = "\x1b[?25l";
@@ -26,6 +26,10 @@ const DISPLAY_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Poll interval for the quiesce check in `drain_until_quiescent`.
 const DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Receive timeout on the pinger sockets, so receive workers notice a stop
+/// request instead of blocking forever.
+const RX_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 const ICMP_ECHO_TYPE: u8 = 8;
 const ICMP_ECHO_CODE: u8 = 0;
@@ -76,13 +80,14 @@ pub fn ping4_test_run(
     // Use an ASCII code to hide the blinking cursor as it makes the output hard
     // to read.
     print!("{HIDE_CURSOR}");
-    p.clone().show();
+    let display = p.clone().show();
     // wait for the test to conclude plus a bit of buffer time for packets in
     // flight.
     sleep(duration + Duration::from_millis(250));
-    for _ in 0..p.targets.lock().unwrap().len() {
-        println!();
-    }
+    // Stop the workers so none outlive this run: a later test opens its own
+    // ICMP socket, and a leftover receiver or ticker would print over it.
+    p.stop.store(true, Ordering::Relaxed);
+    display.join().unwrap();
     // turn the blinky cursor back on
     print!("{SHOW_CURSOR}");
 
@@ -94,6 +99,8 @@ pub fn ping4_test_run(
 struct Pinger4 {
     sock: Socket,
     targets: Mutex<BTreeMap<u16, Ping4State>>,
+    /// Set when the run ends; every worker thread exits once it sees it.
+    stop: AtomicBool,
 }
 
 /// Running results for a single ping target, generic over the address family.
@@ -184,29 +191,42 @@ impl Pinger4 {
         let sock = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))
             .unwrap();
         sock.set_ttl(ttl).unwrap();
-        let s = Arc::new(Self { sock, targets: Mutex::new(BTreeMap::new()) });
+        sock.set_read_timeout(Some(RX_POLL_INTERVAL)).unwrap();
+        let s = Arc::new(Self {
+            sock,
+            targets: Mutex::new(BTreeMap::new()),
+            stop: AtomicBool::new(false),
+        });
         s.clone().rx();
         s.clone().count_lost();
         s
     }
 
-    fn show(self: Arc<Self>) {
+    /// Spawn the live ticker. After `stop` is set it paints the rows one
+    /// last time, leaves the cursor below them, and exits.
+    fn show(self: Arc<Self>) -> JoinHandle<()> {
         print_ping_header();
         // run the reporting on a background thread
         spawn(move || {
             loop {
+                let done = self.stop.load(Ordering::Relaxed);
                 // print a status line for each target
-                for (_id, t) in self.targets.lock().unwrap().iter() {
+                let targets = self.targets.lock().unwrap();
+                for (_id, t) in targets.iter() {
                     print_ping_row(t);
                 }
-                for _ in 0..self.targets.lock().unwrap().len() {
+                if done {
+                    break;
+                }
+                for _ in 0..targets.len() {
                     print!("{MOVE_CURSOR_UP}");
                 }
                 print!("\r");
+                drop(targets);
 
                 sleep(DISPLAY_REFRESH_INTERVAL);
             }
-        });
+        })
     }
 
     fn add_target(
@@ -237,7 +257,7 @@ impl Pinger4 {
         // send ICMP test packets on a background thread
         spawn(move || {
             loop {
-                if Instant::now() >= stop {
+                if Instant::now() >= stop || self.stop.load(Ordering::Relaxed) {
                     break;
                 }
                 let mut c = Checksum::new();
@@ -274,7 +294,7 @@ impl Pinger4 {
     // ticker for lost packet count.
     fn count_lost(self: Arc<Self>) {
         spawn(move || {
-            loop {
+            while !self.stop.load(Ordering::Relaxed) {
                 for (_, tgt) in self.targets.lock().unwrap().iter_mut() {
                     update_lost_packet_count(tgt);
                 }
@@ -287,7 +307,7 @@ impl Pinger4 {
         // Spawn a background thread to receive ICMP replies and do the
         // necessary accounting.
         spawn(move || {
-            loop {
+            while !self.stop.load(Ordering::Relaxed) {
                 let mut ubuf = [MaybeUninit::new(0); RX_BUF_LEN];
                 if let Ok((sz, _)) = self.sock.recv_from(&mut ubuf) {
                     let buf = unsafe { ubuf[..sz].assume_init_ref() };
@@ -298,14 +318,16 @@ impl Pinger4 {
                                 continue;
                             }
                         };
-                    match self.targets.lock().unwrap().get_mut(&msg.identifier)
+                    // The raw socket sees every ICMP message to this host, so
+                    // replies for other identifiers (another stream, another
+                    // process) are expected and skipped.
+                    if msg.typ != ICMP_ECHO_REPLY_TYPE {
+                        continue;
+                    }
+                    if let Some(target) =
+                        self.targets.lock().unwrap().get_mut(&msg.identifier)
                     {
-                        Some(ref mut target) => {
-                            target.record_reply(Instant::now());
-                        }
-                        None => {
-                            println!("no target {}", msg.identifier);
-                        }
+                        target.record_reply(Instant::now());
                     }
                 }
             }
@@ -514,28 +536,39 @@ trait McastPinger: Send + Sync + 'static {
     /// `McastReport::sender_self_rx`).
     fn self_rx(&self) -> u32;
 
-    /// Spawn the live ticker that repaints a status row per member.
-    fn show(self: Arc<Self>) {
+    /// Set when the run ends; every worker thread exits once it sees it.
+    fn stop(&self) -> &AtomicBool;
+
+    /// Spawn the live ticker that repaints a status row per member. After
+    /// `stop` is set it paints the rows one last time, leaves the cursor below
+    /// them, and exits.
+    fn show(self: Arc<Self>) -> JoinHandle<()> {
         print_ping_header();
         spawn(move || {
             loop {
-                for (_src, t) in self.targets().lock().unwrap().iter() {
+                let done = self.stop().load(Ordering::Relaxed);
+                let targets = self.targets().lock().unwrap();
+                for (_src, t) in targets.iter() {
                     print_ping_row(t);
                 }
-                for _ in 0..self.targets().lock().unwrap().len() {
+                if done {
+                    break;
+                }
+                for _ in 0..targets.len() {
                     print!("{MOVE_CURSOR_UP}");
                 }
                 print!("\r");
+                drop(targets);
                 sleep(DISPLAY_REFRESH_INTERVAL);
             }
-        });
+        })
     }
 
     /// Spawn the worker that recomputes per-member loss from the running tx/rx
     /// counts.
     fn count_lost(self: Arc<Self>) {
         spawn(move || {
-            loop {
+            while !self.stop().load(Ordering::Relaxed) {
                 for (_, tgt) in self.targets().lock().unwrap().iter_mut() {
                     update_lost_packet_count(tgt);
                 }
@@ -570,28 +603,30 @@ fn mcast_ping_test_run<P: McastPinger>(
         }
     }
     print!("{HIDE_CURSOR}");
-    pinger.clone().show();
+    let display = pinger.clone().show();
     pinger.clone().tx(pps, duration);
     // Let the send window elapse, then keep counting until replication drains.
     // The final requests' replicated copies are still in flight at the
     // deadline, so we finish only once the receive count stops advancing
     // rather than clipping the tail at a fixed buffer.
     sleep(duration);
+    let drained = drain_until_quiescent(
+        pinger.targets(),
+        Duration::from_millis(500),
+        Duration::from_secs(5),
+    );
+    // Stop the workers so none outlive this run: a later test opens its own
+    // ICMP socket, and a leftover receiver or ticker would print over it.
+    pinger.stop().store(true, Ordering::Relaxed);
+    display.join().unwrap();
+    print!("{SHOW_CURSOR}");
     assert_eq!(
-        drain_until_quiescent(
-            pinger.targets(),
-            Duration::from_millis(500),
-            Duration::from_secs(5),
-        ),
+        drained,
         DrainResult::Quiesced,
         "multicast replies for group {group} did not quiesce within the \
          drain timeout; the report may be missing late replies or duplicate \
          delivery is ongoing",
     );
-    for _ in 0..pinger.targets().lock().unwrap().len() {
-        println!();
-    }
-    print!("{SHOW_CURSOR}");
 
     let members = pinger
         .targets()
@@ -742,13 +777,15 @@ struct McastPinger4 {
     /// Wire copies of our own requests received back (see
     /// `McastReport::sender_self_rx`).
     self_rx: AtomicU32,
+    /// Set when the run ends; every worker thread exits once it sees it.
+    stop: AtomicBool,
 }
 
 impl McastPinger4 {
     fn rx(self: Arc<Self>) {
         spawn(move || {
             let egress = Self::egress_source(self.group);
-            loop {
+            while !self.stop.load(Ordering::Relaxed) {
                 let mut ubuf = [MaybeUninit::new(0); RX_BUF_LEN];
                 if let Ok((sz, from)) = self.sock.recv_from(&mut ubuf) {
                     let buf = unsafe { ubuf[..sz].assume_init_ref() };
@@ -813,12 +850,14 @@ impl McastPinger for McastPinger4 {
         // `rx` counts as `self_rx` violations.
         sock.join_multicast_v4(&group, &Ipv4Addr::UNSPECIFIED).unwrap();
         set_multicast_loop_v4(&sock, false);
+        sock.set_read_timeout(Some(RX_POLL_INTERVAL)).unwrap();
         let s = Arc::new(Self {
             sock,
             id,
             group,
             targets: Mutex::new(BTreeMap::new()),
             self_rx: AtomicU32::new(0),
+            stop: AtomicBool::new(false),
         });
         s.clone().rx();
         s.clone().count_lost();
@@ -840,7 +879,7 @@ impl McastPinger for McastPinger4 {
         let dst: SockAddr = SocketAddrV4::new(self.group, 0).into();
         spawn(move || {
             loop {
-                if Instant::now() >= stop {
+                if Instant::now() >= stop || self.stop.load(Ordering::Relaxed) {
                     break;
                 }
                 let mut c = Checksum::new();
@@ -881,6 +920,10 @@ impl McastPinger for McastPinger4 {
 
     fn self_rx(&self) -> u32 {
         self.self_rx.load(Ordering::Relaxed)
+    }
+
+    fn stop(&self) -> &AtomicBool {
+        &self.stop
     }
 }
 
@@ -950,13 +993,15 @@ struct McastPinger6 {
     /// Wire copies of our own requests received back (see
     /// `McastReport::sender_self_rx`).
     self_rx: AtomicU32,
+    /// Set when the run ends; every worker thread exits once it sees it.
+    stop: AtomicBool,
 }
 
 impl McastPinger6 {
     fn rx(self: Arc<Self>) {
         spawn(move || {
             let egress = Self::egress_source(self.group);
-            loop {
+            while !self.stop.load(Ordering::Relaxed) {
                 let mut ubuf = [MaybeUninit::new(0); RX_BUF_LEN];
                 if let Ok((sz, from)) = self.sock.recv_from(&mut ubuf) {
                     let buf = unsafe { ubuf[..sz].assume_init_ref() };
@@ -1026,12 +1071,14 @@ impl McastPinger for McastPinger6 {
         // forms on every platform, so no illumos shim is needed here.
         sock.join_multicast_v6(&group, 0).unwrap();
         sock.set_multicast_loop_v6(false).unwrap();
+        sock.set_read_timeout(Some(RX_POLL_INTERVAL)).unwrap();
         let s = Arc::new(Self {
             sock,
             id,
             group,
             targets: Mutex::new(BTreeMap::new()),
             self_rx: AtomicU32::new(0),
+            stop: AtomicBool::new(false),
         });
         s.clone().rx();
         s.clone().count_lost();
@@ -1053,7 +1100,7 @@ impl McastPinger for McastPinger6 {
         let dst: SockAddr = SocketAddrV6::new(self.group, 0, 0, 0).into();
         spawn(move || {
             loop {
-                if Instant::now() >= stop {
+                if Instant::now() >= stop || self.stop.load(Ordering::Relaxed) {
                     break;
                 }
                 // The ICMPv6 checksum covers an IPv6 pseudo-header the sender
@@ -1094,6 +1141,10 @@ impl McastPinger for McastPinger6 {
 
     fn self_rx(&self) -> u32 {
         self.self_rx.load(Ordering::Relaxed)
+    }
+
+    fn stop(&self) -> &AtomicBool {
+        &self.stop
     }
 }
 
