@@ -450,7 +450,7 @@ impl<'parent> ProblemSetBuilder<'parent> {
         debug_log
             .entry(&log, "requested a new active problem")
             .kv("code", code)
-            .kv("requested_by", de)
+            .kv("de", de)
             .comment(&problem_comment)
             .finish();
 
@@ -620,7 +620,7 @@ macro_rules! revise_field {
             rev.debug_log
                 .entry(&rev.log, concat!("revised ", stringify!($field)))
                 .kv(stringify!($field), revised_val)
-                .kv("revised_by", &$self.de)
+                .kv("de", &$self.de)
                 .comment($comment)
                 .finish();
         }
@@ -731,7 +731,7 @@ impl RevisionBuilder<'_> {
             .or_else(|| rev.new_alerts.get(&alert_id))
             .map(|link| (link.revision, link.linked_sitrep_id));
         if let Some((revision, linked_sitrep_id)) = existing {
-            self.log_warning("attempted to link an alert to a problem twice")
+            self.log_warning("attempted to attach an alert to a problem twice")
                 .kv("alert_id", alert_id)
                 .kv("existing_link_revision", revision.as_u64())
                 .kv("existing_link_sitrep_id", linked_sitrep_id)
@@ -748,8 +748,8 @@ impl RevisionBuilder<'_> {
         };
         rev.new_alerts
             .insert_unique(link)
-            .expect("we just checked that the alert is not already linked");
-        self.log_event("added alert to problem")
+            .expect("we just checked that the alert is not already attached");
+        self.log_event("attached alert to problem")
             .kv("alert_id", alert_id)
             .comment(comment)
             .finish();
@@ -793,9 +793,9 @@ impl RevisionBuilder<'_> {
             comment: comment.clone(),
         };
         rev.new_support_bundles.insert_unique(link).expect(
-            "we just checked that the support bundle is not already linked",
+            "we just checked that the support bundle is not already attached",
         );
-        self.log_event("linked support bundle")
+        self.log_event("attached support bundle")
             .kv("support_bundle_id", support_bundle_id)
             .comment(comment)
             .finish();
