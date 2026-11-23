@@ -5093,7 +5093,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
+            "description": "Detach even if the attachment is in use. Without `cascade`, detach fails if a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Detaching never deletes routes.",
             "schema": {
               "type": "boolean"
             }
@@ -5303,7 +5303,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
+            "description": "Detach even if the attachment is in use. Without `cascade`, detach fails if a route targets this gateway and an instance in the VPC has an external IP from the IP pool or matching the IP address. Detaching never deletes routes.",
             "schema": {
               "type": "boolean"
             }
@@ -5549,7 +5549,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any routes targeting it.",
+            "description": "Also delete any routes targeting this gateway. Without `cascade`, delete fails if any routes target it. Deleting the gateway always detaches its IP pools and IP addresses.",
             "schema": {
               "type": "boolean"
             }

@@ -14,7 +14,8 @@ use nexus_test_utils::{
         create_ip_pool, create_local_user, create_project, create_route,
         create_router, create_silo, create_vpc, delete_internet_gateway,
         detach_ip_address_from_igw, detach_ip_pool_from_igw, grant_iam,
-        link_ip_pool, objects_list_page_authz, test_params,
+        link_ip_pool, object_delete, object_delete_error,
+        objects_list_page_authz, test_params,
     },
 };
 use nexus_test_utils_macros::nexus_test;
@@ -276,28 +277,6 @@ async fn test_internet_gateway_delete_cascade(ctx: &ControlPlaneTestContext) {
     expect_igw_pools_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
     // looking for gateway addresses should return 404
     expect_igw_addresses_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
-}
-
-// A non-cascading delete must fail when a route still targets the gateway,
-// rather than silently leaving a dangling route reference behind.
-#[nexus_test]
-async fn test_internet_gateway_delete_no_cascade_fails_with_routes(
-    ctx: &ControlPlaneTestContext,
-) {
-    let c = &ctx.external_client;
-    test_setup(c).await;
-
-    // test_setup already created a route targeting IGW_NAME; create the gateway
-    // it points at. Note the gateway has no ip pool / address attachments, so
-    // the only thing blocking a no-cascade delete is the route.
-    create_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
-
-    // a route references this gateway, so a non-cascading delete must fail
-    expect_igw_delete_fail(c, PROJECT_NAME, VPC_NAME, IGW_NAME, false).await;
-
-    // the gateway should still be there
-    let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
-    assert_eq!(igws.len(), 2, "gateway should survive the failed delete");
 }
 
 // A non-cascading delete should succeed when no routes target the gateway, and
@@ -869,11 +848,7 @@ async fn delete_route(
         "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
         route_name, project_name, vpc_name, router_name,
     );
-    NexusRequest::object_delete(client, &url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+    object_delete(client, &url).await;
 }
 
 async fn expect_igw_not_found(
@@ -936,18 +911,13 @@ async fn expect_igw_delete_fail(
         "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
         igw_name, project_name, vpc_name, cascade
     );
-    let _error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::DELETE,
-        &url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let error =
+        object_delete_error(client, &url, StatusCode::BAD_REQUEST).await;
+    assert!(
+        error.message.starts_with("Routes referencing this gateway exist"),
+        "unexpected error message: {}",
+        error.message,
+    );
 }
 
 async fn expect_igw_ip_pool_detach_fail(
