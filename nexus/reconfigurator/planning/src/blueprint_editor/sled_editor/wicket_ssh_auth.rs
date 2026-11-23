@@ -5,7 +5,6 @@
 use super::scalar::ScalarEditor;
 use omicron_generation_kinds::WicketSshAuthGeneration;
 use sled_agent_types::inventory::WicketSshAuth;
-use sled_agent_types::inventory::WicketSshAuthKind;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WicketSshAuthEditError {
@@ -19,14 +18,11 @@ pub enum WicketSshAuthEditError {
     },
 
     #[error(
-        "tried to set wicket SSH auth to same generation ({generation}) \
-         with different kind (current = {current:?}, new = {new:?})"
+        "tried to set wicket SSH auth to same generation \
+         with different kind: current = {}, new = {}",
+         current.display(), new.display(),
     )]
-    SameGenerationDifferentKind {
-        generation: WicketSshAuthGeneration,
-        current: WicketSshAuthKind,
-        new: WicketSshAuthKind,
-    },
+    SameGenerationDifferentKind { current: WicketSshAuth, new: WicketSshAuth },
 }
 
 #[derive(Debug)]
@@ -59,9 +55,8 @@ impl WicketSshAuthEditor {
             && current_value.kind != new_value.kind
         {
             return Err(WicketSshAuthEditError::SameGenerationDifferentKind {
-                generation: current_value.generation,
-                current: current_value.kind.clone(),
-                new: new_value.kind,
+                current: current_value.clone(),
+                new: new_value,
             });
         }
 
