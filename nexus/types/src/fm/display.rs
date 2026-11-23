@@ -133,15 +133,15 @@ impl Styles {
         }
     }
 
-    pub fn added_marker(&self) -> Styled<char> {
+    pub(crate) fn added_marker(&self) -> Styled<char> {
         self.added().style(GUTTER_ADDED)
     }
 
-    pub fn modified_marker(&self) -> Styled<char> {
+    pub(crate) fn modified_marker(&self) -> Styled<char> {
         self.modified().style(GUTTER_MODIFIED)
     }
 
-    pub fn removed_marker(&self) -> Styled<char> {
+    pub(crate) fn removed_marker(&self) -> Styled<char> {
         self.removed().style(GUTTER_REMOVED)
     }
 }

@@ -568,7 +568,7 @@ async fn cmd_db_sitrep_show(
             problems.by_id().iter().filter(|p| p.is_resolved()).count();
         let num_active = problems.len() - num_resolved;
 
-        println!("\n{:=<80}", "== ACTIVE PROBLEMS ");
+        println!("\n{:=<80}", "== PROBLEMS ");
         println!("{num_active} active, {num_resolved} resolved\n");
         println!(
             "(i) {}",

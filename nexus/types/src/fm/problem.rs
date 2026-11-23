@@ -482,18 +482,6 @@ impl SitrepProblem {
             colored: false,
         }
     }
-
-    /// Returns `true` if the current revision of this problem was requested
-    /// in `sitrep_id`, or if any alert or support bundle links were added to
-    /// this problem in `sitrep_id`.
-    fn changed_in_sitrep(&self, sitrep_id: SitrepUuid) -> bool {
-        self.current_revision().requested_sitrep_id == sitrep_id
-            || self.alerts.iter().any(|a| a.linked_sitrep_id == sitrep_id)
-            || self
-                .support_bundles
-                .iter()
-                .any(|b| b.linked_sitrep_id == sitrep_id)
-    }
 }
 
 /// Displays a summary of a [`SitrepProblem`] as a single line, as returned by
@@ -503,17 +491,16 @@ impl SitrepProblem {
 /// interesting activity in the sitrep being displayed, if this displayer was
 /// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
 ///
-/// - column 1 is `+` if the problem was requested in the current sitrep, `*`
-///   if it was requested in an earlier sitrep, but a new revision, alert link,
-///   or support bundle link, was requested in this sitrep, and blank otherwise.
-/// - column 2 is `-` if the problem was resolved in this sitrep (i.e., its
-///   current revision is resolved and was requested in this sitrep), and
-///   blank otherwise. If a problem requested in this sitrep was resolved by a
-///   revision from some other sitrep, the record is inconsistent, and column 2
-///   is `!`.
-///
-/// Because resolving a problem requires a new revision, a problem requested in
-/// an earlier sitrep and resolved in this one is always displayed as `*-`.
+/// - `+` if the problem was created in this sitrep,
+/// - `*` if the problem was modified (i.e. it has a new revision) in this
+///   sitrep, but it was not created in this sitrep, and the new revision does
+///   not resolve it,
+/// - `-` if the problem was resolved by a revision requested in this sitrep,
+///   and it was not already created,
+/// - `+-` if the problem was both created and resolved in this sitrep,
+/// - `!` if the problem was created in this sitrep but resolved in an *earlier*
+///   sitrep (i.e., it was resolved before it was created, which shouldn't
+///   happen and is a bug)
 ///
 /// If no sitrep ID was provided, the gutter is blank, so that rows remain
 /// aligned.
@@ -557,7 +544,7 @@ impl fmt::Display for DisplayProblemSummaryLegend {
         write!(
             f,
             "activity in this sitrep: \
-            {} requested, {} revised, {} resolved\n\n   \
+            {} created, {} revised, {} resolved\n\n   \
             STATE            ID                                   CODE SUMMARY",
             styles.added_marker(),
             styles.modified_marker(),
@@ -591,26 +578,30 @@ impl fmt::Display for DisplayProblemSummary<'_> {
         } else {
             styles.warning().style(ACTIVE)
         };
-        let (created, resolved) = match sitrep_id {
+        let (diff1, diff2) = match sitrep_id {
             Some(this_sitrep) => {
                 let created_here = *requested_sitrep_id == this_sitrep;
-                let created = if created_here {
+                let revised_here =
+                    current_rev.requested_sitrep_id == this_sitrep;
+                let diff1 = if created_here {
                     styles.added_marker()
-                } else if problem.changed_in_sitrep(this_sitrep) {
+                } else if is_resolved && revised_here {
+                    styles.removed_marker()
+                } else if revised_here {
                     styles.modified_marker()
                 } else {
                     styles.normal().style(' ')
                 };
-                let resolved = if !is_resolved {
+                let diff2 = if !is_resolved {
                     styles.normal().style(' ')
-                } else if current_rev.requested_sitrep_id == this_sitrep {
+                } else if created_here && revised_here {
                     styles.removed_marker()
                 } else if created_here {
                     styles.warning().style('!')
                 } else {
                     styles.normal().style(' ')
                 };
-                (created, resolved)
+                (diff1, diff2)
             }
             None => (styles.normal().style(' '), styles.normal().style(' ')),
         };
@@ -618,7 +609,7 @@ impl fmt::Display for DisplayProblemSummary<'_> {
         let code = u32::from(current_rev.code);
         write!(
             f,
-            "{:>indent$}{created}{resolved} {state:>STATE_WIDTH$} {} \
+            "{:>indent$}{diff1}{diff2} {state:>STATE_WIDTH$} {} \
              {code:04} {}",
             "",
             styles.heading().style(format_args!("problem {id}")),

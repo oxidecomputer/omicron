@@ -2784,18 +2784,18 @@ rendezvous resource generation numbers:
 problems in this sitrep:     7
 ereports in this sitrep:     3
 
-== ACTIVE PROBLEMS =============================================================
+== PROBLEMS ====================================================================
 4 active, 3 resolved
 
-(i) activity in this sitrep: + requested, * revised, - resolved
+(i) activity in this sitrep: + created, * revised, - resolved
 
    STATE            ID                                   CODE SUMMARY
 +    active problem 00000000-0000-0000-0000-000000000064 0001 Degraded ZFS pool on sled BRM42220007 disk N3
      active problem 00000000-0000-0000-0000-00000000006e 0001 Faulted ZFS pool on sled BRM42220012 disk N5
-*- resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
+-  resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
    resolved problem 00000000-0000-0000-0000-000000000082 0001 Faulted disk N9 on sled BRM42220023 has been expunged.
 *    active problem 00000000-0000-0000-0000-00000000008c 0002 3 control plane services on sled BRM42220014 in maintainence
-*    active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
+     active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
 +- resolved problem 00000000-0000-0000-0000-0000000000a0 0002 Internal DNS service on sled BRM42220019 in maintainence
 
 == CASES =======================================================================
@@ -2845,18 +2845,18 @@ rendezvous resource generation numbers:
 problems in this sitrep:     7
 ereports in this sitrep:     3
 
-== ACTIVE PROBLEMS =============================================================
+== PROBLEMS ====================================================================
 4 active, 3 resolved
 
-(i) activity in this sitrep: + requested, * revised, - resolved
+(i) activity in this sitrep: + created, * revised, - resolved
 
    STATE            ID                                   CODE SUMMARY
 +    active problem 00000000-0000-0000-0000-000000000064 0001 Degraded ZFS pool on sled BRM42220007 disk N3
      active problem 00000000-0000-0000-0000-00000000006e 0001 Faulted ZFS pool on sled BRM42220012 disk N5
-*- resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
+-  resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
    resolved problem 00000000-0000-0000-0000-000000000082 0001 Faulted disk N9 on sled BRM42220023 has been expunged.
 *    active problem 00000000-0000-0000-0000-00000000008c 0002 3 control plane services on sled BRM42220014 in maintainence
-*    active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
+     active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
 +- resolved problem 00000000-0000-0000-0000-0000000000a0 0002 Internal DNS service on sled BRM42220019 in maintainence
 
 == CASES =======================================================================
