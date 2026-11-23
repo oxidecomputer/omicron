@@ -24,6 +24,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::fm;
+use omicron_generation_kinds::ProblemRevNum;
 use omicron_generation_kinds::SitrepAlertGeneration;
 use omicron_generation_kinds::SitrepProblemGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
@@ -579,8 +580,8 @@ async fn test_omdb_success_cases() {
         .await;
     }
 
-    // The sitrep that Nexus produced has no cases, so also show one that
-    // does. Its IDs are all fixed, so they are not redacted.
+    // The sitrep that Nexus produced has no cases or problems, so also show
+    // one that does. Its IDs are all fixed, so they are not redacted.
     let example_sitrep_id =
         insert_example_sitrep(&opctx, datastore).await.to_string();
     let mut example_redactor = Redactor::default();
@@ -976,7 +977,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     );
 }
 
-/// Inserts a sitrep with example cases, returning its ID.
+/// Inserts a sitrep with example cases and problems, returning its ID.
 ///
 /// The sitrep has no parent, so it loses to the sitrep that Nexus already
 /// committed and is left out of the sitrep history.
@@ -985,6 +986,9 @@ async fn insert_example_sitrep(
     datastore: &DataStore,
 ) -> SitrepUuid {
     use nexus_types::fm::ereport::{Ena, EreportData, EreportId, Reporter};
+    use nexus_types::fm::problem::ProblemCode::{
+        SmfSvcsInMaintainence, UnhealthyZpool,
+    };
 
     // Cases and their contents are displayed in ID order, so the IDs are
     // fixed to keep the output stable.
@@ -1095,7 +1099,13 @@ async fn insert_example_sitrep(
         }]
         .into_iter()
         .collect(),
-        problems: Default::default(),
+        problems: [fm::case::CaseProblem {
+            problem_id: id(100),
+            linked_sitrep_id: sitrep_id,
+            comment: "the degraded zpool is a problem".to_string(),
+        }]
+        .into_iter()
+        .collect(),
     };
 
     // A case from an earlier sitrep. In this sitrep, an ereport was added and
@@ -1180,6 +1190,191 @@ async fn insert_example_sitrep(
         "closed in an earlier sitrep",
     );
 
+    // Like the cases above, the problems below cover each combination of
+    // markers in the problem summary's activity gutter.
+    let revision = |number: u32,
+                    requested_sitrep_id: SitrepUuid,
+                    code: fm::problem::ProblemCode,
+                    resolved: bool,
+                    summary: &str| {
+        fm::problem::SitrepRevision {
+            number: ProblemRevNum::from_u32(number),
+            requested_sitrep_id,
+            time_resolved: resolved.then_some(now),
+            code,
+            summary: summary.to_string(),
+            description: format!("description of revision {number}"),
+            action_required: "none, it's not a real problem".to_string(),
+        }
+    };
+    let problem =
+        |n: u128,
+         requested_sitrep_id: SitrepUuid,
+         comment: &str,
+         revisions: Vec<fm::problem::SitrepRevision>| {
+            fm::problem::SitrepProblem {
+                id: id(n),
+                requested_sitrep_id,
+                comment: comment.to_string(),
+                revisions: revisions.into_iter().collect(),
+                alerts: Default::default(),
+                support_bundles: Default::default(),
+            }
+        };
+
+    // The problem for the open disk case, created in this sitrep along with
+    // links to that case's alert and support bundle.
+    let mut zpool_problem = problem(
+        100,
+        sitrep_id,
+        "zpool is degraded",
+        vec![revision(
+            1,
+            sitrep_id,
+            UnhealthyZpool,
+            false,
+            "Degraded ZFS pool on sled BRM42220007 disk N3",
+        )],
+    );
+    zpool_problem
+        .alerts
+        .insert_unique(fm::problem::AlertLink {
+            alert_id: id(17),
+            revision: ProblemRevNum::from_u32(1),
+            linked_sitrep_id: sitrep_id,
+            comment: "initial alert for this problem".to_string(),
+        })
+        .expect("alert link IDs are unique");
+    zpool_problem
+        .support_bundles
+        .insert_unique(fm::problem::SupportBundleLink {
+            support_bundle_id: id(18),
+            revision: ProblemRevNum::from_u32(1),
+            linked_sitrep_id: sitrep_id,
+            comment: "dumps from impacted sled".to_string(),
+        })
+        .expect("support bundle link IDs are unique");
+    let unchanged_problem = problem(
+        110,
+        earlier_sitrep_id,
+        "created earlier, no changes in this sitrep",
+        vec![revision(
+            1,
+            earlier_sitrep_id,
+            UnhealthyZpool,
+            false,
+            "Faulted ZFS pool on sled BRM42220012 disk N5",
+        )],
+    );
+    let resolved_here_problem = problem(
+        120,
+        earlier_sitrep_id,
+        "created earlier, resolved in this sitrep",
+        vec![
+            revision(
+                1,
+                earlier_sitrep_id,
+                UnhealthyZpool,
+                false,
+                "Degraded ZFS pool on sled BRM42220002 disk N0",
+            ),
+            revision(
+                2,
+                sitrep_id,
+                UnhealthyZpool,
+                true,
+                "Faulted disk N0 on sled BRM42220002 has been replaced",
+            ),
+        ],
+    );
+    // Resolved problems are carried forward until rendezvous has created
+    // their externally visible records.
+    let resolved_earlier_problem = problem(
+        130,
+        even_earlier_sitrep_id,
+        "resolved in an earlier sitrep",
+        vec![
+            revision(
+                1,
+                even_earlier_sitrep_id,
+                UnhealthyZpool,
+                false,
+                "Faulted ZFS pool on sled BRM42220023 disk N9",
+            ),
+            revision(
+                2,
+                earlier_sitrep_id,
+                UnhealthyZpool,
+                true,
+                "Faulted disk N9 on sled BRM42220023 has been expunged.",
+            ),
+        ],
+    );
+    let revised_problem = problem(
+        140,
+        earlier_sitrep_id,
+        "created earlier,\nrevised in this sitrep",
+        vec![
+            revision(
+                1,
+                earlier_sitrep_id,
+                SmfSvcsInMaintainence,
+                false,
+                "1 control plane service on sled BRM42220014 in maintainence",
+            ),
+            revision(
+                2,
+                sitrep_id,
+                SmfSvcsInMaintainence,
+                false,
+                "3 control plane services on sled BRM42220014 in maintainence",
+            ),
+        ],
+    );
+    let mut linked_problem = problem(
+        150,
+        earlier_sitrep_id,
+        "created earlier, alert linked in this sitrep",
+        vec![revision(
+            1,
+            earlier_sitrep_id,
+            SmfSvcsInMaintainence,
+            false,
+            "NTP service on sled BRM42220008 in maintainence",
+        )],
+    );
+    linked_problem
+        .alerts
+        .insert_unique(fm::problem::AlertLink {
+            alert_id: id(151),
+            revision: ProblemRevNum::from_u32(1),
+            linked_sitrep_id: sitrep_id,
+            comment: "the service is still in maintenance".to_string(),
+        })
+        .expect("alert link IDs are unique");
+    let transient_problem = problem(
+        160,
+        sitrep_id,
+        "created and resolved in this sitrep",
+        vec![revision(
+            1,
+            sitrep_id,
+            SmfSvcsInMaintainence,
+            true,
+            "Internal DNS service on sled BRM42220019 in maintainence",
+        )],
+    );
+    let problems = fm::AllProblems::try_from_iter([
+        zpool_problem,
+        unchanged_problem,
+        resolved_here_problem,
+        resolved_earlier_problem,
+        revised_problem,
+        linked_problem,
+        transient_problem,
+    ])
+    .expect("example problems are valid");
+
     let sitrep = fm::Sitrep {
         metadata: fm::SitrepMetadata {
             id: sitrep_id,
@@ -1188,7 +1383,7 @@ async fn insert_example_sitrep(
             inv_collection_id: id(30),
             next_inv_min_time_started: now,
             creator_id: collector_id,
-            comment: "an example sitrep with cases".to_string(),
+            comment: "an example sitrep with cases and problems".to_string(),
             time_created: now,
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
@@ -1206,7 +1401,7 @@ async fn insert_example_sitrep(
         .into_iter()
         .collect(),
         ereports_by_id: Default::default(),
-        problems: Default::default(),
+        problems,
     };
     match datastore.fm_sitrep_insert(opctx, sitrep, None).await {
         Err(InsertSitrepError::ParentNotCurrent(_)) => {}

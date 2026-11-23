@@ -7,6 +7,7 @@
 //! These are *not* part of the external API; for that, see the
 //! [`crate::external_api::problem`] module.
 
+use super::display;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
@@ -17,6 +18,7 @@ use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::Arc;
 
 /// A structured internal representation of problem codes.
@@ -65,7 +67,7 @@ macro_rules! problem_descriptions {
         }
     ),+) => {
         impl ProblemCode {
-            pub fn description(&self) -> &'static ProblemCodeDescription {
+            pub const fn description(&self) -> &'static ProblemCodeDescription {
                 match self {
                     $(
                         ProblemCode::$Variant => {
@@ -462,6 +464,158 @@ impl SitrepProblem {
 
     pub fn code(&self) -> ProblemCode {
         self.current_revision().code
+    }
+
+    pub fn is_resolved(&self) -> bool {
+        self.current_revision().time_resolved.is_some()
+    }
+
+    pub fn display_summary(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayProblemSummary<'_> {
+        DisplayProblemSummary {
+            problem: self,
+            indent,
+            sitrep_id,
+            colored: false,
+        }
+    }
+}
+
+/// Displays a summary of a [`SitrepProblem`] as a single line, as returned by
+/// [`SitrepProblem::display_summary`].
+///
+/// The line begins with a two-column gutter describing whether the problem had
+/// interesting activity in the sitrep being displayed, if this displayer was
+/// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
+///
+/// - `+` if the problem was created in this sitrep,
+/// - `*` if the problem was modified (i.e. it has a new revision) in this
+///   sitrep, but it was not created in this sitrep, and the new revision does
+///   not resolve it,
+/// - `-` if the problem was resolved by a revision requested in this sitrep,
+///   and it was not already created,
+/// - `+-` if the problem was both created and resolved in this sitrep,
+/// - `!` if the problem was created in this sitrep but resolved in an *earlier*
+///   sitrep (i.e., it was resolved before it was created, which shouldn't
+///   happen and is a bug)
+///
+/// If no sitrep ID was provided, the gutter is blank, so that rows remain
+/// aligned.
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayProblemSummary<'a> {
+    problem: &'a SitrepProblem,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayProblemSummary<'_> {
+    /// Explains the gutter markers in [`DisplayProblemSummary`]'s output.
+    /// Callers displaying a list of problem summaries should print this
+    /// legend.
+    pub fn legend() -> DisplayProblemSummaryLegend {
+        DisplayProblemSummaryLegend { colored: false }
+    }
+
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayProblemSummaryLegend {
+    colored: bool,
+}
+
+impl DisplayProblemSummaryLegend {
+    pub fn colored(self, colored: bool) -> Self {
+        Self { colored }
+    }
+}
+
+impl fmt::Display for DisplayProblemSummaryLegend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { colored } = self;
+        let styles = display::Styles::new(colored);
+        write!(
+            f,
+            "activity in this sitrep: \
+            {} created, {} revised, {} resolved\n\n   \
+            STATE            ID                                   CODE SUMMARY",
+            styles.added_marker(),
+            styles.modified_marker(),
+            styles.removed_marker(),
+        )
+    }
+}
+
+impl fmt::Display for DisplayProblemSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { problem, indent, sitrep_id, colored } = self;
+        let SitrepProblem {
+            id,
+            requested_sitrep_id,
+            comment: _,
+            revisions: _,
+            alerts: _,
+            support_bundles: _,
+        } = problem;
+        let current_rev = problem.current_revision();
+
+        let styles = display::Styles::new(colored);
+
+        const ACTIVE: &str = "active";
+        const RESOLVED: &str = "resolved";
+        const STATE_WIDTH: usize = display::const_max_len(&[ACTIVE, RESOLVED]);
+
+        let is_resolved = current_rev.time_resolved.is_some();
+        let state = if is_resolved {
+            styles.normal().style(RESOLVED)
+        } else {
+            styles.warning().style(ACTIVE)
+        };
+        let (diff1, diff2) = match sitrep_id {
+            Some(this_sitrep) => {
+                let created_here = *requested_sitrep_id == this_sitrep;
+                let revised_here =
+                    current_rev.requested_sitrep_id == this_sitrep;
+                let diff1 = if created_here {
+                    styles.added_marker()
+                } else if is_resolved && revised_here {
+                    styles.removed_marker()
+                } else if revised_here {
+                    styles.modified_marker()
+                } else {
+                    styles.normal().style(' ')
+                };
+                let diff2 = if !is_resolved {
+                    styles.normal().style(' ')
+                } else if created_here && revised_here {
+                    styles.removed_marker()
+                } else if created_here {
+                    styles.warning().style('!')
+                } else {
+                    styles.normal().style(' ')
+                };
+                (diff1, diff2)
+            }
+            None => (styles.normal().style(' '), styles.normal().style(' ')),
+        };
+
+        let code = u32::from(current_rev.code);
+        write!(
+            f,
+            "{:>indent$}{diff1}{diff2} {state:>STATE_WIDTH$} {} \
+             {code:04} {}",
+            "",
+            styles.heading().style(format_args!("problem {id}")),
+            current_rev.summary,
+        )?;
+        Ok(())
     }
 }
 
