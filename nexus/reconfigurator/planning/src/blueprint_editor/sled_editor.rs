@@ -281,16 +281,19 @@ impl SledEditor {
         let (disks, disks_counts) = self.disks.finalize();
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
-        let remove_mupdate_override_is_modified =
-            self.remove_mupdate_override.is_modified();
         let changed_host_phase_2 = self.host_phase_2.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
         let (measurements, measurement_counts) = self.measurements.finalize();
 
-        let update_disposition_is_modified =
-            self.update_disposition_kind.is_modified();
+        let scalar_edits = EditedSledScalarEdits {
+            debug_force_generation_bump: self.debug_force_generation_bump,
+            remove_mupdate_override: self.remove_mupdate_override.is_modified(),
+            wicket_ssh_auth: self.wicket_ssh_auth.is_modified(),
+            update_disposition: self.update_disposition_kind.is_modified(),
+        };
+
         let update_disposition = BlueprintSledUpdateDisposition {
-            generation: if update_disposition_is_modified {
+            generation: if scalar_edits.update_disposition {
                 self.incoming_update_disposition_generation.next()
             } else {
                 self.incoming_update_disposition_generation
@@ -298,26 +301,13 @@ impl SledEditor {
             kind: self.update_disposition_kind.finalize(),
         };
 
-        let wicket_ssh_auth_is_modified = self.wicket_ssh_auth.is_modified();
-        let wicket_ssh_auth = self.wicket_ssh_auth.finalize();
-
-        let scalar_edits = EditedSledScalarEdits {
-            debug_force_generation_bump: self.debug_force_generation_bump,
-            remove_mupdate_override: remove_mupdate_override_is_modified,
-            wicket_ssh_auth: wicket_ssh_auth_is_modified,
-            update_disposition: update_disposition_is_modified,
-        };
-
         // Bump the generation if we made any changes of concern to sled-agent.
-        if self.debug_force_generation_bump
+        if scalar_edits.has_edits()
             || disks_counts.has_nonzero_counts()
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
-            || remove_mupdate_override_is_modified
             || changed_host_phase_2
             || measurement_counts.has_nonzero_counts()
-            || update_disposition_is_modified
-            || wicket_ssh_auth_is_modified
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -339,7 +329,7 @@ impl SledEditor {
                 host_phase_2: self.host_phase_2.finalize(),
                 measurements,
                 update_disposition,
-                wicket_ssh_auth,
+                wicket_ssh_auth: self.wicket_ssh_auth.finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
