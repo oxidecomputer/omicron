@@ -591,12 +591,13 @@ impl super::Nexus {
             auto_restart_policy,
             boot_disk,
             cpu_platform,
+            virtual_platform,
             multicast_groups,
             enable_jumbo_frames,
             shutdown_policy,
         } = params;
 
-        check_instance_cpu_memory_sizes(*ncpus, *memory)?;
+        check_instance_settings(*virtual_platform, *ncpus, *memory)?;
 
         // Opting in to jumbo frames requires the fleet-wide opt-in. Opting out
         // (`Some(false)`) is always allowed.
@@ -641,6 +642,7 @@ impl super::Nexus {
             *ncpus,
             *memory,
             **cpu_platform,
+            *virtual_platform,
             *enable_jumbo_frames,
             shutdown_policy.unwrap_or_default(),
         );
@@ -681,7 +683,11 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
+        check_instance_settings(
+            params.virtual_platform,
+            params.ncpus,
+            params.memory,
+        )?;
 
         let all_disks: Vec<&instance::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
@@ -3084,9 +3090,13 @@ pub(crate) async fn process_vmm_update(
     })
 }
 
-/// Determines whether the supplied instance sizes (CPU count and memory size)
-/// are acceptable.
-fn check_instance_cpu_memory_sizes(
+/// Determines whether the supplied instance settings are acceptable.
+///
+/// In practice, this mostly delegates to other helpers to determine
+/// "acceptable", but gives us a convenient single place to check that settings
+/// internal to an instance are okay.
+fn check_instance_settings(
+    virtual_platform: instance::InstanceVirtualPlatform,
     ncpus: instance::InstanceCpuCount,
     memory: ByteCount,
 ) -> Result<(), Error> {
@@ -3133,6 +3143,50 @@ fn check_instance_cpu_memory_sizes(
                 ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
             ),
         ));
+    }
+
+    // The virtual platform for this instance may be pickier than the global
+    // checks we'e done above.
+    //
+    // This would seem like a validation we can do on `InstanceVirtualPlatform`
+    // itself, except that related constants are in `app::instance_platform::*`,
+    // but the impl on `InstanceVirtualPlatform`-the-API-type would be in
+    // `nexus-types-versions`. The alternative would be for constants to also be
+    // in `nexus-types-versions` with the impls, but instead we're keeping all
+    // the instance platform bits together in `mod instance_platform` so we can
+    // take them all out of Nexus in one fell swoop (to live outside Nexus,
+    // settings validation and all)
+    if virtual_platform == instance::InstanceVirtualPlatform::Initial {
+        // The `Initial` virtual platform has a somehat bogus CPU topology of
+        // "one thread per socket". Some guests don't even tolerate 64 sockets
+        // well (see Propolis#FIXME). We could enable x2APIC for `Initial` and
+        // at least let guests try to fare as well as they could, but because we
+        // don't (and probably won't) test such configurations, lets just avoid
+        // the problems entirely until someone asks:
+        const MAX_VCPU_INITIAL: u16 = 254;
+        if ncpus.0 > 254 {
+            return Err(Error::invalid_value(
+                "ncpus",
+                format!(
+                    "initial virtual platform does not support more than {} vCPUs",
+                    MAX_VCPU_INITIAL
+                ),
+            ));
+        }
+    } else {
+        // Otherwise, we unconditionally report SMT, so there should be an even
+        // numer of vCPUs for the SMT siblings.
+        if !ncpus.0.is_multiple_of(2) {
+            return Err(Error::invalid_value(
+                "memory",
+                format!(
+                    "{} virtual platform does not support odd vCPU counts",
+                    virtual_platform
+                ),
+            ));
+        }
+
+        // No particular ceiling for supported vCPUs beyond the global figure.
     }
 
     Ok(())
@@ -3248,9 +3302,10 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
     use instance::InstanceShutdownPolicy;
+    use instance::InstanceVirtualPlatform;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmCpuPlatform, VmmState as DbVmmState,
+        VmmCpuPlatform, VmmState as DbVmmState, VmmVirtualPlatform,
     };
     use nexus_types::external_api::instance;
     use omicron_common::api::external::{
@@ -3374,6 +3429,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
@@ -3397,6 +3453,7 @@ mod tests {
                 .unwrap(),
             0,
             VmmCpuPlatform::SledDefault,
+            VmmVirtualPlatform::Initial,
         );
 
         (instance, vmm)
@@ -3734,6 +3791,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),

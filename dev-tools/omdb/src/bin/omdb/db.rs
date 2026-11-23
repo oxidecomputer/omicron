@@ -5400,6 +5400,7 @@ async fn cmd_db_instance_info(
                     propolis_port: _,
                     instance_id: _,
                     cpu_platform: _,
+                    virtual_platform: _,
                     time_created,
                     time_deleted,
                     time_state_updated: _,
@@ -8159,6 +8160,7 @@ impl Display for VmmDisplay<'_> {
         const SLED_ID: &'static str = "sled ID";
         const SLED_SERIAL: &'static str = "sled serial";
         const CPU_PLATFORM: &'static str = "CPU platform";
+        const VIRTUAL_PLATFORM: &'static str = "virtual platform";
         const ADDRESS: &'static str = "propolis address";
         const STATE: &'static str = "state";
         const FAILURE_REASON: &'static str = "  failure reason";
@@ -8191,6 +8193,7 @@ impl Display for VmmDisplay<'_> {
             propolis_ip,
             propolis_port,
             cpu_platform,
+            virtual_platform,
             state,
             generation,
             time_state_updated,
@@ -8259,6 +8262,7 @@ impl Display for VmmDisplay<'_> {
             writeln!(f, "{indent}{SLED_SERIAL:>width$}: {serial}")?;
         }
         writeln!(f, "{indent}{CPU_PLATFORM:>width$}: {cpu_platform}")?;
+        writeln!(f, "{indent}{VIRTUAL_PLATFORM:>width$}: {virtual_platform}")?;
         Ok(())
     }
 }
@@ -8337,6 +8341,7 @@ async fn cmd_db_vmm_list(
                 propolis_ip: _,
                 propolis_port: _,
                 cpu_platform: _,
+                virtual_platform: _,
                 time_state_updated: _,
                 generation: _,
                 state: _,
@@ -8709,6 +8714,7 @@ mod tests {
             "127.0.0.1".parse().unwrap(),
             12400,
             db::model::VmmCpuPlatform::AmdMilan,
+            db::model::VmmVirtualPlatform::Initial,
         );
         vmm.time_created = when;
         vmm.time_state_updated = when;

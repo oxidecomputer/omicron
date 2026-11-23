@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "66.0.0"
+    "version": "67.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -3650,6 +3650,14 @@
               }
             ]
           },
+          "cpu_topology": {
+            "description": "A *very* simplistic description of this VM's CPU topology.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CpuTopology"
+              }
+            ]
+          },
           "cpuid": {
             "nullable": true,
             "description": "The CPUID values to expose to the guest. If `None`, bhyve will derive default values from the host's CPUID values.",
@@ -3662,7 +3670,7 @@
           "cpus": {
             "description": "The number of virtual logical processors attached to this VM.",
             "type": "integer",
-            "format": "uint8",
+            "format": "uint16",
             "minimum": 0
           },
           "guest_hv_interface": {
@@ -3682,6 +3690,7 @@
         },
         "required": [
           "chipset",
+          "cpu_topology",
           "cpus",
           "memory_mb"
         ],
@@ -4900,6 +4909,29 @@
           "acked_prepares",
           "config"
         ]
+      },
+      "CpuTopology": {
+        "description": "A *very* simple topology for for a VM's vCPUs.\n\nTypically this will be configured as `threads_per_core: 2` to indicate SMT, and one socket. The number of vCPUs in each socket is the same, meaning that the number of vCPUs must divide evenly into the number of sockets in the topology.",
+        "type": "object",
+        "properties": {
+          "has_smt": {
+            "type": "boolean"
+          },
+          "sockets": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "topo_leaves": {
+            "$ref": "#/components/schemas/TopoLeaves"
+          }
+        },
+        "required": [
+          "has_smt",
+          "sockets",
+          "topo_leaves"
+        ],
+        "additionalProperties": false
       },
       "Cpuid": {
         "description": "A set of CPUID values to expose to a guest.",
@@ -10538,6 +10570,31 @@
         "required": [
           "rack_network_config"
         ]
+      },
+      "TopoLeaves": {
+        "description": "A collection of CPUID leaves to specialize for a board's `CpuTopology`.\n\nLeaves may be selected here without being present in `Cpuid`, in which case the extra selected topology leaves are ignored. Conversely, `Cpuid` leaves with topology information that are not mentioend here probably indicate a bug (at best, those leaves will probably indicate collection of single-core sockets in the machine.)",
+        "type": "object",
+        "properties": {
+          "ext_1e": {
+            "type": "boolean"
+          },
+          "ext_8": {
+            "type": "boolean"
+          },
+          "std_4": {
+            "type": "boolean"
+          },
+          "std_b": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ext_1e",
+          "ext_8",
+          "std_4",
+          "std_b"
+        ],
+        "additionalProperties": false
       },
       "TrustQuorumCoordinatorStatusResponse": {
         "description": "Response type for `trust_quorum_coordinator_status`.",

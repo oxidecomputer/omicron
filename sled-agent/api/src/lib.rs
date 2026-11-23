@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
     v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
-    v50, v51, v52, v53, v55, v57, v61,
+    v50, v51, v52, v53, v55, v57, v59, v61,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (67, PROPOLIS_CPU_TOPOLOGY),
     (66, PROPOLIS_ACPI_SHUTDOWN),
     (65, ADD_DISK_LOCATION_TO_INVENTORY),
     (64, TRUST_QUORUM_MEMBERS),
@@ -452,13 +453,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_INSTANCE_ATTACHED_SUBNETS_MAP..
+        versions = VERSION_PROPOLIS_CPU_TOPOLOGY..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_INSTANCE_ATTACHED_SUBNETS_MAP..VERSION_PROPOLIS_CPU_TOPOLOGY
+    }]
+    async fn vmm_register_v59(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v59::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -471,7 +486,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v44::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(
+        Self::vmm_register_v59(
             rqctx,
             path_params,
             body.try_map(TryFrom::try_from).map_err(|err| {

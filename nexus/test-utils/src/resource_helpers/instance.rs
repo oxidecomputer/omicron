@@ -14,6 +14,7 @@ use nexus_types::external_api::instance::{
 use nexus_types::external_api::multicast;
 use nexus_types_versions::latest::instance::Instance;
 use nexus_types_versions::latest::instance::InstanceCpuPlatform;
+use nexus_types_versions::latest::instance::InstanceVirtualPlatform;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::NameOrId;
@@ -41,6 +42,7 @@ impl InstanceCreateBuilder {
             disks: Vec::new(),
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: InstanceVirtualPlatform::Generic,
             start: true,
             auto_restart_policy: None,
             anti_affinity_groups: Vec::new(),
@@ -135,6 +137,14 @@ impl InstanceCreateBuilder {
         cpu_platform: Option<InstanceCpuPlatform>,
     ) -> Self {
         self.interim_body.cpu_platform = cpu_platform;
+        self
+    }
+
+    pub fn with_virtual_platform(
+        mut self,
+        virtual_platform: InstanceVirtualPlatform,
+    ) -> Self {
+        self.interim_body.virtual_platform = virtual_platform;
         self
     }
 

@@ -367,6 +367,7 @@ mod test {
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
+    use nexus_db_model::VmmVirtualPlatform;
     use nexus_db_model::to_db_typed_generation;
     use nexus_db_queries::authz;
     use nexus_test_utils::ControlPlaneBuilder;
@@ -448,6 +449,7 @@ mod test {
                 disks: Vec::new(),
                 boot_disk: None,
                 cpu_platform: None,
+                virtual_platform: instance::InstanceVirtualPlatform::Generic,
                 ssh_public_keys: None,
                 start: state == InstanceState::Vmm,
                 auto_restart_policy,
@@ -500,6 +502,7 @@ mod test {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
+                    virtual_platform: VmmVirtualPlatform::Initial,
                     time_state_updated: Utc::now(),
                     generation: Generation::new(),
                     state: VmmState::SagaUnwound,

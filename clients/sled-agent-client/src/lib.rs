@@ -12,7 +12,9 @@ use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
-pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
+pub use propolis_client::{
+    CrucibleOpts, VolumeConstructionRequest, instance_spec::CpuTopology,
+};
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent/sled-agent-latest.json",
     interface = Positional,
@@ -47,6 +49,7 @@ progenitor::generate_api!(
         CommitStatus = trust_quorum_types_versions::latest::status::CommitStatus,
         ConfigReconcilerInventory = sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory,
         CoordinatorStatus = trust_quorum_types_versions::latest::status::CoordinatorStatus,
+        CpuTopology = propolis_client::instance_spec::CpuTopology,
         DatasetConfig = sled_agent_types_versions::latest::disk::DatasetConfig,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = sled_agent_types::disk::DiskIdentity,

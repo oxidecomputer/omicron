@@ -1559,6 +1559,7 @@ pub mod test {
                     ),
                 ),
                 cpu_platform: None,
+                virtual_platform: instance_types::InstanceVirtualPlatform::Generic,
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),

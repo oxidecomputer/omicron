@@ -452,6 +452,7 @@ table! {
         boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
+        virtual_platform -> crate::enums::InstanceVirtualPlatformEnum,
         enable_jumbo_frames -> Bool,
         shutdown_policy_timeout -> Nullable<Interval>,
         shutdown_policy_action -> crate::enums::InstanceShutdownActionEnum,
@@ -475,6 +476,7 @@ table! {
         cpu_platform -> crate::enums::VmmCpuPlatformEnum,
         failure_reason -> Nullable<crate::enums::VmmFailureReasonEnum>,
         stop_for_update_disposition_generation -> Nullable<Int8>,
+        virtual_platform -> crate::enums::VmmVirtualPlatformEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));

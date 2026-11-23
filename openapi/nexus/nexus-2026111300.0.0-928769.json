@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026111100.0.0"
+    "version": "2026111300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -24005,6 +24005,14 @@
           "time_run_state_updated": {
             "type": "string",
             "format": "date-time"
+          },
+          "virtual_platform": {
+            "description": "The virtual platform for this instance.\n\nTODO: say more?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceVirtualPlatform"
+              }
+            ]
           }
         },
         "required": [
@@ -24021,7 +24029,8 @@
           "shutdown_policy",
           "time_created",
           "time_modified",
-          "time_run_state_updated"
+          "time_run_state_updated",
+          "virtual_platform"
         ]
       },
       "InstanceAutoRestartPolicy": {
@@ -24109,7 +24118,7 @@
           },
           "cpu_platform": {
             "nullable": true,
-            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is placed on when started.",
             "default": null,
             "allOf": [
               {
@@ -24216,6 +24225,14 @@
             "default": "",
             "type": "string",
             "format": "byte"
+          },
+          "virtual_platform": {
+            "description": "TODO: docs",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceVirtualPlatform"
+              }
+            ]
           }
         },
         "required": [
@@ -24223,7 +24240,8 @@
           "hostname",
           "memory",
           "name",
-          "ncpus"
+          "ncpus",
+          "virtual_platform"
         ]
       },
       "InstanceDiskAttachment": {
@@ -24829,6 +24847,14 @@
                 "$ref": "#/components/schemas/InstanceShutdownPolicy"
               }
             ]
+          },
+          "virtual_platform": {
+            "description": "TODO: docs",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceVirtualPlatform"
+              }
+            ]
           }
         },
         "required": [
@@ -24838,7 +24864,16 @@
           "enable_jumbo_frames",
           "memory",
           "ncpus",
-          "shutdown_policy"
+          "shutdown_policy",
+          "virtual_platform"
+        ]
+      },
+      "InstanceVirtualPlatform": {
+        "description": "TODO: docs",
+        "type": "string",
+        "enum": [
+          "initial",
+          "generic"
         ]
       },
       "InterfaceNum": {

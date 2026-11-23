@@ -5,7 +5,7 @@
 use super::InstanceIntendedState as IntendedState;
 use super::{
     ByteCount, Disk, ExternalIp, InstanceAutoRestartPolicy, InstanceCpuCount,
-    InstanceCpuPlatform, InstanceState, Vmm, VmmState,
+    InstanceCpuPlatform, InstanceState, InstanceVirtualPlatform, Vmm, VmmState,
 };
 use crate::DbTypedUuid;
 use crate::ExternalSubnet;
@@ -148,6 +148,17 @@ pub struct Instance {
     /// most general CPU platform supported by the selected sled.
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
+    /// The instance's virtual platform.
+    ///
+    /// A virtual platform describes how a virtual machine is presented to a
+    /// guest, as well as some aspects of how it operates. Different virtual
+    /// platforms may constrain allowed instance settings, such as compatible
+    /// CPU platforms, vCPU counts, or other parameters. Revisions of the same
+    /// virtual platform have matching constraints; while they can be selected
+    /// more freely, older revisions of a virtual platform should only be useful
+    /// for debugging.
+    pub virtual_platform: InstanceVirtualPlatform,
+
     /// When true, the instance has opted in to jumbo frames (8500 byte MTU)
     /// on its primary OPTE interface. The effective MTU also depends on the
     /// fleet-wide setting in `system_networking_settings`; if that flag is off
@@ -218,6 +229,7 @@ impl Instance {
             boot_disk_id: None,
             intended_state,
             cpu_platform: params.cpu_platform.map(Into::into),
+            virtual_platform: params.virtual_platform.into(),
             enable_jumbo_frames: params.enable_jumbo_frames,
             shutdown_policy_action,
             shutdown_policy_timeout,
@@ -830,6 +842,8 @@ pub struct InstanceUpdate {
 
     pub cpu_platform: Option<InstanceCpuPlatform>,
 
+    pub virtual_platform: InstanceVirtualPlatform,
+
     pub enable_jumbo_frames: bool,
 
     /// The shutdown policy for this instance. If this is `None`, it will
@@ -850,6 +864,7 @@ impl InstanceUpdate {
         ncpus: instance_types::InstanceCpuCount,
         memory: external::ByteCount,
         cpu_platform: Option<instance_types::InstanceCpuPlatform>,
+        virtual_platform: instance_types::InstanceVirtualPlatform,
         enable_jumbo_frames: bool,
         shutdown_policy: instance_types::InstanceShutdownPolicy,
     ) -> Self {
@@ -861,6 +876,7 @@ impl InstanceUpdate {
             ncpus: ncpus.into(),
             memory: memory.into(),
             cpu_platform: cpu_platform.map(From::from),
+            virtual_platform: virtual_platform.into(),
             enable_jumbo_frames,
             shutdown_policy_action,
             shutdown_policy_timeout,
@@ -907,6 +923,7 @@ mod tests {
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
+            virtual_platform: instance_types::InstanceVirtualPlatform::Initial,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),

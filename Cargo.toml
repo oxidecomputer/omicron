@@ -778,11 +778,11 @@ progenitor-extras = "0.3.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "f2298871d2331550056e55badc4cd0e2a667110e" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "f2298871d2331550056e55badc4cd0e2a667110e" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "f2298871d2331550056e55badc4cd0e2a667110e" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "f2298871d2331550056e55badc4cd0e2a667110e" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "f2298871d2331550056e55badc4cd0e2a667110e" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -1154,12 +1154,12 @@ opt-level = 3
 # [patch."https://github.com/oxidecomputer/diesel-dtrace"]
 # diesel-dtrace = { path = "../diesel-dtrace" }
 
-# [patch."https://github.com/oxidecomputer/propolis"]
-# bhyve_api = { path = "../propolis/crates/bhyve-api" }
-# propolis-api-types-versions = { path = "../propolis/crates/propolis-api-types-versions" }
-# propolis_api_types = { path = "../propolis/crates/propolis-api-types" }
-# propolis-client = { path = "../propolis/lib/propolis-client" }
-# propolis-mock-server = { path = "../propolis/bin/mock-server" }
+[patch."https://github.com/oxidecomputer/propolis"]
+bhyve_api = { path = "../propolis/crates/bhyve-api" }
+propolis-api-types-versions = { path = "../propolis/crates/propolis-api-types-versions" }
+propolis_api_types = { path = "../propolis/crates/propolis-api-types" }
+propolis-client = { path = "../propolis/lib/propolis-client" }
+propolis-mock-server = { path = "../propolis/bin/mock-server" }
 
 # [patch."https://github.com/oxidecomputer/tufaceous"]
 # tufaceous = { path = "../tufaceous/bin" }

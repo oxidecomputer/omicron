@@ -204,6 +204,7 @@ mod tests {
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
+    use nexus_db_model::VmmVirtualPlatform;
     use nexus_db_queries::db::datastore::sled::SledReservationReason;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
@@ -249,6 +250,7 @@ mod tests {
                         propolis_ip: "::1".parse().unwrap(),
                         propolis_port: 12345.into(),
                         cpu_platform: VmmCpuPlatform::SledDefault,
+                        virtual_platform: VmmVirtualPlatform::Initial,
                         state: VmmState::Destroyed,
                         time_state_updated: Utc::now(),
                         generation: Generation::new(),

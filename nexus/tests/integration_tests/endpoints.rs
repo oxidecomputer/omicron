@@ -820,6 +820,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {
         boot_disk: Nullable(None),
         cpu_platform: Nullable(None),
+        virtual_platform: instance::InstanceVirtualPlatform::Generic,
         auto_restart_policy: Nullable(None),
         ncpus: instance::InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),

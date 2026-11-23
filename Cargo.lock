@@ -683,7 +683,6 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -693,7 +692,6 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -12802,7 +12800,6 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002)",
  "propolis_types",
@@ -12815,7 +12812,6 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -12839,7 +12835,6 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -12871,7 +12866,6 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=bd62980710dd3d6d3524aa7f6617127942b75002)",
  "propolis-api-types-versions",
@@ -12880,7 +12874,6 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c#9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c"
 dependencies = [
  "schemars 0.8.22",
  "serde",

@@ -15,7 +15,7 @@
 use super::{Generation, VmmState};
 use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
-use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason};
+use crate::{SqlU16, VmmCpuPlatform, VmmFailureReason, VmmVirtualPlatform};
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::vmm;
 use omicron_generation_kinds::UpdateDispositionGenerationKind;
@@ -97,6 +97,13 @@ pub struct Vmm {
     /// state has not been modified by an update.
     pub stop_for_update_disposition_generation:
         Option<DbTypedGeneration<UpdateDispositionGenerationKind>>,
+
+    /// The fully-qualified virtual platform for this VMM. The instance can
+    /// partially or fully specify a virtual platform; if the instance's request
+    /// only partially specifies a virtual platform, then the control plane
+    /// selected a matching specific virtual platform when creating the VMM
+    /// record.
+    pub virtual_platform: VmmVirtualPlatform,
 }
 
 impl Vmm {
@@ -111,6 +118,7 @@ impl Vmm {
         propolis_ip: ipnetwork::IpNetwork,
         propolis_port: u16,
         cpu_platform: VmmCpuPlatform,
+        virtual_platform: VmmVirtualPlatform,
     ) -> Self {
         let now = Utc::now();
 
@@ -126,6 +134,7 @@ impl Vmm {
             propolis_port: SqlU16(propolis_port),
             state: VmmState::Creating,
             cpu_platform,
+            virtual_platform,
             failure_reason: None,
             stop_for_update_disposition_generation: None,
         }

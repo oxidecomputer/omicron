@@ -403,6 +403,7 @@ async fn sim_create_vmm_record(
         sled_id,
         propolis_ip,
         params.src_vmm.cpu_platform,
+        params.src_vmm.virtual_platform,
     )
     .await
 }
@@ -723,6 +724,8 @@ mod tests {
                 disks: vec![],
                 boot_disk: None,
                 cpu_platform: None,
+                virtual_platform:
+                    instance_types::InstanceVirtualPlatform::Generic,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
