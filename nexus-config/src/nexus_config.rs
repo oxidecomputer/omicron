@@ -171,7 +171,7 @@ pub enum InternalDns {
 /// expected output for `test_deployment_config_schema` can be updated by
 /// running the test with `EXPECTORATE=overwrite`.
 ///
-/// [`JsonSchema`]: schemars:JsonSchema
+/// [`JsonSchema`]: schemars::JsonSchema
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[cfg_attr(test, derive(JsonSchema))]
 pub struct DeploymentConfig {
