@@ -6728,22 +6728,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         req: TypedBody<rack::RackAdoptRequest>,
     ) -> Result<HttpResponseCreated<Rack>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let rack_id = req.into_inner().rack_id;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
             let rack_info = nexus.rack_adopt(&opctx, rack_id).await?;
-
             Ok(HttpResponseCreated(rack_info.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn rack_view(
