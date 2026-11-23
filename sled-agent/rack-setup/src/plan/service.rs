@@ -1358,6 +1358,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::inventory::WicketSshAuthStatus;
     use sled_hardware_types::BaseboardId;
 
     const DISK_COUNT: usize = 10;
@@ -1585,6 +1586,7 @@ mod tests {
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
                 fmd: Ok(FmdInventory::default()),
+                wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
             },
             is_scrimlet,
         )

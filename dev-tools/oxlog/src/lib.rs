@@ -31,7 +31,9 @@
 //!
 //! - for one instance of an SMF service in one zone: its live file
 //!   `foo.log`, the rotated `foo.log.0` beside it, and the archived
-//!   `foo.log.<epoch>` files in each of the zone's debug datasets;
+//!   `foo.log.<epoch>` files  in each of the zone's debug datasets (and, if the
+//!   zone was destroyed, the archived `foo.<epoch>`, which was the live log
+//!   file at the time the zone was archived);
 //! - for one CockroachDB log: all of its `<prefix>.<...>.log` files.
 //!
 //! Which files form a series is decided by the naming rules of whatever
@@ -53,6 +55,7 @@ use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use glob::Pattern;
 use jiff::Timestamp;
 use rayon::prelude::*;
+
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use uuid::Uuid;
@@ -187,8 +190,61 @@ impl LogFile {
         }
     }
 
-    pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
+    /// Compares the file name of two log files, ignoring the path.
+    ///
+    /// For archived log files from a SMF service, prefer
+    /// [`LogFile::archived_file_name_cmp`].
+    fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.path.file_name().cmp(&other.path.file_name())
+    }
+
+    /// A special file-name comparison for archived log files.
+    ///
+    /// We must, yet again, unfortunately do something somewhat janky due to the
+    /// existence of archived live log files that lack the '.log' extension (see
+    /// [#9271](https://github.com/oxidecomputer/omicron/issues/9271)). This
+    /// comparison tries to preferentially order files with the same file prefix
+    /// (i.e. the part prior to any extensions) based on the numeric value of
+    /// the `.<epoch>` extension, ignoring whether or not there is a `.log`
+    /// extension. If the epoch is the same (which it really oughtn't be), we
+    /// tie-break based on the presence of the `.log` extension, with
+    /// `<svc>.log.1234` comparing *lower* than `<svc>.1234` (since the latter
+    /// is an archived live log, which is probably newer than a rotated archived
+    /// log).
+    ///
+    /// Yes, this is all quite complex. I'm sorry in advance.
+    fn archived_file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // We expect both paths to be files, so it would be weird if these ever
+        // returned `None`, but rather than panicking, let's just do the rest of
+        // the comparison with emptystring, which will compare similarly to
+        // `None` anyway.
+        let my_filename = self.path.file_name().unwrap_or("");
+        let other_filename = other.path.file_name().unwrap_or("");
+
+        // First, compare the SMF series names, ignoring any extensions (i.e.
+        // both '.log' and '.<epoch>'). If we are comparing log files from the
+        // same SMF service, these will likely be the same. This comparison
+        // ignores the presence or absence of a '.log' extension.
+        smf_series(my_filename)
+            .cmp(smf_series(other_filename))
+            // Then, order based on the epoch suffix.
+            .then_with(|| {
+                epoch_from_filename(my_filename)
+                    .cmp(&epoch_from_filename(other_filename))
+            })
+            // If the epochs are the same, tie-break based on the presence of
+            // '.log'. If a file has been rotated, it should compare less than
+            // one that was not rotated before it was archived.
+            .then_with(|| {
+                my_filename
+                    .contains(".log")
+                    .cmp(&other_filename.contains(".log"))
+                    // `true` compares as "greater than" `false`, so we must
+                    // flip the ordering so that the file which has a '.log' is
+                    // less than the one which does not.
+                    .reverse()
+            })
+            .then_with(|| self.file_name_cmp(other))
     }
 
     /// Returns true if the file's content may overlap `date_range`
@@ -252,7 +308,7 @@ impl SvcLogs {
     /// scattered across several different directories -- and we care more
     /// about filename than which directory they are in.
     pub fn sort_by_file_name(&mut self) {
-        self.archived.sort_unstable_by(LogFile::file_name_cmp);
+        self.archived.sort_unstable_by(LogFile::archived_file_name_cmp);
         self.extra.sort_unstable_by(LogFile::file_name_cmp);
     }
 }
@@ -491,9 +547,19 @@ pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
     // Log files are named by the SMF services, with the `/` in the FMRI
     // translated to a `-`.
     let filename = filename.as_ref();
-    OX_SMF_PREFIXES
-        .iter()
-        .any(|prefix| filename.starts_with(prefix) && filename.contains(".log"))
+    if !OX_SMF_PREFIXES.iter().any(|prefix| filename.starts_with(prefix)) {
+        return false;
+    }
+    let (_, numeric_suffix) = split_numeric_suffix(filename);
+    // Archived logs that were never rotated (i.e. they were the live log at the
+    // time an entire zone was archived) will not have the `.log` extension, but
+    // will always end with an mtime (see
+    // https://github.com/oxidecomputer/omicron/issues/9271).
+    //
+    // On the other hand, the live log file inside a running zone will have the
+    // `.log` extension, but no numeric suffix. Therefore, we consider it a log
+    // file if it has a numeric suffix OR if its name includes `.log`.
+    filename.contains(".log") || numeric_suffix.is_some()
 }
 
 // Parse an oxide smf log file name and return the name of the underlying
@@ -533,15 +599,31 @@ fn split_numeric_suffix(filename: &str) -> (&str, Option<&str>) {
 }
 
 /// Returns the name of the series that an SMF log file belongs to: its live
-/// file's name.
+/// file's name, without the `.log` extension.
 ///
-/// SMF log files are named `<service>.log` (live), `<service>.log.<N>`
-/// (rotated by logadm(8)), and `<service>.log.<epoch>` (archived by
-/// sled-agent's debug collector). Keying on the full live file name, rather
-/// than the service name, keeps the series of separate instances of a
-/// service apart.
+/// SMF log files are named `<service>.log` (live), `<service>.log.<N>` (rotated
+/// by logadm(8)), `<service>.log.<epoch>` (rotated logs archived by
+/// sled-agent's debug collector), or, (unfortunately, see omicron#9271),
+/// `<service>.<epoch>` (the live log from a zone that was being destroyed,
+/// archived by sled-agent's debug collector). All of these belong to the series
+/// `<service>`.
+///
+/// Placing `<service>.<epoch>` in the same series as the rest relies on
+/// sled-agent archiving live logs only when their zone is destroyed, after the
+/// last write to them: the archived file is then the last file of its series up
+/// to that point. Its last-written time can therefore be the earliest bound on
+/// the oldest writes to files that follow it. If live logs are ever archived
+/// while still being written, the series would no longer be free of overlap.
+///
+/// Keying on the live file's name, rather than the service name, keeps the
+/// series of separate instances of a service apart.
 fn smf_series(filename: &str) -> &str {
-    split_numeric_suffix(filename).0
+    let (name, _) = split_numeric_suffix(filename);
+    // Live SMF log files end in `.log`. Using `strip_suffix` removes exactly
+    // one instance of that pattern, unlike `trim_end_matches`, which would
+    // remove any number of `.log`s. This probably doesn't matter in practice
+    // but it feels better to be more conservative in what we trim, I guess...
+    name.strip_suffix(".log").unwrap_or(name)
 }
 
 /// A directory of log files kept outside SMF's log directories.
@@ -768,7 +850,7 @@ fn load_svc_logs(
         };
 
         let mut file = LogFile::new(dir.join(filename));
-        let mut series = Some(smf_series(filename).to_string());
+        let mut series = Some(smf_series(filename));
         let mut newest_write = None;
         if read_metadata {
             file.read_metadata(&entry);
@@ -792,7 +874,7 @@ fn load_svc_logs(
         undated.push(UndatedLogFile {
             service: svc_name.to_string(),
             kind,
-            series,
+            series: series.map(str::to_string),
             symlink_target: None,
             newest_write,
             path,
@@ -951,6 +1033,7 @@ fn date_files(files: Vec<UndatedLogFile>) -> Vec<DatedLogFile> {
 mod tests {
     pub use super::is_oxide_smf_log_file;
     pub use super::oxide_smf_service_name_from_log_file_name;
+    use super::{LogFile, SvcLogs};
 
     #[test]
     fn test_is_oxide_smf_log_file() {
@@ -962,6 +1045,15 @@ mod tests {
         assert!(!is_oxide_smf_log_file("not-oxide-blah:default.log"));
         assert!(!is_oxide_smf_log_file("not-system-illumos-blah:default.log"));
         assert!(!is_oxide_smf_log_file("system-blah:default.log"));
+        // Archived logs that were never rotated (i.e. they were the live log at
+        // the time an entire zone was archived) will not have the `.log`
+        // extension, but will always end with an mtime.
+        // This reproduces https://github.com/oxidecomputer/omicron/issues/9271
+        assert!(is_oxide_smf_log_file("oxide-blah:default.1761086667"));
+        assert!(is_oxide_smf_log_file(
+            "system-illumos-blah:default.1761086667"
+        ));
+        assert!(!is_oxide_smf_log_file("oxide-blah:default"));
     }
 
     #[test]
@@ -1016,7 +1108,6 @@ mod tests {
 
     #[test]
     fn test_sort_logs() {
-        use super::{LogFile, SvcLogs};
         use std::collections::BTreeMap;
 
         let mut logs = BTreeMap::new();
@@ -1059,7 +1150,51 @@ mod tests {
             },
         );
 
+        // CockroachDB log files come in two two series, `cockroach` and
+        // `cockroach-health`. Each series has a `<prefix>.log` symlink to
+        // its current file. Each series' files, including its symlink, should
+        // stay together.
+        let crdb_zone = "oxz_cockroachdb_8bbea076-ff60-4330-8302-383e18140ef3";
+        let crdb_expected = [
+            "cockroach-health.log".to_string(),
+            format!(
+                "cockroach-health.{crdb_zone}.root.2026-09-22T03_29_59Z.003419.log"
+            ),
+            format!(
+                "cockroach-health.{crdb_zone}.root.2026-09-22T03_44_19Z.015495.log"
+            ),
+            "cockroach.log".to_string(),
+            format!(
+                "cockroach.{crdb_zone}.root.2026-09-28T20_25_39Z.016211.log"
+            ),
+            format!(
+                "cockroach.{crdb_zone}.root.2026-09-29T09_44_35Z.006190.log"
+            ),
+        ];
+        logs.insert(
+            "cockroachdb".to_string(),
+            SvcLogs {
+                current: None,
+                archived: Vec::new(),
+                // Insert in reverse, so that the files must be sorted.
+                extra: crdb_expected
+                    .iter()
+                    .rev()
+                    .map(|name| {
+                        LogFile::new(format!("/data/logs/{name}").into())
+                    })
+                    .collect(),
+            },
+        );
+
         super::sort_logs(&mut logs);
+
+        let crdb_sorted: Vec<&str> = logs["cockroachdb"]
+            .extra
+            .iter()
+            .map(|f| f.path.file_name().unwrap())
+            .collect();
+        assert_eq!(crdb_sorted, crdb_expected);
 
         let svc_logs = logs.get("blah").unwrap();
         assert_eq!(
@@ -1072,6 +1207,42 @@ mod tests {
         );
         assert_eq!(svc_logs.extra[0].path, "/foo/blah/sub.default.log1");
         assert_eq!(svc_logs.extra[1].path, "/bar/blah/sub.default.log2");
+    }
+
+    // Archived log files for a service should be sorted by the epoch in their
+    // filenames within the same SMF series. This must work regardless of
+    // whether they were rotated before archival (`<svc>.log.<epoch>`) or were
+    // the live log when the zone was archived (`<svc>.<epoch>`). See
+    // https://github.com/oxidecomputer/omicron/issues/9271 for details.
+    #[test]
+    fn test_sort_by_archived_file_name() {
+        // The log files in the expected sorting order.
+        let expected = [
+            "/pool/a/oxide-blah:default.log.1600000000",
+            "/pool/b/oxide-blah:default.1650000000",
+            "/pool/a/oxide-blah:default.log.1700000000",
+            "/pool/b/oxide-blah:default.log.1750000000",
+            // The newest file has no `.log`, and must still sort last.
+            "/pool/a/oxide-blah:default.1800000000",
+        ];
+
+        let mut svc_logs = SvcLogs {
+            current: None,
+            // Populate the list of archived log files in reverse order, so that
+            // we must sort them.
+            archived: expected
+                .iter()
+                .rev()
+                .map(|path| LogFile::new(path.into()))
+                .collect(),
+            extra: Vec::new(),
+        };
+
+        svc_logs.sort_by_file_name();
+
+        let sorted: Vec<&str> =
+            svc_logs.archived.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(sorted, expected);
     }
 
     fn ts(s: &str) -> jiff::Timestamp {
@@ -1134,13 +1305,21 @@ mod tests {
             "oxide-nexus:default.log.0",
             "oxide-nexus:default.log.12",
             "oxide-nexus:default.log.1790585101",
+            // The live log, archived when its zone was destroyed.
+            "oxide-nexus:default.1790585101",
         ] {
-            assert_eq!(smf_series(filename), "oxide-nexus:default.log");
+            assert_eq!(smf_series(filename), "oxide-nexus:default");
         }
         // Separate instances of a service are separate series.
         assert_eq!(
             smf_series("oxide-foo:instance2.log.0"),
-            "oxide-foo:instance2.log"
+            "oxide-foo:instance2"
+        );
+        // Only one `.log` is stripped. `.log.log` is not a case we particularly
+        // expect in practice, but we may as well treat it as distinct?
+        assert_eq!(
+            smf_series("oxide-foo:default.log.log.0"),
+            "oxide-foo:default.log"
         );
     }
 

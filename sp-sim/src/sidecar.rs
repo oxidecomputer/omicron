@@ -18,7 +18,8 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
-use crate::sp::SpTasks;
+use crate::sp::SimRackTaskName;
+use crate::sp::SimSpSlot;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -74,6 +75,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio_util::task::JoinMap;
 
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
@@ -89,7 +91,6 @@ pub const NUM_IGNITION_TARGETS: usize = 36;
 
 pub struct Sidecar {
     sp: sp::Handle<Handler>,
-    tasks: SpTasks<()>,
 }
 
 #[async_trait]
@@ -160,7 +161,9 @@ impl SimulatedSp for Sidecar {
 impl Sidecar {
     pub(crate) async fn spawn(
         sidecar: &SidecarConfig,
+        index: usize,
         ignition_handle: SpIgnitionHandle,
+        tasks: &mut JoinMap<SimRackTaskName, ()>,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated sidecar");
@@ -205,23 +208,21 @@ impl Sidecar {
                 sidecar.common.old_rot_state,
                 update_state,
             );
-            let (sp, udp_task) = sp::Handle::spawn(
+            let sp = sp::Handle::spawn(
                 servers,
                 ereport_servers,
                 ereport_state,
                 ignition_handle,
                 handler,
+                SimSpSlot::Sidecar(index),
+                tasks,
                 &log,
             );
 
-            Ok(Self { sp, tasks: SpTasks::Running { udp_task, extra: () } })
+            Ok(Self { sp })
         } else {
-            Ok(Self { sp: sp::Handle::rot_only(), tasks: SpTasks::RotOnly })
+            Ok(Self { sp: sp::Handle::rot_only() })
         }
-    }
-
-    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<()> {
-        &mut self.tasks
     }
 
     /// Returns the current ignition state as seen from this sidecar.

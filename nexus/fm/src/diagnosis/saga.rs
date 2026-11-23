@@ -443,6 +443,7 @@ mod tests {
         OrphanedReason, SagaOwnerState, SagaProgressState,
     };
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{OmicronZoneUuid, SitrepUuid};
@@ -599,6 +600,7 @@ mod tests {
             alerts_requested: Default::default(),
             support_bundles_requested: Default::default(),
             facts,
+            problems: IdOrdMap::new(),
         }
     }
 
@@ -623,9 +625,11 @@ mod tests {
                 comment: String::new(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         }
     }
 
