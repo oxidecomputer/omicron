@@ -1022,9 +1022,9 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|(id, editor)| (id, editor.finalize()));
         let all_sleds = commissioned_sleds.chain(self.decommissioned_sleds);
 
-        // Updating the wicket SSH auth setting is done as a part of setting up
-        // the builder; we can check here whether that made any changes and
-        // include a comment if so.
+        // Updating the wicket SSH auth setting is done when
+        // `ensure_sled_exists()` is called for each sled; we can check here
+        // whether that made changes to any sleds and include a comment if so.
         let mut num_wicket_ssh_auth_updates = 0;
 
         for (sled_id, edited_sled) in all_sleds {

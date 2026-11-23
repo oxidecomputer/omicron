@@ -210,6 +210,12 @@ impl<'a> Planner<'a> {
     /// entities (`reconfigurator-cli` and tests) can easily reuse it if they
     /// want to update a `BlueprintBuilder` they're using without running
     /// through the planner proper.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `input` is inconsistent with the state of `builder` in some way
+    /// that should never happen in practice (e.g., the same sled ID appears in
+    /// both but with a different sled subnet).
     pub fn update_builder_from_planning_input(
         builder: &mut BlueprintBuilder,
         input: &PlanningInput,
@@ -218,9 +224,10 @@ impl<'a> Planner<'a> {
         // the expected fleet-level wicket SSH auth setting. This may make
         // changes to `OmicronSledConfig`s even if we would otherwise avoid
         // making most changes (e.g., if we're waiting for mupdate recovery);
-        // the wicket SSH auth setting can safely be applied even if a mupdate
-        // has happened, and our job in this case is solely to broadcast
-        // whatever the latest setting from an operator is to all sleds.
+        // the wicket SSH auth setting can safely be applied even if we don't
+        // end up doing any other planning, and our job in this case is solely
+        // to broadcast whatever the latest setting from an operator is to all
+        // commissioned sleds.
         //
         // If `input` has new sleds that weren't in `builder`'s parent
         // blueprint, this will create empty configs for them.

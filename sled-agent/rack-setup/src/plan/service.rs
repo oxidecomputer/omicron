@@ -1063,6 +1063,10 @@ impl SledInfo {
                 disks: IdOrdMap::new(),
                 datasets: BTreeMap::new(),
                 zones: IdOrdMap::new(),
+                // Every sled starts out with the initial wicket SSH auth
+                // setting (generation 1, unauthenticated). If we do future work
+                // to allow an operator to specify some other value as a part of
+                // RSS, it will need to be assigned generation 2.
                 wicket_ssh_auth: WicketSshAuth::initial(),
             },
         }
