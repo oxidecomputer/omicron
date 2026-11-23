@@ -28,6 +28,7 @@ use omicron_uuid_kinds::{
     ReconfiguratorSimStateUuid, SledUuid,
 };
 use sled_agent_types::disk::M2Slot;
+use sled_agent_types::inventory::WicketSshAuth;
 use strum::IntoEnumIterator as _;
 
 use crate::{
@@ -784,6 +785,9 @@ pub struct LoadSerializedSystemResult {
 
     /// External DNS generations.
     pub external_dns_generations: Vec<Generation>,
+
+    /// wicket SSH auth setting.
+    pub wicket_ssh_auth: WicketSshAuth,
 }
 
 impl LoadSerializedSystemResult {
@@ -798,49 +802,59 @@ impl LoadSerializedSystemResult {
             cockroachdb_settings: CockroachDbSettings::empty(),
             internal_dns_generations: Vec::new(),
             external_dns_generations: Vec::new(),
+            wicket_ssh_auth: WicketSshAuth::initial(),
         }
     }
 }
 
 impl fmt::Display for LoadSerializedSystemResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            primary_collection_id,
+            sled_ids,
+            collection_ids,
+            blueprint_ids,
+            external_ip_policy,
+            cockroachdb_settings,
+            internal_dns_generations,
+            external_dns_generations,
+            wicket_ssh_auth,
+        } = self;
+
         writeln!(
             f,
             "using collection {} as source of sled inventory data",
-            self.primary_collection_id,
+            primary_collection_id,
         )?;
-        writeln!(f, "loaded sleds: {}", join_comma_or_none(&self.sled_ids))?;
+        writeln!(f, "loaded sleds: {}", join_comma_or_none(sled_ids))?;
         writeln!(
             f,
             "loaded collections: {}",
-            join_comma_or_none(&self.collection_ids)
+            join_comma_or_none(collection_ids)
         )?;
         writeln!(
             f,
             "loaded blueprints: {}",
-            join_comma_or_none(&self.blueprint_ids)
+            join_comma_or_none(blueprint_ids)
         )?;
         writeln!(
             // TODO: output format for IP policy that's not just Debug?
             f,
             "loaded external IP policy: {:?}",
-            self.external_ip_policy,
+            external_ip_policy,
         )?;
-        writeln!(
-            f,
-            "loaded cockroachdb settings: {}",
-            self.cockroachdb_settings,
-        )?;
+        writeln!(f, "loaded cockroachdb settings: {}", cockroachdb_settings)?;
         writeln!(
             f,
             "loaded internal DNS generations: {}",
-            join_comma_or_none(&self.internal_dns_generations)
+            join_comma_or_none(internal_dns_generations)
         )?;
         writeln!(
             f,
             "loaded external DNS generations: {}",
-            join_comma_or_none(&self.external_dns_generations)
+            join_comma_or_none(external_dns_generations)
         )?;
+        writeln!(f, "loaded wicket SSH auth: {}", wicket_ssh_auth.display())?;
 
         Ok(())
     }
@@ -1078,6 +1092,12 @@ impl SimSystemBuilderInner {
         );
         system_res.cockroachdb_settings =
             state.planning_input.cockroachdb_settings().clone();
+
+        self.system.description.set_wicket_ssh_auth(
+            state.planning_input.wicket_ssh_auth().clone(),
+        );
+        system_res.wicket_ssh_auth =
+            state.planning_input.wicket_ssh_auth().clone();
 
         self.system
             .description

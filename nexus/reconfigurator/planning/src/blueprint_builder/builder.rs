@@ -739,7 +739,9 @@ impl<'a> BlueprintBuilder<'a> {
                         editor.subnet(),
                     );
                 }
-                editor.set_wicket_ssh_auth(wicket_ssh_auth)?;
+                editor.set_wicket_ssh_auth(wicket_ssh_auth).with_context(
+                    || format!("failed to ensure sled {sled_id}"),
+                )?;
             }
         }
         Ok(())
@@ -1006,7 +1008,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// can be used for building more blueprints.  This version is only intended
     /// for tests.
     pub fn build_returning_rng(
-        self,
+        mut self,
         source: BlueprintSource,
     ) -> (Blueprint, PlannerRng) {
         let blueprint_id = self.new_blueprint_id();
@@ -1019,6 +1021,11 @@ impl<'a> BlueprintBuilder<'a> {
             .into_iter()
             .map(|(id, editor)| (id, editor.finalize()));
         let all_sleds = commissioned_sleds.chain(self.decommissioned_sleds);
+
+        // Updating the wicket SSH auth setting is done as a part of setting up
+        // the builder; we can check here whether that made any changes and
+        // include a comment if so.
+        let mut num_wicket_ssh_auth_updates = 0;
 
         for (sled_id, edited_sled) in all_sleds {
             let EditedSled { config, edit_counts, scalar_edits } = edited_sled;
@@ -1051,6 +1058,9 @@ impl<'a> BlueprintBuilder<'a> {
                     "update_disposition_modified" => update_disposition,
                     "wicket_ssh_auth_modified" => wicket_ssh_auth,
                 );
+                if wicket_ssh_auth {
+                    num_wicket_ssh_auth_updates += 1;
+                }
             } else {
                 debug!(
                     self.log, "sled unchanged in new blueprint";
@@ -1058,6 +1068,14 @@ impl<'a> BlueprintBuilder<'a> {
                     "blueprint_id" => %blueprint_id,
                 );
             }
+        }
+
+        if num_wicket_ssh_auth_updates > 0 {
+            let s = if num_wicket_ssh_auth_updates > 1 { "s" } else { "" };
+            self.comments.push(format!(
+                "updated wicket SSH auth setting on \
+                 {num_wicket_ssh_auth_updates} sled{s}"
+            ));
         }
 
         let mut blueprint = Blueprint {
