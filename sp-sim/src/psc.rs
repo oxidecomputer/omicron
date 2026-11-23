@@ -17,6 +17,7 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
+use crate::sp::SpTasks;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -77,6 +78,7 @@ pub const FAKE_PSC_MODEL: &str = "FAKE_SIM_PSC";
 
 pub struct Psc {
     sp: sp::Handle<Handler>,
+    tasks: SpTasks<()>,
 }
 
 #[async_trait]
@@ -183,21 +185,26 @@ impl Psc {
             let handler = Handler::new(
                 baseboard_vpd,
                 psc.common.components.clone(),
-                log,
+                log.clone(),
                 psc.common.old_rot_state,
                 update_state,
             );
-            let sp = sp::Handle::spawn(
+            let (sp, udp_task) = sp::Handle::spawn(
                 servers,
                 ereport_servers,
                 ereport_state,
                 handler,
+                &log,
             );
 
-            Ok(Self { sp })
+            Ok(Self { sp, tasks: SpTasks::Running { udp_task, extra: () } })
         } else {
-            Ok(Self { sp: sp::Handle::rot_only() })
+            Ok(Self { sp: sp::Handle::rot_only(), tasks: SpTasks::RotOnly })
         }
+    }
+
+    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<()> {
+        &mut self.tasks
     }
 }
 

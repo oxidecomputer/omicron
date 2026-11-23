@@ -36,7 +36,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (66, WICKET_SSH_AUTH),
+    (67, WICKET_SSH_AUTH),
+    (66, PROPOLIS_ACPI_SHUTDOWN),
     (65, ADD_DISK_LOCATION_TO_INVENTORY),
     (64, TRUST_QUORUM_MEMBERS),
     (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
@@ -585,12 +586,28 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}/state",
+        versions = VERSION_PROPOLIS_ACPI_SHUTDOWN..
     }]
     async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::VmmPutStateBody>,
     ) -> Result<HttpResponseOk<latest::instance::VmmPutStateResponse>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_put_state",
+        method = PUT,
+        path = "/vmms/{propolis_id}/state",
+        versions = ..VERSION_PROPOLIS_ACPI_SHUTDOWN
+    }]
+    async fn vmm_put_state_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v1::instance::VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<v1::instance::VmmPutStateResponse>, HttpError>
+    {
+        Self::vmm_put_state(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         method = GET,

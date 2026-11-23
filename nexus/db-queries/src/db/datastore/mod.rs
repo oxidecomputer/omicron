@@ -116,7 +116,7 @@ mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
-mod problem;
+pub mod problem;
 mod project;
 mod quota;
 mod rack;
@@ -222,6 +222,7 @@ pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmBulkMarkStopForUpdateResult;
 pub use vmm::VmmStateUpdateResult;
+pub use vmm::VmmStoppableForUpdate;
 pub use volume::*;
 pub use webhook_delivery::WebhookDeliveryFilters;
 

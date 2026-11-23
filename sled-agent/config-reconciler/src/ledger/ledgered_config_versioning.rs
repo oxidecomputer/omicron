@@ -21,7 +21,7 @@ use sled_agent_types_versions::v50;
 use sled_agent_types_versions::v51;
 use sled_agent_types_versions::v52;
 use sled_agent_types_versions::v55;
-use sled_agent_types_versions::v66;
+use sled_agent_types_versions::v67;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -73,7 +73,7 @@ macro_rules! version_conversion_chain {
 // we'll attempt to parse the ledgered config. Add new versions to the top of
 // the relevant list.
 version_conversion_chain!(
-    v66::inventory::OmicronSledConfig,
+    v67::inventory::OmicronSledConfig,
     v55::inventory::OmicronSledConfig,
     v51::inventory::OmicronSledConfig,
     v50::inventory::OmicronSledConfig,
@@ -332,8 +332,8 @@ pub(super) mod tests {
         "expectorate/v51-sled-config.json";
     const EXPECTORATE_V55_SLED_CONFIG_PATH: &str =
         "expectorate/v55-sled-config.json";
-    const EXPECTORATE_V66_SLED_CONFIG_PATH: &str =
-        "expectorate/v66-sled-config.json";
+    const EXPECTORATE_V67_SLED_CONFIG_PATH: &str =
+        "expectorate/v67-sled-config.json";
 
     // v1 artifact config collected from a test system.
     const V1_ARTIFACT_CONFIG_PATH: &str = "test-data/v1-artifact-config.json";
@@ -369,7 +369,7 @@ pub(super) mod tests {
         let v50 = v50::inventory::OmicronSledConfig::from(v49.clone());
         let v51 = v51::inventory::OmicronSledConfig::from(v50.clone());
         let v55 = v55::inventory::OmicronSledConfig::from(v51.clone());
-        let v66 = v66::inventory::OmicronSledConfig::from(v55.clone());
+        let v67 = v67::inventory::OmicronSledConfig::from(v55.clone());
 
         expectorate::assert_contents(
             EXPECTORATE_V10_SLED_CONFIG_PATH,
@@ -400,8 +400,8 @@ pub(super) mod tests {
             &serde_json::to_string_pretty(&v55).unwrap(),
         );
         expectorate::assert_contents(
-            EXPECTORATE_V66_SLED_CONFIG_PATH,
-            &serde_json::to_string_pretty(&v66).unwrap(),
+            EXPECTORATE_V67_SLED_CONFIG_PATH,
+            &serde_json::to_string_pretty(&v67).unwrap(),
         );
         logctx.cleanup_successful();
     }
@@ -417,11 +417,11 @@ pub(super) mod tests {
         // compilation error if the latest version changes. Bump the
         // version here and add the new version's path to the array of ledger
         // paths below.
-        type LatestConfig = v66::inventory::OmicronSledConfig;
+        type LatestConfig = v67::inventory::OmicronSledConfig;
 
         let counts = check_ledger_reads::<LatestConfig, _, _>(
             log,
-            EXPECTORATE_V66_SLED_CONFIG_PATH,
+            EXPECTORATE_V67_SLED_CONFIG_PATH,
             Some(V4_SLED_CONFIG_PATH),
             &[
                 V4_SLED_CONFIG_PATH,
@@ -432,7 +432,7 @@ pub(super) mod tests {
                 EXPECTORATE_V50_SLED_CONFIG_PATH,
                 EXPECTORATE_V51_SLED_CONFIG_PATH,
                 EXPECTORATE_V55_SLED_CONFIG_PATH,
-                EXPECTORATE_V66_SLED_CONFIG_PATH,
+                EXPECTORATE_V67_SLED_CONFIG_PATH,
             ],
             |paths| read_ledgered_sled_config(log, paths),
         )

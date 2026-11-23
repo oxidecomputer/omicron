@@ -139,5 +139,6 @@ async fn ereports_survive_malformed_requests() {
     send_probe_and_check_response(&sock, RequestIdV0(3), expected_restart_id)
         .await;
 
+    simrack.teardown().await.expect("simulated SP tasks ran until teardown");
     logctx.cleanup_successful();
 }
