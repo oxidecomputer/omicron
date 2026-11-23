@@ -25,6 +25,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::fm;
 use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepProblemGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_test_utils::dev::test_cmds::EXIT_FAILURE;
 use omicron_test_utils::dev::test_cmds::OutputSnapshot;
@@ -1094,6 +1095,7 @@ async fn insert_example_sitrep(
         }]
         .into_iter()
         .collect(),
+        problems: Default::default(),
     };
 
     // A case from an earlier sitrep. In this sitrep, an ereport was added and
@@ -1110,6 +1112,7 @@ async fn insert_example_sitrep(
         facts: Default::default(),
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
+        problems: Default::default(),
     };
 
     let empty_case = |n: u128,
@@ -1128,6 +1131,7 @@ async fn insert_example_sitrep(
         facts: Default::default(),
         alerts_requested: Default::default(),
         support_bundles_requested: Default::default(),
+        problems: Default::default(),
     };
     let unchanged_case = empty_case(
         40,
@@ -1188,6 +1192,7 @@ async fn insert_example_sitrep(
             time_created: now,
             alert_generation: SitrepAlertGeneration::new(),
             support_bundle_generation: SitrepSupportBundleGeneration::new(),
+            problem_generation: SitrepProblemGeneration::new(),
         },
         cases: [
             disk_case,
@@ -1201,6 +1206,7 @@ async fn insert_example_sitrep(
         .into_iter()
         .collect(),
         ereports_by_id: Default::default(),
+        problems: Default::default(),
     };
     match datastore.fm_sitrep_insert(opctx, sitrep, None).await {
         Err(InsertSitrepError::ParentNotCurrent(_)) => {}
