@@ -17,6 +17,18 @@ mod lockstep_api;
 mod populate;
 mod saga_interface;
 
+// In dev builds, these sharded crates provide generated code for DataStore
+// methods, massively speeding up build times. See
+// https://docs.rs/preinstantiate for more.
+use nexus_db_queries_preinstantiate_0 as _;
+use nexus_db_queries_preinstantiate_1 as _;
+use nexus_db_queries_preinstantiate_2 as _;
+use nexus_db_queries_preinstantiate_3 as _;
+use nexus_db_queries_preinstantiate_4 as _;
+use nexus_db_queries_preinstantiate_5 as _;
+use nexus_db_queries_preinstantiate_6 as _;
+use nexus_db_queries_preinstantiate_7 as _;
+
 use crate::internal_api::params::ServiceIpPoolConfig;
 use crate::internal_api::params::ServiceIpPoolError;
 pub use app::Nexus;
