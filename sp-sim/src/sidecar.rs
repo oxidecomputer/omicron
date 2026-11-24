@@ -18,7 +18,8 @@ use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::sp;
-use crate::sp::SpTasks;
+use crate::sp::SimRackTaskName;
+use crate::sp::SimSpSlot;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -74,6 +75,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio_util::task::JoinMap;
 
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
@@ -89,7 +91,6 @@ pub const NUM_IGNITION_TARGETS: usize = 36;
 
 pub struct Sidecar {
     sp: sp::Handle<Handler>,
-    tasks: SpTasks<()>,
 }
 
 #[async_trait]
@@ -161,7 +162,8 @@ impl Sidecar {
     pub(crate) async fn spawn(
         sidecar: &SidecarConfig,
         index: usize,
-        rack_ignition_state: RackIgnitionState,
+        ignition_handle: SpIgnitionHandle,
+        tasks: &mut JoinMap<SimRackTaskName, ()>,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated sidecar");
@@ -201,27 +203,26 @@ impl Sidecar {
             let handler = Handler::new(
                 baseboard_vpd,
                 sidecar.common.components.clone(),
-                FakeIgnition::new(index, rack_ignition_state),
+                FakeIgnition::new(ignition_handle.clone()),
                 log.clone(),
                 sidecar.common.old_rot_state,
                 update_state,
             );
-            let (sp, udp_task) = sp::Handle::spawn(
+            let sp = sp::Handle::spawn(
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_handle,
                 handler,
+                SimSpSlot::Sidecar(index),
+                tasks,
                 &log,
             );
 
-            Ok(Self { sp, tasks: SpTasks::Running { udp_task, extra: () } })
+            Ok(Self { sp })
         } else {
-            Ok(Self { sp: sp::Handle::rot_only(), tasks: SpTasks::RotOnly })
+            Ok(Self { sp: sp::Handle::rot_only() })
         }
-    }
-
-    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<()> {
-        &mut self.tasks
     }
 
     /// Returns the current ignition state as seen from this sidecar.
@@ -234,8 +235,8 @@ impl Sidecar {
     /// * Further entries are gimlets and PSCs, each in config order.
     /// * All remaining entries have `target: None`.
     ///
-    /// See `FakeIgnition::rack_target` for how switch targets are mapped to rack
-    /// targets.
+    /// See `FakeIgnition::switch_to_rack_target` for how switch targets are
+    /// mapped to rack targets.
     pub async fn current_ignition_state(
         &self,
     ) -> [IgnitionState; NUM_IGNITION_TARGETS] {
@@ -1144,37 +1145,82 @@ pub(crate) struct RackIgnitionState {
     //
     // For more information, see [`Sidecar::current_ignition_state`].
     targets: Arc<Mutex<[IgnitionState; NUM_IGNITION_TARGETS]>>,
+    num_sidecars: usize,
+    num_gimlets: usize,
+    num_pscs: usize,
 }
 
 impl RackIgnitionState {
     /// Returns a new `RackIgnitionState` for the given config.
     pub(crate) fn new(config: &SimulatedSpsConfig) -> Self {
-        let mut state = [IgnitionState {
+        let num_sidecars = config.sidecar.len();
+        let num_gimlets = config.gimlet.len();
+        let num_pscs = config.psc.len();
+        assert!(
+            num_sidecars + num_gimlets + num_pscs <= NUM_IGNITION_TARGETS,
+            "too many simulated SPs",
+        );
+
+        let absent = IgnitionState {
             receiver: ignition::ReceiverStatus {
                 aligned: false,
                 locked: false,
                 polarity_inverted: false,
             },
             target: None,
-        }; NUM_IGNITION_TARGETS];
-        let mut num_sps = 0;
-        let mut add_sp = |system_type| {
-            assert!(num_sps < NUM_IGNITION_TARGETS, "too many simulated SPs");
-            state[num_sps] = initial_ignition_state(system_type);
-            num_sps += 1;
+        };
+        let rack_state = Self {
+            targets: Arc::new(Mutex::new([absent; NUM_IGNITION_TARGETS])),
+            num_sidecars,
+            num_gimlets,
+            num_pscs,
         };
 
-        for _ in &config.sidecar {
-            add_sp(ignition::SystemType::Sidecar);
-        }
-        for _ in &config.gimlet {
-            add_sp(ignition::SystemType::Gimlet);
-        }
-        for _ in &config.psc {
-            add_sp(ignition::SystemType::Psc);
+        {
+            let mut targets = rack_state.lock();
+            for index in 0..num_sidecars {
+                targets[rack_state.sidecar_target(index)] =
+                    initial_ignition_state(ignition::SystemType::Sidecar);
+            }
+            for index in 0..num_gimlets {
+                targets[rack_state.gimlet_target(index)] =
+                    initial_ignition_state(ignition::SystemType::Gimlet);
+            }
+            for index in 0..num_pscs {
+                targets[rack_state.psc_target(index)] =
+                    initial_ignition_state(ignition::SystemType::Psc);
+            }
         }
 
-        Self { targets: Arc::new(Mutex::new(state)) }
+        rack_state
+    }
+
+    pub(crate) fn sidecar_handle(&self, index: usize) -> SpIgnitionHandle {
+        self.sp_handle(self.sidecar_target(index))
+    }
+
+    pub(crate) fn gimlet_handle(&self, index: usize) -> SpIgnitionHandle {
+        self.sp_handle(self.gimlet_target(index))
+    }
+
+    pub(crate) fn psc_handle(&self, index: usize) -> SpIgnitionHandle {
+        self.sp_handle(self.psc_target(index))
+    }
+
+    fn sp_handle(&self, rack_target: usize) -> SpIgnitionHandle {
+        SpIgnitionHandle { rack_state: self.clone(), rack_target }
+    }
+
+    fn sidecar_target(&self, index: usize) -> usize {
+        rack_target(0, self.num_sidecars, index)
+    }
+
+    fn gimlet_target(&self, index: usize) -> usize {
+        rack_target(self.num_sidecars, self.num_gimlets, index)
+    }
+
+    fn psc_target(&self, index: usize) -> usize {
+        rack_target(self.num_sidecars + self.num_gimlets, self.num_pscs, index)
     }
 
     fn lock(&self) -> MutexGuard<'_, [IgnitionState; NUM_IGNITION_TARGETS]> {
@@ -1182,8 +1228,79 @@ impl RackIgnitionState {
     }
 }
 
+fn rack_target(base: usize, count: usize, index: usize) -> usize {
+    assert!(
+        index < count,
+        "SP index {index} is within the {count} configured SPs of its type",
+    );
+    base + index
+}
+
+/// A single simulated SP's view of whether Ignition has powered it on or not..
+#[derive(Clone)]
+pub(crate) struct SpIgnitionHandle {
+    // A shared handle to the rack's ignition state.
+    rack_state: RackIgnitionState,
+    // The index of this SP within the rack's ignition state.
+    rack_target: usize,
+}
+
+impl SpIgnitionHandle {
+    /// Returns true if the simulated SP is powered.
+    ///
+    /// If the SP is not powered, then it won't respond to requests.
+    ///
+    /// For our purposes, only `On` counts as powered. This is not quite the
+    /// same as MGS, which reports `PoweringOn` as true as well, but (a) an SP
+    /// that's still powering on hasn't booted yet so probably won't be able to
+    /// answer requests, and (b) sp-sim's ignition never produces the
+    /// transitional states anyway.
+    ///
+    /// Note that ignition power only controls whether a simulated SP sends data
+    /// or responds to requests. Unlike a real SP:
+    ///
+    /// * A simulated SP's state isn't reset across power cycles.
+    /// * sp-sim doesn't simulate a dead switch. On a real rack, powering off a
+    ///   sidecar also takes down the corresponding management network, so SPs won't
+    ///   be reachable through the corresponding port. In sp-sim, powering off a
+    ///   sidecar only silences that sidecar's own SP and doesn't affect the
+    ///   reachability of other SPs through that port.
+    ///
+    /// TODO: Resolve these divergences.
+    pub(crate) fn is_powered(&self) -> bool {
+        let state = self.rack_state.lock()[self.rack_target];
+        let target = state
+            .target
+            .expect("a simulated SP's own ignition target is present");
+        match target.power_state {
+            ignition::SystemPowerState::On => true,
+            ignition::SystemPowerState::Off
+            | ignition::SystemPowerState::Aborted
+            | ignition::SystemPowerState::PoweringOff
+            | ignition::SystemPowerState::PoweringOn => false,
+        }
+    }
+}
+
 impl FakeIgnition {
-    fn new(local_sidecar: usize, rack_state: RackIgnitionState) -> Self {
+    fn new(ignition_handle: SpIgnitionHandle) -> Self {
+        let SpIgnitionHandle { rack_state, rack_target: local_sidecar } =
+            ignition_handle;
+        let state = rack_state.lock()[local_sidecar];
+        let system_type = state
+            .target
+            .expect("a sidecar's own ignition target is present")
+            .system_type;
+        match system_type {
+            ignition::SystemType::Sidecar => {}
+            ignition::SystemType::Gimlet
+            | ignition::SystemType::Psc
+            | ignition::SystemType::Cosmo
+            | ignition::SystemType::Unknown(_) => panic!(
+                "FakeIgnition is created with a sidecar's ignition power \
+                 handle, but rack target {local_sidecar} is a {system_type:?}",
+            ),
+        }
         Self {
             local_sidecar,
             link_events: [empty_link_events(); NUM_IGNITION_TARGETS],
@@ -1200,11 +1317,11 @@ impl FakeIgnition {
     }
 
     fn get_target(&self, target: u8) -> Result<IgnitionState, SpError> {
-        let rack_target = self.rack_target(target)?;
+        let rack_target = self.switch_to_rack_target(target)?;
         Ok(self.rack_state.lock()[rack_target])
     }
 
-    fn rack_target(&self, target: u8) -> Result<usize, SpError> {
+    fn switch_to_rack_target(&self, target: u8) -> Result<usize, SpError> {
         let switch_target = usize::from(target);
         if switch_target >= NUM_IGNITION_TARGETS {
             Err(SpError::Ignition(IgnitionError::InvalidPort))
@@ -1224,7 +1341,7 @@ impl FakeIgnition {
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), SpError> {
-        let rack_target = self.rack_target(target)?;
+        let rack_target = self.switch_to_rack_target(target)?;
         let mut state = self.rack_state.lock();
         let target = state[rack_target]
             .target
