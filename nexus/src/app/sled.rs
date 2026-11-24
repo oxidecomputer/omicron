@@ -36,7 +36,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
 use sled_agent_types::inventory::SledRegistrationInfo;
 use sled_agent_types::inventory::SledRole;
-use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -217,10 +216,7 @@ impl super::Nexus {
         //
         // The check and the change to expunged run in a single transaction,
         // so a configuration proposed concurrently can't slip in between them.
-        let baseboard_id = BaseboardId {
-            part_number: sled.part_number().to_string(),
-            serial_number: sled.serial_number().to_string(),
-        };
+        let baseboard_id = sled.baseboard_id();
         let prev_policy = self
             .db_datastore
             .sled_set_policy_to_expunged_if_trust_quorum_allows(

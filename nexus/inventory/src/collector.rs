@@ -1054,6 +1054,7 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use crate::examples::RACK_UUID;
     use gateway_messages::SpPort;
+    use gateway_test_utils::setup::TwoSwitchSimRack;
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
@@ -1066,6 +1067,7 @@ mod test {
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_sled_agent::sim;
     use omicron_test_utils::dev::test_cmds::Redactor;
+    use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1590,17 +1592,9 @@ mod test {
         // This is the same as the basic test, but we set up two different MGS
         // instances and point the collector at both.  We should get the same
         // result.
-        let gwtestctx1 = gateway_test_utils::setup::test_setup(
-            "test_multi_mgs_1",
-            SpPort::One,
-        )
-        .await;
-        let gwtestctx2 = gateway_test_utils::setup::test_setup(
-            "test_multi_mgs_2",
-            SpPort::Two,
-        )
-        .await;
-        let log = &gwtestctx1.logctx.log;
+        let logctx = test_setup_log("test_multi_mgs");
+        let log = &logctx.log;
+        let rack = TwoSwitchSimRack::start("test_multi_mgs", log, 2).await;
 
         let simulated_upstairs =
             Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
@@ -1627,7 +1621,7 @@ mod test {
 
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
-        let mgs_clients = [&gwtestctx1, &gwtestctx2]
+        let mgs_clients = [&rack.mgs0, &rack.mgs1]
             .into_iter()
             .map(|g| &g.client)
             .cloned()
@@ -1660,8 +1654,8 @@ mod test {
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
         sled1.http_server.close().await.unwrap();
-        gwtestctx1.teardown().await;
-        gwtestctx2.teardown().await;
+        rack.teardown().await.expect("simulated rack was torn down cleanly");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]

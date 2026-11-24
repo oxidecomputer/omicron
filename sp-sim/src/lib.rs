@@ -33,14 +33,17 @@ pub use psc::Psc;
 pub use psc::SIM_PSC_BOARD;
 pub use server::logger;
 pub use sidecar::FAKE_SIDECAR_MODEL;
+pub use sidecar::NUM_IGNITION_TARGETS;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use sidecar::Sidecar;
 pub use slog::Logger;
-use sp::SpTasks;
+use sp::SimRackTaskName;
+use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinError;
+use tokio_util::task::JoinMap;
 pub use update::HostFlashHashCompletionSender;
 pub use update::HostFlashHashPolicy;
 
@@ -143,17 +146,27 @@ pub struct SimRack {
     pub sidecars: Vec<Sidecar>,
     pub gimlets: Vec<Gimlet>,
     pub pscs: Vec<Psc>,
+    /// All the tasks owned by this simulated rack.
+    ///
+    /// The default behavior of [`JoinMap`] is to abort running tasks on drop.
+    tasks: JoinMap<SimRackTaskName, ()>,
 }
 
 impl SimRack {
     pub async fn start(config: &Config, log: &Logger) -> Result<Self> {
+        let rack_ignition_state =
+            sidecar::RackIgnitionState::new(&config.simulated_sps);
+        let mut tasks = JoinMap::new();
+
         let mut sidecars =
             Vec::with_capacity(config.simulated_sps.sidecar.len());
         for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
             sidecars.push(
                 Sidecar::spawn(
-                    config,
                     sidecar,
+                    i,
+                    rack_ignition_state.sidecar_handle(i),
+                    &mut tasks,
                     log.new(slog::o!("slot" => format!("sidecar {}", i))),
                 )
                 .await?,
@@ -170,6 +183,9 @@ impl SimRack {
                     // For now, just use the fastest version (assume contents
                     // are always hashed).
                     HostFlashHashPolicy::assume_already_hashed(),
+                    i,
+                    rack_ignition_state.gimlet_handle(i),
+                    &mut tasks,
                     log.new(slog::o!("slot" => format!("gimlet {}", i))),
                 )
                 .await?,
@@ -179,10 +195,19 @@ impl SimRack {
         let mut pscs = Vec::with_capacity(config.simulated_sps.psc.len());
         for (i, psc) in config.simulated_sps.psc.iter().enumerate() {
             let log = log.new(slog::o!("slot" => format!("PSC {i}")));
-            pscs.push(Psc::spawn(psc, log).await?);
+            pscs.push(
+                Psc::spawn(
+                    psc,
+                    i,
+                    rack_ignition_state.psc_handle(i),
+                    &mut tasks,
+                    log,
+                )
+                .await?,
+            );
         }
 
-        Ok(Self { sidecars, gimlets, pscs })
+        Ok(Self { sidecars, gimlets, pscs, tasks })
     }
 
     pub fn ignition_controller(&self) -> &Sidecar {
@@ -202,73 +227,36 @@ impl SimRack {
     /// Returns `Ok(())` if teardown succeeded, or `Err(_)` if there were any
     /// panics or other errors.
     pub async fn teardown(mut self) -> Result<()> {
-        let mut udp_tasks = Vec::new();
-        let mut serial_console_tasks = Vec::new();
-        for (i, sidecar) in self.sidecars.iter_mut().enumerate() {
-            match sidecar.tasks_mut() {
-                SpTasks::RotOnly => {}
-                SpTasks::Running { udp_task, extra: () } => {
-                    udp_tasks.push((format!("sidecar {i} UDP task"), udp_task));
-                }
-            }
-        }
-        for (i, gimlet) in self.gimlets.iter_mut().enumerate() {
-            match gimlet.tasks_mut() {
-                SpTasks::RotOnly => {}
-                SpTasks::Running { udp_task, extra: consoles } => {
-                    udp_tasks.push((format!("gimlet {i} UDP task"), udp_task));
-                    for (component, task) in consoles {
-                        let label = format!(
-                            "gimlet {i} serial console task ({component})"
-                        );
-                        serial_console_tasks.push((label, task));
-                    }
-                }
-            }
-        }
-        for (i, psc) in self.pscs.iter_mut().enumerate() {
-            match psc.tasks_mut() {
-                SpTasks::RotOnly => {}
-                SpTasks::Running { udp_task, extra: () } => {
-                    udp_tasks.push((format!("PSC {i} UDP task"), udp_task));
-                }
-            }
-        }
+        self.tasks.abort_all();
 
-        // Abort all the tasks before awaiting any tasks so that all
-        // cancellations happen at the same time for symmetry reasons.
-        for (_, task) in &udp_tasks {
-            task.abort();
-        }
-        for (_, task) in &serial_console_tasks {
-            task.abort();
-        }
-
-        let mut errors = Vec::new();
-        for (label, task) in udp_tasks {
-            match task.await {
+        // Tasks finish in an arbitrary order. Keying errors by task name and
+        // storing them in an ordered map ensures a deterministic order for
+        // errors.
+        let mut errors = BTreeMap::new();
+        while let Some((name, result)) = self.tasks.join_next().await {
+            match result {
                 // We still hold a reference to the command sender, so the task
                 // should not have exited by itself.
-                Ok(()) => errors.push(anyhow!(
-                    "simulated SP {label} exited before teardown"
-                )),
-                Err(error) => record_join_error(&mut errors, &label, error),
-            }
-        }
-        for (label, task) in serial_console_tasks {
-            match task.await {
-                Ok(never) => match never {},
-                Err(error) => record_join_error(&mut errors, &label, error),
+                Ok(()) => {
+                    let error =
+                        anyhow!("simulated SP {name} exited before teardown");
+                    errors.insert(name, error);
+                }
+                Err(error) => record_join_error(&mut errors, name, error),
             }
         }
 
-        if errors.is_empty() { Ok(()) } else { Err(merge_anyhow_list(errors)) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(merge_anyhow_list(errors.into_values()))
+        }
     }
 }
 
 fn record_join_error(
-    errors: &mut Vec<anyhow::Error>,
-    label: &str,
+    errors: &mut BTreeMap<SimRackTaskName, anyhow::Error>,
+    name: SimRackTaskName,
     error: JoinError,
 ) {
     // A JoinError is either a panic or a cancellation. Ignore cancellations
@@ -276,9 +264,8 @@ fn record_join_error(
     //
     // JoinError's Display impl includes the task id and panic message.
     if error.is_panic() {
-        errors.push(
-            anyhow::Error::new(error)
-                .context(format!("simulated SP {label} panicked")),
-        );
+        let error = anyhow::Error::new(error)
+            .context(format!("simulated SP {name} panicked"));
+        errors.insert(name, error);
     }
 }

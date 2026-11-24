@@ -16,8 +16,10 @@ use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::sidecar::SpIgnitionHandle;
 use crate::sp;
-use crate::sp::SpTasks;
+use crate::sp::SimRackTaskName;
+use crate::sp::SimSpSlot;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -69,6 +71,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio_util::task::JoinMap;
 
 pub const SIM_PSC_BOARD: &str = "SimPscSp";
 
@@ -78,7 +81,6 @@ pub const FAKE_PSC_MODEL: &str = "FAKE_SIM_PSC";
 
 pub struct Psc {
     sp: sp::Handle<Handler>,
-    tasks: SpTasks<()>,
 }
 
 #[async_trait]
@@ -147,7 +149,13 @@ impl SimulatedSp for Psc {
 }
 
 impl Psc {
-    pub async fn spawn(psc: &PscConfig, log: Logger) -> Result<Self> {
+    pub(crate) async fn spawn(
+        psc: &PscConfig,
+        index: usize,
+        ignition_handle: SpIgnitionHandle,
+        tasks: &mut JoinMap<SimRackTaskName, ()>,
+        log: Logger,
+    ) -> Result<Self> {
         info!(log, "setting up simulated PSC");
 
         let baseboard_vpd =
@@ -189,22 +197,21 @@ impl Psc {
                 psc.common.old_rot_state,
                 update_state,
             );
-            let (sp, udp_task) = sp::Handle::spawn(
+            let sp = sp::Handle::spawn(
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_handle,
                 handler,
+                SimSpSlot::Psc(index),
+                tasks,
                 &log,
             );
 
-            Ok(Self { sp, tasks: SpTasks::Running { udp_task, extra: () } })
+            Ok(Self { sp })
         } else {
-            Ok(Self { sp: sp::Handle::rot_only(), tasks: SpTasks::RotOnly })
+            Ok(Self { sp: sp::Handle::rot_only() })
         }
-    }
-
-    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<()> {
-        &mut self.tasks
     }
 }
 

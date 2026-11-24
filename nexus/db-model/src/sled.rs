@@ -142,6 +142,17 @@ impl Sled {
         &self.part_number
     }
 
+    pub fn baseboard_id(&self) -> sled_hardware_types::BaseboardId {
+        sled_hardware_types::BaseboardId {
+            part_number: self.part_number.clone(),
+            serial_number: self.serial_number.clone(),
+        }
+    }
+
+    pub fn role(&self) -> SledRole {
+        if self.is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet }
+    }
+
     /// The policy here is the `sled_types::SledPolicy` because we expect external
     /// users to always use that.
     pub fn policy(&self) -> sled_types::SledPolicy {
@@ -215,22 +226,14 @@ impl From<Sled> for execution::Sled {
             sled.policy(),
             sled.address(),
             *sled.repo_depot_port,
-            if sled.is_scrimlet {
-                SledRole::Scrimlet
-            } else {
-                SledRole::Gimlet
-            },
+            sled.role(),
         )
     }
 }
 
 impl From<Sled> for params::SledAgentInfo {
     fn from(sled: Sled) -> Self {
-        let role = if sled.is_scrimlet {
-            SledRole::Scrimlet
-        } else {
-            SledRole::Gimlet
-        };
+        let role = sled.role();
         let decommissioned = match sled.state {
             SledState::Active => false,
             SledState::Decommissioned => true,
