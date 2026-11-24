@@ -717,7 +717,7 @@ mod tests {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_types::external_api::instance::InstanceCreate;
-    use nexus_types::external_api::instance::InstanceShutdownPolicy;
+    use nexus_types::external_api::instance::StopTimeoutSecs;
     use nexus_types_versions::latest::instance::Instance;
     use nexus_types_versions::latest::instance::InstanceNetworkInterfaceAttachment;
     use nexus_types_versions::latest::instance::InstanceSelector;
@@ -778,7 +778,7 @@ mod tests {
                 )],
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy: InstanceShutdownPolicy::HardOff,
+                stop_timeout_secs: StopTimeoutSecs::ZERO,
             },
         )
         .await;

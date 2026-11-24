@@ -57,6 +57,7 @@ use nexus_types::external_api::instance::IpAssignment;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::instance::PrivateIpv4StackCreate;
 use nexus_types::external_api::instance::PrivateIpv6StackCreate;
+use nexus_types::external_api::instance::StopTimeoutSecs;
 use nexus_types::external_api::instance::{
     Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
     InstanceState,
@@ -5824,7 +5825,7 @@ async fn test_updating_missing_instance_is_not_found(
             memory: ByteCount::from_gibibytes_u32(0),
             multicast_groups: None,
             enable_jumbo_frames: false,
-            shutdown_policy: Nullable(None),
+            stop_timeout_secs: instance::StopTimeoutSecs::ZERO,
         },
         http::StatusCode::NOT_FOUND,
     )
@@ -5852,7 +5853,7 @@ fn instance_compute_update(
         // be changed."
         multicast_groups: None,
         enable_jumbo_frames: instance.enable_jumbo_frames,
-        shutdown_policy: Nullable(None),
+        stop_timeout_secs: instance.stop_timeout_secs,
     };
 
     edit_update(&mut update);
@@ -9536,7 +9537,7 @@ async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
 async fn setup_shutdown_test_instance_and_mock_propolis(
     cptestctx: &ControlPlaneTestContext,
     instance_name: &str,
-    shutdown_policy: instance::InstanceShutdownPolicy,
+    stop_timeout_secs: instance::StopTimeoutSecs,
 ) -> (Instance, std::net::SocketAddr) {
     let client = &cptestctx.external_client;
     create_project_and_pool(&client).await;
@@ -9551,7 +9552,7 @@ async fn setup_shutdown_test_instance_and_mock_propolis(
             .unwrap();
 
     let instance_params = InstanceCreateBuilder::new(instance_name)
-        .with_shutdown_policy(shutdown_policy)
+        .with_stop_timeout_secs(stop_timeout_secs)
         .with_start(true)
         .finish();
 
@@ -9622,7 +9623,7 @@ async fn mock_get_last_state_requested(
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_force_hardstop_during_soft(
+async fn test_instances_stop_timeout_force_hardstop_during_soft(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -9630,22 +9631,16 @@ async fn test_instances_shutdown_policy_force_hardstop_during_soft(
 
     // Create an instance with soft shutdown policy.
     const TIMEOUT_SECS: u64 = 42;
+    let timeout = StopTimeoutSecs::try_from(TIMEOUT_SECS).unwrap();
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            instance::InstanceShutdownPolicy::PowerButton {
-                timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-            },
+            timeout,
         )
         .await;
 
-    assert_eq!(
-        instance.shutdown_policy,
-        instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-        }
-    );
+    assert_eq!(instance.stop_timeout_secs, timeout);
 
     // check the instance receives a shutdown request on stop
     expect_instance_stop_ok(client, instance_name, false).await;
@@ -9663,25 +9658,23 @@ async fn test_instances_shutdown_policy_force_hardstop_during_soft(
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_force_hardstop(
+async fn test_instances_stop_timeout_force_hardstop(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const TIMEOUT_SECS: u64 = 531;
-    let policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-    };
+    let timeout = StopTimeoutSecs::try_from(TIMEOUT_SECS).unwrap();
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            policy,
+            timeout,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, policy);
+    assert_eq!(instance.stop_timeout_secs, timeout);
 
     // stop with force=true param should request normal Stop
     // to propolis, ignoring configured soft-off policy.
@@ -9693,25 +9686,23 @@ async fn test_instances_shutdown_policy_force_hardstop(
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_soft(
+async fn test_instances_stop_timeout_change_policy_and_send_hardstop_during_soft(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const TIMEOUT_SECS: u64 = 42;
-    let policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-    };
+    let timeout = StopTimeoutSecs::try_from(TIMEOUT_SECS).unwrap();
 
     let (instance_soft, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            policy,
+            timeout,
         )
         .await;
 
-    assert_eq!(instance_soft.shutdown_policy, policy);
+    assert_eq!(instance_soft.stop_timeout_secs, timeout);
 
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(
@@ -9723,14 +9714,13 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
         client,
         &instance_soft.identity.id,
         instance_compute_update(&instance_soft, |update| {
-            update.shutdown_policy =
-                Nullable(Some(instance::InstanceShutdownPolicy::HardOff));
+            update.stop_timeout_secs = instance::StopTimeoutSecs::ZERO;
         }),
     )
     .await;
     assert_eq!(
-        instance_hard.shutdown_policy,
-        instance::InstanceShutdownPolicy::HardOff
+        instance_hard.stop_timeout_secs,
+        instance::StopTimeoutSecs::ZERO
     );
 
     // stop without forcing, still is hard-off due to new policy
@@ -9742,24 +9732,22 @@ async fn test_instances_shutdown_policy_change_policy_and_send_hardstop_during_s
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_change_timeout_and_resend(
+async fn test_instances_stop_timeout_change_timeout_and_resend(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
 
     const TIMEOUT_SECS: u64 = 321;
-    let policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-    };
+    let timeout = StopTimeoutSecs::try_from(TIMEOUT_SECS).unwrap();
     let (instance_default, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            policy,
+            timeout,
         )
         .await;
-    assert_eq!(instance_default.shutdown_policy, policy);
+    assert_eq!(instance_default.stop_timeout_secs, timeout);
 
     // configured timeout is sent with normal stop request
     expect_instance_stop_ok(client, instance_name, false).await;
@@ -9769,23 +9757,16 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
     );
 
     const NEW_TIMEOUT_SECS: u64 = 76;
-    let new_policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: NEW_TIMEOUT_SECS.try_into().unwrap(),
-    };
+    let new_timeout = StopTimeoutSecs::try_from(NEW_TIMEOUT_SECS).unwrap();
     let instance_soft = expect_instance_reconfigure_ok(
         client,
         &instance_default.identity.id,
         instance_compute_update(&instance_default, |update| {
-            update.shutdown_policy = Nullable(Some(new_policy));
+            update.stop_timeout_secs = new_timeout;
         }),
     )
     .await;
-    assert_eq!(
-        instance_soft.shutdown_policy,
-        instance::InstanceShutdownPolicy::PowerButton {
-            timeout_secs: NEW_TIMEOUT_SECS.try_into().unwrap(),
-        }
-    );
+    assert_eq!(instance_soft.stop_timeout_secs, new_timeout);
 
     // we still *send* propolis the different timeout (but per rfd622 it will
     // be ignored if an existing timeout is underway)
@@ -9797,65 +9778,23 @@ async fn test_instances_shutdown_policy_change_timeout_and_resend(
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_defaulted_when_null_in_update(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let instance_name = "resonance-cascade";
-
-    const TIMEOUT_SECS: u64 = 321;
-    let policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-    };
-    let (instance_soft, propolis_addr) =
-        setup_shutdown_test_instance_and_mock_propolis(
-            &cptestctx,
-            instance_name,
-            // Create an instance with a shutdown policy.
-            policy,
-        )
-        .await;
-
-    let instance_default = expect_instance_reconfigure_ok(
-        client,
-        &instance_soft.identity.id,
-        instance_compute_update(&instance_soft, |update| {
-            update.shutdown_policy = Nullable(None);
-        }),
-    )
-    .await;
-    assert_eq!(
-        instance_default.shutdown_policy,
-        instance::InstanceShutdownPolicy::HardOff
-    );
-
-    expect_instance_stop_ok(client, instance_name, false).await;
-    assert_matches::assert_matches!(
-        mock_get_last_state_requested(propolis_addr).await,
-        PropolisStateRequested::Stop
-    );
-}
-
-#[nexus_test]
-async fn test_instances_shutdown_policy_reboot(
+async fn test_instances_stop_timeout_reboot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const TIMEOUT_SECS: u64 = 531;
-    let policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-    };
+    let timeout = StopTimeoutSecs::try_from(TIMEOUT_SECS).unwrap();
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            policy,
+            timeout,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, policy);
+    assert_eq!(instance.stop_timeout_secs, timeout);
 
     expect_instance_reboot_ok(client, instance_name).await;
     assert_matches::assert_matches!(
@@ -9865,25 +9804,23 @@ async fn test_instances_shutdown_policy_reboot(
 }
 
 #[nexus_test]
-async fn test_instances_shutdown_policy_reboot_after_stop(
+async fn test_instances_stop_timeout_reboot_after_stop(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "resonance-cascade";
     const TIMEOUT_SECS: u64 = 531;
-    let policy = instance::InstanceShutdownPolicy::PowerButton {
-        timeout_secs: TIMEOUT_SECS.try_into().unwrap(),
-    };
+    let timeout = StopTimeoutSecs::try_from(TIMEOUT_SECS).unwrap();
 
     let (instance, propolis_addr) =
         setup_shutdown_test_instance_and_mock_propolis(
             &cptestctx,
             instance_name,
-            policy,
+            timeout,
         )
         .await;
 
-    assert_eq!(instance.shutdown_policy, policy);
+    assert_eq!(instance.stop_timeout_secs, timeout);
 
     expect_instance_stop_ok(client, instance_name, false).await;
     assert_matches::assert_matches!(

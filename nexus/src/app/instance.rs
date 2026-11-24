@@ -593,7 +593,7 @@ impl super::Nexus {
             cpu_platform,
             multicast_groups,
             enable_jumbo_frames,
-            shutdown_policy,
+            stop_timeout_secs,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -642,7 +642,7 @@ impl super::Nexus {
             *memory,
             **cpu_platform,
             *enable_jumbo_frames,
-            shutdown_policy.unwrap_or_default(),
+            (*stop_timeout_secs).into(),
         );
 
         // Update the instance configuration
@@ -3247,7 +3247,6 @@ mod tests {
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
-    use instance::InstanceShutdownPolicy;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
@@ -3380,7 +3379,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: InstanceShutdownPolicy::default(),
+            stop_timeout_secs: Default::default(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3740,7 +3739,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames,
-            shutdown_policy: InstanceShutdownPolicy::default(),
+            stop_timeout_secs: Default::default(),
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::new_v4();

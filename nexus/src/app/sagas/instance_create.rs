@@ -1565,8 +1565,7 @@ pub mod test {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy:
-                    instance_types::InstanceShutdownPolicy::default(),
+                stop_timeout_secs: Default::default(),
             },
             boundary_switches: HashSet::from([SwitchSlot::Switch0]),
         }

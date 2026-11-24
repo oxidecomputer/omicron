@@ -825,7 +825,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
         enable_jumbo_frames: false,
-        shutdown_policy: Nullable(None),
+        stop_timeout_secs: instance::StopTimeoutSecs::ZERO,
     });
 
 // The instance needs a network interface, too.

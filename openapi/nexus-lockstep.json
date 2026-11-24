@@ -1615,13 +1615,6 @@
   },
   "components": {
     "schemas": {
-      "AcpiTimeoutSecs": {
-        "description": "ACPI power button timeout in seconds.",
-        "type": "integer",
-        "format": "uint64",
-        "minimum": 1,
-        "maximum": 900
-      },
       "ActivationReason": {
         "description": "Describes why a background task was activated\n\nThis is only used for debugging.  This is deliberately not made available to the background task itself.  See \"Design notes\" in the module-level documentation for details.",
         "type": "string",
@@ -5834,11 +5827,11 @@
           "run_state": {
             "$ref": "#/components/schemas/InstanceState"
           },
-          "shutdown_policy": {
-            "description": "The method by which the instance will be powered down when transitioning to the stopped state, either forcefully or by giving the guest an ACPI power button signal first.",
+          "stop_timeout_secs": {
+            "description": "How long the guest is given to shut itself down before it is forcibly powered off, after an ACPI power button press.\n\nIf the timeout period is configured for zero seconds, the instance is stopped as if power was immediately pulled; no notification is sent to the guest.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                "$ref": "#/components/schemas/StopTimeoutSecs"
               }
             ]
           },
@@ -5874,7 +5867,7 @@
           "ncpus",
           "project_id",
           "run_state",
-          "shutdown_policy",
+          "stop_timeout_secs",
           "time_created",
           "time_modified",
           "time_run_state_updated"
@@ -5980,45 +5973,6 @@
         },
         "required": [
           "destination"
-        ]
-      },
-      "InstanceShutdownPolicy": {
-        "description": "The method by which the instance will be powered down when transitioning to the stopped state or when rebooting: either forcefully or by giving the guest an ACPI power button signal first.",
-        "oneOf": [
-          {
-            "description": "Instance's VM is forcefully terminated immediately.",
-            "type": "object",
-            "properties": {
-              "action": {
-                "type": "string",
-                "enum": [
-                  "hard_off"
-                ]
-              }
-            },
-            "required": [
-              "action"
-            ]
-          },
-          {
-            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
-            "type": "object",
-            "properties": {
-              "action": {
-                "type": "string",
-                "enum": [
-                  "power_button"
-                ]
-              },
-              "timeout_secs": {
-                "$ref": "#/components/schemas/AcpiTimeoutSecs"
-              }
-            },
-            "required": [
-              "action",
-              "timeout_secs"
-            ]
-          }
         ]
       },
       "InstanceState": {
@@ -10355,6 +10309,13 @@
           "target",
           "weight"
         ]
+      },
+      "StopTimeoutSecs": {
+        "description": "How long the guest is given to shut itself down before it is forcibly powered off, after an ACPI power button press.\n\nA timeout period of zero seconds results in no power button signal, instead stopping the instance immediately. This is analogous to simply pulling power from the instance; no notification is sent to the guest.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0,
+        "maximum": 900
       },
       "SupportBundleCreate": {
         "type": "object",

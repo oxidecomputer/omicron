@@ -59,7 +59,8 @@ const _: () = const { assert!(AcpiTimeoutSecs::MAX == 900) };
 
 impl AcpiTimeoutSecs {
     const MIN: u64 = 1;
-    const MAX: u64 = 900;
+    // This is only pub for tests that convert to/from AcpiTimeoutSecs.
+    pub const MAX: u64 = 900;
 }
 
 impl From<AcpiTimeoutSecs> for u64 {

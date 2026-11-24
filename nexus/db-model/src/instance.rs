@@ -194,7 +194,7 @@ impl Instance {
         };
 
         let (shutdown_policy_action, shutdown_policy_timeout) =
-            shutdown_policy_to_db_columns(params.shutdown_policy);
+            shutdown_policy_to_db_columns(params.stop_timeout_secs.into());
 
         Self {
             identity,
@@ -914,7 +914,7 @@ mod tests {
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
             // explicitly set hard-off
-            shutdown_policy: instance_types::InstanceShutdownPolicy::HardOff,
+            stop_timeout_secs: instance_types::StopTimeoutSecs::ZERO,
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::from_untyped_uuid(Uuid::new_v4());
@@ -928,10 +928,8 @@ mod tests {
         assert_eq!(db_instance.shutdown_policy_timeout, None);
 
         // set power button with timeout
-        params.shutdown_policy =
-            instance_types::InstanceShutdownPolicy::PowerButton {
-                timeout_secs: 42.try_into().expect("42 is a valid timeout"),
-            };
+        params.stop_timeout_secs =
+            42.try_into().expect("42 is a valid stop timeout");
         let db_instance = Instance::new(instance_id, project_id, &params);
         assert_eq!(
             db_instance.shutdown_policy_action,
