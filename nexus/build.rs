@@ -2,9 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// See omicron-rpaths for documentation.
-// NOTE: This file MUST be kept in sync with the other build.rs files in this
-// repository.
 fn main() {
+    // See omicron-rpaths for documentation. This call must match the other
+    // build.rs files in this repository.
     omicron_rpaths::configure_default_omicron_rpaths();
+
+    // Expose the release number from tools/pins.toml as SYSTEM_RELEASE_NUMBER.
+    println!("cargo:rerun-if-changed=../tools/pins.toml");
+    let pins = omicron_pins::Pins::read_from_dir("..".into())
+        .expect("tools/pins.toml is valid");
+    println!(
+        "cargo:rustc-env=SYSTEM_RELEASE_NUMBER={}",
+        pins.system_version.major
+    );
 }

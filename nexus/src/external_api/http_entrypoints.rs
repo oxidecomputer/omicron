@@ -129,24 +129,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
 
 enum NexusExternalApiImpl {}
 
-/// Returns the major version of the system software, read from
-/// `tools/pins.toml` at build time.
-fn system_major_version() -> String {
-    #[derive(serde::Deserialize)]
-    struct Pins {
-        system_version: semver::Version,
-    }
-    static MAJOR: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| {
-            toml::from_str::<Pins>(include_str!("../../../tools/pins.toml"))
-                .expect("tools/pins.toml has a valid system_version")
-                .system_version
-                .major
-                .to_string()
-        });
-    MAJOR.clone()
-}
-
 impl NexusExternalApi for NexusExternalApiImpl {
     type Context = ApiContext;
 
@@ -155,7 +137,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseOk<system::SystemVersion>, HttpError> {
         Ok(HttpResponseOk(system::SystemVersion {
             api_version: latest_version(),
-            system_version: system_major_version(),
+            system_version: env!("SYSTEM_RELEASE_NUMBER").to_string(),
         }))
     }
 

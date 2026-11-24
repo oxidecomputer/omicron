@@ -21,7 +21,6 @@ pub struct SystemVersion {
     /// The release number of the system software serving this API, e.g., `24`
     /// for release 24. This number does not distinguish patch releases such
     /// as 24.1. Use it to find the right docs, release notes, and CLI or SDK
-    /// versions. During an update, some components of the system may be
-    /// running a newer version.
+    /// versions.
     pub system_version: String,
 }
