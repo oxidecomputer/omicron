@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 fn main() {
-    // See omicron-rpaths for documentation. NOTE: This file MUST be kept in
-    // sync with the other build.rs files in this repository.
+    // Set RPATH for native libraries. Required if this crate depends (even
+    // transitively) on a -sys crate listed in omicron-rpaths.
     omicron_rpaths::configure_default_omicron_rpaths();
 }
