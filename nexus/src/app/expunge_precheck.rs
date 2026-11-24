@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Checking for conditions that make it risky to expunge a sled or physical
-//! disk
+//! Checking for conditions that make it risky to expunge a working sled or
+//! physical disk
 //!
 //! All of this should presumably be subsumed by Fault Management / Active
 //! Problems.
@@ -37,18 +37,14 @@ use std::time::Duration;
 /// reports it as a problem
 ///
 /// The age is measured from the time that the collection started.  Nexus
-/// collects inventory at least every 10 minutes, and a collection takes much
-/// less time than that.  A threshold under 10 minutes would produce false
-/// positives on a healthy system.
+/// collects inventory at least every 10 minutes, and a collection generally
+/// takes much less time than that.  A threshold under 10 minutes would produce
+/// false positives on a healthy system.
 const EXPUNGE_PRECHECK_INVENTORY_MAX_AGE: Duration =
     Duration::from_secs(15 * 60);
 
 impl super::Nexus {
-    /// Reports about risks of expunging a working sled or physical disk
-    ///
-    /// When Crucible data or CockroachDB data is already under-replicated,
-    /// expungement of a working component can make things much worse than it
-    /// would when the system is healthy.
+    /// Reports on risks of expunging a working sled or physical disk
     ///
     /// Note that this is best-effort.  It doesn't check for all kinds of
     /// problems and it can miss risks introduced by recent failures (i.e.,
@@ -119,7 +115,7 @@ impl super::Nexus {
         };
 
         Ok(ExpungePrecheck::new(
-            inventory.time_done,
+            inventory.time_started,
             check_inventory(&inventory, Utc::now()),
             check_crucible_data(&expunged_resources, replacements_in_progress),
             check_cockroachdb(&inventory, cockroachdb_target_count),
@@ -137,29 +133,24 @@ fn check_inventory(
     now: DateTime<Utc>,
 ) -> ExpungePrecheckResult<InventoryProblemKind> {
     let age = now.signed_duration_since(inventory.time_started);
-    let age_secs = age.num_seconds();
-    let max_age_secs = EXPUNGE_PRECHECK_INVENTORY_MAX_AGE.as_secs();
-    // `to_std()` fails only if `age` is negative.  That can happen if this
-    // Nexus's clock is behind the clock of the Nexus that collected the
-    // inventory.  In that case, the collection is not old.
+    // `to_std()` fails if `age` is negative.  This is very unlikely but could
+    // happen due to clock skew between systems.
     let too_old =
         age.to_std().is_ok_and(|age| age > EXPUNGE_PRECHECK_INVENTORY_MAX_AGE);
-    let problems = if too_old {
-        vec![ExpungePrecheckProblem {
+    if too_old {
+        let summary = format!("Using inventory from {age} ago (too old)");
+        let problems = vec![ExpungePrecheckProblem {
             kind: InventoryProblemKind::TooOld,
             message: format!(
-                "the latest inventory collection started {age_secs} seconds \
-                 ago, which is more than the limit of {max_age_secs} seconds"
+                "Inventory is too old (age: {}, max: {:?})",
+                age, EXPUNGE_PRECHECK_INVENTORY_MAX_AGE
             ),
-        }]
+        }];
+        ExpungePrecheckResult { summary, problems }
     } else {
-        Vec::new()
-    };
-    let summary = format!(
-        "The latest inventory collection started {age_secs} seconds ago \
-         (limit: {max_age_secs} seconds)."
-    );
-    ExpungePrecheckResult { summary, problems }
+        let summary = format!("Using inventory from {age} ago");
+        ExpungePrecheckResult { summary, problems: Vec::new() }
+    }
 }
 
 /// Counts of Crucible replacement requests that have not yet completed
@@ -185,9 +176,9 @@ fn check_crucible_data(
         .map(|r| ExpungePrecheckProblem {
             kind: UserDataProblemKind::ExpungedDiskHasData,
             message: format!(
-                "physical disk {} (serial {}) is expunged but still holds {} \
-                 read-write regions, {} read-only regions, and {} region \
-                 snapshots",
+                "physical disk {} (serial {}) is expunged but still holds data \
+                 (read-write regions: {}, read-only regions: {}, region \
+                 snapshots: {})",
                 r.disk_id,
                 r.disk_serial,
                 r.num_read_write_regions,
@@ -214,6 +205,7 @@ fn check_crucible_data(
         });
     }
 
+    // XXX-dap it's silly to put this all in text
     let summary = format!(
         "Expunged physical disks still holding user data: {}. Region \
          replacements in progress: {region_replacements}. \
@@ -235,7 +227,6 @@ fn check_cockroachdb(
     target: usize,
 ) -> ExpungePrecheckResult<CockroachdbProblemKind> {
     let reasons = cockroachdb_unhealthy_reasons(inventory, target);
-
     let nreporting = inventory.cockroach_status.len();
     let unhealthy_nodes: BTreeSet<&InternalNodeId> =
         reasons.iter().filter_map(|(node_id, _)| *node_id).collect();
@@ -304,10 +295,10 @@ fn cockroachdb_problem(
 /// collection.
 ///
 /// We do this because a sled that's missing from inventory may be down or
-/// unreachable and that means its Crucible volumes might be offline.
-/// This isn't necessarily true, of course, and it's also possible that
-/// Crucible is offline despite the sled being present in inventory.
-/// Nonetheless, this seems like a useful data point to elevate to the operator.
+/// unreachable and that means its Crucible volumes might be offline.  This
+/// isn't necessarily true, of course, and it's also possible that Crucible is
+/// offline despite the sled being present in inventory.  Nonetheless, this
+/// seems like a useful data point to elevate to the operator.
 ///
 /// Note that if a sled is known to be broken, this will report that sled as
 /// missing, and that will cause the expunge precheck to fail because of the
@@ -325,7 +316,8 @@ fn check_sleds(
             kind: SledsProblemKind::MissingFromInventory,
             message: format!(
                 "sled {sled_id} (serial {serial}) is in service but is \
-                 missing from the latest inventory collection",
+                 missing from the latest inventory collection (it may be \
+                 offline)",
             ),
         })
         .collect();
