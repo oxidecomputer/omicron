@@ -1523,7 +1523,7 @@ async fn map_switch_zone_addrs(
         );
 
         info!(log, "determining switch slot managed by switch zone"; "zone_address" => #?addr);
-        let switch_slot = match mgs_client.sp_local_switch_id().await {
+        let switch_id = match mgs_client.sp_local_switch_id().await {
             Ok(switch) => {
                 info!(
                     log,
@@ -1531,7 +1531,7 @@ async fn map_switch_zone_addrs(
                     "slot" => #?switch,
                     "zone_address" => #?addr
                 );
-                switch.slot
+                switch.into_inner()
             }
             Err(e) => {
                 error!(
@@ -1544,17 +1544,16 @@ async fn map_switch_zone_addrs(
             }
         };
 
-        match switch_slot {
-            0 => {
-                switch_zone_addrs.insert(SwitchSlot::Switch0, addr);
+        match nexus_networking::local_switch_slot(&switch_id) {
+            Ok(slot) => {
+                switch_zone_addrs.insert(slot, addr);
             }
-            1 => {
-                switch_zone_addrs.insert(SwitchSlot::Switch1, addr);
-            }
-            _ => {
+            Err(error) => {
                 warn!(
                     log,
-                    "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}"
+                    "MGS reported an unexpected local switch when querying \
+                     {addr:#?}";
+                    "error" => %error,
                 );
             }
         };
