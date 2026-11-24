@@ -8157,7 +8157,7 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
 
     /// Check whether expunging a working sled or physical disk will create
-    /// problem due to ongoing repairs
+    /// a problem due to ongoing repairs
     ///
     /// The system is designed to survive a limited number of concurrent
     /// failures. When a sled or physical disk is expunged, the system repairs
