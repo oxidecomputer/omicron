@@ -5,25 +5,36 @@
 //! Tests for multirack regional cluster APIs.
 
 use super::endpoints::MULTIRACK_RACKS_UNADOPTED_URL;
+use http::StatusCode;
+use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
 use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_inventory::CollectionBuilder;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::multirack::UnadoptedRack;
+use nexus_types::external_api::rack::Rack;
+use nexus_types::external_api::rack::RackToAdopt;
 use nexus_types::inventory::DiscoveredRack;
 use nexus_types::inventory::DiscoveredSled;
 use omicron_common::address::Ipv6Subnet;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types_versions::latest::multirack::MultirackJoinCompleteResponse;
 use sled_agent_types_versions::latest::multirack::SledAgentStartState;
 use sled_hardware_types::BaseboardId;
+use std::net::Ipv6Addr;
 use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const REGION_PREFIX: &str = "fd00:aaaa:bbbb:10";
+const RACKS_URL: &str = "/v1/system/hardware/racks";
 
 /// Construct `count` discovered sleds for the rack identified by `rack_idx`.
 ///
@@ -196,6 +207,168 @@ async fn test_rack_list_unadopted() {
             "adopted rack should not be listed: {racks:#?}"
         );
     }
+
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_rack_adopt() {
+    // Start a fake multirack join service, and pass its port into the Nexus
+    // config
+    let mut join_service = ServerBuilder::new()
+        .bind_addr((Ipv6Addr::LOCALHOST, 0).into())
+        .run()
+        .expect("failed to start fake join service");
+    let join_service_port = join_service.addr().port();
+
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_rack_adopt")
+            .customize_nexus_config(&|config| {
+                // Disable the inventory collection background task to avoid a
+                // race.
+                config.pkg.background_tasks.inventory.disable_collect = true;
+                config.deployment.multirack_join_service_port =
+                    join_service_port;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Put a fake rack into inventory
+    let rack_id = RackUuid::new_v4();
+    let mut builder = CollectionBuilder::new("multirack-test");
+    builder
+        .found_discovered_rack(DiscoveredRack {
+            rack_id,
+            rack_subnet: Ipv6Subnet::new(
+                format!("{REGION_PREFIX}0::").parse().unwrap(),
+            ),
+            join_service_ip: Ipv6Addr::LOCALHOST,
+            discovered_sleds: make_discovered_sleds(0, 2),
+        })
+        .unwrap();
+    datastore
+        .inventory_insert_collection(&opctx, &builder.build())
+        .await
+        .expect("failed to insert inventory collection");
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    // Verify the fake rack shows up correctly
+    let unadopted = list_unadopted_racks(&cptestctx, 10).await;
+    assert_eq!(
+        unadopted.iter().map(|r| r.rack_id).collect::<Vec<_>>(),
+        vec![rack_id],
+    );
+
+    // We only expect the fake join service to get hit once, since the second
+    // idempotent join request we'll do later should short-circuit out as long
+    // as the first request was successful
+    join_service.expect(
+        Expectation::matching(request::method_path(
+            "PUT",
+            "/multirack-join-complete",
+        ))
+        .times(1)
+        .respond_with(json_encoded(MultirackJoinCompleteResponse {
+            bootstore_generation: 1,
+        })),
+    );
+
+    let request = RackToAdopt { rack_id };
+    let adopted: Rack = object_create(client, RACKS_URL, &request).await;
+    assert_eq!(adopted.identity.id, rack_id.into_untyped_uuid());
+
+    // The rack should now be visible as a regular rack, and no longer listed
+    // as unadopted
+    let rack: Rack =
+        object_get(client, &format!("{RACKS_URL}/{rack_id}")).await;
+    assert_eq!(rack.identity.id, rack_id.into_untyped_uuid());
+    let unadopted = list_unadopted_racks(&cptestctx, 10).await;
+    assert!(unadopted.is_empty(), "unexpected unadopted racks: {unadopted:#?}");
+
+    // Finally, test for idempotence (i.e. running the same request again should
+    // return success again, and the state of the system should look the same
+    // afterward)
+    let readopted: Rack = object_create(client, RACKS_URL, &request).await;
+    assert_eq!(readopted.identity.id, rack_id.into_untyped_uuid());
+
+    let rack: Rack =
+        object_get(client, &format!("{RACKS_URL}/{rack_id}")).await;
+    assert_eq!(rack.identity.id, rack_id.into_untyped_uuid());
+    let unadopted = list_unadopted_racks(&cptestctx, 10).await;
+    assert!(unadopted.is_empty(), "unexpected unadopted racks: {unadopted:#?}");
+
+    join_service.verify_and_clear();
+    cptestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_rack_adopt_not_found() {
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_rack_adopt_not_found")
+            .customize_nexus_config(&|config| {
+                // Disable the inventory collection background task to avoid a
+                // race.
+                config.pkg.background_tasks.inventory.disable_collect = true;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Attempting to adopt a rack ID that's neither adopted nor discovered
+    // should fail with a 404
+    let rack_id = RackUuid::new_v4();
+    object_create_error(
+        client,
+        RACKS_URL,
+        &RackToAdopt { rack_id },
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
+    // Put a fake rack into inventory, so that we know the 404 below is due to
+    // the rack ID not matching rather than inventory being empty
+    let discovered_rack_id = RackUuid::new_v4();
+    let mut builder = CollectionBuilder::new("multirack-test");
+    builder
+        .found_discovered_rack(DiscoveredRack {
+            rack_id: discovered_rack_id,
+            rack_subnet: Ipv6Subnet::new(
+                format!("{REGION_PREFIX}0::").parse().unwrap(),
+            ),
+            join_service_ip: Ipv6Addr::LOCALHOST,
+            discovered_sleds: make_discovered_sleds(0, 2),
+        })
+        .unwrap();
+    datastore
+        .inventory_insert_collection(&opctx, &builder.build())
+        .await
+        .expect("failed to insert inventory collection");
+    nexus_test_utils::background::run_inventory_loader(
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    // Rerun the above test and make sure we still get a 404 after adding a fake
+    // rack to the inventory
+    object_create_error(
+        client,
+        RACKS_URL,
+        &RackToAdopt { rack_id },
+        StatusCode::NOT_FOUND,
+    )
+    .await;
 
     cptestctx.teardown().await;
 }

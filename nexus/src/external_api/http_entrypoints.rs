@@ -6733,6 +6733,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn rack_adopt(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<rack::RackToAdopt>,
+    ) -> Result<HttpResponseCreated<Rack>, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let rack_id = req.into_inner().rack_id;
+            let rack_info = nexus.rack_adopt(&opctx, rack_id).await?;
+            Ok(HttpResponseCreated(rack_info.into()))
+        })
+        .await
+    }
+
     async fn rack_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::RackPath>,

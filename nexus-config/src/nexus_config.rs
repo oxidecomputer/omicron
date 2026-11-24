@@ -16,6 +16,7 @@ pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_AGENT_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
@@ -209,10 +210,23 @@ pub struct DeploymentConfig {
     /// cases where this might matter. We can remove this in a future release.
     #[serde(default = "default_record_db_claim_backtraces")]
     pub record_db_claim_backtraces: bool,
+    /// Port that Nexus uses to contact the multirack join service.
+    ///
+    /// In production this is always the sled-agent port. It's only configurable
+    /// here for test purposes, so that we can mock the join service and tell
+    /// Nexus where to contact it. (The IP address of the join service comes
+    /// from the inventory collection, so we only need a flag like this for the
+    /// port.)
+    #[serde(default = "default_multirack_join_service_port")]
+    pub multirack_join_service_port: u16,
 }
 
 fn default_techport_external_server_port() -> u16 {
     NEXUS_TECHPORT_EXTERNAL_PORT
+}
+
+fn default_multirack_join_service_port() -> u16 {
+    SLED_AGENT_PORT
 }
 
 fn default_record_db_claim_backtraces() -> bool {
@@ -1540,6 +1554,7 @@ mod test {
                         treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
                     record_db_claim_backtraces: false,
+                    multirack_join_service_port: SLED_AGENT_PORT,
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {

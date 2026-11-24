@@ -292,6 +292,10 @@ pub struct Nexus {
     /// Configuration for external HTTP clients.
     external_http_client_config: nexus_config::ExternalHttpClientConfig,
 
+    /// Port on which to contact an unadopted rack's multirack join service.
+    /// (The IP address comes from inventory.)
+    multirack_join_service_port: u16,
+
     /// Background task driver
     background_tasks_driver: OnceLock<background::Driver>,
 
@@ -623,6 +627,9 @@ impl Nexus {
                 .deployment
                 .external_http_clients
                 .clone(),
+            multirack_join_service_port: config
+                .deployment
+                .multirack_join_service_port,
             background_tasks_driver: OnceLock::new(),
             background_tasks,
             background_tasks_internal,

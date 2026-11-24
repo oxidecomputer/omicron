@@ -12,6 +12,8 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::INFRA_LOT;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::Rack;
+use nexus_db_model::RackIdentity;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -36,8 +38,11 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ResourceType;
+use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use oxnet::IpNet;
@@ -57,6 +62,70 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Rack> {
         self.db_datastore.rack_list(&opctx, pagparams).await
+    }
+
+    pub(crate) async fn rack_adopt(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+    ) -> LookupResult<db::model::Rack> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // Idempotency check: if the rack already exists in the `rack` table
+        // then we've already adopted this rack and can return success
+        // immediately.
+        match self.rack_lookup(&opctx, &rack_id).await {
+            Ok(rack) => return Ok(rack),
+            Err(Error::ObjectNotFound { .. }) => {
+                // If the rack hasn't been adopted, fine, proceed
+            }
+            Err(lookup_err) => {
+                // Any other error is unexpected enough that we should bail
+                return Err(lookup_err);
+            }
+        };
+
+        let coll = self.inventory_load_rx().borrow().clone();
+        let Some(Some(discovered_rack)) =
+            coll.map(|c| c.discovered_racks.get(&rack_id).cloned())
+        else {
+            // We can't find the rack in the discovered racks in inventory,
+            // either because the rack is not present in the collection or
+            // because we have no collection at all. Either way, error out:
+            return Err(Error::ObjectNotFound {
+                type_name: ResourceType::Rack,
+                lookup_type: LookupType::ById(rack_id.into_untyped_uuid()),
+            });
+        };
+
+        // Now that we've found the unadopted rack in inventory, go ahead and
+        // tell the new rack's multirack join service to complete the join:
+        let ip = discovered_rack.join_service_ip;
+        let port = self.multirack_join_service_port;
+        let url = format!("http://[{ip}]:{port}");
+        let log = self.log.new(o!("SledAgent" => url.clone()));
+        let join_service_client = sled_agent_client::Client::new_with_client(
+            &url,
+            internal_http_client(),
+            log,
+        );
+        // This request to the join service is idempotent as long as sled-agent
+        // hasn't rebooted, so if this call succeeds but we fail to get a
+        // response back and the Nexus request is retried, we can still get a
+        // success response back here and continue on:
+        join_service_client.multirack_join_complete().await?;
+
+        // If we didn't error out on the call to the join service, we can now go
+        // ahead and write a new row to the rack table!
+        let rack_subnet = Some(IpNetwork::from(Ipv6Network::from(
+            discovered_rack.rack_subnet,
+        )));
+        let adopted_rack = Rack {
+            identity: RackIdentity::new(rack_id),
+            initialized: true,
+            rack_subnet,
+        };
+        self.db_datastore.rack_insert(&opctx, &adopted_rack).await
     }
 
     pub(crate) async fn rack_lookup(

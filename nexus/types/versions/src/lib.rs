@@ -121,3 +121,5 @@ pub mod v2026_11_05_00;
 pub mod v2026_11_11_00;
 #[path = "add_version_endpoint/mod.rs"]
 pub mod v2026_11_21_00;
+#[path = "adopt_rack/mod.rs"]
+pub mod v2026_11_23_00;
