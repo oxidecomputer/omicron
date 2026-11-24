@@ -1030,6 +1030,13 @@ mod test {
             .insert_region_replacement_request(&opctx, request.clone())
             .await
             .unwrap();
+        assert_eq!(
+            datastore
+                .count_incomplete_region_replacements(&opctx)
+                .await
+                .unwrap(),
+            1
+        );
 
         // The drive saga will transition the record to Driving, locking it.
 
@@ -1093,6 +1100,16 @@ mod test {
             RegionReplacementState::ReplacementDone
         );
         assert_eq!(actual_request.operating_saga_id, None);
+
+        // The request's state is ReplacementDone, not Complete, so it is still
+        // counted.
+        assert_eq!(
+            datastore
+                .count_incomplete_region_replacements(&opctx)
+                .await
+                .unwrap(),
+            1
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1169,10 +1186,26 @@ mod test {
 
         // The first saga has finished and sets the record to Complete.
 
+        assert_eq!(
+            datastore
+                .count_incomplete_region_replacements(&opctx)
+                .await
+                .unwrap(),
+            1
+        );
         datastore
             .set_region_replacement_complete(&opctx, request, saga_id)
             .await
             .unwrap();
+
+        // Once the request is complete, it is no longer counted.
+        assert_eq!(
+            datastore
+                .count_incomplete_region_replacements(&opctx)
+                .await
+                .unwrap(),
+            0
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

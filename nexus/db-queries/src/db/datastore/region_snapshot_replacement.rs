@@ -1625,6 +1625,15 @@ mod test {
             .await
             .unwrap_err();
 
+        // Only the first request was inserted, and it has not completed.
+        assert_eq!(
+            datastore
+                .count_incomplete_region_snapshot_replacements(&opctx)
+                .await
+                .unwrap(),
+            1
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -2017,6 +2026,15 @@ mod test {
             )
             .await
             .unwrap();
+
+        // The only request is complete.
+        assert_eq!(
+            datastore
+                .count_incomplete_region_snapshot_replacements(&opctx)
+                .await
+                .unwrap(),
+            0
+        );
 
         assert!(
             datastore

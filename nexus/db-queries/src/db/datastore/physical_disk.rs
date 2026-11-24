@@ -926,6 +926,7 @@ mod test {
         SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
     };
     use sled_hardware_types::BaseboardId;
+    use std::collections::BTreeMap;
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
@@ -939,6 +940,75 @@ mod test {
             direction: PaginationOrder::Ascending,
             marker: None,
         }
+    }
+
+    #[test]
+    fn test_expunged_physical_disk_resources_map() {
+        let disk1 = PhysicalDiskUuid::new_v4();
+        let disk2 = PhysicalDiskUuid::new_v4();
+        let serial1 = String::from("serial1");
+        let serial2 = String::from("serial2");
+
+        let mut map = ExpungedPhysicalDiskResourcesMap::default();
+        assert!(map.is_empty());
+        assert_eq!(map.len(), 0);
+
+        // Adding the same kind of resource for the same disk twice adds the
+        // counts together.
+        map.add_read_write_regions(disk1, serial1.clone(), 1);
+        map.add_read_write_regions(disk1, serial1.clone(), 2);
+        map.add_region_snapshots(disk2, serial2.clone(), 5);
+
+        // Merging adds counts for disks that are already present and adds
+        // disks that are not.
+        let mut other = ExpungedPhysicalDiskResourcesMap::default();
+        other.add_read_write_regions(disk1, serial1.clone(), 10);
+        other.add_read_only_regions(disk1, serial1.clone(), 20);
+        other.add_region_snapshots(disk2, serial2.clone(), 30);
+        let disk3 = PhysicalDiskUuid::new_v4();
+        other.add_read_only_regions(disk3, String::from("serial3"), 7);
+
+        // Disks are identified by id, not serial number, because serial
+        // numbers are not unique.  A different disk with the same serial
+        // number as `disk1` gets its own entry.
+        let disk4 = PhysicalDiskUuid::new_v4();
+        other.add_read_write_regions(disk4, serial1.clone(), 100);
+        map.merge(other);
+
+        assert_eq!(map.len(), 4);
+        let by_id: BTreeMap<_, _> =
+            map.iter().map(|r| (r.disk_id, r.clone())).collect();
+        assert_eq!(
+            by_id[&disk1],
+            ExpungedPhysicalDiskResources {
+                disk_id: disk1,
+                disk_serial: serial1.clone(),
+                num_read_write_regions: 13,
+                num_read_only_regions: 20,
+                num_region_snapshots: 0,
+            }
+        );
+        assert_eq!(
+            by_id[&disk2],
+            ExpungedPhysicalDiskResources {
+                disk_id: disk2,
+                disk_serial: serial2,
+                num_read_write_regions: 0,
+                num_read_only_regions: 0,
+                num_region_snapshots: 35,
+            }
+        );
+        assert_eq!(by_id[&disk3].num_read_only_regions, 7);
+        assert_eq!(
+            by_id[&disk4],
+            ExpungedPhysicalDiskResources {
+                disk_id: disk4,
+                disk_serial: serial1,
+                num_read_write_regions: 100,
+                num_read_only_regions: 0,
+                num_region_snapshots: 0,
+            }
+        );
     }
 
     #[tokio::test]

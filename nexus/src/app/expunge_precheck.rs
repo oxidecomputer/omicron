@@ -177,7 +177,7 @@ mod test {
         let mut resources = ExpungedPhysicalDiskResourcesMap::default();
         resources.add_read_write_regions(disk_id, disk_serial.clone(), 1);
         resources.add_read_only_regions(disk_id, disk_serial.clone(), 2);
-        resources.add_region_snapshots(disk_id, disk_serial, 3);
+        resources.add_region_snapshots(disk_id, disk_serial.clone(), 3);
         let problems = crucible_data_problems(&resources, none_in_progress);
         let [UserDataProblem::ExpungedDiskHasData(r)] = problems.as_slice()
         else {

@@ -4,6 +4,8 @@
 
 //! Tests basic snapshot support in the API
 
+use crate::integration_tests::crucible_replacements::expunge_precheck_get;
+use crate::integration_tests::crucible_replacements::expunged_resource_counts_checked;
 use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
@@ -1706,4 +1708,19 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
     for expunged_region_snapshot in expunged_region_snapshots {
         assert_eq!(expunged_region_snapshot.snapshot_id, snapshot.identity.id);
     }
+
+    // Expunging the sled expunged its three physical disks.  Each of them
+    // holds one of the snapshot's region snapshots.  Each also holds one of the
+    // disk's regions, plus another region that snapshot creation allocated.
+    let counts = expunged_resource_counts_checked(datastore, &opctx).await;
+    assert_eq!(counts.len(), 3, "{counts:?}");
+    for r in counts.iter() {
+        assert!(r.num_read_write_regions >= 1, "{counts:?}");
+        assert_eq!(r.num_region_snapshots, 1, "{counts:?}");
+    }
+
+    // The expunge precheck reports these disks right away.
+    let status = expunge_precheck_get(client).await;
+    assert!(!status.ok, "{status:#?}");
+    assert_eq!(status.user_data.expunged_disks_with_data, 3, "{status:#?}");
 }

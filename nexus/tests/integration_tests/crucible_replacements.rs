@@ -4,9 +4,6 @@
 
 //! Tests related to region and region snapshot replacement
 
-use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::ExpressionMethods;
-use diesel::QueryDsl;
 use dropshot::test_util::ClientTestContext;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
@@ -16,6 +13,8 @@ use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResources;
+use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResourcesMap;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::background::*;
@@ -156,35 +155,15 @@ pub(crate) async fn wait_for_all_replacements(
                 // Now that all resources have been moved, wait for the requests
                 // to all transition to complete.
 
-                let conn = datastore.pool_connection_for_tests().await.unwrap();
+                let region_replacement_left = datastore
+                    .count_incomplete_region_replacements(&opctx)
+                    .await
+                    .unwrap();
 
-                let region_replacement_left = {
-                    use nexus_db_schema::schema::region_replacement::dsl;
-
-                    dsl::region_replacement
-                        .filter(
-                            dsl::replacement_state
-                                .ne(RegionReplacementState::Complete),
-                        )
-                        .select(diesel::dsl::count_star())
-                        .first_async::<i64>(&*conn)
-                        .await
-                        .unwrap()
-                };
-
-                let region_snapshot_replacement_left = {
-                    use nexus_db_schema::schema::region_snapshot_replacement::dsl;
-
-                    dsl::region_snapshot_replacement
-                        .filter(
-                            dsl::replacement_state
-                                .ne(RegionSnapshotReplacementState::Complete),
-                        )
-                        .select(diesel::dsl::count_star())
-                        .first_async::<i64>(&*conn)
-                        .await
-                        .unwrap()
-                };
+                let region_snapshot_replacement_left = datastore
+                    .count_incomplete_region_snapshot_replacements(&opctx)
+                    .await
+                    .unwrap();
 
                 if region_replacement_left + region_snapshot_replacement_left
                     > 0
@@ -365,6 +344,25 @@ mod region_replacement {
                 region_replacement.replacement_state,
                 RegionReplacementState::Requested,
             );
+
+            // This request is for a region on a physical disk that is not
+            // expunged, as when support staff request one using omdb.  The
+            // expunge precheck reports it anyway.
+            let status = expunge_precheck_get(client).await;
+            assert!(!status.ok, "{status:#?}");
+            assert_eq!(
+                status.user_data.expunged_disks_with_data, 0,
+                "{status:#?}"
+            );
+            assert_eq!(
+                status.user_data.region_replacements_in_progress, 1,
+                "{status:#?}"
+            );
+            assert_eq!(
+                status.user_data.region_snapshot_replacements_in_progress, 0,
+                "{status:#?}"
+            );
+            assert_eq!(status.user_data.problems.len(), 1, "{status:#?}");
 
             DeletedVolumeTest {
                 log: cptestctx.logctx.log.new(o!()),
@@ -2085,6 +2083,11 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // Before anything is expunged, the expunge precheck passes.
+    let status = expunge_precheck_get(client).await;
+    assert!(status.ok, "{status:#?}");
+    assert!(status.user_data.problems.is_empty(), "{status:#?}");
+
     // Before expunging the physical disk, save the DB model
     let Disk::Crucible(db_disk) =
         datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
@@ -2111,14 +2114,41 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
+    let physical_disk_id = db_zpool.physical_disk_id();
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id(),
+            physical_disk_id,
             PhysicalDiskPolicy::Expunged,
         )
         .await
         .unwrap();
+
+    // The expunged physical disk holds one of the original disk's read-write
+    // regions and its region snapshot.  It may also hold a region of the disk
+    // created from the snapshot.  Nothing can finish moving the data until the
+    // Pantry activates volumes (below), so these checks cannot race with the
+    // replacements.
+    let counts = expunged_resource_counts_checked(datastore, &opctx).await;
+    let only_disk: Vec<_> = counts.iter().collect();
+    let [disk_counts] = only_disk.as_slice() else {
+        panic!("expected one expunged disk with data: {counts:?}");
+    };
+    assert_eq!(disk_counts.disk_id, physical_disk_id);
+    assert!(disk_counts.num_read_write_regions >= 1, "{counts:?}");
+    assert_eq!(disk_counts.num_region_snapshots, 1, "{counts:?}");
+
+    let status = expunge_precheck_get(client).await;
+    assert!(!status.ok, "{status:#?}");
+    assert_eq!(status.user_data.expunged_disks_with_data, 1, "{status:#?}");
+    assert!(
+        status
+            .user_data
+            .problems
+            .iter()
+            .any(|p| p.contains(&physical_disk_id.to_string())),
+        "{status:#?}"
+    );
 
     // Any volumes sent to the Pantry for reconciliation should return active
     // for this test
@@ -2150,6 +2180,11 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
             .unwrap()
             .is_empty()
     );
+
+    // Now that all replacements have finished, the expunge precheck passes
+    // again.
+    let status = expunge_precheck_get(client).await;
+    assert!(status.ok, "{status:#?}");
 }
 
 /// Tests that multiple replacements can occur until completion
@@ -2637,6 +2672,18 @@ async fn test_read_only_replacement_sanity(
             .await
             .unwrap();
 
+        // This request is for a region snapshot on a physical disk that is not
+        // expunged, as when support staff request one using omdb.  No
+        // replacement tasks run until `wait_for_all_replacements()`, so the
+        // expunge precheck reports this request.
+        let status = expunge_precheck_get(client).await;
+        assert!(!status.ok, "{status:#?}");
+        assert_eq!(status.user_data.expunged_disks_with_data, 0, "{status:#?}");
+        assert_eq!(
+            status.user_data.region_snapshot_replacements_in_progress, 1,
+            "{status:#?}"
+        );
+
         wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
 
@@ -2662,14 +2709,28 @@ async fn test_read_only_replacement_sanity(
         .await
         .unwrap();
 
+    let physical_disk_id = db_zpool.physical_disk_id();
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id(),
+            physical_disk_id,
             PhysicalDiskPolicy::Expunged,
         )
         .await
         .unwrap();
+
+    // The expunged physical disk holds at least the read-only region found
+    // above.  No replacement tasks run until `wait_for_all_replacements()`,
+    // so these checks cannot race with the replacements.
+    let counts = expunged_resource_counts_checked(datastore, &opctx).await;
+    let disk_counts = counts
+        .iter()
+        .find(|r| r.disk_id == physical_disk_id)
+        .unwrap_or_else(|| panic!("expunged disk has no data: {counts:?}"));
+    assert!(disk_counts.num_read_only_regions >= 1, "{counts:?}");
+
+    let status = expunge_precheck_get(client).await;
+    assert!(!status.ok, "{status:#?}");
 
     wait_for_all_replacements(&datastore, &lockstep_client).await;
 
@@ -2688,6 +2749,10 @@ async fn test_read_only_replacement_sanity(
             .unwrap()
             .is_empty()
     );
+
+    // Now that all replacements have finished, the expunge precheck passes.
+    let status = expunge_precheck_get(client).await;
+    assert!(status.ok, "{status:#?}");
 }
 
 /// `test_replacement_sanity_twice`, but delete the snapshot before doing the
@@ -2837,116 +2902,71 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
     }
 }
 
-/// Fetches the repair status, waiting until the system has collected the
-/// inventory that the status depends on.
-async fn expunge_precheck_get(client: &ClientTestContext) -> ExpungePrecheck {
-    wait_for_condition(
-        || async {
-            NexusRequest::object_get(
-                client,
-                "/v1/system/hardware/expunge-precheck",
-            )
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .map_err(|_| CondCheckError::<()>::NotYet { status: None })?
-            .parsed_body::<ExpungePrecheck>()
-            .map_err(|_| CondCheckError::<()>::NotYet { status: None })
-        },
-        &std::time::Duration::from_millis(250),
-        &std::time::Duration::from_secs(60),
-    )
-    .await
-    .expect("fetched expunge precheck")
+/// Fetches the expunge precheck from the external API.
+pub(crate) async fn expunge_precheck_get(
+    client: &ClientTestContext,
+) -> ExpungePrecheck {
+    NexusRequest::object_get(client, "/v1/system/hardware/expunge-precheck")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("fetched expunge precheck")
+        .parsed_body::<ExpungePrecheck>()
+        .expect("parsed expunge precheck")
 }
 
-/// Tests that the repair status reports user data on an expunged physical
-// <review>
-// Can/should this be incorporated into an existing test instead?
-// </review>
-/// disk until replacement completes
-#[nexus_test(extra_sled_agents = 3)]
-async fn test_expunge_precheck_user_data(cptestctx: &ControlPlaneTestContext) {
-    let nexus = &cptestctx.server.server_context().nexus;
-    let datastore = nexus.datastore();
-    let opctx =
-        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let client = &cptestctx.external_client;
+/// Fetches the counts of Crucible resources on expunged physical disks and
+/// checks them against the `find_*_on_expunged_physical_disks()` helpers.
+///
+/// The count queries are supposed to use the same criteria as those helpers.
+/// This catches cases where they drift apart.  The caller must ensure that
+/// nothing changes these resources while this runs.
+pub(crate) async fn expunged_resource_counts_checked(
+    datastore: &DataStore,
+    opctx: &OpContext,
+) -> ExpungedPhysicalDiskResourcesMap {
+    let counts = datastore
+        .crucible_resources_on_expunged_physical_disks(opctx)
+        .await
+        .unwrap();
 
-    // Create one zpool per sled so that replacement has somewhere to move the
-    // data.  Then create a disk and a snapshot of it, so that the expunged
-    // physical disk holds both read-write regions and region snapshots.
-    let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_all_sleds()
-        .with_zpool_count(1)
-        .build()
-        .await;
-    let _project_id = create_project_and_pool(client).await;
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
-    let _snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let nread_write = datastore
+        .find_read_write_regions_on_expunged_physical_disks(opctx)
+        .await
+        .unwrap()
+        .len();
+    let nread_only = datastore
+        .find_read_only_regions_on_expunged_physical_disks(opctx)
+        .await
+        .unwrap()
+        .len();
+    let nregion_snapshots = datastore
+        .find_region_snapshots_on_expunged_physical_disks(opctx)
+        .await
+        .unwrap()
+        .len();
 
-    // Before any expungement, the user data check passes.
-    let status = expunge_precheck_get(client).await;
-    assert!(status.ok, "{status:#?}");
-    assert!(status.user_data.problems.is_empty(), "{status:#?}");
-
-    // Expunge a physical disk that holds one of the disk's regions.
-    let Disk::Crucible(db_disk) =
-        datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
-    else {
-        unreachable!()
+    let total = |f: fn(&ExpungedPhysicalDiskResources) -> u64| -> usize {
+        usize::try_from(counts.iter().map(f).sum::<u64>()).unwrap()
     };
-    let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
-    let (dataset, _) = &disk_allocated_regions[0];
-    let zpool = disk_test
-        .zpools()
-        .find(|x| x.id == dataset.pool_id())
-        .expect("Expected at least one zpool");
-    let (_, db_zpool) = LookupPath::new(&opctx, datastore)
-        .zpool_id(zpool.id)
-        .fetch()
-        .await
-        .unwrap();
-    let physical_disk_id = db_zpool.physical_disk_id();
-    datastore
-        .physical_disk_update_policy(
-            &opctx,
-            physical_disk_id,
-            PhysicalDiskPolicy::Expunged,
-        )
-        .await
-        .unwrap();
-
-    // Now the user data check reports the expunged physical disk.  Nothing
-    // can finish moving the data until the Pantry activates volumes (below),
-    // so this cannot race with the repair.
-    let status = expunge_precheck_get(client).await;
-    assert!(!status.ok, "{status:#?}");
-    assert_eq!(status.user_data.expunged_disks_with_data, 1, "{status:#?}");
-    assert!(
-        status
-            .user_data
-            .problems
-            .iter()
-            .any(|p| p.contains(&physical_disk_id.to_string())),
-        "{status:#?}"
+    assert_eq!(total(|r| r.num_read_write_regions), nread_write, "{counts:?}");
+    assert_eq!(total(|r| r.num_read_only_regions), nread_only, "{counts:?}");
+    assert_eq!(
+        total(|r| r.num_region_snapshots),
+        nregion_snapshots,
+        "{counts:?}"
     );
 
-    // Run all replacements to completion.  Afterward, the user data check
-    // passes again.
-    cptestctx
-        .first_sim_server()
-        .pantry_server
-        .as_ref()
-        .unwrap()
-        .pantry
-        .set_auto_activate_volumes();
-    let lockstep_client = &cptestctx.lockstep_client;
-    wait_for_all_replacements(&datastore, &lockstep_client).await;
+    // Every disk in the map should have at least one resource.
+    for r in counts.iter() {
+        assert!(
+            r.num_read_write_regions
+                + r.num_read_only_regions
+                + r.num_region_snapshots
+                > 0,
+            "{counts:?}"
+        );
+    }
 
-    let status = expunge_precheck_get(client).await;
-    assert!(status.ok, "{status:#?}");
-    assert!(status.user_data.problems.is_empty(), "{status:#?}");
+    counts
 }
