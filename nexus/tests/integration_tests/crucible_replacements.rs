@@ -30,6 +30,8 @@ use nexus_test_utils::resource_helpers::create_snapshot;
 use nexus_test_utils::resource_helpers::delete_snapshot;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::expunge_precheck::ExpungePrecheck;
+use nexus_types::external_api::expunge_precheck::UserDataProblemKind;
 use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -2834,4 +2836,111 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
 
         wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
+}
+
+/// Fetches the repair status, waiting until the system has collected the
+/// inventory that the status depends on.
+async fn expunge_precheck_get(client: &ClientTestContext) -> ExpungePrecheck {
+    wait_for_condition(
+        || async {
+            NexusRequest::object_get(
+                client,
+                "/v1/system/hardware/expunge-precheck",
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .map_err(|_| CondCheckError::<()>::NotYet { status: None })?
+            .parsed_body::<ExpungePrecheck>()
+            .map_err(|_| CondCheckError::<()>::NotYet { status: None })
+        },
+        &std::time::Duration::from_millis(250),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("fetched expunge precheck")
+}
+
+/// Tests that the repair status reports user data on an expunged physical
+/// disk until replacement completes
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_expunge_precheck_user_data(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let client = &cptestctx.external_client;
+
+    // Create one zpool per sled so that replacement has somewhere to move the
+    // data.  Then create a disk and a snapshot of it, so that the expunged
+    // physical disk holds both read-write regions and region snapshots.
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+    let _project_id = create_project_and_pool(client).await;
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let _snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+
+    // Before any expungement, the user data check passes.
+    let status = expunge_precheck_get(client).await;
+    assert!(status.user_data.problems.is_empty(), "{status:#?}");
+
+    // Expunge a physical disk that holds one of the disk's regions.
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
+    else {
+        unreachable!()
+    };
+    let disk_allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+    let (dataset, _) = &disk_allocated_regions[0];
+    let zpool = disk_test
+        .zpools()
+        .find(|x| x.id == dataset.pool_id())
+        .expect("Expected at least one zpool");
+    let (_, db_zpool) = LookupPath::new(&opctx, datastore)
+        .zpool_id(zpool.id)
+        .fetch()
+        .await
+        .unwrap();
+    let physical_disk_id = db_zpool.physical_disk_id();
+    datastore
+        .physical_disk_update_policy(
+            &opctx,
+            physical_disk_id,
+            PhysicalDiskPolicy::Expunged,
+        )
+        .await
+        .unwrap();
+
+    // Now the user data check reports the expunged physical disk.  Nothing
+    // can finish moving the data until the Pantry activates volumes (below),
+    // so this cannot race with the repair.
+    let status = expunge_precheck_get(client).await;
+    assert!(!status.ok, "{status:#?}");
+    assert!(
+        status.user_data.problems.iter().any(|p| {
+            p.kind == UserDataProblemKind::ExpungedDiskHasData
+                && p.message.contains(&physical_disk_id.to_string())
+        }),
+        "{status:#?}"
+    );
+
+    // Run all replacements to completion.  Afterward, the user data check
+    // passes again.
+    cptestctx
+        .first_sim_server()
+        .pantry_server
+        .as_ref()
+        .unwrap()
+        .pantry
+        .set_auto_activate_volumes();
+    let lockstep_client = &cptestctx.lockstep_client;
+    wait_for_all_replacements(&datastore, &lockstep_client).await;
+
+    let status = expunge_precheck_get(client).await;
+    assert!(status.user_data.problems.is_empty(), "{status:#?}");
 }

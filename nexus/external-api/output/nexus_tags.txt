@@ -48,6 +48,7 @@ affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_
 affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
+expunge_precheck_view                    GET      /v1/system/hardware/expunge-precheck
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
 instance_multicast_group_join            PUT      /v1/instances/{instance}/multicast-groups/{multicast_group}
 instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}

@@ -23,6 +23,9 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -45,7 +48,150 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
+/// Counts of Crucible resources (regions and region snapshots) stored on
+/// expunged physical disks
+///
+/// When a physical disk is expunged, automation replaces the regions and region
+/// snapshots stored on that disk with new copies elsewhere in the system.  Once
+/// each region or region snapshot is fully replaced, the original one on the
+/// expunged disk is removed.
+///
+/// This structure tracks regions and region snapshots still currently present
+/// on physical disks.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExpungedPhysicalDiskResourcesMap {
+    by_disk: IdOrdMap<ExpungedPhysicalDiskResources>,
+}
+
+impl ExpungedPhysicalDiskResourcesMap {
+    /// Returns the number of expunged physical disks that hold resources.
+    pub fn len(&self) -> usize {
+        self.by_disk.len()
+    }
+
+    /// Returns whether no expunged physical disks hold resources.
+    pub fn is_empty(&self) -> bool {
+        self.by_disk.is_empty()
+    }
+
+    /// Iterates over the resources on each expunged physical disk.
+    pub fn iter(&self) -> impl Iterator<Item = &ExpungedPhysicalDiskResources> {
+        self.by_disk.iter()
+    }
+
+    /// Records `count` read/write regions on the given physical disk.
+    pub fn add_read_write_regions(
+        &mut self,
+        disk_id: PhysicalDiskUuid,
+        disk_serial: String,
+        count: u64,
+    ) {
+        self.disk_mut(disk_id, disk_serial).num_read_write_regions += count;
+    }
+
+    /// Records `count` read-only regions on the given physical disk.
+    pub fn add_read_only_regions(
+        &mut self,
+        disk_id: PhysicalDiskUuid,
+        disk_serial: String,
+        count: u64,
+    ) {
+        self.disk_mut(disk_id, disk_serial).num_read_only_regions += count;
+    }
+
+    /// Records `count` region snapshots on the given physical disk.
+    pub fn add_region_snapshots(
+        &mut self,
+        disk_id: PhysicalDiskUuid,
+        disk_serial: String,
+        count: u64,
+    ) {
+        self.disk_mut(disk_id, disk_serial).num_region_snapshots += count;
+    }
+
+    /// Adds all of the resources in `other` to `self`.
+    pub fn merge(&mut self, other: ExpungedPhysicalDiskResourcesMap) {
+        for disk in other.by_disk {
+            let ExpungedPhysicalDiskResources {
+                disk_id,
+                disk_serial,
+                num_read_write_regions,
+                num_read_only_regions,
+                num_region_snapshots,
+            } = disk;
+            let mut mine = self.disk_mut(disk_id, disk_serial);
+            mine.num_read_write_regions += num_read_write_regions;
+            mine.num_read_only_regions += num_read_only_regions;
+            mine.num_region_snapshots += num_region_snapshots;
+        }
+    }
+
+    /// Returns the entry for the given physical disk, creating it with zero
+    /// counts if it doesn't exist.
+    fn disk_mut(
+        &mut self,
+        disk_id: PhysicalDiskUuid,
+        disk_serial: String,
+    ) -> iddqd::id_ord_map::RefMut<'_, ExpungedPhysicalDiskResources> {
+        self.by_disk.entry(disk_id).or_insert_with(|| {
+            ExpungedPhysicalDiskResources {
+                disk_id,
+                disk_serial,
+                num_read_write_regions: 0,
+                num_read_only_regions: 0,
+                num_region_snapshots: 0,
+            }
+        })
+    }
+}
+
+/// Crucible resources that remain on one expunged physical disk
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpungedPhysicalDiskResources {
+    pub disk_id: PhysicalDiskUuid,
+    pub disk_serial: String,
+    pub num_read_write_regions: u64,
+    pub num_read_only_regions: u64,
+    pub num_region_snapshots: u64,
+}
+
+impl IdOrdItem for ExpungedPhysicalDiskResources {
+    type Key<'a> = PhysicalDiskUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        // This is keyed by the physical disk's id rather than its serial number
+        // because the serial number is not unique.  The database only enforces
+        // uniqueness of (vendor, serial, model), and only among physical disks
+        // that are neither deleted nor decommissioned.
+        self.disk_id
+    }
+
+    id_upcast!();
+}
+
 impl DataStore {
+    /// Returns the Crucible resources that remain on each expunged physical
+    /// disk.
+    ///
+    /// Only physical disks that still hold at least one resource are
+    /// included.  This uses the same criteria as
+    /// `find_read_write_regions_on_expunged_physical_disks()`,
+    /// `find_read_only_regions_on_expunged_physical_disks()`, and
+    /// `find_region_snapshots_on_expunged_physical_disks()`, but it returns
+    /// only counts, grouped by physical disk.
+    pub async fn crucible_resources_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<ExpungedPhysicalDiskResourcesMap, Error> {
+        let mut rv =
+            self.count_regions_on_expunged_physical_disks(opctx).await?;
+        rv.merge(
+            self.count_region_snapshots_on_expunged_physical_disks(opctx)
+                .await?,
+        );
+        Ok(rv)
+    }
+
     /// Inserts a physical disk and zpool together in a transaction if there is
     /// a valid adoption request.
     ///

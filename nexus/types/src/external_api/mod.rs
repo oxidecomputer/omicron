@@ -38,6 +38,7 @@ pub mod probe;
 pub mod problem;
 pub mod project;
 pub mod rack;
+pub mod expunge_precheck;
 pub mod saml;
 pub mod scim;
 pub mod silo;

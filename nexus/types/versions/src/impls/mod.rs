@@ -50,6 +50,7 @@ mod networking;
 mod physical_disk;
 mod policy;
 mod problem;
+mod expunge_precheck;
 mod saml;
 mod silo;
 mod sled;

@@ -395,6 +395,16 @@ pub mod project {
     pub use crate::v2026_09_08_00::project::ProjectCreateDefaults;
 }
 
+pub mod expunge_precheck {
+    pub use crate::v2026_11_20_00::expunge_precheck::CockroachdbProblemKind;
+    pub use crate::v2026_11_20_00::expunge_precheck::ExpungePrecheck;
+    pub use crate::v2026_11_20_00::expunge_precheck::ExpungePrecheckProblem;
+    pub use crate::v2026_11_20_00::expunge_precheck::ExpungePrecheckResult;
+    pub use crate::v2026_11_20_00::expunge_precheck::InventoryProblemKind;
+    pub use crate::v2026_11_20_00::expunge_precheck::SledsProblemKind;
+    pub use crate::v2026_11_20_00::expunge_precheck::UserDataProblemKind;
+}
+
 pub mod saml {
     pub use crate::v2025_11_20_00::saml::RelativeUri;
     pub use crate::v2025_11_20_00::saml::RelayState;

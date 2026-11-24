@@ -148,6 +148,8 @@ pub static HARDWARE_DISKS_UNADOPTED_URL: &'static str =
     "/v1/system/hardware/disks-unadopted";
 
 pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
+pub const HARDWARE_EXPUNGE_PRECHECK_URL: &'static str =
+    "/v1/system/hardware/expunge-precheck";
 pub static HARDWARE_DISK_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID)
 });
@@ -3110,6 +3112,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             VerifyEndpoint {
                 url: &HARDWARE_DISK_URL,
                 visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_EXPUNGE_PRECHECK_URL,
+                visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },

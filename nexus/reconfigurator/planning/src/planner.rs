@@ -95,6 +95,7 @@ use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
 pub(crate) use self::zone_safety::ZoneSafetyChecks;
+pub use self::zone_safety::cockroachdb_unhealthy_reasons;
 
 mod image_source;
 mod omicron_zone_placement;

@@ -97,6 +97,7 @@ mod project;
 mod quiesce;
 mod quota;
 mod rack;
+mod expunge_precheck;
 pub(crate) mod saga;
 mod scim;
 mod session;

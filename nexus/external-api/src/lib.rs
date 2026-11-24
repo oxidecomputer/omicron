@@ -90,6 +90,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_20_00, EXPUNGE_PRECHECK),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
     (2026_11_04_00, UNADOPTED_RACK_LIST),
@@ -7946,6 +7947,30 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
+
+    /// Check whether it's safe to expunge sled or physical disk
+    ///
+    /// Checks for conditions that make it risky to expunge a sled or physical
+    /// disk, like repairs from previous expungements that have not finished.
+    /// The system is designed to survive only a limited number of concurrent
+    /// failures, and each of these conditions reduces the number of
+    /// additional failures that it can survive. Check that `ok` is `true`
+    /// before expunging a sled or physical disk.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/expunge-precheck",
+        // <review>
+        // TODO is this the right path for this?
+        // </review>
+        tags = ["experimental"],
+        versions = VERSION_EXPUNGE_PRECHECK..,
+    }]
+    async fn expunge_precheck_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::expunge_precheck::ExpungePrecheck>,
+        HttpError,
+    >;
 
     /// List physical disks that have not yet been adopted for use
     #[endpoint {
