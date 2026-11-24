@@ -108,6 +108,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_generation_kinds::Generation;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -120,6 +121,7 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map;
 use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -272,21 +274,6 @@ impl DataStore {
                     zones: _,
                 } = sled;
 
-                // TODO omicron#11821 We don't yet store `wicket_ssh_auth` in
-                // the database, and reading a blueprint always fills in
-                // `WicketSshAuth::initial()`. As a small seatbelt until we
-                // finish this work, refuse to _insert_ any blueprint whose
-                // setting doesn't match.
-                if *wicket_ssh_auth != WicketSshAuth::initial() {
-                    return Err(Error::internal_error(format!(
-                        "blueprint {blueprint_id} sled {sled_id} \
-                         has unexpected wicket_ssh_auth: {} \
-                         (all sleds are expected to have the initial value \
-                          until omicron#11821 is fully implemented)",
-                        wicket_ssh_auth.display()
-                    )));
-                }
-
                 let (
                     update_disposition_generation,
                     update_availability,
@@ -294,7 +281,7 @@ impl DataStore {
                 ) = BpSledMetadata::update_disposition_columns(
                     *update_disposition,
                 );
-                Ok(BpSledMetadata {
+                BpSledMetadata {
                     blueprint_id: blueprint_id.into(),
                     sled_id: sled_id.into(),
                     sled_state: (*state).into(),
@@ -316,9 +303,12 @@ impl DataStore {
                     last_allocated_ip_subnet_offset:
                         last_allocated_ip_subnet_offset.into_u16().into(),
                     measurements: measurements.into(),
-                })
+                    wicket_ssh_auth_generation: wicket_ssh_auth
+                        .generation
+                        .into(),
+                }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
 
         let measurements = blueprint
             .sleds
@@ -816,6 +806,28 @@ impl DataStore {
                 rows.extend(batch);
             }
             rows
+        };
+
+        // Load wicket SSH auth settings referenced by sled rows
+        let wicket_ssh_auth: BTreeMap<WicketSshAuthGeneration, WicketSshAuth> = {
+            let mut wicket_ssh_auth = BTreeMap::new();
+            for (sled, _, _) in &raw_sled_metadata {
+                let wicket_gen = sled.wicket_ssh_auth_generation.into();
+                match wicket_ssh_auth.entry(wicket_gen) {
+                    btree_map::Entry::Occupied(_) => {
+                        // nothing to do - we already loaded this generation
+                    }
+                    btree_map::Entry::Vacant(entry) => {
+                        entry.insert(
+                            self.wicket_ssh_auth_read_on_connection(
+                                &conn, wicket_gen,
+                            )
+                            .await?,
+                        );
+                    }
+                }
+            }
+            wicket_ssh_auth
         };
 
         // Load zone NIC rows
@@ -1385,6 +1397,18 @@ impl DataStore {
             let update_disposition = s.update_disposition().map_err(|e| {
                 Error::internal_error(InlineErrorChain::new(&*e).to_string())
             })?;
+            let wicket_ssh_auth = {
+                let wicket_gen = s.wicket_ssh_auth_generation.into();
+                wicket_ssh_auth
+                    .get(&wicket_gen)
+                    .ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "Missing wicket ssh auth generation {} for sled {}",
+                            wicket_gen, s.sled_id
+                        ))
+                    })?
+                    .clone()
+            };
             let config = BlueprintSledConfig {
                 state: s.sled_state.into(),
                 update_disposition,
@@ -1399,9 +1423,7 @@ impl DataStore {
                     .map(|id| id.into()),
                 host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
                 measurements,
-                // TODO omicron#11821 We should load this from the db, once it
-                // exists. For now every value is set to gen 1, unauth.
-                wicket_ssh_auth: WicketSshAuth::initial(),
+                wicket_ssh_auth,
             };
             let old = sled_configs.insert(s.sled_id.into(), config);
             bail_unless!(

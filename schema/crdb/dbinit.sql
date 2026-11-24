@@ -6120,6 +6120,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
             = (update_disruption_policy IS NOT NULL)
     ),
 
+    -- wicket SSH auth generation; to hydrate this into the full wicket SSH auth
+    -- setting, consult the `wicket_ssh_auth*` tables.
+    wicket_ssh_auth_generation INT8 NOT NULL,
+
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
