@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
-use crate::{ExternalDisks, HardwareView, SledMode};
+use crate::{DiskBay, ExternalDisks, HardwareView, SledMode};
+use iddqd::IdOrdMap;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::DiskVariant;
@@ -60,6 +61,10 @@ impl HardwareManager {
     }
 
     pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
+    pub fn disk_bays(&self) -> IdOrdMap<DiskBay> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
