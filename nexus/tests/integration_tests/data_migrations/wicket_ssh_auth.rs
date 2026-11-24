@@ -194,7 +194,8 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         .expect("effective gen with and without error satisfies constraint");
 
     // `wicket_ssh_auth` rejects generation 0.
-    ctx.client
+    let err = ctx
+        .client
         .batch_execute(
             "
             INSERT INTO omicron.public.wicket_ssh_auth (
@@ -204,6 +205,10 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         )
         .await
         .expect_err("generation 0 violates constraint");
+    assert_eq!(
+        err.as_db_error().expect("error came from the database").code(),
+        &tokio_postgres::error::SqlState::CHECK_VIOLATION,
+    );
 
     // Clean up after ourselves.
     ctx.client

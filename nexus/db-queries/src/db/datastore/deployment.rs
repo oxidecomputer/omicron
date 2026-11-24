@@ -4000,6 +4000,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_blueprint_wicket_ssh_auth_round_trip() {
+        use sled_agent_types::inventory::WicketSshAuthKind;
+
+        const TEST_NAME: &str = "test_blueprint_wicket_ssh_auth_round_trip";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let initial = WicketSshAuth::initial();
+        let gen2 = WicketSshAuth {
+            generation: initial.generation.next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: ["fake key 1", "fake key 2"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                allow_support_keys: false,
+            },
+        };
+        datastore.wicket_ssh_auth_insert_for_tests(gen2.clone()).await;
+
+        let (_, _, mut blueprint) = representative(&logctx.log, TEST_NAME);
+        assert!(
+            blueprint.sleds.len() >= 2,
+            "test requires a blueprint with at least two sleds"
+        );
+        for (i, sled) in blueprint.sleds.values_mut().enumerate() {
+            sled.wicket_ssh_auth =
+                if i % 2 == 0 { gen2.clone() } else { initial.clone() };
+        }
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("failed to insert blueprint");
+        let authz_blueprint = authz_blueprint_from_id(blueprint.id);
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to read blueprint back");
+        assert_eq!(blueprint, blueprint_read);
+
+        // If a blueprint sled config somehow refers to a generation that
+        // doesn't exist, reading the blueprint will fail. This should be
+        // impossible, and on top of that inserts guard against this, so we have
+        // to go behind the datastore's back to test that trying to read such a
+        // blueprint emits a reasonable error message.
+        let sled_id = *blueprint.sleds.keys().next().unwrap();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let nupdated = diesel::sql_query(format!(
+            "UPDATE omicron.public.bp_sled_metadata \
+             SET wicket_ssh_auth_generation = 99 \
+             WHERE blueprint_id = '{}' AND sled_id = '{}'",
+            blueprint.id, sled_id,
+        ))
+        .execute_async(&*conn)
+        .await
+        .expect("updated bp_sled_metadata");
+        assert_eq!(nupdated, 1);
+        let err = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect_err("blueprint read should fail");
+        match err {
+            Error::InternalError { internal_message } => assert!(
+                internal_message.contains(
+                    "refers to nonexistent wicket SSH auth generation 99"
+                ),
+                "unexpected message: {internal_message}"
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_measurement_blueprint() {
         const TEST_NAME: &str = "test_measurement_blueprint";
         // Setup
