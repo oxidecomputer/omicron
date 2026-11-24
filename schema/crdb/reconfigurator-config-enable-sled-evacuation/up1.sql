@@ -1,9 +1,10 @@
 -- Enable sled evacuation during an update on systems that already have a
--- reconfigurator config stored in the database, and do not yet have the
--- `sled_update_reboot_policy` set to `evacuate`.
+-- reconfigurator config stored in the database, and have the
+-- `sled_update_reboot_policy` set to `immediate_no_evacuation`.
 --
 -- The statement inserts nothing if the table is empty (Nexus then uses its
 -- in-memory default), or the latest config already uses `evacuate`.
+SET LOCAL disallow_full_table_scans = off;
 INSERT INTO omicron.public.reconfigurator_config (
     version,
     planner_enabled,
