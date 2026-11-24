@@ -99,6 +99,10 @@ pub struct AlertFilters {
     /// If this argument is not provided, both dispatched and un-dispatched
     /// events are included.
     dispatched: Option<bool>,
+
+    /// If set, include only alerts attached to the specified problem at
+    /// the specified revision.
+    problem: Option<model::ProblemRevisionFilter>,
 }
 
 impl AlertFilters {
@@ -239,6 +243,14 @@ impl AlertFilters {
         }
         self.dispatched = Some(dispatched);
         Ok(self)
+    }
+
+    pub fn for_problem(
+        mut self,
+        problem: impl Into<model::ProblemRevisionFilter>,
+    ) -> Self {
+        self.problem = Some(problem.into());
+        self
     }
 }
 
@@ -541,6 +553,7 @@ impl DataStore {
             dispatched,
             ref cases,
             ref classes,
+            problem,
         } = filters;
         if let Some(before) = before {
             query = query.filter(alert_dsl::time_created.le(before));
@@ -573,6 +586,13 @@ impl DataStore {
         if !classes.is_empty() {
             query =
                 query.filter(alert_dsl::alert_class.eq_any(classes.clone()));
+        }
+
+        if let Some(_problem) = problem {
+            todo!(
+                "eliza: this is where we will have to add an INNER JOIN on \
+                 the problem-alert-link table, once that exists"
+            );
         }
 
         query

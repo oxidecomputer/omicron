@@ -13,6 +13,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::AlertFilters;
 use nexus_db_queries::db::model::ProblemView;
 use nexus_types::external_api::alert;
 use nexus_types::external_api::problem as api;
@@ -113,13 +114,28 @@ impl Nexus {
     /// Lists alerts associated with the requested problem.
     pub async fn problem_alert_list(
         &self,
+        opctx: &OpContext,
         problem_lookup: &lookup::Problem<'_>,
-        _params: &alert::AlertListParams,
-        _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+        params: &alert::AlertListParams,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<alert::Alert> {
-        let (.., _authz_problem) =
-            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
-        // TODO(eliza): actually add a way to associate problems and alerts...
-        Ok(Vec::new())
+        // First, return an error on invalid query params (before looking up the
+        // problem)
+        let filters = AlertFilters::try_from(params.clone())?;
+        // Next, fetch the problem's current revision, in order to use it to
+        // construct the alert filters.
+        let (.., _authz_problem, problem) =
+            problem_lookup.fetch_for(authz::Action::ListChildren).await?;
+        let filters = filters.for_problem(&problem);
+
+        let alerts = self
+            .db_datastore
+            .alert_list_matching(opctx, &filters, &pagparams)
+            .await?
+            .into_iter()
+            .map(|(alert, _)| alert.into())
+            .collect();
+
+        Ok(alerts)
     }
 }

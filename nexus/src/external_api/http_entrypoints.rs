@@ -9284,6 +9284,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let alerts = nexus
                 .problem_alert_list(
+                    &opctx,
                     &problem_lookup,
                     &scan_params.selector,
                     &pag_params,

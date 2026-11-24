@@ -200,3 +200,23 @@ impl From<ProblemView> for api::Problem {
         }
     }
 }
+
+/// A filter for listing resources associated with a problem as of a particular
+/// revision.
+#[derive(Debug, Copy, Clone)]
+pub struct ProblemRevisionFilter {
+    pub id: DbTypedUuid<ProblemKind>,
+    pub rev: DbTypedGeneration<ProblemRevKind>,
+}
+
+impl From<&'_ Problem> for ProblemRevisionFilter {
+    fn from(problem: &Problem) -> Self {
+        Self { id: problem.identity.id, rev: problem.current_revision }
+    }
+}
+
+impl From<&'_ ProblemView> for ProblemRevisionFilter {
+    fn from(problem: &ProblemView) -> Self {
+        Self { id: problem.identity.id, rev: problem.revision.into() }
+    }
+}
