@@ -77,8 +77,7 @@ impl OperatorStatus {
                 "Waiting for update of {component} on {baseboard_id}"
             )),
             OperatorStatus::WaitingForUpdate(UpdateWait::Zones { kinds }) => {
-                let summary =
-                    "Waiting for a control plane zone to start";
+                let summary = "Waiting for a control plane zone to start";
                 if kinds.is_empty() {
                     OperatorStatusDescription::summary(summary)
                 } else {
