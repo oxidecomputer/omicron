@@ -10082,8 +10082,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_alert (
 --
 -- This table is used to list the set of support bundles attached to a problem
 -- as of a particular revision of that problem. Support bundles may be attached
--- to multiple problems, so a join table (rather than a foreign key on `alert`)
--- is used to express this relationship.
+-- to multiple problems, so a join table (rather than a foreign key on
+-- `support_bundle`) is used to express this relationship.
 --
 -- Records in this table are logically "owned" by the problem, and are removed
 -- only when the problem itself is deleted. Because these records are not
