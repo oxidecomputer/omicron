@@ -320,6 +320,7 @@ impl_dyn_authorized_resource_for_global!(authz::QuiesceState);
 impl_dyn_authorized_resource_for_global!(authz::SubnetPoolList);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
 impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
+impl_dyn_authorized_resource_for_global!(authz::WicketSshAuth);
 
 impl DynAuthorizedResource for authz::TrustQuorumConfig {
     fn do_authorize<'a, 'b>(

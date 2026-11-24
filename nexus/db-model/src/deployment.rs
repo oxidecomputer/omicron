@@ -72,7 +72,7 @@ use omicron_common::api::external::Error;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_generation_kinds::{
     NexusGenerationKind, SledConfigGenerationKind, TargetReleaseGenerationKind,
-    UpdateDispositionGenerationKind,
+    UpdateDispositionGenerationKind, WicketSshAuthGenerationKind,
 };
 use omicron_git_version_types::GitVersion;
 use omicron_uuid_kinds::{
@@ -338,6 +338,8 @@ pub struct BpSledMetadata {
         DbTypedGeneration<UpdateDispositionGenerationKind>,
     pub update_availability: DbSledUpdateAvailability,
     pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
+    pub wicket_ssh_auth_generation:
+        DbTypedGeneration<WicketSshAuthGenerationKind>,
 }
 
 impl BpSledMetadata {

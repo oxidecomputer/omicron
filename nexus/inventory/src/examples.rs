@@ -1365,6 +1365,17 @@ pub fn sled_agent(
     });
     let fmd = Ok(FmdInventory { cases: fmd_cases, resources: fmd_resources });
 
+    // Scrimlets have a switch zone and therefore report the status of applying
+    // the wicket SSH auth setting to it. Include an error so we exercise that
+    // too.
+    let wicket_ssh_auth_status = match sled_role {
+        SledRole::Gimlet => WicketSshAuthStatus::NoSwitchZone,
+        SledRole::Scrimlet => WicketSshAuthStatus::SwitchZone {
+            effective_auth_gen: WicketSshAuth::initial().generation,
+            last_error: Some("example wicket SSH auth error".to_string()),
+        },
+    };
+
     Inventory {
         baseboard_id,
         reservoir_size: ByteCount::from(1024),
@@ -1386,6 +1397,6 @@ pub fn sled_agent(
         smf_services_enabled_not_online,
         reference_measurements,
         fmd,
-        wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
+        wicket_ssh_auth_status,
     }
 }

@@ -321,7 +321,26 @@ impl Populator for PopulateRack {
     }
 }
 
-const ALL_POPULATORS: [&dyn Populator; 9] = [
+/// Populates the initial wicket SSH auth setting (generation 1,
+/// unauthenticated). This matches the setting chosen by RSS for the initial
+/// sled configs.
+#[derive(Debug)]
+struct PopulateWicketSshAuth;
+impl Populator for PopulateWicketSshAuth {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_wicket_ssh_auth(opctx).await }.boxed()
+    }
+}
+
+const ALL_POPULATORS: [&dyn Populator; 10] = [
     &PopulateBuiltinUsers {},
     &PopulateBuiltinRoleAssignments {},
     &PopulateBuiltinSilos {},
@@ -331,6 +350,7 @@ const ALL_POPULATORS: [&dyn Populator; 9] = [
     &PopulateSiloUserRoleAssignments {},
     &PopulateFleet {},
     &PopulateRack {},
+    &PopulateWicketSshAuth {},
 ];
 
 #[cfg(test)]

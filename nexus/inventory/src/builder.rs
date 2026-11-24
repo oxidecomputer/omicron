@@ -658,10 +658,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online,
             reference_measurements,
             fmd,
-            // TODO omicron#11821 We should store the wicket SSH auth status in
-            // inventory in the DB. For now just drop it; reading inventory will
-            // fill in a dummy value.
-            wicket_ssh_auth_status: _,
+            wicket_ssh_auth_status,
         } = inventory;
 
         let baseboard_id =
@@ -698,6 +695,7 @@ impl CollectionBuilder {
             smf_services_enabled_not_online,
             reference_measurements,
             fmd,
+            wicket_ssh_auth_status,
         };
 
         self.sleds

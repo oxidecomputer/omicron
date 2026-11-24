@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use super::wicket_ssh_auth::WicketSshAuthRefs;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
@@ -27,9 +28,10 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
+use nexus_db_errors::{ErrorHandler, TransactionError};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ArtifactHash;
 use nexus_db_model::HwM2Slot;
@@ -75,6 +77,7 @@ use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvSvcEnabledNotOnline;
 use nexus_db_model::InvSvcEnabledNotOnlineParseError;
 use nexus_db_model::InvSvcEnabledNotOnlineService;
+use nexus_db_model::InvWicketSshAuthStatusCols;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -118,6 +121,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -147,6 +151,7 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -677,6 +682,22 @@ impl DataStore {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
+        // We only store the generation of each sled config's wicket SSH auth
+        // setting; reading the collection back rehydrates it from the
+        // `wicket_ssh_auth*` tables. Collect the distinct settings this
+        // collection references so we can confirm (via
+        // `wicket_ssh_auth_validate_on_connection()` inside the transaction
+        // below) that each one exists with exactly these contents.
+        let wicket_ssh_auth_refs =
+            WicketSshAuthRefs::from_inventory_collection(collection).map_err(
+                |e| {
+                    Error::from(e).internal_context(format!(
+                        "inserting inventory collection {}",
+                        collection.id,
+                    ))
+                },
+            )?;
+
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
         // means we don't have to worry about other readers seeing a
@@ -696,8 +717,23 @@ impl DataStore {
         // The risk of a serialization error is possible here, but low,
         // as most of the operations should be insertions rather than in-place
         // modifications of existing tables.
+        let err = OptionalError::new();
         self.transaction_non_retry_wrapper("inventory_insert_collection")
-            .transaction(&conn, |conn| async move {
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+            // Check that every wicket SSH auth generation we reference
+            // is valid (see above).
+            self.wicket_ssh_auth_validate_on_connection(
+                &conn,
+                &wicket_ssh_auth_refs,
+            )
+            .await
+            .map_err(|e| match e {
+                TransactionError::Database(e) => e,
+                TransactionError::CustomError(e) => err.bail(e),
+            })?;
+
             // Insert records (and generate ids) for any baseboards that do not
             // already exist in the database.
             Self::hw_baseboard_ids_insert_conn(&conn, baseboards).await?;
@@ -2045,6 +2081,10 @@ impl DataStore {
                         update_disposition: instance_manager_update_disposition,
                         num_registered_vmms: instance_manager_num_registered_vmms,
                     } = instance_manager_status_cols;
+                    let InvWicketSshAuthStatusCols {
+                        wicket_ssh_auth_effective_gen,
+                        wicket_ssh_auth_last_error,
+                    } = sled_agent.wicket_ssh_auth_status.clone().into();
                     let file_source_resolver = InvOmicronFileSourceResolver::new(&sled_agent.file_source_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
@@ -2118,6 +2158,10 @@ impl DataStore {
                                 .into_sql::<Nullable<InvSledUpdateDispositionEnum>>(),
                             instance_manager_num_registered_vmms
                                 .into_sql::<diesel::sql_types::Int8>(),
+                            wicket_ssh_auth_effective_gen
+                                .into_sql::<Nullable<diesel::sql_types::Int8>>(),
+                            wicket_ssh_auth_last_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
                             sled_agent.rack_id.into_untyped_uuid()
                                 .into_sql::<diesel::sql_types::Uuid>(),
                         ))
@@ -2164,6 +2208,8 @@ impl DataStore {
                                 sa_dsl::mupdate_override_boot_disk_error,
                                 sa_dsl::instance_manager_update_disposition,
                                 sa_dsl::instance_manager_num_registered_vmms,
+                                sa_dsl::wicket_ssh_auth_effective_gen,
+                                sa_dsl::wicket_ssh_auth_last_error,
                                 sa_dsl::rack_id,
                             ))
                             .execute_async(&conn)
@@ -2204,6 +2250,8 @@ impl DataStore {
                         _instance_manager_update_disposition,
                         _instance_manager_num_registered_vmms,
                         _rack_id,
+                        _wicket_ssh_auth_effective_gen,
+                        _wicket_ssh_auth_last_error,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -2283,9 +2331,15 @@ impl DataStore {
             }
 
             Ok(())
-        })
+        }
+            })
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        .map_err(|e| match err.take() {
+            Some(err) => Error::from(err).internal_context(format!(
+                "inserting inventory collection {collection_id}"
+            )),
+            None => public_error_from_diesel(e, ErrorHandler::Server),
+        })?;
 
         info!(
             &opctx.log,
@@ -4153,6 +4207,15 @@ impl DataStore {
         let mut omicron_sled_configs = {
             use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
 
+            // As we read each sled config, we need to rehydrate the full wicket
+            // SSH auth setting based on the generation number stored. We expect
+            // a small number of distinct generations (usually 1!), so keep them
+            // in a map here to avoid unnecessary db traffic.
+            let mut wicket_ssh_auth_by_gen: BTreeMap<
+                WicketSshAuthGeneration,
+                WicketSshAuth,
+            > = BTreeMap::new();
+
             let mut configs = IdOrdMap::new();
 
             let mut paginator = Paginator::new(
@@ -4174,9 +4237,40 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
+                    let sled_config_id = sled_config.id.into();
+                    let wicket_auth_gen =
+                        sled_config.wicket_ssh_auth_generation.into();
+                    let wicket_ssh_auth =
+                        match wicket_ssh_auth_by_gen.entry(wicket_auth_gen) {
+                            btree_map::Entry::Occupied(entry) => {
+                                entry.get().clone()
+                            }
+                            btree_map::Entry::Vacant(entry) => {
+                                let auth = self
+                                .wicket_ssh_auth_read_optional_on_connection(
+                                    &conn,
+                                    wicket_auth_gen,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                })?
+                                .ok_or_else(|| {
+                                    Error::internal_error(format!(
+                                        "inventory collection {id} refers \
+                                         to nonexistent wicket SSH auth \
+                                         generation {wicket_auth_gen}"
+                                    ))
+                                })?;
+                                entry.insert(auth).clone()
+                            }
+                        };
                     configs
                         .insert_unique(OmicronSledConfigWithId {
-                            id: sled_config.id.into(),
+                            id: sled_config_id,
                             config: OmicronSledConfig {
                                 generation: sled_config.generation.into(),
                                 remove_mupdate_override: sled_config
@@ -4190,12 +4284,7 @@ impl DataStore {
                                 update_disposition: sled_config
                                     .update_disposition
                                     .into(),
-                                // TODO omicron#11821 We should store the
-                                // wicket SSH auth reported in inventory in
-                                // the DB. For now we return the initial value
-                                // in all inventory reports (it's the only value
-                                // any sled-agent can report anyway).
-                                wicket_ssh_auth: WicketSshAuth::initial(),
+                                wicket_ssh_auth,
                             },
                         })
                         .map_err(|e| {
@@ -5267,6 +5356,7 @@ impl DataStore {
                 .transpose()?;
 
             let instance_manager_status = s.instance_manager_status();
+            let wicket_ssh_auth_status = s.wicket_ssh_auth_status();
 
             let file_source_resolver = s
                 .file_source_resolver
@@ -5402,6 +5492,7 @@ impl DataStore {
                         _ => Ok(FmdInventory { cases, resources }),
                     }
                 },
+                wicket_ssh_auth_status,
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -5936,20 +6027,19 @@ impl ConfigReconcilerRows {
             host_phase_2,
             measurements,
             update_disposition,
-            // TODO omicron#11821 We should store the wicket SSH auth reported
-            // in each sled config.
-            wicket_ssh_auth: _,
+            wicket_ssh_auth,
         } = config;
 
-        self.sled_configs.push(InvOmicronSledConfig::new(
-            collection_id,
-            sled_config_id,
-            *generation,
-            *remove_mupdate_override,
-            host_phase_2.clone(),
-            measurements.clone(),
-            *update_disposition,
-        ));
+        self.sled_configs.push(InvOmicronSledConfig {
+            inv_collection_id: collection_id.into(),
+            id: sled_config_id.into(),
+            generation: (*generation).into(),
+            remove_mupdate_override: remove_mupdate_override.map(From::from),
+            host_phase_2: host_phase_2.clone().into(),
+            measurements: measurements.clone().into(),
+            update_disposition: (*update_disposition).into(),
+            wicket_ssh_auth_generation: wicket_ssh_auth.generation.into(),
+        });
         self.disks.extend(disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
                 collection_id,
@@ -7215,6 +7305,302 @@ mod test {
         );
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Collections store only the generation of each sled config's wicket SSH
+    // auth setting. Inserting one must fail if that generation isn't in the
+    // `wicket_ssh_auth*` tables with identical contents; otherwise we'd store a
+    // collection that can't be read back (or that reads back differently from
+    // what the sled reported).
+    #[tokio::test]
+    async fn test_inventory_insert_validates_wicket_ssh_auth() {
+        use sled_agent_types::inventory::WicketSshAuth;
+        use sled_agent_types::inventory::WicketSshAuthKind;
+
+        let logctx = dev::test_setup_log(
+            "test_inventory_insert_validates_wicket_ssh_auth",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+        let initial = WicketSshAuth::initial();
+        let gen2 = initial.generation.next();
+
+        // Clear out all the inventory sled configs except the ledgered config
+        // on all sleds. This makes the patching we do below simpler.
+        for mut sled_agent in collection.sled_agents.iter_mut() {
+            sled_agent.last_reconciliation = None;
+            sled_agent.reconciler_status =
+                ConfigReconcilerInventoryStatus::NotYetRun;
+        }
+
+        // Build a copy of `collection` in which all sleds have a ledgered
+        // config reporting `auth`.
+        let with_ledgered_auth = |auth: WicketSshAuth| {
+            let mut collection = collection.clone();
+            let mut patched = false;
+            for mut sled_agent in collection.sled_agents.iter_mut() {
+                if let Some(config) = sled_agent.ledgered_sled_config.as_mut() {
+                    config.wicket_ssh_auth = auth.clone();
+                    patched = true;
+                }
+            }
+            assert!(patched, "test requires a sled with a ledgered config");
+            collection
+        };
+        let insert_err = |bad: nexus_types::inventory::Collection| async move {
+            let err = datastore
+                .inventory_insert_collection(&opctx, &bad)
+                .await
+                .expect_err("collection insert should fail");
+            match err {
+                Error::InternalError { internal_message } => internal_message,
+                other => panic!("unexpected error: {other:?}"),
+            }
+        };
+
+        // A sled reports a generation that doesn't exist.
+        let message = insert_err(with_ledgered_auth(WicketSshAuth {
+            generation: gen2,
+            kind: WicketSshAuthKind::Unauthenticated,
+        }))
+        .await;
+        assert!(
+            message.contains(&format!("wicket SSH auth generation {gen2}"))
+                && message.contains("does not exist"),
+            "unexpected message: {message}"
+        );
+
+        // A sled reports a generation that exists, but with different
+        // contents.
+        let message = insert_err(with_ledgered_auth(WicketSshAuth {
+            generation: initial.generation,
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::new(),
+                allow_support_keys: true,
+            },
+        }))
+        .await;
+        assert!(
+            message.contains("has different contents than the stored setting"),
+            "unexpected message: {message}"
+        );
+
+        // The checks above all used the ledgered config, but sleds report up
+        // to two other configs; a bad reference in either of those must be
+        // rejected too.
+        let missing = WicketSshAuth {
+            generation: gen2,
+            kind: WicketSshAuthKind::Unauthenticated,
+        };
+        let sled_config = collection
+            .sled_agents
+            .iter()
+            .find_map(|sled_agent| sled_agent.ledgered_sled_config.clone())
+            .expect("test requires a sled with a ledgered config");
+        let bad_config = {
+            let mut config = sled_config.clone();
+            config.wicket_ssh_auth = missing.clone();
+            config
+        };
+
+        let mut bad = collection.clone();
+        bad.sled_agents.iter_mut().next().unwrap().last_reconciliation = Some(
+            ConfigReconcilerInventory::debug_assume_success(bad_config.clone()),
+        );
+        let message = insert_err(bad).await;
+        assert!(
+            message.contains(&format!("wicket SSH auth generation {gen2}"))
+                && message.contains("does not exist"),
+            "unexpected message: {message}"
+        );
+
+        let mut bad = collection.clone();
+        bad.sled_agents.iter_mut().next().unwrap().reconciler_status =
+            ConfigReconcilerInventoryStatus::Running {
+                config: Box::new(bad_config.clone()),
+                started_at: now_db_precision(),
+                running_for: Duration::from_secs(1),
+            };
+        let message = insert_err(bad).await;
+        assert!(
+            message.contains(&format!("wicket SSH auth generation {gen2}"))
+                && message.contains("does not exist"),
+            "unexpected message: {message}"
+        );
+
+        // Two sleds report different contents for the same generation. (This
+        // should be impossible! But we guard against it anyway.)
+        let mut bad = collection.clone();
+        {
+            let mut patched = 0;
+            for mut sled_agent in bad.sled_agents.iter_mut() {
+                if let Some(config) = sled_agent.ledgered_sled_config.as_mut() {
+                    config.wicket_ssh_auth = WicketSshAuth {
+                        generation: gen2,
+                        kind: WicketSshAuthKind::PublicKeys {
+                            authorized_keys: BTreeSet::new(),
+                            allow_support_keys: patched % 2 == 0,
+                        },
+                    };
+                    patched += 1;
+                }
+            }
+            assert!(
+                patched >= 2,
+                "test requires two sleds with ledgered configs"
+            );
+        }
+        let message = insert_err(bad).await;
+        assert!(
+            message.contains("has different contents as referenced by"),
+            "unexpected message: {message}"
+        );
+
+        // Without making any invalid changes to the collection, we should be
+        // able to insert it and read it back.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        assert_eq!(collection, collection_read);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // A sled can report up to three sled configs, each of which may be at a
+    // different wicket SSH auth generation (e.g., while a new setting is being
+    // rolled out). Test that a sled in such a state is faithfully round-tripped
+    // through an insert/read.
+    #[tokio::test]
+    async fn test_inventory_wicket_ssh_auth_round_trip() {
+        use sled_agent_types::inventory::WicketSshAuth;
+        use sled_agent_types::inventory::WicketSshAuthKind;
+        use sled_agent_types::inventory::WicketSshAuthStatus;
+
+        let logctx =
+            dev::test_setup_log("test_inventory_wicket_ssh_auth_round_trip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let initial = WicketSshAuth::initial();
+        let gen2 = WicketSshAuth {
+            generation: initial.generation.next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: ["fake key 1", "fake key 2"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                allow_support_keys: false,
+            },
+        };
+        let gen3 = WicketSshAuth {
+            generation: gen2.generation.next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::new(),
+                allow_support_keys: true,
+            },
+        };
+        datastore.wicket_ssh_auth_insert_for_tests(gen2.clone()).await;
+        datastore.wicket_ssh_auth_insert_for_tests(gen3.clone()).await;
+
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+
+        // Pick a sled with a ledgered config and give it three configs at
+        // three different generations: it has ledgered gen 3, is currently
+        // reconciling gen 2, and last finished reconciling gen 1.
+        {
+            let mut sled_agent = collection
+                .sled_agents
+                .iter_mut()
+                .find(|sled_agent| sled_agent.ledgered_sled_config.is_some())
+                .expect("test requires a sled with a ledgered config");
+            let with_auth = |auth: &WicketSshAuth| {
+                let mut config =
+                    sled_agent.ledgered_sled_config.clone().unwrap();
+                config.wicket_ssh_auth = auth.clone();
+                config
+            };
+            let (ledgered, running, reconciled) =
+                (with_auth(&gen3), with_auth(&gen2), with_auth(&initial));
+            sled_agent.ledgered_sled_config = Some(ledgered);
+            sled_agent.reconciler_status =
+                ConfigReconcilerInventoryStatus::Running {
+                    config: Box::new(running),
+                    started_at: now_db_precision(),
+                    running_for: Duration::from_secs(1),
+                };
+            sled_agent.last_reconciliation = Some(
+                ConfigReconcilerInventory::debug_assume_success(reconciled),
+            );
+            sled_agent.wicket_ssh_auth_status =
+                WicketSshAuthStatus::SwitchZone {
+                    effective_auth_gen: initial.generation,
+                    last_error: None,
+                };
+        }
+
+        // The representative collection should also have a sled reporting an
+        // error applying the setting to its switch zone.
+        assert!(
+            collection.sled_agents.iter().any(|sled_agent| matches!(
+                &sled_agent.wicket_ssh_auth_status,
+                WicketSshAuthStatus::SwitchZone { last_error: Some(_), .. }
+            )),
+            "test requires a sled reporting a wicket SSH auth error"
+        );
+
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        assert_eq!(collection, collection_read);
+
+        // If a sled config somehow refers to a generation that doesn't exist,
+        // reading the collection will fail. This should be impossible, and on
+        // top of that inserts guard against this, so we have to go behind the
+        // datastore's back to test that trying to read such a collection emits
+        // a reasonable error message.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let nupdated = diesel::sql_query(format!(
+            "UPDATE omicron.public.inv_omicron_sled_config \
+             SET wicket_ssh_auth_generation = 99 \
+             WHERE inv_collection_id = '{}' \
+             AND wicket_ssh_auth_generation = {}",
+            collection.id, gen2.generation,
+        ))
+        .execute_async(&*conn)
+        .await
+        .expect("updated inv_omicron_sled_config");
+        assert_eq!(nupdated, 1);
+        let err = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect_err("collection read should fail");
+        match err {
+            Error::InternalError { internal_message } => assert!(
+                internal_message.contains(
+                    "refers to nonexistent wicket SSH auth generation 99"
+                ),
+                "unexpected message: {internal_message}"
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

@@ -1303,6 +1303,50 @@ impl AuthorizedResource for TargetReleaseConfig {
     }
 }
 
+/// Synthetic resource describing access to the operator-controlled wicket SSH
+/// auth settings
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WicketSshAuth;
+
+pub const WICKET_SSH_AUTH: WicketSshAuth = WicketSshAuth;
+
+impl oso::PolarClass for WicketSshAuth {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &WicketSshAuth| FLEET)
+    }
+}
+
+impl AuthorizedResource for WicketSshAuth {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the WicketSshAuth, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor
+        // has the "viewer" or "admin" role on the Fleet (possibly conferred
+        // from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// Synthetic resource used for modeling access to the list of alert classes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AlertClassList;

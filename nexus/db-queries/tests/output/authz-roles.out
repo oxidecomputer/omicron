@@ -271,6 +271,27 @@ resource: authz::TargetReleaseConfig
   internal-api                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   external-authn                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
+resource: authz::WicketSshAuth
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-user-self                   ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  db-init                           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  internal-api                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  external-authn                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
 resource: authz::AlertClassList
 
   USER                              Q  R LC RP  M MP CC  D

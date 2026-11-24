@@ -4681,6 +4681,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- ID of the row in the `rack` table that corresponds to this sled's rack
     rack_id UUID NOT NULL,
 
+    -- Columns making up the wicket SSH auth status on this sled
+    --
+    -- NULL in this column maps to `WicketSshAuthStatus::NoSwitchZone`.
+    -- Non-NULL values map to `WicketSshAuthStatus::SwitchZone { .. }`.
+    -- `wicket_ssh_auth_last_error` must be NULL if
+    -- `wicket_ssh_auth_effective_gen` is NULL. It may or may not be NULL
+    -- otherwise (there isn't always a last error).
+    wicket_ssh_auth_effective_gen INT8,
+    wicket_ssh_auth_last_error TEXT,
+
+    CONSTRAINT wicket_ssh_auth_last_error_only_if_have_effective_gen CHECK (
+        wicket_ssh_auth_last_error IS NULL
+        OR wicket_ssh_auth_effective_gen IS NOT NULL
+    ),
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
@@ -5021,6 +5036,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- current update disposition, controlling whether new VMM registrations are
     -- accepted
     update_disposition omicron.public.inv_sled_update_disposition NOT NULL,
+
+    -- generation of wicket SSH auth settings recorded by this sled-config
+    --
+    -- to rehydrate this to the full settings, look up this generation in the
+    -- relevant `wicket_ssh_auth*` tables.
+    wicket_ssh_auth_generation INT8 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
 );
@@ -6098,6 +6119,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
         (update_availability = 'evacuating')
             = (update_disruption_policy IS NOT NULL)
     ),
+
+    -- wicket SSH auth generation; to hydrate this into the full wicket SSH auth
+    -- setting, consult the `wicket_ssh_auth*` tables.
+    wicket_ssh_auth_generation INT8 NOT NULL,
 
     PRIMARY KEY (blueprint_id, sled_id)
 );
@@ -10284,6 +10309,63 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_support_bundle (
     PRIMARY KEY (sitrep_id, problem_id, support_bundle_id)
 );
 
+-- Top-level table for operator-controlled wicket SSH auth settings (see RFD
+-- 785). Generation 1 is always "unauthenticated" and is inserted by Nexus when
+-- it populates its builtin data; all subsequent generations are created in
+-- response to operator changes. Rows in this table are immutable; if the
+-- operator changes the config, we record the new desired config as a new
+-- generation.
+--
+-- This table (and its partner, `wicket_ssh_auth_key`) is also used when
+-- reading blueprints and inventory collections. Both record a wicket SSH auth
+-- setting per sled config, but to avoid duplicating all the SSH keys for each
+-- sled in every blueprint and collection, they store _only_ the generation
+-- number (in `bp_sled_metadata` and `inv_omicron_sled_config`). Reading them
+-- "rehydrates" that generation number into the full auth settings via these
+-- tables.
+--
+-- These references mean any future pruning of this table must take into account
+-- any references by inventory collections/blueprints (deleting a generation
+-- they reference will render them unable to load), and inserting inventory
+-- collections/blueprints will fail if they reference an unknown generation
+-- (enforced at runtime; there's no conceivable reason this check should fail).
+CREATE TABLE IF NOT EXISTS omicron.public.wicket_ssh_auth (
+    -- Monotonically increasing generation
+    generation INT8 PRIMARY KEY CHECK (generation >= 1),
+
+    -- Time at which this generation was inserted.
+    time_created TIMESTAMPTZ NOT NULL,
+
+    -- A human-readable description of this generation's setting.
+    description STRING NOT NULL,
+
+    -- Column encoding the kind of auth applied in this setting:
+    --
+    -- NULL => unauthenticated
+    -- true => authenticated with baked-in keys plus any operator-specified keys
+    -- false => authenticated with only operator-specified keys
+    --
+    -- In either of the latter cases, look up all rows in
+    -- `wicket_ssh_auth_key` with this `generation` to find the
+    -- operator-specified keys.
+    allow_support_keys BOOL
+);
+
+-- Operator-specified wicket SSH keys for the setting of a given
+-- `wicket_ssh_auth` generation.
+CREATE TABLE IF NOT EXISTS omicron.public.wicket_ssh_auth_key (
+    -- Foreign key into `wicket_ssh_auth`
+    generation INT8 NOT NULL,
+
+    -- The authorized_key line.
+    authorized_key STRING NOT NULL,
+
+    -- A human-readable description of this key.
+    description STRING NOT NULL,
+
+    PRIMARY KEY (generation, authorized_key)
+);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -10293,7 +10375,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '324.0.0', NULL)
+    (TRUE, NOW(), NOW(), '325.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
