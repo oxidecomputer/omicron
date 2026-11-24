@@ -471,11 +471,36 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use slog::{Logger, o};
     use std::collections::HashMap;
+    use std::error::Error as StdError;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
     use std::sync::Arc;
+
+    fn assert_dns_record_not_found<E>(err: &E)
+    where
+        E: StdError + 'static,
+    {
+        let mut chain = Vec::new();
+        let mut current: Option<&(dyn StdError + 'static)> = Some(err);
+
+        while let Some(error) = current {
+            chain.push(error.to_string());
+            if let Some(resolve_error) = error.downcast_ref::<ResolveError>() {
+                assert!(
+                    resolve_error.is_not_found(),
+                    "expected DNS record-not-found error; ResolveError: {resolve_error:?}; error chain: {chain:#?}",
+                );
+                return;
+            }
+            current = error.source();
+        }
+
+        panic!(
+            "expected ResolveError in client error chain; error chain: {chain:#?}"
+        );
+    }
 
     struct DnsServer {
         // We hang onto the storage_path even though it's never used because
@@ -924,10 +949,7 @@ mod test {
 
         // The DNS server is running, but has no records. Expect a failure.
         let err = client.test_endpoint().await.unwrap_err();
-        assert!(
-            err.to_string().contains("error sending request"),
-            "Unexpected Error (expected 'error sending request'): {err}",
-        );
+        assert_dns_record_not_found(&err);
 
         // Add a record for the new service.
         let mut dns_config = DnsConfigBuilder::new();
@@ -1012,10 +1034,7 @@ mod test {
 
         // The DNS server is running, but has no records. Expect a failure.
         let err = client.test_endpoint().await.unwrap_err();
-        assert!(
-            err.to_string().contains("error sending request"),
-            "Unexpected Error (expected 'error sending request'): {err}",
-        );
+        assert_dns_record_not_found(&err);
 
         // Add a record for the new service, but only to the second DNS server.
         // Since both servers are authoritative, we also shut down the first
