@@ -119,6 +119,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -148,6 +149,7 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -4166,6 +4168,15 @@ impl DataStore {
         let mut omicron_sled_configs = {
             use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
 
+            // As we read each sled config, we need to rehydrate the full wicket
+            // SSH auth setting based on the generation number stored. We expect
+            // a small number of distinct generations (usually 1!), so keep them
+            // in a map here to avoid unnecessary db traffic.
+            let mut wicket_ssh_auth_by_gen: BTreeMap<
+                WicketSshAuthGeneration,
+                WicketSshAuth,
+            > = BTreeMap::new();
+
             let mut configs = IdOrdMap::new();
 
             let mut paginator = Paginator::new(
@@ -4187,9 +4198,30 @@ impl DataStore {
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
+                    let sled_config_id = sled_config.id.into();
+                    let wicket_auth_gen =
+                        sled_config.wicket_ssh_auth_generation.into();
+                    let wicket_ssh_auth =
+                        match wicket_ssh_auth_by_gen.entry(wicket_auth_gen) {
+                            btree_map::Entry::Occupied(entry) => {
+                                entry.get().clone()
+                            }
+                            btree_map::Entry::Vacant(entry) => {
+                                let auth = self
+                                    .wicket_ssh_auth_read_on_connection(
+                                        &conn,
+                                        wicket_auth_gen,
+                                    )
+                                    .await
+                                    .internal_context(format!(
+                                        "reading inventory collection {id}"
+                                    ))?;
+                                entry.insert(auth).clone()
+                            }
+                        };
                     configs
                         .insert_unique(OmicronSledConfigWithId {
-                            id: sled_config.id.into(),
+                            id: sled_config_id,
                             config: OmicronSledConfig {
                                 generation: sled_config.generation.into(),
                                 remove_mupdate_override: sled_config
@@ -4203,12 +4235,7 @@ impl DataStore {
                                 update_disposition: sled_config
                                     .update_disposition
                                     .into(),
-                                // TODO omicron#11821 We should store the
-                                // wicket SSH auth reported in inventory in
-                                // the DB. For now we return the initial value
-                                // in all inventory reports (it's the only value
-                                // any sled-agent can report anyway).
-                                wicket_ssh_auth: WicketSshAuth::initial(),
+                                wicket_ssh_auth,
                             },
                         })
                         .map_err(|e| {
@@ -5951,20 +5978,19 @@ impl ConfigReconcilerRows {
             host_phase_2,
             measurements,
             update_disposition,
-            // TODO omicron#11821 We should store the wicket SSH auth reported
-            // in each sled config.
-            wicket_ssh_auth: _,
+            wicket_ssh_auth,
         } = config;
 
-        self.sled_configs.push(InvOmicronSledConfig::new(
-            collection_id,
-            sled_config_id,
-            *generation,
-            *remove_mupdate_override,
-            host_phase_2.clone(),
-            measurements.clone(),
-            *update_disposition,
-        ));
+        self.sled_configs.push(InvOmicronSledConfig {
+            inv_collection_id: collection_id.into(),
+            id: sled_config_id.into(),
+            generation: (*generation).into(),
+            remove_mupdate_override: remove_mupdate_override.map(From::from),
+            host_phase_2: host_phase_2.clone().into(),
+            measurements: measurements.clone().into(),
+            update_disposition: (*update_disposition).into(),
+            wicket_ssh_auth_generation: wicket_ssh_auth.generation.into(),
+        });
         self.disks.extend(disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
                 collection_id,

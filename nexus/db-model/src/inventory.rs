@@ -65,10 +65,8 @@ use omicron_common::address::{
 use omicron_common::disk::DatasetName;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::SledConfigGenerationKind;
 use omicron_generation_kinds::WicketSshAuthGenerationKind;
-use omicron_generation_kinds::{
-    SledConfigGeneration, SledConfigGenerationKind,
-};
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::FmdHostCaseKind;
@@ -76,7 +74,6 @@ use omicron_uuid_kinds::FmdResourceKind;
 use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
-use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronSledConfigKind;
 use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -3153,28 +3150,8 @@ pub struct InvOmicronSledConfig {
     pub measurements: DbOmicronMeasurements,
 
     pub update_disposition: DbInvSledUpdateDisposition,
-}
-
-impl InvOmicronSledConfig {
-    pub fn new(
-        inv_collection_id: CollectionUuid,
-        id: OmicronSledConfigUuid,
-        generation: SledConfigGeneration,
-        remove_mupdate_override: Option<MupdateOverrideUuid>,
-        host_phase_2: HostPhase2DesiredSlots,
-        measurements: BTreeSet<OmicronSingleMeasurement>,
-        update_disposition: OmicronSledUpdateDisposition,
-    ) -> Self {
-        Self {
-            inv_collection_id: inv_collection_id.into(),
-            id: id.into(),
-            generation: generation.into(),
-            remove_mupdate_override: remove_mupdate_override.map(From::from),
-            host_phase_2: host_phase_2.into(),
-            measurements: measurements.into(),
-            update_disposition: update_disposition.into(),
-        }
-    }
+    pub wicket_ssh_auth_generation:
+        DbTypedGeneration<WicketSshAuthGenerationKind>,
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
