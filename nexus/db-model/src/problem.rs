@@ -50,6 +50,7 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::problem as api;
 use nexus_types::fm::problem::AlertLink;
 use nexus_types::fm::problem::ProblemCode;
+use nexus_types::fm::problem::SupportBundleLink;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::ProblemRevKind;
@@ -174,6 +175,32 @@ pub struct ProblemSupportBundle {
     /// problem. This must be greater than zero, which is enforced by a `CHECK`
     /// constraint in the database.
     pub revision: DbTypedGeneration<ProblemRevKind>,
+}
+
+impl ProblemSupportBundle {
+    /// Constructs the `problem_support_bundle` record that should be created
+    /// for a sitrep [`SupportBundleLink`] requested by the problem with the
+    /// specified `problem_id`.
+    pub fn from_sitrep(
+        problem_id: ProblemUuid,
+        link: &SupportBundleLink,
+    ) -> Self {
+        let SupportBundleLink {
+            support_bundle_id,
+            revision,
+            // The sitrep in which the link was created and the comment
+            // explaining it are debugging information that's internal to the
+            // sitrep. These are not part of the externally-visible attachment
+            // record.
+            linked_sitrep_id: _,
+            comment: _,
+        } = link;
+        Self {
+            problem_id: problem_id.into(),
+            support_bundle_id: (*support_bundle_id).into(),
+            revision: (*revision).into(),
+        }
+    }
 }
 
 /// A view of a problem at its current revision.

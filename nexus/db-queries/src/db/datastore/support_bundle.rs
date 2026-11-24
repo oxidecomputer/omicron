@@ -5,8 +5,11 @@
 //! [`DataStore`] methods on [`SupportBundle`]s.
 
 use super::DataStore;
+use super::RunnableQuery;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::model::ProblemRevisionFilter;
+use crate::db::model::ProblemSupportBundle;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
@@ -28,6 +31,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::fm::problem::SupportBundleLink;
 use nexus_types::support_bundle::BundleData;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_common::api::external;
@@ -457,6 +461,116 @@ impl DataStore {
         .load_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Lists one page of support bundles attached to a problem as of a
+    /// particular revision, ordered by creation time.
+    ///
+    /// Only support bundles attached at the requested revision or earlier are
+    /// listed. Support bundles attached to the problem which do not exist (or
+    /// no longer exist) are not listed.
+    pub async fn problem_list_support_bundles(
+        &self,
+        opctx: &OpContext,
+        problem: impl Into<ProblemRevisionFilter>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
+    ) -> ListResultVec<SupportBundle> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::problem_list_support_bundles_query(problem.into(), pagparams)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn problem_list_support_bundles_query(
+        ProblemRevisionFilter { id, rev }: ProblemRevisionFilter,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
+    ) -> impl RunnableQuery<SupportBundle> + use<> {
+        use nexus_db_schema::schema::problem_support_bundle::dsl as problem_bundle_dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        // Unlike `alert_list_matching`, the problem filter here is not
+        // optional, so we can use an INNER JOIN rather than a subquery. Since
+        // `(problem_id, support_bundle_id)` is the primary key of
+        // `problem_support_bundle`, each support bundle matches at most one
+        // association record, so the join will not return duplicates.
+        paginated_multicolumn(
+            dsl::support_bundle,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .inner_join(
+            problem_bundle_dsl::problem_support_bundle.on(
+                problem_bundle_dsl::support_bundle_id
+                    .eq(dsl::id)
+                    .and(problem_bundle_dsl::problem_id.eq(id))
+                    .and(problem_bundle_dsl::revision.le(rev)),
+            ),
+        )
+        .select(SupportBundle::as_select())
+    }
+
+    /// Creates externally-visible records in the `problem_support_bundle`
+    /// association table for support bundle links requested for
+    /// `authz_problem` in a sitrep.
+    ///
+    /// All records created by this method are for the problem ID provided by
+    /// `authz_problem`. Callers must pass in only `links` requested for that
+    /// problem in the sitrep (i.e. those returned by
+    /// [`SitrepProblem::support_bundles`]).
+    ///
+    /// This function may create support bundle links requested by multiple
+    /// revisions of the problem's revision history. A support bundle attached
+    /// at a given revision remains attached in subsequent revisions of the
+    /// problem. Attached support bundles do not become visible in the external
+    /// API until the revision at which they were attached (or a later one)
+    /// becomes the problem's current revision.
+    ///
+    /// Attaching support bundles to a problem is idempotent. If a given support
+    /// bundle UUID is already attached to the problem, no association record
+    /// is created for that support bundle, even if the existing attachment's
+    /// revision differs from the requested one. This function returns the
+    /// number of new support bundle link records that were actually created.
+    ///
+    /// This does not check that the revisions or the support bundles exist. A
+    /// support bundle may be attached before it has been created. In that
+    /// case, it will not be returned by [`Self::problem_list_support_bundles`]
+    /// until the support bundle record with the provided ID exists. If such a
+    /// support bundle is never created, its attachment record remains, but is
+    /// never visible.
+    ///
+    /// [`SitrepProblem::support_bundles`]: nexus_types::fm::problem::SitrepProblem::support_bundles
+    pub async fn problem_attach_support_bundles(
+        &self,
+        opctx: &OpContext,
+        authz_problem: &authz::Problem,
+        links: impl IntoIterator<Item = &'_ SupportBundleLink>,
+    ) -> CreateResult<usize> {
+        use nexus_db_schema::schema::problem_support_bundle::dsl as problem_bundle_dsl;
+
+        opctx.authorize(authz::Action::Modify, authz_problem).await?;
+        let problem_id = authz_problem.id();
+        let records = links
+            .into_iter()
+            .map(|link| ProblemSupportBundle::from_sitrep(problem_id, link))
+            .collect::<Vec<_>>();
+        if records.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::insert_into(problem_bundle_dsl::problem_support_bundle)
+            .values(records)
+            .on_conflict((
+                problem_bundle_dsl::problem_id,
+                problem_bundle_dsl::support_bundle_id,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Lists one page of support bundles in a particular state, assigned to
@@ -994,9 +1108,12 @@ mod test {
     use super::*;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
+    use dropshot::PaginationOrder;
     use nexus_db_schema::schema::rendezvous_support_bundle_created::dsl as marker_dsl;
 
     use crate::db::datastore::test::bp_insert_and_make_target;
+    use crate::db::datastore::test_utils::problem;
+    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::sled_upsert_expect_written;
     use nexus_db_model::SledBaseboard;
@@ -1021,9 +1138,51 @@ mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SitrepUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use rand::Rng;
+    use std::collections::BTreeSet;
+    use std::num::NonZeroU32;
+
+    #[tokio::test]
+    async fn explain_problem_list_support_bundles() {
+        use crate::db::explain::ExplainableAsync;
+        use omicron_generation_kinds::ProblemRevNum;
+        use omicron_uuid_kinds::ProblemUuid;
+
+        let logctx =
+            dev::test_setup_log("explain_problem_list_support_bundles");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let conn = db.pool().claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let query = DataStore::problem_list_support_bundles_query(
+            ProblemRevisionFilter {
+                id: ProblemUuid::new_v4().into(),
+                rev: ProblemRevNum::from_u32(3).into(),
+            },
+            &pagparams,
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("--- explanation: {explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {explanation}",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     fn authz_support_bundle_from_id(
         id: SupportBundleUuid,
@@ -2604,6 +2763,289 @@ mod test {
             .expect("empty input must return Ok");
 
         assert!(existing.is_empty(), "empty input returns empty result");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Creates a support bundle record that is not associated with any FM
+    /// case.
+    ///
+    /// This inserts the record directly, rather than using
+    /// `support_bundle_create`, which requires a debug dataset to allocate the
+    /// bundle in.
+    async fn create_support_bundle(datastore: &DataStore) -> SupportBundleUuid {
+        let bundle = SupportBundle::new(
+            SupportBundleUuid::new_v4(),
+            "test support bundle".to_string(),
+            ZpoolUuid::new_v4(),
+            // Each bundle gets its own dataset ID, since the
+            // `one_bundle_per_dataset` index permits only one bundle per
+            // dataset.
+            DatasetUuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
+            None,
+            None,
+        );
+        let id = bundle.id();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(support_bundle_dsl::support_bundle)
+            .values(bundle)
+            .execute_async(&*conn)
+            .await
+            .expect("creating a support bundle should succeed");
+        id
+    }
+
+    fn problem_link_request(
+        support_bundle_id: SupportBundleUuid,
+        revision: u32,
+    ) -> SupportBundleLink {
+        SupportBundleLink {
+            support_bundle_id,
+            revision: problem::rev(revision),
+            linked_sitrep_id: SitrepUuid::new_v4(),
+            comment: "test support bundle link".to_string(),
+        }
+    }
+
+    /// Lists the support bundles attached to a problem as of its current
+    /// revision, similarly to the external API.
+    async fn list_attached_support_bundles(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_problem: &authz::Problem,
+    ) -> BTreeSet<SupportBundleUuid> {
+        let (_, problem) = LookupPath::new(opctx, datastore)
+            .problem_id(authz_problem.id())
+            .fetch()
+            .await
+            .expect("looking up the problem should succeed");
+
+        let mut bundles = BTreeSet::new();
+        let mut paginator = Paginator::new(
+            // Use a page size of 1 to ensure that any time we list more than
+            // one support bundle, pagination is also exercised.
+            NonZeroU32::new(1).unwrap(),
+            PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let page = datastore
+                .problem_list_support_bundles(
+                    opctx,
+                    &problem,
+                    &p.current_pagparams(),
+                )
+                .await
+                .expect("listing support bundles should succeed");
+            paginator = p.found_batch(&page, &|bundle| {
+                (bundle.time_created, bundle.id().into_untyped_uuid())
+            });
+            // This also ensures that the loop terminates if the query ignores
+            // the pagination marker and returns the same page again.
+            for bundle in page {
+                let id = bundle.id();
+                assert!(
+                    bundles.insert(id),
+                    "support bundle {id} was returned on more than one page \
+                     (already listed: {bundles:?})",
+                );
+            }
+        }
+        bundles
+    }
+
+    /// Tests that a problem's support bundle list includes support bundles
+    /// attached at its current revision or any earlier one. Support bundles
+    /// that do not exist, support bundles at revisions that have not yet been
+    /// made the current revision, and support bundles not attached to the
+    /// problem are not returned.
+    #[tokio::test]
+    async fn test_problem_support_bundle_list_as_of_current_revision() {
+        let logctx = dev::test_setup_log(
+            "test_problem_support_bundle_list_as_of_current_revision",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        problem::insert_current_sitrep(
+            opctx,
+            datastore,
+            SitrepProblemGeneration::new(),
+        )
+        .await;
+
+        let (authz_problem, _) =
+            problem::create_with_revisions(opctx, datastore, 2).await;
+        let (other_problem, _) =
+            problem::create_with_revisions(opctx, datastore, 1).await;
+        let rev1_bundle = create_support_bundle(datastore).await;
+        let rev2_bundle = create_support_bundle(datastore).await;
+        let other_bundle = create_support_bundle(datastore).await;
+        // A support bundle that is not attached to any problem at all.
+        create_support_bundle(datastore).await;
+        // A support bundle that is attached to the problem, but has not been
+        // created.
+        let nonexistent_bundle = SupportBundleUuid::new_v4();
+
+        let attached = datastore
+            .problem_attach_support_bundles(
+                opctx,
+                &authz_problem,
+                &[
+                    problem_link_request(rev1_bundle, 1),
+                    problem_link_request(nonexistent_bundle, 1),
+                    problem_link_request(rev2_bundle, 2),
+                ],
+            )
+            .await
+            .expect("attaching support bundles should succeed");
+        assert_eq!(
+            attached, 3,
+            "all support bundle attachment records should be created"
+        );
+        let attached = datastore
+            .problem_attach_support_bundles(
+                opctx,
+                &other_problem,
+                &[problem_link_request(other_bundle, 1)],
+            )
+            .await
+            .expect("attaching support bundles should succeed");
+        assert_eq!(attached, 1, "the attachment should be inserted");
+
+        assert_eq!(
+            list_attached_support_bundles(opctx, datastore, &authz_problem)
+                .await,
+            BTreeSet::new(),
+            "a problem at revision zero should have no visible support \
+             bundles",
+        );
+
+        datastore
+            .problem_set_current_revision(
+                opctx,
+                &authz_problem,
+                problem::rev(1),
+            )
+            .await
+            .expect("making revision 1 current should succeed");
+        assert_eq!(
+            list_attached_support_bundles(opctx, datastore, &authz_problem)
+                .await,
+            BTreeSet::from([rev1_bundle]),
+            "a support bundle attached at a revision which is not yet \
+             current, or which does not exist, should not be visible",
+        );
+
+        datastore
+            .problem_set_current_revision(
+                opctx,
+                &authz_problem,
+                problem::rev(2),
+            )
+            .await
+            .expect("making revision 2 current should succeed");
+        assert_eq!(
+            list_attached_support_bundles(opctx, datastore, &authz_problem)
+                .await,
+            BTreeSet::from([rev1_bundle, rev2_bundle]),
+            "support bundles attached at earlier revisions should remain \
+             attached",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests that re-attaching support bundles that are already attached does
+    /// not insert them again or modify the existing attachments, even if the
+    /// requested revision differs, while any new support bundles in the same
+    /// batch are attached.
+    #[tokio::test]
+    async fn test_problem_attach_support_bundles_is_idempotent() {
+        let logctx = dev::test_setup_log(
+            "test_problem_attach_support_bundles_is_idempotent",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        problem::insert_current_sitrep(
+            opctx,
+            datastore,
+            SitrepProblemGeneration::new(),
+        )
+        .await;
+
+        let (authz_problem, _) =
+            problem::create_with_revisions(opctx, datastore, 2).await;
+        datastore
+            .problem_set_current_revision(
+                opctx,
+                &authz_problem,
+                problem::rev(1),
+            )
+            .await
+            .expect("making revision 1 current should succeed");
+        let first = create_support_bundle(datastore).await;
+        let second = create_support_bundle(datastore).await;
+
+        let attached = datastore
+            .problem_attach_support_bundles(opctx, &authz_problem, &[])
+            .await
+            .expect("attaching no support bundles should succeed");
+        assert_eq!(attached, 0);
+
+        let attached = datastore
+            .problem_attach_support_bundles(
+                opctx,
+                &authz_problem,
+                &[problem_link_request(first, 1)],
+            )
+            .await
+            .expect("attaching a support bundle should succeed");
+        assert_eq!(attached, 1, "a new attachment should be inserted");
+
+        let attached = datastore
+            .problem_attach_support_bundles(
+                opctx,
+                &authz_problem,
+                &[
+                    problem_link_request(first, 1),
+                    problem_link_request(second, 1),
+                ],
+            )
+            .await
+            .expect(
+                "re-attaching a support bundle should succeed idempotently",
+            );
+        assert_eq!(
+            attached, 1,
+            "only the support bundle which was not already attached should be \
+             inserted"
+        );
+
+        // If attaching `first` at revision 2 overwrote the existing
+        // attachment, it would no longer be visible at revision 1.
+        let attached = datastore
+            .problem_attach_support_bundles(
+                opctx,
+                &authz_problem,
+                &[problem_link_request(first, 2)],
+            )
+            .await
+            .expect(
+                "re-attaching a support bundle should succeed idempotently",
+            );
+        assert_eq!(
+            attached, 0,
+            "an existing attachment should not be re-created"
+        );
+        assert_eq!(
+            list_attached_support_bundles(opctx, datastore, &authz_problem)
+                .await,
+            BTreeSet::from([first, second]),
+            "re-attaching a support bundle at a different revision should not \
+             modify the existing attachment",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

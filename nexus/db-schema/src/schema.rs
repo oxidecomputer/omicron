@@ -3751,6 +3751,8 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query!(support_bundle, problem_support_bundle);
+
 table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,

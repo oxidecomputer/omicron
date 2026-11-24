@@ -104,14 +104,22 @@ impl Nexus {
     /// Lists the support bundles attached to the requested problem.
     pub async fn problem_support_bundles_list(
         &self,
+        opctx: &OpContext,
         problem_lookup: &lookup::Problem<'_>,
-        _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundleInfo> {
-        let (_authz_problem, _problem) =
+        let (_authz_problem, problem) =
             fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
-        // TODO(eliza): actually add a way to associate problems and support
-        // bundles...
-        Ok(Vec::new())
+
+        let bundles = self
+            .db_datastore
+            .problem_list_support_bundles(opctx, &problem, pagparams)
+            .await?
+            .into_iter()
+            .map(SupportBundleInfo::from)
+            .collect();
+
+        Ok(bundles)
     }
 
     /// Lists alerts associated with the requested problem.
