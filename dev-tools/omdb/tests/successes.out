@@ -2457,7 +2457,7 @@ Reconfigurator config:
     planner enabled: false
     planner config:
         disruption policy : terminate
-        sled update reboot policy: immediate (no evacuation)
+        sled update reboot policy: evacuate
 
 ---------------------------------------------
 stderr:

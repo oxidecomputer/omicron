@@ -23,7 +23,7 @@ cockroachdb settings:
     preserve downgrade:   (not set)
 planner config:
     disruption policy : terminate
-    sled update reboot policy: immediate (no evacuation)
+    sled update reboot policy: evacuate
 
 
 
@@ -85,7 +85,7 @@ cockroachdb settings:
     preserve downgrade:   (not set)
 planner config:
     disruption policy : terminate
-    sled update reboot policy: immediate (no evacuation)
+    sled update reboot policy: evacuate
 
 
 
@@ -1204,7 +1204,7 @@ cockroachdb settings:
     preserve downgrade:   (not set)
 planner config:
     disruption policy : terminate
-    sled update reboot policy: immediate (no evacuation)
+    sled update reboot policy: evacuate
 
 
 
@@ -1232,7 +1232,7 @@ cockroachdb settings:
     preserve downgrade:   (not set)
 planner config:
     disruption policy : terminate
-    sled update reboot policy: immediate (no evacuation)
+    sled update reboot policy: evacuate
 
 
 > load saved.out --collection-id 61f451b3-2121-4ed6-91c7-a550054f6c21
@@ -1297,7 +1297,7 @@ cockroachdb settings:
     preserve downgrade:   (not set)
 planner config:
     disruption policy : terminate
-    sled update reboot policy: immediate (no evacuation)
+    sled update reboot policy: evacuate
 
 
 
