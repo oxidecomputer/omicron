@@ -119,11 +119,12 @@ pub struct FmProblemRevisionRequest {
 /// record will be created by rendezvous when executing the sitrep that contains
 /// this record.
 ///
-/// The referenced alert need not be one requested in the same sitrep, and a
-/// link will be created when the sitrep is executed as long as the referenced
-/// alert still exists. Rendezvous must not create the externally visible link
-/// until both the problem and the alert exist. Otherwise, a caller listing a
-/// problem's alerts may see an alert that does not exist yet.
+/// The referenced alert need not be one requested in the same sitrep, and
+/// rendezvous may create the externally-visible association-table record before
+/// the alert itself exists. Listing a problem's support bundles will select
+/// from the `support_bundle` table and filter or INNER JOIN with the link
+/// table, so a link referencing a support bundle that doesn't exist will not be
+/// selected.
 ///
 /// Once the problem is no longer part of the sitrep *and* rendezvous has
 /// created the link, this record need not be carried forward into subsequent
@@ -164,11 +165,11 @@ pub struct FmProblemAlert {
 /// the sitrep that contains this record.
 ///
 /// The referenced support bundle need not be one requested in the same sitrep,
-/// and a link will be created when the sitrep is executed as long as the
-/// referenced support bundle still exists. Rendezvous must not create the externally
-/// visible link until both the problem and the support bundle exist. Otherwise,
-/// a caller listing a problem's support bundle may see one that does not exist
-/// yet.
+/// and rendezvous may create the externally-visible association-table record
+/// before the support bundle itself exists. Listing a problem's support bundles
+/// will select from the `support_bundle` table and filter or INNER JOIN with
+/// the link table, so a link referencing a support bundle that doesn't exist
+/// will not be selected.
 ///
 /// Once the problem is no longer part of the sitrep *and* rendezvous has
 /// created the link, this record need not be carried forward into subsequent

@@ -12,6 +12,31 @@
 //! state of a problem is the revision whose `revision` number equals the
 //! problem's `current_revision`.
 //!
+//! ## Alerts and Support Bundles
+//!
+//! Alerts and support bundles attached to a problem are represented by the
+//! [`ProblemAlert`] and [`ProblemSupportBundle`] association tables. Rows in
+//! these tables record the ID of the attached alert or support bundle, the
+//! problem ID, and the revision of the problem at which the alert or support
+//! bundle was linked to the problem. Because alerts and support bundles may be
+//! attached to multiple problems, we must use a join table (rather than a
+//! foreign key on `alert` or `support_bundle`) to express this relationship.
+//!
+//! Records in these tables are logically "owned" by the problem, and are
+//! removed only when the problem itself is deleted. Because these records are
+//! not removed while the problem still exists, the alerts and support bundles
+//! attached to a problem at a given revision number are any records where the
+//! attachment's revision number is less than or equal to that revision number.
+//! Queries that list these resources for a given problem should always include
+//! a `WHERE` clause that selects only resources attached at the problem's
+//! current revision or earlier. This ensures that external API callers do not
+//! encounter revisions that have not yet been fully created.
+//!
+//! These association records may exist before the alert or support bundle is
+//! created, and may outlive it if it is deleted. Listing alerts or support
+//! bundles selects records from the alert or support bundle tables, so it will
+//! not return records that do not yet exist or have been deleted.
+//!
 //! [RFD 699]: https://rfd.shared.oxide.computer/rfd/0699
 
 use crate::DbTypedGeneration;
@@ -19,15 +44,20 @@ use crate::DbTypedUuid;
 use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_db_schema::schema::{problem, problem_revision};
+use nexus_db_schema::schema::{
+    problem, problem_alert, problem_revision, problem_support_bundle,
+};
 use nexus_types::external_api::problem as api;
+use nexus_types::fm::problem::AlertLink;
 use nexus_types::fm::problem::ProblemCode;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::ProblemRevKind;
 use omicron_generation_kinds::ProblemRevNum;
+use omicron_uuid_kinds::AlertKind;
 use omicron_uuid_kinds::ProblemKind;
 use omicron_uuid_kinds::ProblemUuid;
+use omicron_uuid_kinds::SupportBundleKind;
 
 /// A problem.
 ///
@@ -78,6 +108,72 @@ pub struct ProblemRevision {
     pub summary: String,
     pub description: String,
     pub action_required: String,
+}
+
+/// An alert attached to a problem.
+///
+/// This corresponds to a record in the `problem_alert` table.
+///
+/// Records in this table are logically part of the problem itself, and are
+/// removed when it is deleted. They are created by FM rendezvous based on
+/// requests in the sitrep [`crate::fm::FmProblemAlert`] table.
+#[derive(Clone, Debug, PartialEq, Queryable, Insertable, Selectable)]
+#[diesel(table_name = problem_alert)]
+pub struct ProblemAlert {
+    pub problem_id: DbTypedUuid<ProblemKind>,
+    pub alert_id: DbTypedUuid<AlertKind>,
+    /// The revision of the problem in which the alert was attached.
+    ///
+    /// The alert remains attached to all subsequent revisions of the problem.
+    /// This must be greater than zero, which is enforced by a `CHECK`
+    /// constraint in the database.
+    pub revision: DbTypedGeneration<ProblemRevKind>,
+}
+
+impl ProblemAlert {
+    /// Constructs the `problem_alert` record that should be created for a
+    /// sitrep [`AlertLink`] requested by the problem with the specified
+    /// `problem_id`.
+    pub fn from_sitrep(problem_id: ProblemUuid, link: &AlertLink) -> Self {
+        let AlertLink {
+            alert_id,
+            revision,
+            // The sitrep in which the link was created and the comment
+            // explaining it are debugging information that's internal to the
+            // sitrep. These are not part of the externally-visible attachment
+            // record.
+            linked_sitrep_id: _,
+            comment: _,
+        } = link;
+        Self {
+            problem_id: problem_id.into(),
+            alert_id: (*alert_id).into(),
+            revision: (*revision).into(),
+        }
+    }
+}
+
+/// A support bundle attached to a problem.
+///
+/// This corresponds to a record in the `problem_support_bundle` table, and is
+/// used to list support bundles attached to the problem as of a particular
+/// revision.
+///
+/// Records in this table are logically owned by the problem, and are removed
+/// when the problem is deleted. Records in this table are created by FM
+/// rendezvous based on requests in the sitrep
+/// [`crate::fm::FmProblemSupportBundle`] table.
+#[derive(Clone, Debug, PartialEq, Queryable, Insertable, Selectable)]
+#[diesel(table_name = problem_support_bundle)]
+pub struct ProblemSupportBundle {
+    pub problem_id: DbTypedUuid<ProblemKind>,
+    pub support_bundle_id: DbTypedUuid<SupportBundleKind>,
+    /// The revision of the problem in which the support bundle was attached.
+    ///
+    /// The support bundle remains attached to all subsequent revisions of the
+    /// problem. This must be greater than zero, which is enforced by a `CHECK`
+    /// constraint in the database.
+    pub revision: DbTypedGeneration<ProblemRevKind>,
 }
 
 /// A view of a problem at its current revision.
@@ -203,6 +299,11 @@ impl From<ProblemView> for api::Problem {
 
 /// A filter for listing resources associated with a problem as of a particular
 /// revision.
+///
+/// Resources attached at any revision less than or equal to `rev` match this
+/// filter. Resources attached in later revisions do not, so that resources
+/// attached in a revision that rendezvous has not yet made current are not
+/// visible.
 #[derive(Debug, Copy, Clone)]
 pub struct ProblemRevisionFilter {
     pub id: DbTypedUuid<ProblemKind>,

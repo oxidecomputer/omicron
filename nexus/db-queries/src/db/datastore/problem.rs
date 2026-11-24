@@ -14,6 +14,7 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::model::DbTypedGeneration;
 use crate::db::model::Problem;
+use crate::db::model::ProblemAlert;
 use crate::db::model::ProblemIdentity;
 use crate::db::model::ProblemRevision;
 use crate::db::model::ProblemView;
@@ -28,8 +29,10 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::problem::dsl as problem_dsl;
+use nexus_db_schema::schema::problem_alert::dsl as problem_alert_dsl;
 use nexus_db_schema::schema::problem_revision::dsl as rev_dsl;
 use nexus_types::external_api::problem as api;
+use nexus_types::fm::problem::AlertLink;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -435,6 +438,63 @@ impl DataStore {
             ))
             .check_if_exists::<Problem>(problem_id.into_untyped_uuid())
     }
+
+    /// Creates externally-visible records in the `problem_alert` association
+    /// table for alert links requested for `authz_problem` in a sitrep.
+    ///
+    /// All records created by this method are for the problem ID provided by
+    /// `authz_problem`. Callers must pass in only `links` requested for that
+    /// problem in the sitrep (i.e. those returned by
+    /// [`SitrepProblem::alerts`]).
+    ///
+    /// This function may create alert links requested by multiple revisions of
+    /// the problem's revision history. An alert attached at a given revision
+    /// remains attached in subsequent revisions of the problem. Attached alerts
+    /// do not become visible in the external API until the revision at which
+    /// they were attached (or a later one) becomes the problem's current
+    /// revision.
+    ///
+    /// Attaching alerts to a problem is idempotent. If a given alert UUID is
+    /// already attached to the problem, no association record is created for
+    /// that alert, even if the existing attachment's revision differs from the
+    /// requested one. This function returns the number of new alert link
+    /// records that were actually created.
+    ///
+    /// This does not check that the revisions or the alerts exist. An alert may
+    /// be attached before it has been created. In that case, it will not be
+    /// returned by `alert_list_matching` with a problem ID filter until the
+    /// alert record with the provided ID exists. If such an alert is never
+    /// created, its attachment record remains, but is never visible.
+    ///
+    /// [`SitrepProblem::alerts`]: nexus_types::fm::problem::SitrepProblem::alerts
+    pub async fn problem_attach_alerts(
+        &self,
+        opctx: &OpContext,
+        authz_problem: &authz::Problem,
+        links: impl IntoIterator<Item = &'_ AlertLink>,
+    ) -> CreateResult<usize> {
+        opctx.authorize(authz::Action::Modify, authz_problem).await?;
+        let problem_id = authz_problem.id();
+        let records = links
+            .into_iter()
+            .map(|link| ProblemAlert::from_sitrep(problem_id, link))
+            .collect::<Vec<_>>();
+        if records.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::insert_into(problem_alert_dsl::problem_alert)
+            .values(records)
+            .on_conflict((
+                problem_alert_dsl::problem_id,
+                problem_alert_dsl::alert_id,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 /// The outcome of [`DataStore::problem_set_current_revision`].
@@ -455,7 +515,9 @@ pub enum SetCurrentRevisionOutcome {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::AlertFilters;
     use crate::db::model::SqlU32;
+    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
@@ -471,9 +533,11 @@ mod test {
     use omicron_generation_kinds::SitrepAlertGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::AlertUuid;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
+    use std::collections::BTreeSet;
     use std::num::NonZeroU32;
 
     fn rev(revision: u32) -> ProblemRevNum {
@@ -1083,6 +1147,230 @@ mod test {
         assert_eq!(
             problem.identity.time_modified,
             revisions.last().unwrap().time_created,
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Creates an alert that is not associated with any FM case.
+    async fn create_alert(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> AlertUuid {
+        let alert = crate::db::model::Alert::new(
+            AlertUuid::new_v4(),
+            &nexus_types::alert::test_alerts::Foo(serde_json::json!({})),
+        )
+        .unwrap();
+        datastore
+            .alert_create(opctx, alert)
+            .await
+            .expect("creating an alert should succeed")
+            .id()
+    }
+
+    fn alert_link_request(alert_id: AlertUuid, revision: u32) -> AlertLink {
+        AlertLink {
+            alert_id,
+            revision: rev(revision),
+            linked_sitrep_id: SitrepUuid::new_v4(),
+            comment: "test alert link".to_string(),
+        }
+    }
+
+    /// Lists the alerts attached to a problem as of its current revision,
+    /// similarly to the external API.
+    async fn list_attached_alerts(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_problem: &authz::Problem,
+    ) -> BTreeSet<AlertUuid> {
+        let (_, problem) = LookupPath::new(opctx, datastore)
+            .problem_id(authz_problem.id())
+            .fetch()
+            .await
+            .expect("looking up the problem should succeed");
+        let filters = AlertFilters::new().for_problem(&problem);
+
+        let mut alerts = BTreeSet::new();
+        let mut paginator = Paginator::new(
+            // Use a page size of 1 to ensure that any time we list more than
+            // one alert, pagination is also exercised.
+            NonZeroU32::new(1).unwrap(),
+            PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let page = datastore
+                .alert_list_matching(opctx, &filters, &p.current_pagparams())
+                .await
+                .expect("listing alerts should succeed");
+            paginator = p.found_batch(&page, &|(alert, _)| {
+                (alert.time_created(), alert.id().into_untyped_uuid())
+            });
+            // This also ensures that the loop terminates if the query ignores
+            // the pagination marker and returns the same page again.
+            for (alert, _) in page {
+                let id = alert.id();
+                assert!(
+                    alerts.insert(id),
+                    "alert {id} was returned on more than one page \
+                     (already listed: {alerts:?})",
+                );
+            }
+        }
+        alerts
+    }
+
+    /// Tests that a problem's alert list includes alerts attached at its
+    /// current revision or any earlier one. Alerts that do not exist, alerts at
+    /// revisions that have not yet been made the current revision, and alerts
+    /// not attached to the problem are not returned.
+    #[tokio::test]
+    async fn test_problem_alert_list_as_of_current_revision() {
+        let logctx = dev::test_setup_log(
+            "test_problem_alert_list_as_of_current_revision",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
+
+        let (authz_problem, _) =
+            create_with_revisions(opctx, datastore, 2).await;
+        let (other_problem, _) =
+            create_with_revisions(opctx, datastore, 1).await;
+        let rev1_alert = create_alert(opctx, datastore).await;
+        let rev2_alert = create_alert(opctx, datastore).await;
+        let other_alert = create_alert(opctx, datastore).await;
+        // An alert that is not attached to any problem at all.
+        create_alert(opctx, datastore).await;
+
+        let attached = datastore
+            .problem_attach_alerts(
+                opctx,
+                &authz_problem,
+                &[
+                    alert_link_request(rev1_alert, 1),
+                    alert_link_request(rev2_alert, 2),
+                ],
+            )
+            .await
+            .expect("attaching alerts should succeed");
+        assert_eq!(
+            attached, 2,
+            "both alert attachment records should be created."
+        );
+        let attached = datastore
+            .problem_attach_alerts(
+                opctx,
+                &other_problem,
+                &[alert_link_request(other_alert, 1)],
+            )
+            .await
+            .expect("attaching alerts should succeed");
+        assert_eq!(attached, 1, "the attachment should be inserted");
+
+        assert_eq!(
+            list_attached_alerts(opctx, datastore, &authz_problem).await,
+            BTreeSet::new(),
+            "a problem at revision zero should have no visible alerts",
+        );
+
+        datastore
+            .problem_set_current_revision(opctx, &authz_problem, rev(1))
+            .await
+            .expect("making revision 1 current should succeed");
+        assert_eq!(
+            list_attached_alerts(opctx, datastore, &authz_problem).await,
+            BTreeSet::from([rev1_alert]),
+            "an alert attached at a revision which is not yet current \
+             should not be visible",
+        );
+
+        datastore
+            .problem_set_current_revision(opctx, &authz_problem, rev(2))
+            .await
+            .expect("making revision 2 current should succeed");
+        assert_eq!(
+            list_attached_alerts(opctx, datastore, &authz_problem).await,
+            BTreeSet::from([rev1_alert, rev2_alert]),
+            "alerts attached at earlier revisions should remain attached",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Tests that re-attaching alerts that are already attached does not insert
+    /// them again or modify the existing attachments, even if the requested
+    /// revision differs. while any new alerts in the same batch are attached.
+    #[tokio::test]
+    async fn test_problem_attach_alerts_is_idempotent() {
+        let logctx =
+            dev::test_setup_log("test_problem_attach_alerts_is_idempotent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        insert_current_sitrep(opctx, datastore, SitrepProblemGeneration::new())
+            .await;
+
+        let (authz_problem, _) =
+            create_with_revisions(opctx, datastore, 2).await;
+        datastore
+            .problem_set_current_revision(opctx, &authz_problem, rev(1))
+            .await
+            .expect("making revision 1 current should succeed");
+        let first = create_alert(opctx, datastore).await;
+        let second = create_alert(opctx, datastore).await;
+
+        let attached = datastore
+            .problem_attach_alerts(opctx, &authz_problem, &[])
+            .await
+            .expect("attaching no alerts should succeed");
+        assert_eq!(attached, 0);
+
+        let attached = datastore
+            .problem_attach_alerts(
+                opctx,
+                &authz_problem,
+                &[alert_link_request(first, 1)],
+            )
+            .await
+            .expect("attaching an alert should succeed");
+        assert_eq!(attached, 1, "a new attachment should be inserted");
+
+        let attached = datastore
+            .problem_attach_alerts(
+                opctx,
+                &authz_problem,
+                &[alert_link_request(first, 1), alert_link_request(second, 1)],
+            )
+            .await
+            .expect("re-attaching an alert should succeed idempotently");
+        assert_eq!(
+            attached, 1,
+            "only the alert which was not already attached should be inserted"
+        );
+
+        // If attaching `first` at revision 2 overwrote the existing
+        // attachment, it would no longer be visible at revision 1.
+        let attached = datastore
+            .problem_attach_alerts(
+                opctx,
+                &authz_problem,
+                &[alert_link_request(first, 2)],
+            )
+            .await
+            .expect("re-attaching an alert should succeed idempotently");
+        assert_eq!(
+            attached, 0,
+            "an existing attachment should not be re-created"
+        );
+        assert_eq!(
+            list_attached_alerts(opctx, datastore, &authz_problem).await,
+            BTreeSet::from([first, second]),
+            "re-attaching an alert at a different revision should not \
+             modify the existing attachment",
         );
 
         db.terminate().await;

@@ -27,6 +27,7 @@ use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_db_schema::schema::problem_alert::dsl as problem_alert_dsl;
 use nexus_types::external_api::alert as external_api;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::identity::Asset;
@@ -588,11 +589,20 @@ impl DataStore {
                 query.filter(alert_dsl::alert_class.eq_any(classes.clone()));
         }
 
-        if let Some(_problem) = problem {
-            todo!(
-                "eliza: this is where we will have to add an INNER JOIN on \
-                 the problem-alert-link table, once that exists"
-            );
+        // If there is a problem filter, select only alerts attached to that
+        // problem at revision `rev` or earlier.
+        if let Some(model::ProblemRevisionFilter { id, rev }) = problem {
+            // Note: ideally, we would reach for an INNER JOIN, but this is a
+            // subquery instead, because join changes the query's type (even
+            // when boxed), so one cannot be added conditionally here. Since
+            // `(problem_id, alert_id)` is the primary key of `problem_alert`,
+            // the subquery selects each alert at most once, and the query plan
+            // ends up being a lookup join anyway, so it should be equivalent.
+            let attached_to_problem = problem_alert_dsl::problem_alert
+                .filter(problem_alert_dsl::problem_id.eq(id))
+                .filter(problem_alert_dsl::revision.le(rev))
+                .select(problem_alert_dsl::alert_id);
+            query = query.filter(alert_dsl::id.eq_any(attached_to_problem));
         }
 
         query
@@ -613,12 +623,14 @@ mod tests {
     use nexus_types::alert::test_alerts;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_generation_kinds::ProblemRevNum;
     use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::ProblemUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use serde_json::json;
     use std::num::NonZeroU32;
@@ -783,6 +795,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explain_alert_list_matching_only_problem() {
+        explain_list_matching_query(
+            "explain_alert_list_matching_only_problem",
+            AlertFilters::new().for_problem(model::ProblemRevisionFilter {
+                id: ProblemUuid::new_v4().into(),
+                rev: ProblemRevNum::from_u32(3).into(),
+            }),
+        )
+        .await
+    }
+
+    #[tokio::test]
     async fn explain_alert_list_matching_all_filters() {
         let now = Utc::now();
         explain_list_matching_query(
@@ -799,7 +823,11 @@ mod tests {
                 .dispatched(true)
                 .expect("true and dispatched before/after is valid")
                 .for_fm_cases([CaseUuid::new_v4(), CaseUuid::new_v4()])
-                .with_classes([AlertClass::TestFoo, AlertClass::TestFooBar]),
+                .with_classes([AlertClass::TestFoo, AlertClass::TestFooBar])
+                .for_problem(model::ProblemRevisionFilter {
+                    id: ProblemUuid::new_v4().into(),
+                    rev: ProblemRevNum::from_u32(3).into(),
+                }),
         )
         .await
     }

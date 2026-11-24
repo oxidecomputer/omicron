@@ -3733,6 +3733,25 @@ allow_tables_to_appear_in_same_query!(problem, problem_revision);
 joinable!(problem_revision -> problem (problem_id));
 
 table! {
+    problem_alert (problem_id, alert_id) {
+        problem_id -> Uuid,
+        alert_id -> Uuid,
+        revision -> Int8,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(alert, problem_alert);
+allow_tables_to_appear_in_same_query!(rendezvous_alert_created, problem_alert);
+
+table! {
+    problem_support_bundle (problem_id, support_bundle_id) {
+        problem_id -> Uuid,
+        support_bundle_id -> Uuid,
+        revision -> Int8,
+    }
+}
+
+table! {
     trust_quorum_configuration (rack_id, epoch) {
         rack_id -> Uuid,
         epoch -> Int8,

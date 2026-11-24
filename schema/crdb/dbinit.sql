@@ -10039,6 +10039,82 @@ CREATE TABLE IF NOT EXISTS omicron.public.problem_revision (
     PRIMARY KEY (problem_id, revision)
 );
 
+-- Alerts attached to a problem (see RFD 699).
+--
+-- This table is used to list the set of alerts attached to a problem as of a
+-- particular revision of that problem. Alerts may be attached to multiple
+-- problems, so a join table (rather than a foreign key on `alert`) is used to
+-- express this relationship.
+--
+-- Records in this table are logically "owned" by the problem, and are removed
+-- only when the problem itself is deleted. Because these records are not
+-- removed while the problem still exists, the alerts attached to a problem at a
+-- given revision number are any records where the attachment's revision number
+-- is less than or equal to that revision number. Queries that list alerts for a
+-- given problem should always include a `WHERE` clause that selects only rows
+-- attached at the problem's current revision or earlier. This ensures that
+-- external API callers do not encounter revisions that have not yet been fully
+-- created.
+--
+-- These association records may exist before the alert record is created, and
+-- may outlive it if it is deleted. Listing alerts for a problem selects records
+-- from the alert table, so it will not return records that do not yet exist or
+-- have been deleted.
+--
+-- Records in this table are created by FM rendezvous based on requests in the
+-- sitrep (represented by the `omicron.public.fm_problem_alert` table).
+CREATE TABLE IF NOT EXISTS omicron.public.problem_alert (
+    -- The ID of the problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the attached alert.
+    alert_id UUID NOT NULL,
+    -- The revision of the problem in which the alert was attached.
+    revision INT8 NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    -- An alert may be attached to a given problem at most once, so the
+    -- revision is not part of the primary key.
+    PRIMARY KEY (problem_id, alert_id)
+);
+
+-- Support bundles attached to a problem (see RFD 699).
+--
+-- This table is used to list the set of support bundles attached to a problem
+-- as of a particular revision of that problem. Support bundles may be attached
+-- to multiple problems, so a join table (rather than a foreign key on `alert`)
+-- is used to express this relationship.
+--
+-- Records in this table are logically "owned" by the problem, and are removed
+-- only when the problem itself is deleted. Because these records are not
+-- removed while the problem still exists, the support bundles attached to a
+-- problem at a given revision number are any records where the attachment's
+-- revision number is less than or equal to that revision number. Queries that
+-- list support bundles for a given problem should always include a `WHERE`
+-- clause that selects only rows attached at the problem's current revision or
+-- earlier. This ensures that external API callers do not encounter revisions
+-- that have not yet been fully created.
+--
+-- These association records may exist before the support bundle record is
+-- created, and may outlive it if it is deleted. Listing support bundles for a
+-- problem selects records from the support bundle table, so it will not return
+-- records that do not yet exist or have been deleted.
+--
+-- Records in this table are created by FM rendezvous based on requests in the
+-- sitrep (represented by the `omicron.public.fm_problem_support_bundle` table).
+CREATE TABLE IF NOT EXISTS omicron.public.problem_support_bundle (
+    -- The ID of the problem.
+    problem_id UUID NOT NULL,
+    -- The ID of the attached support bundle.
+    support_bundle_id UUID NOT NULL,
+    -- The revision of the problem in which the support bundle was attached.
+    revision INT8 NOT NULL,
+
+    CONSTRAINT revision_is_non_zero CHECK (revision > 0),
+
+    PRIMARY KEY (problem_id, support_bundle_id)
+);
+
 -- A request from a fault management diagnosis engine that an active problem be
 -- created if it does not already exist.
 --
@@ -10221,10 +10297,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case_problem (
 -- the requested link record has been created by rendezvous*, these records need
 -- not be carried forward into the next sitrep.
 --
--- Rendezvous should not create externally-visible alert link records until both
--- the problem record *and* the alert record have already been created.
--- Otherwise, external API callers listing alerts for a problem may see alerts
--- that do not yet exist.
+-- Rendezvous may create the externally visible `problem_alert` record before
+-- the alert record itself has been created. Listing a problem's alerts selects
+-- from the `alert` table, so a link to an alert that does not exist is not
+-- visible.
 CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_alert (
     -- The ID of the problem.
     problem_id UUID NOT NULL,
@@ -10258,10 +10334,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_alert (
 -- the requested link record has been created by rendezvous*, these records need
 -- not be carried forward into the next sitrep.
 --
--- Rendezvous should not create externally-visible support bundle link records
--- until both the problem record *and* the support bundle record have already
--- been created. Otherwise, external API callers listing support bundles for a
--- problem may see support bundles that do not yet exist.
+-- Rendezvous may create the externally visible `problem_support_bundle` record
+-- before the support bundle record itself has been created, so listing a
+-- problem's support bundles must select from the `support_bundle` table, so
+-- that a link to a support bundle that does not exist is not visible.
 CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_support_bundle (
     -- The ID of the problem.
     problem_id UUID NOT NULL,
@@ -10293,7 +10369,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '324.0.0', NULL)
+    (TRUE, NOW(), NOW(), '325.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
