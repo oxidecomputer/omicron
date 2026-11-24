@@ -1709,9 +1709,10 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(expunged_region_snapshot.snapshot_id, snapshot.identity.id);
     }
 
-    // Expunging the sled expunged its three physical disks.  Each of them
-    // holds one of the snapshot's region snapshots.  Each also holds one of the
-    // disk's regions, plus another region that snapshot creation allocated.
+    // Expunging the sled expunged its three physical disks.  Verify that each
+    // of them still holds one of the snapshot's region snapshots.  Each should
+    // also hold one of the disk's regions, plus another region that snapshot
+    // creation allocated.
     let counts = expunged_resource_counts_checked(datastore, &opctx).await;
     assert_eq!(counts.len(), 3, "{counts:?}");
     for r in counts.iter() {

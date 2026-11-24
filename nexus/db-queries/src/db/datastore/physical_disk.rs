@@ -57,7 +57,7 @@ use uuid::Uuid;
 /// expunged disk is removed.
 ///
 /// This structure tracks regions and region snapshots still currently present
-/// on physical disks.
+/// on expunged physical disks.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExpungedPhysicalDiskResourcesMap {
     by_disk: IdOrdMap<ExpungedPhysicalDiskResources>,
@@ -948,6 +948,7 @@ mod test {
         let disk2 = PhysicalDiskUuid::new_v4();
         let serial1 = String::from("serial1");
         let serial2 = String::from("serial2");
+        let serial3 = String::from("serial3");
 
         let mut map = ExpungedPhysicalDiskResourcesMap::default();
         assert!(map.is_empty());
@@ -966,11 +967,12 @@ mod test {
         other.add_read_only_regions(disk1, serial1.clone(), 20);
         other.add_region_snapshots(disk2, serial2.clone(), 30);
         let disk3 = PhysicalDiskUuid::new_v4();
-        other.add_read_only_regions(disk3, String::from("serial3"), 7);
+        other.add_read_only_regions(disk3, serial3, 7);
 
         // Disks are identified by id, not serial number, because serial
-        // numbers are not unique.  A different disk with the same serial
-        // number as `disk1` gets its own entry.
+        // numbers are not unique when a disk is expunged and re-adopted.  A
+        // different disk with the same serial number as `disk1` gets its own
+        // entry.
         let disk4 = PhysicalDiskUuid::new_v4();
         other.add_read_write_regions(disk4, serial1.clone(), 100);
         map.merge(other);

@@ -345,9 +345,7 @@ mod region_replacement {
                 RegionReplacementState::Requested,
             );
 
-            // This request is for a region on a physical disk that is not
-            // expunged, as when support staff request one using omdb.  The
-            // expunge precheck reports it anyway.
+            // Verify that the expunge precheck identifies this replacement.
             let status = expunge_precheck_get(client).await;
             assert!(!status.ok, "{status:#?}");
             assert_eq!(
@@ -2124,11 +2122,11 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    // The expunged physical disk holds one of the original disk's read-write
-    // regions and its region snapshot.  It may also hold a region of the disk
-    // created from the snapshot.  Nothing can finish moving the data until the
-    // Pantry activates volumes (below), so these checks cannot race with the
-    // replacements.
+    // Verify that the accounting reports that the expunged physical disk holds
+    // one of the original disk's read-write regions and its region snapshot.
+    // It may also hold a region of the disk created from the snapshot.  Nothing
+    // can finish moving the data until the Pantry activates volumes (below), so
+    // these checks cannot race with the replacements.
     let counts = expunged_resource_counts_checked(datastore, &opctx).await;
     let only_disk: Vec<_> = counts.iter().collect();
     let [disk_counts] = only_disk.as_slice() else {
@@ -2672,10 +2670,7 @@ async fn test_read_only_replacement_sanity(
             .await
             .unwrap();
 
-        // This request is for a region snapshot on a physical disk that is not
-        // expunged, as when support staff request one using omdb.  No
-        // replacement tasks run until `wait_for_all_replacements()`, so the
-        // expunge precheck reports this request.
+        // Verify that the expunge precheck reports this replacement.
         let status = expunge_precheck_get(client).await;
         assert!(!status.ok, "{status:#?}");
         assert_eq!(status.user_data.expunged_disks_with_data, 0, "{status:#?}");
@@ -2719,9 +2714,8 @@ async fn test_read_only_replacement_sanity(
         .await
         .unwrap();
 
-    // The expunged physical disk holds at least the read-only region found
-    // above.  No replacement tasks run until `wait_for_all_replacements()`,
-    // so these checks cannot race with the replacements.
+    // Verify that the accounting reflects that the expunged physical disk holds
+    // at least the read-only region found above.
     let counts = expunged_resource_counts_checked(datastore, &opctx).await;
     let disk_counts = counts
         .iter()

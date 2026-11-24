@@ -54,7 +54,7 @@ impl super::Nexus {
         Ok(ExpungePrecheck::new(check_crucible_data(
             &expunged_resources,
             replacements_in_progress,
-        )))
+        )?))
     }
 }
 
@@ -70,20 +70,28 @@ struct InProgressCrucibleReplacements {
 fn check_crucible_data(
     expunged_resources: &ExpungedPhysicalDiskResourcesMap,
     replacements_in_progress: InProgressCrucibleReplacements,
-) -> UserDataPrecheck {
+) -> Result<UserDataPrecheck, Error> {
+    let expunged_disks_with_data = u64::try_from(expunged_resources.len())
+        .map_err(|_| {
+            Error::internal_error(&format!(
+                "number of expunged physical disks with data does not fit in \
+                 a u64: {}",
+                expunged_resources.len()
+            ))
+        })?;
     let problems =
         crucible_data_problems(expunged_resources, replacements_in_progress)
             .iter()
             .map(|p| p.to_string())
             .collect();
-    UserDataPrecheck {
-        expunged_disks_with_data: expunged_resources.len(),
+    Ok(UserDataPrecheck {
+        expunged_disks_with_data,
         region_replacements_in_progress: replacements_in_progress
             .region_replacements,
         region_snapshot_replacements_in_progress: replacements_in_progress
             .region_snapshot_replacements,
         problems,
-    }
+    })
 }
 
 /// Returns the problems that the user data check found.
@@ -167,7 +175,8 @@ mod test {
         let check = check_crucible_data(
             &ExpungedPhysicalDiskResourcesMap::default(),
             none_in_progress,
-        );
+        )
+        .expect("checked user data");
         assert!(check.problems.is_empty(), "{check:?}");
 
         // A disk with resources on it is a problem even when no replacement
@@ -184,7 +193,8 @@ mod test {
             panic!("unexpected problems: {problems:?}");
         };
         assert_eq!(r.disk_id, disk_id);
-        let check = check_crucible_data(&resources, none_in_progress);
+        let check = check_crucible_data(&resources, none_in_progress)
+            .expect("checked user data");
         assert_eq!(check.expunged_disks_with_data, 1, "{check:?}");
         assert_eq!(check.problems.len(), 1, "{check:?}");
         assert!(
@@ -207,7 +217,8 @@ mod test {
                 UserDataProblem::RegionSnapshotReplacementsInProgress(2),
             ]
         );
-        let check = check_crucible_data(&no_resources, in_progress);
+        let check = check_crucible_data(&no_resources, in_progress)
+            .expect("checked user data");
         assert_eq!(check.expunged_disks_with_data, 0, "{check:?}");
         assert_eq!(check.region_replacements_in_progress, 1, "{check:?}");
         assert_eq!(

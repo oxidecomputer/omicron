@@ -29,7 +29,7 @@ pub struct ExpungePrecheck {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserDataPrecheck {
     /// Number of expunged physical disks that still hold user data
-    pub expunged_disks_with_data: usize,
+    pub expunged_disks_with_data: u64,
     /// Number of region replacements that have not finished
     pub region_replacements_in_progress: u64,
     /// Number of region snapshot replacements that have not finished

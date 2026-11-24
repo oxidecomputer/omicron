@@ -1026,6 +1026,13 @@ mod test {
             request
         };
 
+        assert_eq!(
+            datastore
+                .count_incomplete_region_replacements(&opctx)
+                .await
+                .unwrap(),
+            0
+        );
         datastore
             .insert_region_replacement_request(&opctx, request.clone())
             .await

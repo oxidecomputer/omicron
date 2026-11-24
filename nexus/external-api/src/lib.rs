@@ -7948,9 +7948,8 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
 
-    /// Check whether it would be dangerous to expunge a working sled or
-    /// physical disk because the system is currently working on repairs from a
-    /// previous expungement or failure
+    /// Check whether expunging a working sled or physical disk will create
+    /// problem due to ongoing repairs
     ///
     /// The system is designed to survive a limited number of concurrent
     /// failures. When a sled or physical disk is expunged, the system repairs

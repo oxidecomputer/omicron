@@ -1599,6 +1599,14 @@ mod test {
             .await
             .unwrap();
 
+        assert_eq!(
+            datastore
+                .count_incomplete_region_snapshot_replacements(&opctx)
+                .await
+                .unwrap(),
+            0
+        );
+
         let request_1 = RegionSnapshotReplacement::new_from_region_snapshot(
             dataset_1_id,
             region_1_id,
