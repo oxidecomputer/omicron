@@ -109,6 +109,10 @@ impl super::Nexus {
             internal_http_client(),
             log,
         );
+        // This request to the join service is idempotent as long as sled-agent
+        // hasn't rebooted, so if this call succeeds but we fail to get a
+        // response back and the Nexus request is retried, we can still get a
+        // success response back here and continue on:
         join_service_client.multirack_join_complete().await?;
 
         // If we didn't error out on the call to the join service, we can now go
