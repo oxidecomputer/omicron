@@ -19,6 +19,7 @@ use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::alert;
@@ -780,58 +781,42 @@ pub static DEMO_INSTANCE_EXTERNAL_SUBNETS_URL: LazyLock<String> =
         )
     });
 pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
-    LazyLock::new(|| instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_INSTANCE_NAME.clone(),
-            description: String::from(""),
-        },
-        ncpus: instance::InstanceCpuCount(1),
-        memory: ByteCount::from_gibibytes_u32(16),
-        hostname: "demo-instance".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: Some(Vec::new()),
-        network_interfaces:
-            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![instance::ExternalIpCreate::Ephemeral {
-            pool_selector: ip_pool::PoolSelector::Explicit {
-                pool: DEMO_IP_POOL_NAME.clone().into(),
-            },
-        }],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
+    LazyLock::new(|| {
+        InstanceCreateBuilder::new(DEMO_INSTANCE_NAME.as_str())
+            .with_description("")
+            .with_ncpus(instance::InstanceCpuCount(1))
+            .with_memory(ByteCount::from_gibibytes_u32(16))
+            .with_hostname("demo-instance")
+            .with_user_data(&[])
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .with_external_ips(vec![instance::ExternalIpCreate::Ephemeral {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: DEMO_IP_POOL_NAME.clone().into(),
+                },
+            }])
+            .with_start(true)
+            .finish()
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
-    LazyLock::new(|| instance::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_STOPPED_INSTANCE_NAME.clone(),
-            description: String::from(""),
-        },
-        ncpus: instance::InstanceCpuCount(1),
-        memory: ByteCount::from_gibibytes_u32(16),
-        hostname: "demo-instance".parse().unwrap(),
-        user_data: vec![],
-        ssh_public_keys: Some(Vec::new()),
-        network_interfaces:
-            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![instance::ExternalIpCreate::Ephemeral {
-            pool_selector: ip_pool::PoolSelector::Explicit {
-                pool: DEMO_IP_POOL_NAME.clone().into(),
-            },
-        }],
-        disks: vec![],
-        boot_disk: None,
-        cpu_platform: None,
-        start: true,
-        auto_restart_policy: Default::default(),
-        anti_affinity_groups: Vec::new(),
-        multicast_groups: Vec::new(),
-        enable_jumbo_frames: false,
+    LazyLock::new(|| {
+        InstanceCreateBuilder::new(DEMO_STOPPED_INSTANCE_NAME.as_str())
+            .with_description("")
+            .with_ncpus(instance::InstanceCpuCount(1))
+            .with_memory(ByteCount::from_gibibytes_u32(16))
+            .with_hostname("demo-instance")
+            .with_user_data(&[])
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            )
+            .with_external_ips(vec![instance::ExternalIpCreate::Ephemeral {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: DEMO_IP_POOL_NAME.clone().into(),
+                },
+            }])
+            .with_start(true)
+            .finish()
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
     LazyLock::new(|| instance::InstanceUpdate {
@@ -842,6 +827,7 @@ pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
         memory: ByteCount::from_gibibytes_u32(16),
         multicast_groups: None,
         enable_jumbo_frames: false,
+        shutdown_policy: Nullable(None),
     });
 
 // The instance needs a network interface, too.

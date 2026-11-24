@@ -6,15 +6,19 @@ use gateway_client::SpComponent;
 use gateway_client::types::SpComponentResetError;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup;
+use gateway_test_utils::setup::TwoSwitchSimRack;
 use gateway_types::component::SpType;
 use omicron_gateway::SpIdentifier;
+use omicron_test_utils::dev::test_setup_log;
 
 #[tokio::test]
 async fn discovery_both_locations() {
-    let testctx0 =
-        setup::test_setup("discovery_both_locations_0", SpPort::One).await;
-    let testctx1 =
-        setup::test_setup("discovery_both_locations_1", SpPort::Two).await;
+    let logctx = test_setup_log("discovery_both_locations");
+    let sim =
+        TwoSwitchSimRack::start("discovery_both_locations", &logctx.log, 2)
+            .await;
+    let testctx0 = &sim.mgs0;
+    let testctx1 = &sim.mgs1;
 
     let client0 = &testctx0.client;
     let client1 = &testctx1.client;
@@ -43,8 +47,8 @@ async fn discovery_both_locations() {
         }
     }
 
-    testctx0.teardown().await;
-    testctx1.teardown().await;
+    sim.teardown().await.expect("simulated rack was torn down cleanly");
+    logctx.cleanup_successful();
 }
 
 #[tokio::test]

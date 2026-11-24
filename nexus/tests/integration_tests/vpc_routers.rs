@@ -13,8 +13,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_from_body;
 use nexus_test_utils::resource_helpers::create_route;
 use nexus_test_utils::resource_helpers::create_router;
 use nexus_test_utils::resource_helpers::create_vpc_subnet;
@@ -495,29 +496,26 @@ async fn test_vpc_routers_custom_delivered_to_instance(
         )
         .await;
 
-        let instance = create_instance_with(
+        let instance = create_instance_from_body(
             client,
             PROJECT_NAME,
-            instance_name,
-            &instance::InstanceNetworkInterfaceAttachment::Create(vec![
-                instance::InstanceNetworkInterfaceCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: format!("nic-{i}").parse().unwrap(),
-                        description: "".into(),
-                    },
-                    vpc_name: vpc.name().clone(),
-                    subnet_name: subnet_name.parse().unwrap(),
-                    ip_config: PrivateIpStackCreate::from_ipv4(
-                        format!("192.168.{i}.10").parse().unwrap(),
-                    ),
-                },
-            ]),
-            vec![],
-            vec![],
-            true,
-            Default::default(),
-            None,
-            Vec::new(),
+            InstanceCreateBuilder::new(instance_name)
+                .with_nics(
+                    instance::InstanceNetworkInterfaceAttachment::Create(vec![
+                        instance::InstanceNetworkInterfaceCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: format!("nic-{i}").parse().unwrap(),
+                                description: "".into(),
+                            },
+                            vpc_name: vpc.name().clone(),
+                            subnet_name: subnet_name.parse().unwrap(),
+                            ip_config: PrivateIpStackCreate::from_ipv4(
+                                format!("192.168.{i}.10").parse().unwrap(),
+                            ),
+                        },
+                    ]),
+                )
+                .finish(),
         )
         .await;
         instance_simulate(

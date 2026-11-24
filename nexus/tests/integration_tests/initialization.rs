@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_config::Database;
 use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
@@ -26,16 +25,8 @@ async fn test_nexus_boots_before_cockroach() {
 
     let log = starter.logctx.log.new(o!("component" => "test"));
 
-    starter
-        .start_gateway(
-            SwitchSlot::Switch0,
-            Some(MGS_PORT),
-            DEFAULT_SP_SIM_CONFIG.into(),
-        )
-        .await;
-    starter
-        .start_gateway(SwitchSlot::Switch1, None, DEFAULT_SP_SIM_CONFIG.into())
-        .await;
+    starter.start_gateway(SwitchSlot::Switch0, Some(MGS_PORT)).await;
+    starter.start_gateway(SwitchSlot::Switch1, None).await;
 
     starter.start_dendrite(SwitchSlot::Switch0).await;
     starter.start_dendrite(SwitchSlot::Switch1).await;
@@ -107,12 +98,8 @@ async fn test_nexus_boots_before_dendrite() {
     // inside of Nexus initialization.  We must use MGS_PORT here because Nexus
     // hardcodes it.
     info!(&log, "Starting MGS");
-    starter
-        .start_gateway(SwitchSlot::Switch0, None, DEFAULT_SP_SIM_CONFIG.into())
-        .await;
-    starter
-        .start_gateway(SwitchSlot::Switch1, None, DEFAULT_SP_SIM_CONFIG.into())
-        .await;
+    starter.start_gateway(SwitchSlot::Switch0, None).await;
+    starter.start_gateway(SwitchSlot::Switch1, None).await;
     info!(&log, "Started MGS");
 
     let populate = true;
@@ -208,9 +195,8 @@ async fn nexus_schema_test_setup(
     starter.start_internal_dns().await;
     starter.start_external_dns().await;
 
-    let sp_conf: camino::Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
-    starter.start_gateway(SwitchSlot::Switch0, None, sp_conf.clone()).await;
-    starter.start_gateway(SwitchSlot::Switch1, None, sp_conf).await;
+    starter.start_gateway(SwitchSlot::Switch0, None).await;
+    starter.start_gateway(SwitchSlot::Switch1, None).await;
     starter.start_dendrite(SwitchSlot::Switch0).await;
     starter.start_dendrite(SwitchSlot::Switch1).await;
     starter.start_mgd(SwitchSlot::Switch0).await;

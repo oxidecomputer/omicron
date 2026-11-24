@@ -427,7 +427,7 @@ async fn cmd_db_sitrep_show(
         return Ok(());
     }
 
-    let fm::Sitrep { metadata, cases, ereports_by_id } = sitrep;
+    let fm::Sitrep { metadata, cases, ereports_by_id, problems } = sitrep;
     let fm::SitrepMetadata {
         id,
         creator_id,
@@ -438,24 +438,26 @@ async fn cmd_db_sitrep_show(
         next_inv_min_time_started,
         alert_generation,
         support_bundle_generation,
+        problem_generation,
     } = metadata;
 
-    const ID: &'static str = "ID";
-    const PARENT_SITREP_ID: &'static str = "parent sitrep ID";
-    const CREATED_BY: &'static str = "created by";
-    const CREATED_AT: &'static str = "created at";
-    const COMMENT: &'static str = "comment";
-    const STATUS: &'static str = "status";
-    const VERSION: &'static str = "  version";
-    const MADE_CURRENT_AT: &'static str = "  made current at";
-    const INV_COLLECTION_ID: &'static str = "inventory collection ID";
-    const INV_STARTED_AT: &'static str = "  started at";
-    const INV_FINISHED_AT: &'static str = "  finished at";
-    const NEXT_INV_MIN_START: &'static str =
-        "  next inventory minimum start time";
-    const ALERT_GEN: &'static str = "alert generation";
-    const SUPPORT_BUNDLE_GEN: &'static str = "support bundle generation";
-    const TOTAL_EREPORTS: &'static str = "ereports in this sitrep";
+    const ID: &'static str = "ID:";
+    const PARENT_SITREP_ID: &'static str = "parent sitrep ID:";
+    const CREATED_BY: &'static str = "created by:";
+    const CREATED_AT: &'static str = "created at:";
+    const COMMENT: &'static str = "comment:";
+    const STATUS: &'static str = "status:";
+    const VERSION: &'static str = "  version:";
+    const MADE_CURRENT_AT: &'static str = "  made current at:";
+    const INV_COLLECTION_ID: &'static str = "inventory collection ID:";
+    const INV_STARTED_AT: &'static str = "  started at:";
+    const INV_FINISHED_AT: &'static str = "  finished at:";
+    const NEXT_INV_MIN_START: &'static str = "  next inv must start after:";
+    const ALERT_GEN: &'static str = "  alert generation:";
+    const SUPPORT_BUNDLE_GEN: &'static str = "  support bundle generation:";
+    const PROBLEM_GEN: &'static str = "  problem generation:";
+    const TOTAL_EREPORTS: &'static str = "ereports in this sitrep:";
+    const TOTAL_PROBLEMS: &'static str = "problems in this sitrep:";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -472,44 +474,50 @@ async fn cmd_db_sitrep_show(
         NEXT_INV_MIN_START,
         ALERT_GEN,
         SUPPORT_BUNDLE_GEN,
+        PROBLEM_GEN,
         TOTAL_EREPORTS,
+        TOTAL_PROBLEMS,
     ]);
 
     println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
-    println!("    {ID:>WIDTH$}: {id:?}");
-    println!("    {PARENT_SITREP_ID:>WIDTH$}: {parent_sitrep_id:?}");
-    println!("    {CREATED_BY:>WIDTH$}: {creator_id}");
-    println!("    {CREATED_AT:>WIDTH$}: {time_created}");
-    if comment.is_empty() {
-        println!("    {COMMENT:>WIDTH$}: N/A\n");
+    println!("{ID:<WIDTH$} {id}");
+    if let Some(parent_id) = parent_sitrep_id {
+        println!("{PARENT_SITREP_ID:<WIDTH$} {parent_id}");
     } else {
-        println!("    {COMMENT:>WIDTH$}:");
-        println!("{}\n", textwrap::indent(&comment, "      "));
+        println!("{PARENT_SITREP_ID:<WIDTH$} N/A");
+    }
+    println!("{CREATED_BY:<WIDTH$} {creator_id}");
+    println!("{CREATED_AT:<WIDTH$} {time_created}");
+    if comment.is_empty() {
+        println!("{COMMENT:<WIDTH$} N/A\n");
+    } else {
+        println!("{COMMENT}");
+        println!("{}", textwrap::indent(&comment, "  "));
     }
 
     match maybe_version {
-        None => println!(
-            "    {STATUS:>WIDTH$}: not committed to the sitrep history"
-        ),
+        None => {
+            println!("{STATUS:<WIDTH$} not committed to the sitrep history")
+        }
         Some(fm::SitrepVersion { version, time_made_current, .. }) => {
             if matches!(current_version, Some(ref v) if v.id == id) {
-                println!("    {STATUS:>WIDTH$}: this is the current sitrep!",);
+                println!("{STATUS:<WIDTH$} this is the current sitrep!",);
             } else {
-                println!("    {STATUS:>WIDTH$}: in the sitrep history");
+                println!("{STATUS:<WIDTH$} in the sitrep history");
             }
-            println!("    {VERSION:>WIDTH$}: v{version}");
-            println!("    {MADE_CURRENT_AT:>WIDTH$}: {time_made_current}");
+            println!("{VERSION:<WIDTH$} v{version}");
+            println!("{MADE_CURRENT_AT:<WIDTH$} {time_made_current}");
             match current_version {
                 Some(v) if v.id == id => {}
                 Some(fm::SitrepVersion { version, id, .. }) => {
                     println!(
-                        "(i)   note: the current sitrep is {id:?} \
-                        (at v{version})",
+                        "  (i) note: the current sitrep is {id} \
+                         (at v{version})",
                     );
                 }
                 None => {
                     eprintln!(
-                        "/!\\ WEIRD: this sitrep is in the sitrep history, \
+                        "  /!\\ WEIRD: this sitrep is in the sitrep history, \
                          but there is no current sitrep. this should not \
                          happen!"
                     );
@@ -519,7 +527,7 @@ async fn cmd_db_sitrep_show(
     }
 
     println!("\n{:=<80}", "== DIAGNOSIS INPUTS ");
-    println!("    {INV_COLLECTION_ID:>WIDTH$}: {inv_collection_id:?}");
+    println!("{INV_COLLECTION_ID:<WIDTH$} {inv_collection_id}");
     let inv_collection = inv_collection_dsl::inv_collection
         .filter(
             inv_collection_dsl::id.eq(inv_collection_id.into_untyped_uuid()),
@@ -531,29 +539,50 @@ async fn cmd_db_sitrep_show(
     match inv_collection {
         Err(err) => {
             eprintln!(
-                "/!\\ failed to fetch inventory collection details: {err}"
+                "  /!\\ failed to fetch inventory collection details: {err}"
             );
         }
         Ok(Some(model::InvCollection { time_started, time_done, .. })) => {
-            println!("    {INV_STARTED_AT:>WIDTH$}: {time_started}");
-            println!("    {INV_FINISHED_AT:>WIDTH$}: {time_done}");
+            println!("{INV_STARTED_AT:<WIDTH$} {time_started}");
+            println!("{INV_FINISHED_AT:<WIDTH$} {time_done}");
         }
         Ok(None) => {
             println!(
-                "      note: this collection no longer exists (perhaps it has \
+                "  (i) note: this collection no longer exists (perhaps it has \
                  been pruned?)"
             )
         }
     }
-    println!("    {NEXT_INV_MIN_START:>WIDTH$}: {next_inv_min_time_started}");
-    println!("    ");
-    println!("    rendezvous resource generation numbers:");
-    println!("    {ALERT_GEN:>WIDTH$}: {alert_generation}");
-    println!("    {SUPPORT_BUNDLE_GEN:>WIDTH$}: {support_bundle_generation}");
-    println!("    ");
-    println!("    {TOTAL_EREPORTS}: {}", ereports_by_id.len());
+    println!("{NEXT_INV_MIN_START:<WIDTH$} {next_inv_min_time_started}");
+    println!("rendezvous resource generation numbers:");
+    println!("{ALERT_GEN:<WIDTH$} {alert_generation}");
+    println!("{SUPPORT_BUNDLE_GEN:<WIDTH$} {support_bundle_generation}");
+    println!("{PROBLEM_GEN:<WIDTH$} {problem_generation}");
+    println!("{TOTAL_PROBLEMS:<WIDTH$} {}", problems.len());
+    println!("{TOTAL_EREPORTS:<WIDTH$} {}", ereports_by_id.len());
     // TODO(eliza): perhaps display a table summarizing those ereports? possibly
     // behind a verbose flag?
+
+    if !problems.is_empty() {
+        let num_resolved =
+            problems.by_id().iter().filter(|p| p.is_resolved()).count();
+        let num_active = problems.len() - num_resolved;
+
+        println!("\n{:=<80}", "== PROBLEMS ");
+        println!("{num_active} active, {num_resolved} resolved\n");
+        println!(
+            "(i) {}",
+            fm::problem::DisplayProblemSummary::legend().colored(colored)
+        );
+        // The by-code index is sorted by problem code, and then by problem ID
+        // within each code.
+        for problem in problems.by_code().values().flat_map(|ps| ps.iter()) {
+            println!(
+                "{}",
+                problem.display_summary(0, Some(id)).colored(colored)
+            );
+        }
+    }
 
     if cases.is_empty() {
         return Ok(());
