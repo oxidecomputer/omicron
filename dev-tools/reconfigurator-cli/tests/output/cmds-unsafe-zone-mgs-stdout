@@ -100,7 +100,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO current sled measurements are in an unknown state, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
-operator status: summary: System is busy
+operator status: summary: Changes in progress (details unavailable)
 planning report:
 * noop converting 9/9 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting 8/8 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
@@ -1511,7 +1511,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
-operator status: summary: System is busy
+operator status: summary: Changes in progress (details unavailable)
 planning report:
 planner config:
     disruption policy : terminate

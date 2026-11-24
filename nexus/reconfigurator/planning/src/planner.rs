@@ -125,6 +125,9 @@ mod zone_safety;
 /// concurrently without taking volumes down; and/or be willing to update
 /// multiple sleds as long as they don't have overlapping control plane
 /// services, etc.).
+///
+/// Note that a change here probably requires rethinking how the operator status
+/// summarizes the contents of a planning report.
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 
 // Details of how a zone's status differs between the blueprint and the sled

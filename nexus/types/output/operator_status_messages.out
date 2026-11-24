@@ -1,8 +1,8 @@
 AtRest
-    summary: No changes in progress
+    summary: Idle (no changes needed)
 
 Busy
-    summary: System is busy
+    summary: Changes in progress (details unavailable)
 
 WaitingForMupdateResolution
     summary: Waiting for MUPdate resolution
@@ -48,15 +48,15 @@ WaitingForUpdate(Mgs { baseboard_id: BaseboardId { part_number: "913-0000019", s
     summary: Waiting for update of RoT Bootloader on 913-0000019:serial0
 
 WaitingForUpdate(Zones { kinds: {} })
-    summary: Waiting for a control plane zone update to finish
+    summary: Waiting for a control plane zone to start
 
 WaitingForUpdate(Zones { kinds: {Nexus} })
-    summary: Waiting for a control plane zone update to finish
-    support details: Control plane service being updated: nexus
+    summary: Waiting for a control plane zone to start
+    support details: Control plane service being started: nexus
 
 WaitingForUpdate(Zones { kinds: {Crucible, Nexus} })
-    summary: Waiting for a control plane zone update to finish
-    support details: Control plane services being updated: crucible, nexus
+    summary: Waiting for a control plane zone to start
+    support details: Control plane services being started: crucible, nexus
 
 WaitingForUpdate(HandoffSagas)
     summary: Waiting for in-progress control plane operations (sagas) to finish before handing off to the new control plane

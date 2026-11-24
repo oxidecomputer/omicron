@@ -2101,7 +2101,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: inventory stale: inventory reported generation (5) that is older than the generation in the parent blueprint (6)
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
-operator status: summary: System is busy
+operator status: summary: Changes in progress (details unavailable)
 planning report:
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * only placed 0/1 desired nexus zones
@@ -2334,7 +2334,7 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
-operator status: summary: System is busy
+operator status: summary: Changes in progress (details unavailable)
 planning report:
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * only placed 0/1 desired nexus zones
@@ -2959,8 +2959,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
-operator status: summary: Waiting for a control plane zone update to finish
-operator status: support details: Control plane service being updated: internal_dns
+operator status: summary: Waiting for a control plane zone to start
+operator status: support details: Control plane service being started: internal_dns
 planning report:
 * noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting host phase 2 slot B to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
