@@ -195,7 +195,7 @@ impl<'a> Planner<'a> {
             creator,
             rng,
         )?;
-        Self::update_builder_from_planning_input(&mut blueprint, input);
+        Self::update_builder_from_planning_input(&mut blueprint, input)?;
         Ok(Planner { log, input, blueprint, inventory })
     }
 
@@ -210,16 +210,33 @@ impl<'a> Planner<'a> {
     /// entities (`reconfigurator-cli` and tests) can easily reuse it if they
     /// want to update a `BlueprintBuilder` they're using without running
     /// through the planner proper.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `input` is inconsistent with the state of `builder` in some way
+    /// that should never happen in practice (e.g., the same sled ID appears in
+    /// both but with a different sled subnet).
     pub fn update_builder_from_planning_input(
         builder: &mut BlueprintBuilder,
         input: &PlanningInput,
-    ) {
-        // Ensure we have an entry for every commissioned sled.
+    ) -> anyhow::Result<()> {
+        // Ensure we have an entry for every commissioned sled, and that it has
+        // the expected fleet-level wicket SSH auth setting. This may make
+        // changes to `OmicronSledConfig`s even if we would otherwise avoid
+        // making most changes (e.g., if we're waiting for mupdate recovery);
+        // the wicket SSH auth setting can safely be applied even if we don't
+        // end up doing any other planning, and our job in this case is solely
+        // to broadcast whatever the latest setting from an operator is to all
+        // commissioned sleds.
         //
         // If `input` has new sleds that weren't in `builder`'s parent
         // blueprint, this will create empty configs for them.
         for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            builder.ensure_sled_exists(sled_id, details.resources.subnet);
+            builder.ensure_sled_exists(
+                sled_id,
+                details.resources.subnet,
+                input.wicket_ssh_auth().clone(),
+            )?;
         }
 
         // Update various blueprint fields that track changes to the system but
@@ -234,6 +251,7 @@ impl<'a> Planner<'a> {
             oximeter_read_policy.version.into(),
             oximeter_read_policy.mode,
         );
+        Ok(())
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {

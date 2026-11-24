@@ -1220,6 +1220,7 @@ mod test {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::inventory::WicketSshAuth;
     use slog::Logger;
     use std::collections::{BTreeMap, HashMap};
     use std::net::Ipv6Addr;
@@ -1347,7 +1348,13 @@ mod test {
         for (sled_id, sled_resources) in
             planning_input.all_sled_resources(SledFilter::InService)
         {
-            builder.ensure_sled_exists(sled_id, sled_resources.subnet);
+            builder
+                .ensure_sled_exists(
+                    sled_id,
+                    sled_resources.subnet,
+                    WicketSshAuth::initial(),
+                )
+                .expect("ensured sled");
             builder
                 .sled_add_disks(sled_id, &sled_resources)
                 .expect("added disks");

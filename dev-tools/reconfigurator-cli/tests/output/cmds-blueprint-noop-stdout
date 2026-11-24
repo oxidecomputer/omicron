@@ -17,6 +17,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::a
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -97,6 +98,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::9
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -174,6 +176,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::9
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -286,6 +289,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:102::/64
     last allocated IP::   fd00:1122:3344:102::a
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -366,6 +370,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:101::/64
     last allocated IP::   fd00:1122:3344:101::9
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------
@@ -443,6 +448,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     config generation::   2
     subnet:::::::::::::   fd00:1122:3344:103::/64
     last allocated IP::   fd00:1122:3344:103::9
+    wicket SSH access::   unauthenticated (generation 1)
 
     host phase 2 contents:
     ------------------------

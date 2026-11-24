@@ -76,6 +76,7 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_agent_types::inventory::ZoneKind;
 use sled_agent_types::inventory::ZpoolHealth;
@@ -142,6 +143,7 @@ pub struct SystemDescription {
     cockroachdb_settings: CockroachDbSettings,
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
+    wicket_ssh_auth: WicketSshAuth,
     planner_config: PlannerConfig,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
     active_nexus_zones: BTreeSet<OmicronZoneUuid>,
@@ -249,6 +251,7 @@ impl SystemDescription {
             cockroachdb_settings: CockroachDbSettings::empty(),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
+            wicket_ssh_auth: WicketSshAuth::initial(),
             planner_config: PlannerConfig::default(),
             ignore_impossible_mgs_updates_since: Utc::now(),
             active_nexus_zones: BTreeSet::new(),
@@ -377,6 +380,14 @@ impl SystemDescription {
         policy: ExternalIpPolicy,
     ) -> &mut Self {
         self.external_service_networking.external_ips = policy;
+        self
+    }
+
+    pub fn set_wicket_ssh_auth(
+        &mut self,
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> &mut Self {
+        self.wicket_ssh_auth = wicket_ssh_auth;
         self
     }
 
@@ -1259,6 +1270,7 @@ impl SystemDescription {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
+            wicket_ssh_auth: self.wicket_ssh_auth.clone(),
             planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(

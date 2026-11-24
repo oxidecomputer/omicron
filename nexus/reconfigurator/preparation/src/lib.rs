@@ -57,6 +57,7 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::error;
@@ -92,6 +93,7 @@ pub struct PlanningInputFromDb<'a> {
     pub oximeter_read_policy: OximeterReadPolicy,
     pub tuf_repo: TufRepoPolicy,
     pub old_repo: TufRepoPolicy,
+    pub wicket_ssh_auth: WicketSshAuth,
     pub planner_config: PlannerConfig,
     pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
@@ -270,6 +272,10 @@ impl PlanningInputFromDb<'_> {
                     nexus.state() == DbMetadataNexusState::Active
                 });
 
+        // TODO omicron#11821 Read this from `datastore`, once we store it in
+        // the datastore! This should be the operator's latest desired config.
+        let wicket_ssh_auth = WicketSshAuth::initial();
+
         let active_nexus_zones =
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
         let not_yet_nexus_zones =
@@ -299,6 +305,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy,
             tuf_repo,
             old_repo,
+            wicket_ssh_auth,
             planner_config,
             active_nexus_zones,
             not_yet_nexus_zones,
@@ -372,6 +379,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
+            wicket_ssh_auth: self.wicket_ssh_auth.clone(),
             planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(

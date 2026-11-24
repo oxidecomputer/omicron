@@ -267,7 +267,7 @@ mod test {
     use oxide_update_engine_types::buffer::{CompletionReason, TerminalKind};
     use oxide_update_engine_types::spec::SerializableError;
     use serde_json::json;
-    use sled_agent_types::inventory::OmicronZoneDataset;
+    use sled_agent_types::inventory::{OmicronZoneDataset, WicketSshAuth};
     use std::collections::BTreeMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -306,6 +306,7 @@ mod test {
                         host_phase_2:
                             BlueprintHostPhase2DesiredSlots::current_contents(),
                         measurements: BlueprintMeasurements::InstallDataset,
+                        wicket_ssh_auth: WicketSshAuth::initial(),
                     },
                 )
             })

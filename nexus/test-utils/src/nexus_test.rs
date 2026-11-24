@@ -51,6 +51,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::SledRole;
+use sled_agent_types::inventory::WicketSshAuth;
 use slog::debug;
 use slog::info;
 use sp_sim::SimRack;
@@ -468,10 +469,13 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
                 "sled {sled_id} is not already in target blueprint {}",
                 parent.id
             );
-            builder.ensure_sled_exists(
-                sled_id,
-                Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-            );
+            builder
+                .ensure_sled_exists(
+                    sled_id,
+                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    WicketSshAuth::initial(),
+                )
+                .expect("ensured sled");
             builder.comment(format!("add sled {sled_id}"));
             Ok(())
         })

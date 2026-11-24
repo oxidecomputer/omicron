@@ -718,6 +718,7 @@ pub async fn run_standalone_server(
                     .map(|config| (config.id, config))
                     .collect(),
                 zones,
+                wicket_ssh_auth: sled_config.wicket_ssh_auth,
             },
         });
 

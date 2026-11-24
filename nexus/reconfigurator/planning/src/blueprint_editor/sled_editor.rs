@@ -17,7 +17,6 @@ use crate::planner::NoopConvertSledInfoMut;
 use crate::planner::NoopConvertSledStatus;
 use crate::planner::SledPlannerRng;
 use anyhow::anyhow;
-use host_phase_2::HostPhase2Editor;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use illumos_utils::zpool::ZpoolName;
@@ -55,6 +54,7 @@ use scalar::ScalarEditor;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::PerDiskDatasetKind;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::ZoneKind;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -67,16 +67,20 @@ mod host_phase_2;
 mod measurements;
 mod scalar;
 mod underlay_ip_allocator;
+mod wicket_ssh_auth;
 mod zones;
 
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
+pub use self::wicket_ssh_auth::WicketSshAuthEditError;
 pub use self::zones::ZonesEditError;
 
 use self::datasets::DatasetsEditor;
 use self::datasets::PartialDatasetConfig;
 use self::disks::DisksEditor;
+use self::host_phase_2::HostPhase2Editor;
+use self::wicket_ssh_auth::WicketSshAuthEditor;
 use self::zones::ZonesEditor;
 
 #[derive(Debug, thiserror::Error)]
@@ -127,6 +131,8 @@ pub enum SledEditError {
     EditDisks(#[from] DisksEditError),
     #[error("failed to edit datasets")]
     EditDatasetsError(#[from] DatasetsEditError),
+    #[error("failed to edit wicket ssh auth")]
+    EditWicketSshAuth(#[from] WicketSshAuthEditError),
     #[error("failed to edit zones")]
     EditZones(#[from] ZonesEditError),
     #[error(
@@ -180,6 +186,7 @@ pub struct SledEditor {
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
     host_phase_2: HostPhase2Editor,
     measurements: MeasurementEditor,
+    wicket_ssh_auth: WicketSshAuthEditor,
     debug_force_generation_bump: bool,
 }
 
@@ -235,11 +242,15 @@ impl SledEditor {
             ),
             host_phase_2: HostPhase2Editor::new(config.host_phase_2),
             measurements: MeasurementEditor::new(config.measurements),
+            wicket_ssh_auth: WicketSshAuthEditor::new(config.wicket_ssh_auth),
             debug_force_generation_bump: false,
         })
     }
 
-    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
+    pub fn for_new_active(
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> Self {
         Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet,
@@ -261,6 +272,7 @@ impl SledEditor {
             measurements: MeasurementEditor::new(
                 BlueprintMeasurements::Unknown,
             ),
+            wicket_ssh_auth: WicketSshAuthEditor::new(wicket_ssh_auth),
             debug_force_generation_bump: false,
         }
     }
@@ -269,16 +281,19 @@ impl SledEditor {
         let (disks, disks_counts) = self.disks.finalize();
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
-        let remove_mupdate_override_is_modified =
-            self.remove_mupdate_override.is_modified();
         let changed_host_phase_2 = self.host_phase_2.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
         let (measurements, measurement_counts) = self.measurements.finalize();
 
-        let update_disposition_is_modified =
-            self.update_disposition_kind.is_modified();
+        let scalar_edits = EditedSledScalarEdits {
+            debug_force_generation_bump: self.debug_force_generation_bump,
+            remove_mupdate_override: self.remove_mupdate_override.is_modified(),
+            wicket_ssh_auth: self.wicket_ssh_auth.is_modified(),
+            update_disposition: self.update_disposition_kind.is_modified(),
+        };
+
         let update_disposition = BlueprintSledUpdateDisposition {
-            generation: if update_disposition_is_modified {
+            generation: if scalar_edits.update_disposition {
                 self.incoming_update_disposition_generation.next()
             } else {
                 self.incoming_update_disposition_generation
@@ -286,21 +301,13 @@ impl SledEditor {
             kind: self.update_disposition_kind.finalize(),
         };
 
-        let scalar_edits = EditedSledScalarEdits {
-            debug_force_generation_bump: self.debug_force_generation_bump,
-            remove_mupdate_override: remove_mupdate_override_is_modified,
-            update_disposition: update_disposition_is_modified,
-        };
-
         // Bump the generation if we made any changes of concern to sled-agent.
-        if self.debug_force_generation_bump
+        if scalar_edits.has_edits()
             || disks_counts.has_nonzero_counts()
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
-            || remove_mupdate_override_is_modified
             || changed_host_phase_2
             || measurement_counts.has_nonzero_counts()
-            || update_disposition_is_modified
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -322,6 +329,7 @@ impl SledEditor {
                 host_phase_2: self.host_phase_2.finalize(),
                 measurements,
                 update_disposition,
+                wicket_ssh_auth: self.wicket_ssh_auth.finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -592,6 +600,14 @@ impl SledEditor {
         host_phase_2: BlueprintHostPhase2DesiredContents,
     ) {
         self.host_phase_2.set_slot(slot, host_phase_2);
+    }
+
+    /// Sets the desired wicket SSH auth setting on this sled.
+    pub fn set_wicket_ssh_auth(
+        &mut self,
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> Result<(), SledEditError> {
+        self.wicket_ssh_auth.set_value(wicket_ssh_auth).map_err(From::from)
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that
@@ -1044,7 +1060,10 @@ mod tests {
     use std::net::Ipv6Addr;
 
     fn new_active_editor() -> SledEditor {
-        SledEditor::for_new_active(Ipv6Subnet::new(Ipv6Addr::LOCALHOST))
+        SledEditor::for_new_active(
+            Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            WicketSshAuth::initial(),
+        )
     }
 
     const EVACUATING: BlueprintSledUpdateDispositionKind =
@@ -1102,5 +1121,95 @@ mod tests {
             SledConfigGeneration::new(),
             "sled_agent_generation was not bumped - no visible change",
         );
+    }
+
+    #[test]
+    fn wicket_ssh_auth_is_a_scalar_edit() {
+        use omicron_generation_kinds::WicketSshAuthGeneration;
+        use sled_agent_types::inventory::WicketSshAuthKind;
+        use std::collections::BTreeSet;
+
+        let new_auth = WicketSshAuth {
+            generation: WicketSshAuthGeneration::new().next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::from(
+                    ["fake public key".to_string()],
+                ),
+                allow_support_keys: false,
+            },
+        };
+
+        // No edits: the setting passes through untouched.
+        let edited = new_active_editor().finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, WicketSshAuth::initial());
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+        );
+
+        // Setting a newer value (even repeatedly) is an edit that bumps the
+        // sled-agent generation exactly once.
+        let mut editor = new_active_editor();
+        editor.set_wicket_ssh_auth(new_auth.clone()).expect("set new auth");
+        editor.set_wicket_ssh_auth(new_auth.clone()).expect("set new auth");
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, new_auth);
+        assert!(edited.scalar_edits.wicket_ssh_auth);
+        assert!(edited.scalar_edits.has_edits());
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new().next(),
+            "sled_agent_generation bumped exactly once",
+        );
+
+        // Setting the value the sled already has is a no-op.
+        let mut editor = new_active_editor();
+        editor
+            .set_wicket_ssh_auth(WicketSshAuth::initial())
+            .expect("set unchanged auth");
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, WicketSshAuth::initial());
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+            "sled_agent_generation was not bumped - no visible change",
+        );
+
+        // A new sled created with a non-initial setting starts out with that
+        // setting, and that doesn't count as an edit.
+        let editor = SledEditor::for_new_active(
+            Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            new_auth.clone(),
+        );
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, new_auth);
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
+        assert_eq!(
+            edited.config.sled_agent_generation,
+            SledConfigGeneration::new(),
+        );
+
+        // Invalid changes are rejected and leave the setting untouched.
+        let mut editor = SledEditor::for_new_active(
+            Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            new_auth.clone(),
+        );
+        let err = editor
+            .set_wicket_ssh_auth(WicketSshAuth::initial())
+            .expect_err("older generation should be rejected");
+        assert!(
+            matches!(
+                err,
+                SledEditError::EditWicketSshAuth(
+                    WicketSshAuthEditError::OlderGeneration { .. }
+                )
+            ),
+            "unexpected error: {err:?}",
+        );
+        let edited = editor.finalize();
+        assert_eq!(edited.config.wicket_ssh_auth, new_auth);
+        assert!(!edited.scalar_edits.wicket_ssh_auth);
     }
 }

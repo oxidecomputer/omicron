@@ -20,6 +20,7 @@ use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
 use anyhow::anyhow;
+use anyhow::bail;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -85,6 +86,7 @@ use sled_agent_types::inventory::MupdateOverrideBootInventory;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
@@ -307,6 +309,8 @@ pub struct EditedSledScalarEdits {
     pub remove_mupdate_override: bool,
     /// Whether the update disposition kind was modified.
     pub update_disposition: bool,
+    /// Whether the wicket SSH auth setting was modified.
+    pub wicket_ssh_auth: bool,
     /// Whether the debug operation to force a Sled Agent generation bump was
     /// set.
     pub debug_force_generation_bump: bool,
@@ -317,14 +321,23 @@ impl EditedSledScalarEdits {
         Self {
             debug_force_generation_bump: false,
             remove_mupdate_override: false,
+            wicket_ssh_auth: false,
             update_disposition: false,
         }
     }
 
     pub fn has_edits(&self) -> bool {
-        self.debug_force_generation_bump
-            || self.remove_mupdate_override
-            || self.update_disposition
+        let Self {
+            remove_mupdate_override,
+            update_disposition,
+            wicket_ssh_auth,
+            debug_force_generation_bump,
+        } = self;
+
+        *debug_force_generation_bump
+            || *remove_mupdate_override
+            || *wicket_ssh_auth
+            || *update_disposition
     }
 }
 
@@ -694,15 +707,44 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
-    /// Ensure a commissioned sled exists in this builder.
+    /// Ensure a commissioned sled exists in this builder with the specified
+    /// `wicket_ssh_auth` setting.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `sled_id` already exists but with a different `sled_subnet`, or
+    /// if applying `wicket_ssh_auth` to this sled is invalid (e.g., if the
+    /// sled's wicket SSH generation is ahead of `wicket_ssh_auth`'s).
     pub fn ensure_sled_exists(
         &mut self,
         sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
-    ) {
-        if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
-            slot.insert(SledEditor::for_new_active(sled_subnet));
+        wicket_ssh_auth: WicketSshAuth,
+    ) -> anyhow::Result<()> {
+        match self.sled_editors.entry(sled_id) {
+            Entry::Vacant(slot) => {
+                slot.insert(SledEditor::for_new_active(
+                    sled_subnet,
+                    wicket_ssh_auth.clone(),
+                ));
+            }
+            Entry::Occupied(mut entry) => {
+                let editor = entry.get_mut();
+                if editor.subnet() != sled_subnet {
+                    bail!(
+                        "sled subnet mismatch: \
+                         sled {sled_id} already exists with subnet {}, but \
+                         caller attempted to ensure it exists with subnet \
+                         {sled_subnet}",
+                        editor.subnet(),
+                    );
+                }
+                editor.set_wicket_ssh_auth(wicket_ssh_auth).with_context(
+                    || format!("failed to ensure sled {sled_id}"),
+                )?;
+            }
         }
+        Ok(())
     }
 
     pub fn set_cockroachdb_fingerprint(&mut self, fingerprint: String) {
@@ -966,7 +1008,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// can be used for building more blueprints.  This version is only intended
     /// for tests.
     pub fn build_returning_rng(
-        self,
+        mut self,
         source: BlueprintSource,
     ) -> (Blueprint, PlannerRng) {
         let blueprint_id = self.new_blueprint_id();
@@ -979,6 +1021,11 @@ impl<'a> BlueprintBuilder<'a> {
             .into_iter()
             .map(|(id, editor)| (id, editor.finalize()));
         let all_sleds = commissioned_sleds.chain(self.decommissioned_sleds);
+
+        // Updating the wicket SSH auth setting is done when
+        // `ensure_sled_exists()` is called for each sled; we can check here
+        // whether that made changes to any sleds and include a comment if so.
+        let mut num_wicket_ssh_auth_updates = 0;
 
         for (sled_id, edited_sled) in all_sleds {
             let EditedSled { config, edit_counts, scalar_edits } = edited_sled;
@@ -994,6 +1041,7 @@ impl<'a> BlueprintBuilder<'a> {
                     debug_force_generation_bump,
                     remove_mupdate_override,
                     update_disposition,
+                    wicket_ssh_auth,
                 } = scalar_edits;
                 debug!(
                     self.log, "sled modified in new blueprint";
@@ -1008,7 +1056,11 @@ impl<'a> BlueprintBuilder<'a> {
                     "remove_mupdate_override_modified" =>
                         remove_mupdate_override,
                     "update_disposition_modified" => update_disposition,
+                    "wicket_ssh_auth_modified" => wicket_ssh_auth,
                 );
+                if wicket_ssh_auth {
+                    num_wicket_ssh_auth_updates += 1;
+                }
             } else {
                 debug!(
                     self.log, "sled unchanged in new blueprint";
@@ -1016,6 +1068,14 @@ impl<'a> BlueprintBuilder<'a> {
                     "blueprint_id" => %blueprint_id,
                 );
             }
+        }
+
+        if num_wicket_ssh_auth_updates > 0 {
+            let s = if num_wicket_ssh_auth_updates > 1 { "s" } else { "" };
+            self.comments.push(format!(
+                "updated wicket SSH auth setting on \
+                 {num_wicket_ssh_auth_updates} sled{s}"
+            ));
         }
 
         let mut blueprint = Blueprint {
@@ -2942,7 +3002,13 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
-        builder.ensure_sled_exists(new_sled_id, new_sled_resources.subnet);
+        builder
+            .ensure_sled_exists(
+                new_sled_id,
+                new_sled_resources.subnet,
+                WicketSshAuth::initial(),
+            )
+            .expect("ensured sled");
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(

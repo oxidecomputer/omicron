@@ -27,6 +27,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types_versions::latest::disk::CompressionAlgorithm;
 use sled_agent_types_versions::latest::inventory::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
@@ -2101,11 +2102,18 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = vec![KvPair::new(
-                    BpDiffState::Removed,
-                    UPDATE_DISPOSITION,
-                    sled.update_disposition.to_string(),
-                )];
+                let mut rows = vec![
+                    KvPair::new(
+                        BpDiffState::Removed,
+                        UPDATE_DISPOSITION,
+                        sled.update_disposition.to_string(),
+                    ),
+                    KvPair::new(
+                        BpDiffState::Removed,
+                        WICKET_SSH_ACCESS,
+                        sled.wicket_ssh_auth.display().to_string(),
+                    ),
+                ];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Removed,
@@ -2166,6 +2174,25 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                         linear_table_unchanged(&sled.after.update_disposition),
                     ));
                 }
+
+                if sled.before.wicket_ssh_auth != sled.after.wicket_ssh_auth {
+                    rows.push(KvPair::new(
+                        BpDiffState::Modified,
+                        WICKET_SSH_ACCESS,
+                        display_modified_wicket_ssh_auth(
+                            &sled.before.wicket_ssh_auth,
+                            &sled.after.wicket_ssh_auth,
+                        ),
+                    ));
+                } else {
+                    rows.push(KvPair::new_unchanged(
+                        WICKET_SSH_ACCESS,
+                        linear_table_unchanged(
+                            &sled.after.wicket_ssh_auth.display(),
+                        ),
+                    ));
+                }
+
                 // If either before or after is set for remove_mupdate_override,
                 // display it.
                 if sled.before.remove_mupdate_override.is_some()
@@ -2196,11 +2223,18 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = vec![KvPair::new(
-                    BpDiffState::Added,
-                    UPDATE_DISPOSITION,
-                    sled.update_disposition.to_string(),
-                )];
+                let mut rows = vec![
+                    KvPair::new(
+                        BpDiffState::Added,
+                        UPDATE_DISPOSITION,
+                        sled.update_disposition.to_string(),
+                    ),
+                    KvPair::new(
+                        BpDiffState::Added,
+                        WICKET_SSH_ACCESS,
+                        sled.wicket_ssh_auth.display().to_string(),
+                    ),
+                ];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Added,
@@ -2320,6 +2354,13 @@ fn display_modified_update_disposition(
     format!("{kind} {generation}")
 }
 
+fn display_modified_wicket_ssh_auth(
+    before: &WicketSshAuth,
+    after: &WicketSshAuth,
+) -> String {
+    format!("{} {ARROW} {}", before.display(), after.display())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2363,6 +2404,30 @@ mod tests {
         assert_eq!(
             display_modified_update_disposition(&AVAILABLE, &GEN_ONLY),
             "available (generation 1 -> 2)",
+        );
+    }
+
+    #[test]
+    fn modified_wicket_ssh_auth_rendering() {
+        use omicron_generation_kinds::WicketSshAuthGeneration;
+        use sled_agent_types::inventory::WicketSshAuthKind;
+
+        let initial = WicketSshAuth::initial();
+        let authenticated = WicketSshAuth {
+            generation: WicketSshAuthGeneration::new().next(),
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::from(
+                    ["fake public key".to_string()],
+                ),
+                allow_support_keys: false,
+            },
+        };
+
+        assert_eq!(
+            display_modified_wicket_ssh_auth(&initial, &authenticated),
+            "unauthenticated (generation 1) -> \
+             authenticated, 1 operator key, support not allowed \
+             (generation 2)",
         );
     }
 }

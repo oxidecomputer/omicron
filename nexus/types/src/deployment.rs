@@ -1595,6 +1595,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 host_phase_2,
                 measurements,
                 update_disposition,
+                wicket_ssh_auth,
             } = config;
 
             // Report toplevel sled info
@@ -1605,6 +1606,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 (CONFIG_GENERATION, sled_agent_generation.to_string()),
                 (SUBNET, subnet.to_string()),
                 (LAST_ALLOCATED_IP, last_allocated_ip.to_string()),
+                (WICKET_SSH_ACCESS, wicket_ssh_auth.display().to_string()),
             ];
 
             if let Some(id) = remove_mupdate_override {
@@ -1748,6 +1750,7 @@ pub struct BlueprintSledConfig {
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
     pub measurements: BlueprintMeasurements,
     pub update_disposition: BlueprintSledUpdateDisposition,
+    pub wicket_ssh_auth: WicketSshAuth,
 }
 
 /// Controls a sled's availability for provisioning and whether its migratable
@@ -1913,10 +1916,7 @@ impl BlueprintSledConfig {
             host_phase_2: self.host_phase_2.into(),
             measurements: self.measurements.into(),
             update_disposition: self.update_disposition.into(),
-            // TODO omicron#11821 This should come from `BlueprintSledConfig`
-            // (which itself should get it from the db). For now, fill in the
-            // same initial value every sled-agent always has.
-            wicket_ssh_auth: WicketSshAuth::initial(),
+            wicket_ssh_auth: self.wicket_ssh_auth,
         }
     }
 

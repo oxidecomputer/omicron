@@ -75,6 +75,7 @@ use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::SourceNatConfigError;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -139,7 +140,7 @@ pub enum PlanError {
     InvalidPrivateIpConfig(#[from] PrivateIpConfigError),
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
     /// Control plane disks configured for this sled
     pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
@@ -149,6 +150,11 @@ pub struct SledConfig {
 
     /// zones configured for this sled
     pub zones: IdOrdMap<BlueprintZoneConfig>,
+
+    /// Initial wicket SSH auth setting
+    ///
+    /// This setting will be the same for all sleds.
+    pub wicket_ssh_auth: WicketSshAuth,
 }
 
 impl SledConfig {
@@ -934,6 +940,7 @@ impl ServicePlan {
                         BlueprintHostPhase2DesiredSlots::current_contents(),
                     remove_mupdate_override: None,
                     measurements: BlueprintMeasurements::InstallDataset,
+                    wicket_ssh_auth: sled_config.wicket_ssh_auth.clone(),
                 },
             );
         }
@@ -1052,7 +1059,16 @@ impl SledInfo {
             u2_zpool_allocators: HashMap::new(),
             is_scrimlet,
             addr_alloc: AddressBumpAllocator::new(sled_id, subnet),
-            request: Default::default(),
+            request: SledConfig {
+                disks: IdOrdMap::new(),
+                datasets: BTreeMap::new(),
+                zones: IdOrdMap::new(),
+                // Every sled starts out with the initial wicket SSH auth
+                // setting (generation 1, unauthenticated). If we do future work
+                // to allow an operator to specify some other value as a part of
+                // RSS, it will need to be assigned generation 2.
+                wicket_ssh_auth: WicketSshAuth::initial(),
+            },
         }
     }
 

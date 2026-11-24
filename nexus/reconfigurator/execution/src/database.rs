@@ -107,6 +107,7 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::WicketSshAuth;
     use std::collections::BTreeMap;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
@@ -186,6 +187,7 @@ mod test {
                 host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
                 ),
                 measurements: BlueprintMeasurements::InstallDataset,
+                wicket_ssh_auth: WicketSshAuth::initial(),
             },
         );
 
