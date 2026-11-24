@@ -5,6 +5,8 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
+use crate::integration_tests::crucible_replacements::expunge_precheck_get;
+use crate::integration_tests::crucible_replacements::expunged_resource_counts_checked;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -2432,6 +2434,19 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     assert_eq!(expunged_regions.len(), 3);
+
+    // Expunging the sled expunged its three physical disks, and each of them
+    // holds one of the regions.
+    let counts = expunged_resource_counts_checked(datastore, &opctx).await;
+    assert_eq!(counts.len(), 3, "{counts:?}");
+    for r in counts.iter() {
+        assert_eq!(r.num_read_write_regions, 1, "{counts:?}");
+    }
+
+    // The expunge precheck reports these disks right away.
+    let status = expunge_precheck_get(client).await;
+    assert!(!status.ok, "{status:#?}");
+    assert_eq!(status.user_data.expunged_disks_with_data, 3, "{status:#?}");
 }
 
 #[nexus_test(extra_sled_agents = 3)]

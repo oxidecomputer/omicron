@@ -54,6 +54,7 @@ use nexus_types::external_api::{
 // Type imports for API implementations (per RFD 619)
 use nexus_types::external_api::bfd::BfdStatus;
 use nexus_types::external_api::certificate::Certificate;
+use nexus_types::external_api::expunge_precheck::ExpungePrecheck;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::identity_provider::IdentityProvider;
@@ -6989,6 +6990,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let (.., physical_disk) =
                 nexus.physical_disk_lookup(&opctx, &path)?.fetch().await?;
             Ok(HttpResponseOk(physical_disk.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn expunge_precheck_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<ExpungePrecheck>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Ok(HttpResponseOk(nexus.expunge_precheck(&opctx).await?))
         };
         apictx
             .context

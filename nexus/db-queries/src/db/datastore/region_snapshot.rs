@@ -5,6 +5,8 @@
 //! [`DataStore`] methods on [`RegionSnapshot`]s.
 
 use super::DataStore;
+use super::count_to_u64;
+use super::physical_disk::ExpungedPhysicalDiskResourcesMap;
 use crate::context::OpContext;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::RegionSnapshot;
@@ -16,8 +18,11 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -118,6 +123,59 @@ impl DataStore {
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Counts the region snapshots on each expunged physical disk.
+    ///
+    /// This uses the same criteria as
+    /// `find_region_snapshots_on_expunged_physical_disks()`, but it returns
+    /// only counts, grouped by physical disk.  Only physical disks that hold
+    /// at least one region snapshot are included.
+    pub(super) async fn count_region_snapshots_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<ExpungedPhysicalDiskResourcesMap, Error> {
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl as region_snapshot_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        let rows: Vec<(Uuid, String, i64)> = region_snapshot_dsl::region_snapshot
+            .inner_join(
+                dataset_dsl::crucible_dataset
+                    .on(region_snapshot_dsl::dataset_id.eq(dataset_dsl::id)),
+            )
+            .inner_join(
+                zpool_dsl::zpool.on(dataset_dsl::pool_id.eq(zpool_dsl::id)),
+            )
+            .inner_join(
+                physical_disk_dsl::physical_disk
+                    .on(zpool_dsl::physical_disk_id.eq(physical_disk_dsl::id)),
+            )
+            .filter(
+                physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged),
+            )
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(zpool_dsl::time_deleted.is_null())
+            .group_by((physical_disk_dsl::id, physical_disk_dsl::serial))
+            .select((
+                physical_disk_dsl::id,
+                physical_disk_dsl::serial,
+                diesel::dsl::count_star(),
+            ))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut rv = ExpungedPhysicalDiskResourcesMap::default();
+        for (disk_id, disk_serial, count) in rows {
+            rv.add_region_snapshots(
+                PhysicalDiskUuid::from_untyped_uuid(disk_id),
+                disk_serial,
+                count_to_u64(count)?,
+            );
+        }
+        Ok(rv)
     }
 
     /// Find region snapshots not on expunged disks that match a snapshot id

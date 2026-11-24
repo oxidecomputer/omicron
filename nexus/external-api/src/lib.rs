@@ -92,6 +92,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_24_00, EXPUNGE_PRECHECK),
     (2026_11_21_00, ADD_VERSION_ENDPOINT),
     (2026_11_11_00, ACPI_SHUTDOWN),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
@@ -8154,6 +8155,32 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
+
+    /// Check whether expunging a working sled or physical disk will create
+    /// a problem due to ongoing repairs
+    ///
+    /// The system is designed to survive a limited number of concurrent
+    /// failures. When a sled or physical disk is expunged, the system repairs
+    /// itself by re-replicating user data and control plane data and by
+    /// deploying replacement control plane components. Each expunged component
+    /// counts as one failure until these repairs finish. Before expunging a
+    /// sled or disk that may currently be working, operators can use this API
+    /// to verify that the system is not still recovering from previous
+    /// expungements or repairs. Note that if a sled or physical disk is already
+    /// not working, expunging it will not make things worse, so there's no need
+    /// to use this API in that case.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/expunge-precheck",
+        tags = ["experimental"],
+        versions = VERSION_EXPUNGE_PRECHECK..,
+    }]
+    async fn expunge_precheck_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::expunge_precheck::ExpungePrecheck>,
+        HttpError,
+    >;
 
     /// List physical disks that have not yet been adopted for use
     #[endpoint {
