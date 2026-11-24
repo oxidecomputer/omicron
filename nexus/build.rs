@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 fn main() {
-    // Set RPATH for native libraries. Required if this crate depends (even
-    // transitively) on a -sys crate listed in omicron-rpaths.
+    // Set RPATH for native libraries. This is required for crates that depend
+    // (even transitively) on a -sys crate listed in the omicron-rpaths docs.
     omicron_rpaths::configure_default_omicron_rpaths();
 
     // Expose the release number from tools/pins.toml as SYSTEM_RELEASE_NUMBER.
