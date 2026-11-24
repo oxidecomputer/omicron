@@ -139,7 +139,7 @@ postgres-types = { version = "0.2.14", default-features = false, features = ["wi
 potential_utf = { version = "0.1.4", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
-preinstantiate = { version = "0.1.0", default-features = false, features = ["build"] }
+preinstantiate = { version = "0.1.1", default-features = false, features = ["build"] }
 primeorder = { version = "0.14.0", default-features = false, features = ["basepoint-table", "std"] }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 progenitor-extras = { version = "0.3.0", default-features = false, features = ["retry", "slog"] }
@@ -341,7 +341,7 @@ postgres-types = { version = "0.2.14", default-features = false, features = ["wi
 potential_utf = { version = "0.1.4", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
-preinstantiate = { version = "0.1.0", default-features = false, features = ["build"] }
+preinstantiate = { version = "0.1.1", default-features = false, features = ["build"] }
 primeorder = { version = "0.14.0", default-features = false, features = ["basepoint-table", "std"] }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 progenitor-extras = { version = "0.3.0", default-features = false, features = ["retry", "slog"] }

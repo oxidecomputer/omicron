@@ -12440,9 +12440,9 @@ dependencies = [
 
 [[package]]
 name = "preinstantiate"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2332437e77e6b20966ea7125131b3eeaf66a4bd62176d94aaf64d2a3d449ed2a"
+checksum = "6b14ad9393564a9b588011fddec30bb884bfa135c70251ed233ee16bc6ce4a2f"
 dependencies = [
  "atomicwrites",
  "camino",
