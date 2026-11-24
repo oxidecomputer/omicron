@@ -46,7 +46,7 @@ impl InstanceCreateBuilder {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: instance::InstanceShutdownPolicy::HardOff,
+            stop_timeout_secs: instance::StopTimeoutSecs::ZERO,
         };
 
         Self { interim_body }
@@ -162,11 +162,11 @@ impl InstanceCreateBuilder {
         self
     }
 
-    pub fn with_shutdown_policy(
+    pub fn with_stop_timeout_secs(
         mut self,
-        shutdown_policy: instance::InstanceShutdownPolicy,
+        stop_timeout_secs: instance::StopTimeoutSecs,
     ) -> Self {
-        self.interim_body.shutdown_policy = shutdown_policy;
+        self.interim_body.stop_timeout_secs = stop_timeout_secs;
         self
     }
 

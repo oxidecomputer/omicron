@@ -5987,8 +5987,7 @@ pub(in crate::db::datastore) mod test {
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
                         enable_jumbo_frames: false,
-                        shutdown_policy:
-                            instance::InstanceShutdownPolicy::default(),
+                        stop_timeout_secs: Default::default(),
                     },
                 ),
             )

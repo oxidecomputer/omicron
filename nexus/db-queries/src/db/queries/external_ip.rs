@@ -998,7 +998,6 @@ mod tests {
     use nexus_types::external_api::instance;
     use nexus_types::external_api::instance::InstanceCreate;
     use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
-    use nexus_types::external_api::instance::InstanceShutdownPolicy;
     use omicron_common::address::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
@@ -1140,7 +1139,7 @@ mod tests {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
                 enable_jumbo_frames: false,
-                shutdown_policy: InstanceShutdownPolicy::default(),
+                stop_timeout_secs: Default::default(),
             });
 
             let conn = self
@@ -2695,7 +2694,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
-            shutdown_policy: InstanceShutdownPolicy::default(),
+            stop_timeout_secs: Default::default(),
         });
 
         let conn = context

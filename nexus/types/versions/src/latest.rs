@@ -194,12 +194,18 @@ pub mod instance {
 
     pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
 
+    // `AcpiTimeoutSecs` and `InstanceShutdownPolicy` are no longer part of the
+    // external API, but (for now) are still used to communicate shutdown
+    // parameters to sled-agent.
     pub use crate::v2026_11_11_00::instance::AcpiTimeoutSecs;
-    pub use crate::v2026_11_11_00::instance::Instance;
-    pub use crate::v2026_11_11_00::instance::InstanceCreate;
     pub use crate::v2026_11_11_00::instance::InstanceShutdownPolicy;
+
     pub use crate::v2026_11_11_00::instance::InstanceStopOrRebootParams;
-    pub use crate::v2026_11_11_00::instance::InstanceUpdate;
+
+    pub use crate::v2026_11_23_00::instance::Instance;
+    pub use crate::v2026_11_23_00::instance::InstanceCreate;
+    pub use crate::v2026_11_23_00::instance::InstanceUpdate;
+    pub use crate::v2026_11_23_00::instance::StopTimeoutSecs;
 }
 
 pub mod internet_gateway {

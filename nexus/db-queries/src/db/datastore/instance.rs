@@ -186,7 +186,7 @@ impl TryFrom<InstanceAndActiveVmm> for instance_types::Instance {
             },
             auto_restart_status,
             enable_jumbo_frames: value.instance.enable_jumbo_frames,
-            shutdown_policy,
+            stop_timeout_secs: shutdown_policy.into(),
         })
     }
 }
@@ -2445,8 +2445,7 @@ mod tests {
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
                         enable_jumbo_frames: false,
-                        shutdown_policy:
-                            instance_types::InstanceShutdownPolicy::default(),
+                        stop_timeout_secs: Default::default(),
                     },
                 ),
             )
