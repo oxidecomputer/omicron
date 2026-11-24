@@ -31,7 +31,6 @@ clickhouse-admin-keeper-client.workspace = true
 clickhouse-admin-server-client.workspace = true
 clickhouse-admin-single-client.workspace = true
 cockroach-admin-client.workspace = true
-cockroach-admin-types.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
 crucible-common.workspace = true

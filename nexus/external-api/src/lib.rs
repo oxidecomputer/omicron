@@ -7956,12 +7956,12 @@ pub trait NexusExternalApi {
     /// failures. When a sled or physical disk is expunged, the system repairs
     /// itself by re-replicating user data and control plane data and by
     /// deploying replacement control plane components. Each expunged component
-    /// counts as one failure until these repairs finish.  Before expunging a
+    /// counts as one failure until these repairs finish. Before expunging a
     /// sled or disk that may currently be working, operators can use this API
     /// to verify that the system is not still recovering from previous
-    /// expungements or repairs.  Note that if a sled or physical disk is
-    /// already not working, expunging it will not make things worse, so there's
-    /// no need to use this API in that case.
+    /// expungements or repairs. Note that if a sled or physical disk is already
+    /// not working, expunging it will not make things worse, so there's no need
+    /// to use this API in that case.
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/expunge-precheck",

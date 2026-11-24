@@ -9720,7 +9720,6 @@ dependencies = [
  "clickhouse-admin-server-client",
  "clickhouse-admin-single-client",
  "cockroach-admin-client",
- "cockroach-admin-types",
  "criterion",
  "crucible-agent-client",
  "crucible-common",

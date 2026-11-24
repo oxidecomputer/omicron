@@ -6,7 +6,6 @@
 //! planning steps that involve bouncing other components.
 
 use crate::blueprint_builder::BlueprintBuilder;
-use cockroach_admin_types::node::InternalNodeId;
 use itertools::Itertools;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::CockroachdbUnsafeToShutdown;
@@ -231,15 +230,43 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
     fn reason_cockroach_unsafe_to_shut_down(
         &self,
     ) -> Option<ZoneUnsafeToShutdown> {
+        use CockroachdbUnsafeToShutdown::*;
+        use ZoneUnsafeToShutdown::Cockroachdb;
+
         let target_cockroachdb_zone_count =
             self.input.target_cockroachdb_zone_count();
-        cockroachdb_unhealthy_reasons(
-            self.inventory,
-            target_cockroachdb_zone_count,
-        )
-        .into_iter()
-        .next()
-        .map(|(_node_id, reason)| ZoneUnsafeToShutdown::Cockroachdb { reason })
+
+        // We must hear from all nodes
+        let all_statuses = &self.inventory.cockroach_status;
+
+        if all_statuses.len() < target_cockroachdb_zone_count {
+            return Some(Cockroachdb { reason: NotEnoughNodes });
+        }
+
+        // All nodes must report: "We have the necessary redundancy, and
+        // have observed no underreplicated ranges".
+        for (_node_id, status) in all_statuses {
+            let Some(ranges_underreplicated) = status.ranges_underreplicated
+            else {
+                return Some(Cockroachdb {
+                    reason: MissingUnderreplicatedStat,
+                });
+            };
+            if ranges_underreplicated != 0 {
+                return Some(Cockroachdb {
+                    reason: UnderreplicatedRanges { n: ranges_underreplicated },
+                });
+            }
+            let Some(live_nodes) = status.liveness_live_nodes else {
+                return Some(Cockroachdb { reason: MissingLiveNodesStat });
+            };
+            if live_nodes < target_cockroachdb_zone_count as u64 {
+                return Some(Cockroachdb {
+                    reason: NotEnoughLiveNodes { live_nodes },
+                });
+            }
+        }
+        None
     }
 
     fn reason_internal_dns_unsafe_to_shut_down(
@@ -287,53 +314,4 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
             });
         }
     }
-}
-
-/// Returns all the reasons that the CockroachDB cluster is known not to be
-/// fully healthy, based on `inventory`.
-///
-/// Each reason is paired with the node that reported it, if the reason came
-/// from a specific node.  An empty result means that every expected node
-/// reported its status and that every node reported full replication and
-/// enough live nodes.
-///
-/// The reasons are returned in a stable order, with cluster-wide reasons
-/// first.  The order is not critical for correctness, but a stable order is
-/// preferable for consumers.
-pub fn cockroachdb_unhealthy_reasons(
-    inventory: &Collection,
-    target_cockroachdb_zone_count: usize,
-) -> Vec<(Option<&InternalNodeId>, CockroachdbUnsafeToShutdown)> {
-    use CockroachdbUnsafeToShutdown::*;
-
-    let mut reasons = Vec::new();
-
-    // We must hear from all nodes
-    let all_statuses = &inventory.cockroach_status;
-    if all_statuses.len() < target_cockroachdb_zone_count {
-        reasons.push((None, NotEnoughNodes));
-    }
-
-    // All nodes must report: "We have the necessary redundancy, and
-    // have observed no underreplicated ranges".
-    for (node_id, status) in all_statuses {
-        match status.ranges_underreplicated {
-            None => reasons.push((Some(node_id), MissingUnderreplicatedStat)),
-            Some(0) => (),
-            Some(n) => {
-                reasons.push((Some(node_id), UnderreplicatedRanges { n }))
-            }
-        }
-        match status.liveness_live_nodes {
-            None => reasons.push((Some(node_id), MissingLiveNodesStat)),
-            Some(live_nodes)
-                if live_nodes < target_cockroachdb_zone_count as u64 =>
-            {
-                reasons.push((Some(node_id), NotEnoughLiveNodes { live_nodes }))
-            }
-            Some(_) => (),
-        }
-    }
-
-    reasons
 }

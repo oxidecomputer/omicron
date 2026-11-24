@@ -31,7 +31,6 @@ use nexus_test_utils::resource_helpers::delete_snapshot;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::expunge_precheck::ExpungePrecheck;
-use nexus_types::external_api::expunge_precheck::UserDataProblemKind;
 use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -2862,6 +2861,9 @@ async fn expunge_precheck_get(client: &ClientTestContext) -> ExpungePrecheck {
 }
 
 /// Tests that the repair status reports user data on an expunged physical
+// <review>
+// Can/should this be incorporated into an existing test instead?
+// </review>
 /// disk until replacement completes
 #[nexus_test(extra_sled_agents = 3)]
 async fn test_expunge_precheck_user_data(cptestctx: &ControlPlaneTestContext) {
@@ -2886,6 +2888,7 @@ async fn test_expunge_precheck_user_data(cptestctx: &ControlPlaneTestContext) {
 
     // Before any expungement, the user data check passes.
     let status = expunge_precheck_get(client).await;
+    assert!(status.ok, "{status:#?}");
     assert!(status.user_data.problems.is_empty(), "{status:#?}");
 
     // Expunge a physical disk that holds one of the disk's regions.
@@ -2921,11 +2924,13 @@ async fn test_expunge_precheck_user_data(cptestctx: &ControlPlaneTestContext) {
     // so this cannot race with the repair.
     let status = expunge_precheck_get(client).await;
     assert!(!status.ok, "{status:#?}");
+    assert_eq!(status.user_data.expunged_disks_with_data, 1, "{status:#?}");
     assert!(
-        status.user_data.problems.iter().any(|p| {
-            p.kind == UserDataProblemKind::ExpungedDiskHasData
-                && p.message.contains(&physical_disk_id.to_string())
-        }),
+        status
+            .user_data
+            .problems
+            .iter()
+            .any(|p| p.contains(&physical_disk_id.to_string())),
         "{status:#?}"
     );
 
@@ -2942,5 +2947,6 @@ async fn test_expunge_precheck_user_data(cptestctx: &ControlPlaneTestContext) {
     wait_for_all_replacements(&datastore, &lockstep_client).await;
 
     let status = expunge_precheck_get(client).await;
+    assert!(status.ok, "{status:#?}");
     assert!(status.user_data.problems.is_empty(), "{status:#?}");
 }
