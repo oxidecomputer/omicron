@@ -8067,7 +8067,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RackAdoptRequest"
+                "$ref": "#/components/schemas/RackToAdopt"
               }
             }
           },
@@ -28053,23 +28053,6 @@
           "time_modified"
         ]
       },
-      "RackAdoptRequest": {
-        "description": "Request to adopt a rack into the regional cluster",
-        "type": "object",
-        "properties": {
-          "rack_id": {
-            "description": "ID of the unadopted rack to add",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RackUuid"
-              }
-            ]
-          }
-        },
-        "required": [
-          "rack_id"
-        ]
-      },
       "RackMembershipAddSledsRequest": {
         "type": "object",
         "properties": {
@@ -28189,6 +28172,23 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "RackToAdopt": {
+        "description": "Body of a request to adopt a rack into the regional cluster",
+        "type": "object",
+        "properties": {
+          "rack_id": {
+            "description": "ID of the unadopted rack to add",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rack_id"
         ]
       },
       "RackUuid": {
