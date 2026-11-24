@@ -209,8 +209,9 @@ impl DataStore {
     ///
     /// RSS initializes every sled to "generation 1, unauthenticated", and the
     /// db migration to the version that added this feature backfilled the same
-    /// setting for all existing systems. Subsequent generations are written in
-    /// response to operator requests to apply new settings.
+    /// setting to all existing inventory collections and blueprints. Subsequent
+    /// generations are written in response to operator requests to apply new
+    /// settings.
     pub async fn load_builtin_wicket_ssh_auth(
         &self,
         opctx: &OpContext,

@@ -48,6 +48,7 @@ mod support_bundle_sp_components;
 mod support_bundle_time_range;
 mod tufaceous_v2;
 mod vmm_failure_reason_if_failed;
+mod wicket_ssh_auth;
 mod widen_lldp_system_description;
 
 pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
@@ -98,6 +99,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(drop_multicast_deleted_state);
     register!(widen_lldp_system_description);
     register!(remove_cross_project_affinity_memberships);
+    register!(wicket_ssh_auth);
 
     map
 }
