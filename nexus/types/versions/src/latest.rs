@@ -547,7 +547,7 @@ pub mod rack {
     pub use crate::v2026_10_29_00::rack::RackMembershipAddSledsRequest;
     pub use crate::v2026_10_29_00::rack::SledAddPrecheckOverrides;
 
-    pub use crate::v2026_11_23_00::rack::RackAdoptRequest;
+    pub use crate::v2026_11_23_00::rack::RackToAdopt;
 }
 
 pub mod subnet_pool {

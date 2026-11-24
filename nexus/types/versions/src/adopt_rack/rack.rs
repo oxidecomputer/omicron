@@ -8,9 +8,9 @@ use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Request to adopt a rack into the regional cluster
+/// Body of a request to adopt a rack into the regional cluster
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct RackAdoptRequest {
+pub struct RackToAdopt {
     /// ID of the unadopted rack to add
     pub rack_id: RackUuid,
 }

@@ -17,7 +17,7 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::multirack::UnadoptedRack;
 use nexus_types::external_api::rack::Rack;
-use nexus_types::external_api::rack::RackAdoptRequest;
+use nexus_types::external_api::rack::RackToAdopt;
 use nexus_types::inventory::DiscoveredRack;
 use nexus_types::inventory::DiscoveredSled;
 use omicron_common::address::Ipv6Subnet;
@@ -281,7 +281,7 @@ async fn test_rack_adopt() {
         })),
     );
 
-    let request = RackAdoptRequest { rack_id };
+    let request = RackToAdopt { rack_id };
     let adopted: Rack = object_create(client, RACKS_URL, &request).await;
     assert_eq!(adopted.identity.id, rack_id.into_untyped_uuid());
 
@@ -332,7 +332,7 @@ async fn test_rack_adopt_not_found() {
     object_create_error(
         client,
         RACKS_URL,
-        &RackAdoptRequest { rack_id },
+        &RackToAdopt { rack_id },
         StatusCode::NOT_FOUND,
     )
     .await;
@@ -365,7 +365,7 @@ async fn test_rack_adopt_not_found() {
     object_create_error(
         client,
         RACKS_URL,
-        &RackAdoptRequest { rack_id },
+        &RackToAdopt { rack_id },
         StatusCode::NOT_FOUND,
     )
     .await;

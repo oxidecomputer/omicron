@@ -7870,7 +7870,7 @@ pub trait NexusExternalApi {
     }]
     async fn rack_adopt(
         rqctx: RequestContext<Self::Context>,
-        req: TypedBody<latest::rack::RackAdoptRequest>,
+        req: TypedBody<latest::rack::RackToAdopt>,
     ) -> Result<HttpResponseCreated<latest::rack::Rack>, HttpError>;
 
     /// Fetch rack
