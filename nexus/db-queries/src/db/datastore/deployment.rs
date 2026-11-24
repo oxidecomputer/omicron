@@ -7,6 +7,8 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::datastore::wicket_ssh_auth::WicketSshAuthRefError;
+use crate::db::datastore::wicket_ssh_auth::WicketSshAuthRefs;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -253,6 +255,19 @@ impl DataStore {
         let row_blueprint = DbBlueprint::from(blueprint);
         let blueprint_id = BlueprintUuid::from(row_blueprint.id);
 
+        // We only store the generation of each sled's wicket SSH auth setting;
+        // reading the blueprint back rehydrates it from the `wicket_ssh_auth*`
+        // tables. Collect the distinct settings this blueprint references so
+        // we can confirm (via `wicket_ssh_auth_validate_on_connection()` inside
+        // the transaction below) that each one exists with exactly these
+        // contents.
+        let wicket_ssh_auth_refs =
+            WicketSshAuthRefs::from_blueprint(&blueprint).map_err(|e| {
+                Error::from(e).internal_context(format!(
+                    "inserting blueprint {blueprint_id}"
+                ))
+            })?;
+
         let sled_metadatas = blueprint
             .sleds
             .iter()
@@ -439,6 +454,14 @@ impl DataStore {
         #[allow(clippy::disallowed_methods)]
         self.transaction_non_retry_wrapper("blueprint_insert")
             .transaction(&conn, |conn| async move {
+                // Check that every wicket SSH auth generation we reference
+                // is valid (see above).
+                Self::wicket_ssh_auth_validate_on_connection(
+                    &conn,
+                    &wicket_ssh_auth_refs,
+                )
+                .await?;
+
                 // Insert the row for the blueprint.
                 {
                     use nexus_db_schema::schema::blueprint::dsl;
@@ -654,6 +677,11 @@ impl DataStore {
                     // causes so we don't need to use InlineErrorChain here.
                     Error::internal_error(&e.to_string())
                 }
+                InsertTxnError::WicketSshAuth(e) => {
+                    Error::from(e).internal_context(format!(
+                        "inserting blueprint {blueprint_id}"
+                    ))
+                }
             })?;
 
         info!(
@@ -822,7 +850,10 @@ impl DataStore {
                             self.wicket_ssh_auth_read_on_connection(
                                 &conn, wicket_gen,
                             )
-                            .await?,
+                            .await
+                            .internal_context(
+                                format!("reading blueprint {blueprint_id}"),
+                            )?,
                         );
                     }
                 }
@@ -2767,6 +2798,18 @@ enum InsertTxnError {
         baseboard_id: Arc<BaseboardId>,
         count: usize,
     },
+
+    #[error("invalid wicket SSH auth reference")]
+    WicketSshAuth(#[from] WicketSshAuthRefError),
+}
+
+impl From<TransactionError<WicketSshAuthRefError>> for InsertTxnError {
+    fn from(err: TransactionError<WicketSshAuthRefError>) -> Self {
+        match err {
+            TransactionError::Database(err) => Self::Diesel(err),
+            TransactionError::CustomError(err) => Self::WicketSshAuth(err),
+        }
+    }
 }
 
 // Insert pending MGS updates for service processors for this blueprint.  These
@@ -3853,6 +3896,94 @@ mod tests {
             2,
             "expected two external IPs, got {actual_ips:?}"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Blueprints store only the generation of each sled's wicket SSH auth
+    // setting. Inserting one must fail if that generation isn't in the
+    // `wicket_ssh_auth*` tables with identical contents; otherwise we'd store a
+    // blueprint that can't be read back (or that reads back differently).
+    #[tokio::test]
+    async fn test_blueprint_insert_validates_wicket_ssh_auth() {
+        use sled_agent_types::inventory::WicketSshAuthKind;
+
+        const TEST_NAME: &str =
+            "test_blueprint_insert_validates_wicket_ssh_auth";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (_, _, blueprint) = representative(&logctx.log, TEST_NAME);
+        assert!(
+            blueprint.sleds.len() >= 2,
+            "test requires a blueprint with at least two sleds"
+        );
+        let initial = WicketSshAuth::initial();
+        let gen2 = initial.generation.next();
+        let public_keys = |generation, allow_support_keys| WicketSshAuth {
+            generation,
+            kind: WicketSshAuthKind::PublicKeys {
+                authorized_keys: BTreeSet::new(),
+                allow_support_keys,
+            },
+        };
+
+        let insert_err = |bad: Blueprint| async move {
+            let err = datastore
+                .blueprint_insert(&opctx, &bad)
+                .await
+                .expect_err("blueprint insert should fail");
+            match err {
+                Error::InternalError { internal_message } => internal_message,
+                other => panic!("unexpected error: {other:?}"),
+            }
+        };
+
+        // Reference a generation that doesn't exist.
+        let mut bad = blueprint.clone();
+        for sled in bad.sleds.values_mut() {
+            sled.wicket_ssh_auth = public_keys(gen2, true);
+        }
+        let message = insert_err(bad).await;
+        assert!(
+            message.contains(&format!("wicket SSH auth generation {gen2}"))
+                && message.contains("does not exist"),
+            "unexpected message: {message}"
+        );
+
+        // Reference a generation that exists, but with different contents.
+        let mut bad = blueprint.clone();
+        for sled in bad.sleds.values_mut() {
+            sled.wicket_ssh_auth = public_keys(initial.generation, true);
+        }
+        let message = insert_err(bad).await;
+        assert!(
+            message.contains("has different contents than the stored setting"),
+            "unexpected message: {message}"
+        );
+
+        // Two sleds claiming different contents for the same generation.
+        let mut bad = blueprint.clone();
+        for (i, sled) in bad.sleds.values_mut().enumerate() {
+            sled.wicket_ssh_auth = public_keys(gen2, i % 2 == 0);
+        }
+        let message = insert_err(bad).await;
+        assert!(
+            message.contains("has different contents as referenced by"),
+            "unexpected message: {message}"
+        );
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint_from_id(blueprint.id))
+            .await
+            .expect("failed to read blueprint back");
+        assert_eq!(blueprint, blueprint_read);
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -4688,7 +4688,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- `wicket_ssh_auth_last_error` must be NULL if
     -- `wicket_ssh_auth_effective_gen` is NULL. It may or may not be NULL
     -- otherwise (there isn't always a last error).
-    wicket_ssh_auth_effective_gen u64,
+    wicket_ssh_auth_effective_gen INT8,
     wicket_ssh_auth_last_error TEXT,
 
     CONSTRAINT wicket_ssh_auth_last_error_only_if_have_effective_gen CHECK (
@@ -10310,15 +10310,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_problem_support_bundle (
 );
 
 -- Top-level table for operator-controlled wicket SSH auth settings (see RFD
--- 785). RSS seeds generation 1, and all subsequent generations are created in
--- response to operator changes.
+-- 785). Generation 1 is always "unauthenticated" and is inserted by Nexus when
+-- it populates its builtin data; all subsequent generations are created in
+-- response to operator changes. Rows in this table are immutable; if the
+-- operator changes the config, we record the new desired config as a new
+-- generation.
 --
--- This table (and its partner, `wicket_ssh_auth_keys`) are also used when
--- reading inventory collections: each sled reports the generation of wicket SSH
--- auth is stored in its `OmicronSledConfig`, but to avoid duplicating all the
--- SSH keys for each sled in every collection, it _only_ stores the generation
--- number. Reading inventory "rehydrates" that generation number into the full
--- auth settings via these tables.
+-- This table (and its partner, `wicket_ssh_auth_key`) is also used when
+-- reading blueprints and inventory collections. Both record a wicket SSH auth
+-- setting per sled config, but to avoid duplicating all the SSH keys for each
+-- sled in every blueprint and collection, they store _only_ the generation
+-- number (in `bp_sled_metadata` and `inv_omicron_sled_config`). Reading them
+-- "rehydrates" that generation number into the full auth settings via these
+-- tables.
+--
+-- These references mean any future pruning of this table must take into account
+-- any references by inventory collections/blueprints (deleting a generation
+-- they reference will render them unable to load), and inserting inventory
+-- collections/blueprints will fail if they reference an unknown generation
+-- (enforced at runtime; there's no conceivable reason this check should fail).
 CREATE TABLE IF NOT EXISTS omicron.public.wicket_ssh_auth (
     -- Monotonically increasing generation
     generation INT8 PRIMARY KEY CHECK (generation >= 1),
@@ -10335,8 +10345,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.wicket_ssh_auth (
     -- true => authenticated with baked-in keys plus any operator-specified keys
     -- false => authenticated with only operator-specified keys
     --
-    -- In either of the latter cases, look up the all rows in
-    -- `wicket_ssh_auth_keys` with this `generation` to find the
+    -- In either of the latter cases, look up all rows in
+    -- `wicket_ssh_auth_key` with this `generation` to find the
     -- operator-specified keys.
     allow_support_keys BOOL
 );
