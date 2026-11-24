@@ -15,6 +15,7 @@ use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::ExternalServiceNetworkingConfig;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::WicketSshAuthGenerationDescription;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -272,9 +273,13 @@ impl PlanningInputFromDb<'_> {
                     nexus.state() == DbMetadataNexusState::Active
                 });
 
-        // TODO omicron#11821 Read this from `datastore`, once we store it in
-        // the datastore! This should be the operator's latest desired config.
-        let wicket_ssh_auth = WicketSshAuth::initial();
+        let wicket_ssh_auth = datastore
+            .wicket_ssh_auth_read(
+                opctx,
+                WicketSshAuthGenerationDescription::Latest,
+            )
+            .await
+            .internal_context("fetching latest wicket SSH auth setting")?;
 
         let active_nexus_zones =
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();

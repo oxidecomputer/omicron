@@ -20,6 +20,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::DbTypedGeneration;
 use nexus_db_model::WicketSshAuth as DbWicketSshAuth;
 use nexus_db_model::WicketSshAuthKey as DbWicketSshAuthKey;
 use nexus_db_model::to_db_typed_generation;
@@ -27,6 +28,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::WicketSshAuthGeneration;
+use omicron_generation_kinds::WicketSshAuthGenerationKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::WicketSshAuth;
@@ -34,6 +36,18 @@ use sled_agent_types::inventory::WicketSshAuthKind;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
+
+/// Selector for a wicket SSH auth generation, used by
+/// [`DataStore::wicket_ssh_auth_read()`].
+#[derive(Debug, Clone, Copy)]
+pub enum WicketSshAuthGenerationDescription {
+    /// Read whatever the current latest generation is.
+    ///
+    /// This is inherently racy with any query that inserts a new generation.
+    Latest,
+    /// Read a specific generation.
+    Specific(WicketSshAuthGeneration),
+}
 
 /// The set of distinct wicket SSH auth settings referenced by something about
 /// to be inserted (a blueprint or an inventory collection).
@@ -220,6 +234,22 @@ impl DataStore {
         Ok(())
     }
 
+    // Helper to read the latest generation recorded in `wicket_ssh_auth`.
+    async fn wicket_ssh_auth_latest_generation_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<WicketSshAuthGeneration, DieselError> {
+        use nexus_db_schema::schema::wicket_ssh_auth::dsl;
+
+        let latest_gen: DbTypedGeneration<WicketSshAuthGenerationKind> =
+            dsl::wicket_ssh_auth
+                .select(dsl::generation)
+                .order_by(dsl::generation.desc())
+                .limit(1)
+                .first_async(conn)
+                .await?;
+        Ok(latest_gen.into())
+    }
+
     /// Check that every generation in `refs` exists in the database with
     /// exactly the contents recorded in `refs`.
     ///
@@ -261,6 +291,35 @@ impl DataStore {
     }
 
     /// Read the full wicket SSH auth setting for `generation`.
+    pub async fn wicket_ssh_auth_read(
+        &self,
+        opctx: &OpContext,
+        generation: WicketSshAuthGenerationDescription,
+    ) -> Result<WicketSshAuth, Error> {
+        opctx.authorize(authz::Action::Read, &authz::WICKET_SSH_AUTH).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Read the latest generation, then we'll use that to look up the full
+        // setting. These do not need to be in the same transaction: wicket SSH
+        // auth settings are immutable, so once we've read the latest
+        // generation, we can (separately) read the setting associated with it.
+        let generation = match generation {
+            WicketSshAuthGenerationDescription::Latest => {
+                Self::wicket_ssh_auth_latest_generation_on_connection(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?
+            }
+            WicketSshAuthGenerationDescription::Specific(generation) => {
+                generation
+            }
+        };
+
+        self.wicket_ssh_auth_read_on_connection(&conn, generation).await
+    }
+
+    /// Read the full wicket SSH auth setting for `generation`.
     //
     // TODO omicron#11821 This returns the sled-agent `WicketSshAuth` type, for
     // now. As a part of the upcoming external API, we'll want to return a Nexus
@@ -275,7 +334,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .ok_or_else(|| {
-                Error::internal_error(&format!(
+                Error::non_resourcetype_not_found(&format!(
                     "wicket SSH auth generation {generation} does not exist"
                 ))
             })
