@@ -14,6 +14,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::AlertFilters;
 use nexus_db_queries::db::model::ProblemView;
 use nexus_types::external_api::alert;
@@ -55,7 +56,7 @@ impl Nexus {
         problem_lookup: &lookup::Problem<'_>,
     ) -> LookupResult<ProblemView> {
         let (authz_problem, problem) =
-            problem_lookup.fetch_for(authz::Action::Read).await?;
+            fetch_problem(problem_lookup, authz::Action::Read).await?;
         self.db_datastore
             .problem_fetch_current_revision(opctx, &authz_problem, problem)
             .await
@@ -68,8 +69,8 @@ impl Nexus {
         _selector: &api::ProblemListParams,
         _pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<api::RelatedProblem> {
-        let (.., _authz_problem) =
-            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        let (_authz_problem, _problem) =
+            fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
         // TODO(eliza): finish this part
         Ok(Vec::new())
     }
@@ -81,8 +82,8 @@ impl Nexus {
         _selector: &api::ProblemListParams,
         _pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<api::RelatedProblem> {
-        let (.., _authz_problem) =
-            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        let (_authz_problem, _problem) =
+            fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
         // TODO(eliza): finish this part
         Ok(Vec::new())
     }
@@ -94,8 +95,8 @@ impl Nexus {
         _selector: &api::ImpactListParams,
         _pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<api::ProblemImpact> {
-        let (.., _authz_problem) =
-            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        let (_authz_problem, _problem) =
+            fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
         // TODO(eliza): actually implement impact lists
         Ok(Vec::new())
     }
@@ -106,8 +107,8 @@ impl Nexus {
         problem_lookup: &lookup::Problem<'_>,
         _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundleInfo> {
-        let (.., _authz_problem) =
-            problem_lookup.lookup_for(authz::Action::ListChildren).await?;
+        let (_authz_problem, _problem) =
+            fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
         // TODO(eliza): actually add a way to associate problems and support
         // bundles...
         Ok(Vec::new())
@@ -124,18 +125,10 @@ impl Nexus {
         // First, return an error on invalid query params (before looking up the
         // problem)
         let filters = AlertFilters::try_from(params.clone())?;
+        let (_authz_problem, problem) =
+            fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
         // Next, fetch the problem's current revision, in order to use it to
         // construct the alert filters.
-        let (.., authz_problem, problem) =
-            problem_lookup.fetch_for(authz::Action::ListChildren).await?;
-        // A problem at revision zero is still being created by rendezvous, and
-        // is not visible in the external API until its first revision is
-        // created and set as the current revision. `problem_view` returns a 404
-        // for problems at revision zero, so for consistency, this function
-        // should as well.
-        if problem.current_revision() == ProblemRevNum::ZERO {
-            return Err(authz_problem.not_found());
-        }
         let filters = filters.for_problem(&problem);
 
         let alerts = self
@@ -148,4 +141,21 @@ impl Nexus {
 
         Ok(alerts)
     }
+}
+
+async fn fetch_problem(
+    lookup: &lookup::Problem<'_>,
+    action: authz::Action,
+) -> LookupResult<(authz::Problem, db::model::Problem)> {
+    let (authz_problem, problem) = lookup.fetch_for(action).await?;
+    // A problem at revision zero is still being created by rendezvous, and
+    // is not visible in the external API until its first revision is
+    // created and set as the current revision. `problem_view` returns a 404
+    // for problems at revision zero, so for consistency, this function
+    // should as well.
+    if problem.current_revision() == ProblemRevNum::ZERO {
+        return Err(authz_problem.not_found());
+    }
+
+    Ok((authz_problem, problem))
 }
