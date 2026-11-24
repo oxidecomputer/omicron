@@ -93,6 +93,7 @@ api_versions!([
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
     (2026_11_23_00, ADOPT_RACK),
+    (2026_11_21_00, ADD_VERSION_ENDPOINT),
     (2026_11_11_00, ACPI_SHUTDOWN),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
     (2026_11_05_00, PROBLEMS),
@@ -456,6 +457,22 @@ pub trait NexusExternalApi {
             status: latest::system::PingStatus::Ok,
         }))
     }
+
+    /// Fetch version information
+    ///
+    /// Returns the latest API version this system supports and the release
+    /// number of the system software serving the API. No authentication is
+    /// required, so this endpoint can be called before logging in to find the
+    /// right docs and CLI or SDK versions.
+    #[endpoint {
+        method = GET,
+        path = "/v1/version",
+        tags = ["system/status"],
+        versions = VERSION_ADD_VERSION_ENDPOINT..,
+    }]
+    async fn system_version(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::system::SystemVersion>, HttpError>;
 
     /// Fetch top-level IAM policy
     #[endpoint {

@@ -2770,7 +2770,7 @@ parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
 comment:
-  an example sitrep with cases
+  an example sitrep with cases and problems
 status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
@@ -2781,17 +2781,31 @@ rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
   problem generation:        1
-problems in this sitrep:     0
+problems in this sitrep:     7
 ereports in this sitrep:     3
+
+== PROBLEMS ====================================================================
+4 active, 3 resolved
+
+(i) activity in this sitrep: + created, * revised, - resolved
+
+   STATE            ID                                   CODE SUMMARY
++    active problem 00000000-0000-0000-0000-000000000064 0001 Degraded ZFS pool on sled BRM42220007 disk N3
+     active problem 00000000-0000-0000-0000-00000000006e 0001 Faulted ZFS pool on sled BRM42220012 disk N5
+-  resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
+   resolved problem 00000000-0000-0000-0000-000000000082 0001 Faulted disk N9 on sled BRM42220023 has been expunged.
+*    active problem 00000000-0000-0000-0000-00000000008c 0002 3 control plane services on sled BRM42220014 in maintainence
+     active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
++- resolved problem 00000000-0000-0000-0000-0000000000a0 0002 Internal DNS service on sled BRM42220019 in maintainence
 
 == CASES =======================================================================
 3 open, 4 closed
 
-(i) activity in this sitrep: + opened, * changed, - closed
+(i) activity in this sitrep: + created, * changed, - closed
 
 *  case 00000000-0000-0000-0000-000000000032 open   certificate   // opened earlier, alert requested in this sitrep
 +  case 00000000-0000-0000-0000-00000000000a open   physical_disk // zpool is degraded
- - case 00000000-0000-0000-0000-000000000046 closed physical_disk // opened earlier, closed in this sitrep
+-  case 00000000-0000-0000-0000-000000000046 closed physical_disk // opened earlier, closed in this sitrep
 *- case 00000000-0000-0000-0000-000000000014 closed power_shelf   // PSU was reseated
    case 00000000-0000-0000-0000-000000000050 closed power_shelf   // closed in an earlier sitrep
    case 00000000-0000-0000-0000-000000000028 open   saga          // opened earlier, no changes in this sitrep
@@ -2817,7 +2831,7 @@ parent sitrep ID:            N/A
 created by:                  00000000-0000-0000-0000-000000000004
 created at:                  <REDACTED_TIMESTAMP>
 comment:
-  an example sitrep with cases
+  an example sitrep with cases and problems
 status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
@@ -2828,8 +2842,22 @@ rendezvous resource generation numbers:
   alert generation:          1
   support bundle generation: 1
   problem generation:        1
-problems in this sitrep:     0
+problems in this sitrep:     7
 ereports in this sitrep:     3
+
+== PROBLEMS ====================================================================
+4 active, 3 resolved
+
+(i) activity in this sitrep: + created, * revised, - resolved
+
+   STATE            ID                                   CODE SUMMARY
++    active problem 00000000-0000-0000-0000-000000000064 0001 Degraded ZFS pool on sled BRM42220007 disk N3
+     active problem 00000000-0000-0000-0000-00000000006e 0001 Faulted ZFS pool on sled BRM42220012 disk N5
+-  resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
+   resolved problem 00000000-0000-0000-0000-000000000082 0001 Faulted disk N9 on sled BRM42220023 has been expunged.
+*    active problem 00000000-0000-0000-0000-00000000008c 0002 3 control plane services on sled BRM42220014 in maintainence
+     active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
++- resolved problem 00000000-0000-0000-0000-0000000000a0 0002 Internal DNS service on sled BRM42220019 in maintainence
 
 == CASES =======================================================================
 
@@ -2878,6 +2906,10 @@ ereports in this sitrep:     3
         - sp_dumps
         - sp_components
         - ereports(none)
+    active problems:
+    * problem 00000000-0000-0000-0000-000000000064
+      // the degraded zpool is a problem
+      added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
   * case 00000000-0000-0000-0000-000000000014
     // PSU was reseated
@@ -2980,6 +3012,10 @@ support bundles requested:
     - sp_dumps
     - sp_components
     - ereports(none)
+active problems:
+* problem 00000000-0000-0000-0000-000000000064
+  // the degraded zpool is a problem
+  added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
 ---------------------------------------------
 stderr:

@@ -132,6 +132,15 @@ enum NexusExternalApiImpl {}
 impl NexusExternalApi for NexusExternalApiImpl {
     type Context = ApiContext;
 
+    async fn system_version(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<system::SystemVersion>, HttpError> {
+        Ok(HttpResponseOk(system::SystemVersion {
+            api_version: latest_version(),
+            system_version: env!("SYSTEM_RELEASE_NUMBER").to_string(),
+        }))
+    }
+
     async fn system_policy_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<policy::Policy<policy::FleetRole>>, HttpError>

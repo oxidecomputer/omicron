@@ -14950,6 +14950,34 @@
         }
       }
     },
+    "/v1/version": {
+      "get": {
+        "tags": [
+          "system/status"
+        ],
+        "summary": "Fetch version information",
+        "description": "Returns the latest API version this system supports and the release number of the system software serving the API. No authentication is required, so this endpoint can be called before logging in to find the right docs and CLI or SDK versions.",
+        "operationId": "system_version",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemVersion"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/vpc-firewall-rules": {
       "get": {
         "tags": [
@@ -31402,6 +31430,25 @@
             "type": "boolean"
           }
         }
+      },
+      "SystemVersion": {
+        "description": "Version information for the API and the system software serving it",
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "description": "The latest API version this system supports, e.g., `2026112100.0.0`, equal to `info.version` in its OpenAPI document. A request with no `api-version` header is handled at this version. A request for a newer one is rejected. Clients should send the version they were built for, which may be older than this one. The official CLI and SDKs do so automatically.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          },
+          "system_version": {
+            "description": "The release number of the system software serving this API, e.g., `24` for release 24. This number does not distinguish patch releases such as 24.1. Use it to find the right docs, release notes, and CLI or SDK versions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_version",
+          "system_version"
+        ]
       },
       "TargetRelease": {
         "description": "View of a system software target release",

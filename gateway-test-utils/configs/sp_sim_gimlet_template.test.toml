@@ -1,0 +1,151 @@
+# Template that the test harnesses copy for each gimlet SP added beyond the
+# configured ones.
+#
+# Notes:
+#
+# * The serial number is overwritten per slot.
+# * There is no ereport config because a separate one is set up per SP.
+# * All `bind_addr` instances are set to port 0 so a different ephemeral port
+#   is used per SP.
+
+serial_number = "SimGimletTemplate"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de0000000000000000000000000000000000000000000000000000000000ff"
+
+[[network_config]]
+[network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[network_config]]
+[network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[ereport_network_config]]
+[ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[ereport_network_config]]
+[ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+presence = "Present"
+serial_console = "[::1]:0"
+
+
+[[components]]
+id = "dev-0"
+device = "tmp117"
+description = "FAKE temperature sensor"
+presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1001, eeprom2 = 0x1002, eeprom3 = 0x1003 } }
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.3629, last_data.timestamp = 1234 },
+]
+[[components]]
+id = "dev-1"
+device = "tmp117"
+description = "FAKE temperature sensor"
+presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1101, eeprom2 = 0x1102, eeprom3 = 0x1103 } }
+sensors = [
+    { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
+]
+
+[[components]]
+id = "dev-2"
+device = "tmp117"
+description = "FAKE Southeast temperature sensor"
+presence = "Present"
+vpd = { tmp11x = { id = 0x0117, eeprom1 = 0x1201, eeprom2 = 0x1202, eeprom3 = 0x1203 } }
+sensors = [
+    { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
+]
+
+[[components]]
+id = "dev-6"
+device = "at24csw080"
+description = "FAKE U.2 Sharkfin A VPD"
+presence = "Present"
+vpd = { barcode = "0XV2:913-0000028:001:2SHRKFN2" }
+
+[[components]]
+id = "dev-7"
+device = "max5970"
+description = "FAKE U.2 Sharkfin A hot swap controller"
+presence = "Present"
+sensors = [
+    { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.41893438, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Current", last_data.value = 0.025614603, last_data.timestamp = 1234 },
+    { name = "V12_U2A_A0", kind = "Voltage", last_data.value = 12.02914, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Voltage", last_data.value = 3.2618, last_data.timestamp = 1234 },
+]
+
+[[components]]
+id = "dev-8"
+device = "nvme_bmc"
+description = "FAKE U.2 A NVMe Basic Management Command"
+presence = "Present"
+sensors = [
+    { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
+]
+[[components]]
+id = "dev-39"
+device = "tmp451"
+description = "FAKE T6 temperature sensor"
+presence = "Present"
+sensors = [
+    { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
+]
+
+[[components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 62.6, last_data.timestamp = 1234 },
+]
+
+[[components]]
+id = "dev-53"
+device = "max31790"
+description = "FAKE Fan controller"
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Speed", last_data.value = 2510.0, last_data.timestamp = 1234 },
+    { name = "Northeast", kind = "Speed", last_data.value = 2390.0, last_data.timestamp = 1234 },
+    { name = "South", kind = "Speed", last_data.value = 2467.0, last_data.timestamp = 1234 },
+    { name = "North", kind = "Speed", last_data.value = 2195.0, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Speed", last_data.value = 2680.0, last_data.timestamp = 1234 },
+    { name = "Northwest", kind = "Speed", last_data.value = 2212.0, last_data.timestamp = 1234 },
+]
+
+[[components]]
+id = "ibc"
+device = "bmr491"
+description = "FAKE intermediate bus converter"
+presence = "Present"
+
+[components.vpd.pmbus]
+mfr_id = "Flex"
+mfr_model = "BMR4913203851"
+mfr_revision = "R1C A"
+mfr_location = "CB6"
+mfr_date = "2023-02-28"
+mfr_serial = "FP1C481053"
+
+# Let's pretend this IBC has no faults...
+[components.pmbus_rails.V12_SYS_A2]
+status_word = 0x0000
+status_vout = 0x00
+status_iout = 0x00
+status_temperature = 0x00
+status_cml = 0x00
+status_input = 0x00
+status_other = 0x00
+# BMR491 does not implement STATUS_MFR_SPECIFIC, STATUS_FAN_1_2, or
+# STATUS_FANS_3_4

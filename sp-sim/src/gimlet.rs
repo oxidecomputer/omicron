@@ -16,8 +16,10 @@ use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::sidecar::SpIgnitionHandle;
 use crate::sp;
-use crate::sp::SpTasks;
+use crate::sp::SimRackTaskName;
+use crate::sp::SimSpSlot;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -72,8 +74,7 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
-use tokio::task;
-use tokio_util::task::AbortOnDropHandle;
+use tokio_util::task::JoinMap;
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
@@ -105,13 +106,9 @@ impl From<GimletPowerState> for PowerState {
     }
 }
 
-// This is a Vec of (component ID, serial console task).
-type SerialConsoleTasks = Vec<(String, AbortOnDropHandle<Infallible>)>;
-
 pub struct Gimlet {
     sp: sp::Handle<Handler>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    tasks: SpTasks<SerialConsoleTasks>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
 
@@ -180,9 +177,12 @@ impl SimulatedSp for Gimlet {
 }
 
 impl Gimlet {
-    pub async fn spawn(
+    pub(crate) async fn spawn(
         gimlet: &GimletConfig,
         phase1_hash_policy: HostFlashHashPolicy,
+        index: usize,
+        ignition_handle: SpIgnitionHandle,
+        tasks: &mut JoinMap<SimRackTaskName, ()>,
         log: Logger,
     ) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
@@ -201,12 +201,11 @@ impl Gimlet {
             return Ok(Self {
                 sp: sp::Handle::rot_only(),
                 serial_console_addrs,
-                tasks: SpTasks::RotOnly,
                 power_state_rx: None,
             });
         };
 
-        let mut serial_console_tasks = Vec::new();
+        let slot = SimSpSlot::Gimlet(index);
 
         // bind to our two local "KSZ" ports
         let servers = UdpServer::bind_pair(network_config, &log).await?;
@@ -272,14 +271,16 @@ impl Gimlet {
                         Arc::clone(servers[1].socket()),
                     ],
                     Arc::clone(&attached_mgs),
+                    ignition_handle.clone(),
                     log.new(slog::o!("serial-console" => id.to_string())),
                 );
-                serial_console_tasks.push((
-                    id.to_owned(),
-                    AbortOnDropHandle::new(task::spawn(async move {
-                        serial_console.run().await
-                    })),
-                ));
+                tasks.spawn(
+                    SimRackTaskName::SerialConsole {
+                        slot,
+                        component: id.to_owned(),
+                    },
+                    async move { match serial_console.run().await {} },
+                );
             }
         }
         let (power_state, power_state_rx) =
@@ -293,24 +294,22 @@ impl Gimlet {
             log.clone(),
             update_state,
         );
-        let (sp, udp_task) = sp::Handle::spawn(
+        let sp = sp::Handle::spawn(
             servers,
             ereport_servers,
             ereport_state,
+            ignition_handle,
             handler,
+            slot,
+            tasks,
             &log,
         );
 
         Ok(Self {
             sp,
             serial_console_addrs,
-            tasks: SpTasks::Running { udp_task, extra: serial_console_tasks },
             power_state_rx: Some(power_state_rx),
         })
-    }
-
-    pub(crate) fn tasks_mut(&mut self) -> &mut SpTasks<SerialConsoleTasks> {
-        &mut self.tasks
     }
 
     pub fn power_state_rx(&self) -> Option<watch::Receiver<GimletPowerState>> {
@@ -342,6 +341,7 @@ struct SerialConsoleTcpTask {
     incoming_serial_console: UnboundedReceiver<Vec<u8>>,
     socks: [Arc<UdpSocket>; 2],
     attached_mgs: AttachedMgsSerialConsole,
+    ignition_handle: SpIgnitionHandle,
     serial_console_tx_offset: u64,
     component: SpComponent,
     log: Logger,
@@ -355,6 +355,7 @@ impl SerialConsoleTcpTask {
         incoming_serial_console: UnboundedReceiver<Vec<u8>>,
         socks: [Arc<UdpSocket>; 2],
         attached_mgs: AttachedMgsSerialConsole,
+        ignition_handle: SpIgnitionHandle,
         log: Logger,
     ) -> Self {
         Self {
@@ -362,6 +363,7 @@ impl SerialConsoleTcpTask {
             incoming_serial_console,
             socks,
             attached_mgs,
+            ignition_handle,
             serial_console_tx_offset: 0,
             component,
             log,
@@ -376,6 +378,23 @@ impl SerialConsoleTcpTask {
     }
 
     async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
+        // If an SP is powered off by Ignition, it can't send serial console
+        // data, so we discard it. But note a divergence here: when a real SP
+        // comes back from a power cycle, it doesn't have a serial console
+        // attached to it. This simulated SP continues to be attached to the
+        // same MGS as it was before.
+        //
+        // TODO: Resolve this divergence.
+        if !self.ignition_handle.is_powered() {
+            debug!(
+                self.log,
+                "SP powered off by Ignition controller; discarding serial \
+                 console data";
+                "len" => data.len(),
+            );
+            return Ok(());
+        }
+
         let (component, sender) = match *self.attached_mgs.lock().unwrap() {
             Some((component, sender)) => (component, sender),
             None => {
