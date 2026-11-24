@@ -1028,7 +1028,7 @@ impl PlanningMgsUpdatesStepReport {
 
     /// Returns what an automated update is waiting for, if this step is
     /// waiting on anything
-    pub fn is_update_waiting(&self) -> Option<UpdateWait> {
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
         // A single blueprint can both mark one sled for evacuation and bring
         // another sled back into service.  In that case, report the
         // evacuation, since that's what the planner is actually waiting for.
@@ -1800,7 +1800,7 @@ impl PlanningZoneUpdatesStepReport {
 
     /// Returns what an automated update is waiting for, if this step is
     /// waiting on anything
-    pub fn is_update_waiting(&self) -> Option<UpdateWait> {
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
         // Check for pending zone updates and expungements.
         let mut changed_zone_kinds = self
             .updated_zones
@@ -2253,12 +2253,12 @@ impl PlanningReport {
             return OperatorStatus::WaitingForMupdateResolution;
         }
 
-        if let Some(wait) = self.mgs_updates.is_update_waiting() {
+        if let Some(wait) = self.mgs_updates.indicates_update_waiting() {
             return OperatorStatus::WaitingForUpdate(wait);
         }
 
         // Check for pending zone updates.
-        if let Some(wait) = self.zone_updates.is_update_waiting() {
+        if let Some(wait) = self.zone_updates.indicates_update_waiting() {
             return OperatorStatus::WaitingForUpdate(wait);
         }
 
@@ -2359,7 +2359,7 @@ mod tests {
             })
             .expect("sled ids are unique");
 
-        match report.is_update_waiting() {
+        match report.indicates_update_waiting() {
             Some(UpdateWait::SledEvacuation {
                 sled_id,
                 baseboard_id,

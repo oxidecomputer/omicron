@@ -45,11 +45,11 @@ impl OperatorStatus {
     pub fn describe(&self) -> OperatorStatusDescription {
         match self {
             OperatorStatus::AtRest => {
-                OperatorStatusDescription::summary("No changes in progress")
+                OperatorStatusDescription::summary("Idle (no changes needed)")
             }
-            OperatorStatus::Busy => {
-                OperatorStatusDescription::summary("System is busy")
-            }
+            OperatorStatus::Busy => OperatorStatusDescription::summary(
+                "Changes in progress (details unavailable)",
+            ),
             OperatorStatus::WaitingForMupdateResolution => {
                 OperatorStatusDescription::summary(
                     "Waiting for MUPdate resolution",
@@ -84,7 +84,7 @@ impl OperatorStatus {
             )),
             OperatorStatus::WaitingForUpdate(UpdateWait::Zones { kinds }) => {
                 let summary =
-                    "Waiting for a control plane zone update to finish";
+                    "Waiting for a control plane zone to start";
                 if kinds.is_empty() {
                     OperatorStatusDescription::summary(summary)
                 } else {
@@ -93,7 +93,7 @@ impl OperatorStatus {
                     OperatorStatusDescription::summary_with_details(
                         summary,
                         format!(
-                            "Control plane service{s} being updated: {kinds}"
+                            "Control plane service{s} being started: {kinds}"
                         ),
                     )
                 }
