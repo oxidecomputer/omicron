@@ -9781,6 +9781,7 @@ dependencies = [
  "omicron-generation-kinds",
  "omicron-git-version",
  "omicron-passwords",
+ "omicron-pins",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",

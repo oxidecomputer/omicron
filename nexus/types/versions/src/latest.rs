@@ -457,6 +457,7 @@ pub mod system {
     pub use crate::v2025_11_20_00::system::AllowListUpdate;
     pub use crate::v2025_11_20_00::system::Ping;
     pub use crate::v2025_11_20_00::system::PingStatus;
+    pub use crate::v2026_11_21_00::system::SystemVersion;
 }
 
 pub mod system_networking {
