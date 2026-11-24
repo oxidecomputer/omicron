@@ -27,6 +27,7 @@ use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_db_schema::schema::problem::dsl as problem_dsl;
 use nexus_db_schema::schema::problem_alert::dsl as problem_alert_dsl;
 use nexus_types::external_api::alert as external_api;
 use nexus_types::fm::case::AlertRequest;
@@ -102,9 +103,9 @@ pub struct AlertFilters {
     /// events are included.
     dispatched: Option<bool>,
 
-    /// If set, include only alerts attached to the specified problem at
-    /// the specified revision.
-    problem: Option<model::ProblemRevisionFilter>,
+    /// If set, include only alerts attached to the specified problem as of
+    /// its current revision.
+    problem: Option<authz::Problem>,
 }
 
 impl AlertFilters {
@@ -247,11 +248,14 @@ impl AlertFilters {
         Ok(self)
     }
 
-    pub fn for_problem(
-        mut self,
-        problem: impl Into<model::ProblemRevisionFilter>,
-    ) -> Self {
-        self.problem = Some(problem.into());
+    /// Includes only alerts attached to `authz_problem` as of its current
+    /// revision.
+    ///
+    /// Alerts attached in a revision that has not yet been made the problem's
+    /// current revision are not included. If the problem has been deleted, no
+    /// alerts are included.
+    pub fn for_problem(mut self, authz_problem: &authz::Problem) -> Self {
+        self.problem = Some(authz_problem.clone());
         self
     }
 }
@@ -520,6 +524,9 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<(Alert, Option<fm::RendezvousAlertCreated>)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        if let Some(authz_problem) = &filters.problem {
+            opctx.authorize(authz::Action::ListChildren, authz_problem).await?;
+        }
 
         Self::alert_list_matching_query(filters, pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
@@ -555,7 +562,7 @@ impl DataStore {
             dispatched,
             ref cases,
             ref classes,
-            problem,
+            ref problem,
         } = filters;
         if let Some(before) = before {
             query = query.filter(alert_dsl::time_created.le(before));
@@ -591,17 +598,32 @@ impl DataStore {
         }
 
         // If there is a problem filter, select only alerts attached to that
-        // problem at revision `rev` or earlier.
-        if let Some(model::ProblemRevisionFilter { id, rev }) = problem {
-            // Note: ideally, we would reach for an INNER JOIN, but this is a
-            // subquery instead, because join changes the query's type (even
-            // when boxed), so one cannot be added conditionally here. Since
-            // `(problem_id, alert_id)` is the primary key of `problem_alert`,
-            // the subquery selects each alert at most once, and the query plan
-            // ends up being a lookup join anyway, so it should be equivalent.
+        // problem at its current revision or earlier.
+        if let Some(authz_problem) = problem {
+            // Note: logically, we would INNER JOIN the `alert` table with the
+            // `problem_alert` table, but this is a subquery instead, because
+            // diesel joins change the query's type (even when boxed), so one
+            // cannot be added conditionally here. Since `(problem_id,
+            // alert_id)` is the primary key of `problem_alert`, the subquery
+            // selects each alert at most once, and the query plan ends up being
+            // a lookup join anyway, so it should be equivalent.
             let attached_to_problem = problem_alert_dsl::problem_alert
-                .filter(problem_alert_dsl::problem_id.eq(id))
-                .filter(problem_alert_dsl::revision.le(rev))
+                // INNER JOIN `problem_alert` with the `problem` table to select
+                // the problem's currently active revision, in order to select
+                // only alerts attached at or before that revision.
+                .inner_join(
+                    problem_dsl::problem.on(problem_dsl::id
+                        .eq(problem_alert_dsl::problem_id)
+                        .and(problem_dsl::time_deleted.is_null())
+                        .and(
+                            problem_alert_dsl::revision
+                                .le(problem_dsl::current_revision),
+                        )),
+                )
+                .filter(
+                    problem_alert_dsl::problem_id
+                        .eq(authz_problem.id().into_untyped_uuid()),
+                )
                 .select(problem_alert_dsl::alert_id);
             query = query.filter(alert_dsl::id.eq_any(attached_to_problem));
         }
@@ -677,14 +699,13 @@ mod tests {
     use assert_matches::assert_matches;
     use chrono::Utc;
     use dropshot::PaginationOrder;
-    use nexus_db_lookup::LookupPath;
     use nexus_db_model::fm::RendezvousAlertCreated;
     use nexus_db_schema::schema::rendezvous_alert_created::dsl as alert_marker_dsl;
     use nexus_types::alert::AlertClass;
     use nexus_types::alert::test_alerts;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
-    use omicron_generation_kinds::ProblemRevNum;
+    use omicron_common::api::external::LookupType;
     use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
@@ -860,10 +881,8 @@ mod tests {
     async fn explain_alert_list_matching_only_problem() {
         explain_list_matching_query(
             "explain_alert_list_matching_only_problem",
-            AlertFilters::new().for_problem(model::ProblemRevisionFilter {
-                id: ProblemUuid::new_v4().into(),
-                rev: ProblemRevNum::from_u32(3).into(),
-            }),
+            AlertFilters::new()
+                .for_problem(&authz_problem_from_id(ProblemUuid::new_v4())),
         )
         .await
     }
@@ -886,12 +905,13 @@ mod tests {
                 .expect("true and dispatched before/after is valid")
                 .for_fm_cases([CaseUuid::new_v4(), CaseUuid::new_v4()])
                 .with_classes([AlertClass::TestFoo, AlertClass::TestFooBar])
-                .for_problem(model::ProblemRevisionFilter {
-                    id: ProblemUuid::new_v4().into(),
-                    rev: ProblemRevNum::from_u32(3).into(),
-                }),
+                .for_problem(&authz_problem_from_id(ProblemUuid::new_v4())),
         )
         .await
+    }
+
+    fn authz_problem_from_id(id: ProblemUuid) -> authz::Problem {
+        authz::Problem::new(authz::FLEET, id, LookupType::by_id(id))
     }
 
     async fn explain_list_matching_query(
@@ -1176,19 +1196,14 @@ mod tests {
         }
     }
 
-    /// Lists the alerts attached to a problem as of its current revision,
-    /// similarly to the external API.
+    /// Lists the alerts attached to a problem, fetching multiple pages until
+    /// there are no results to return.
     async fn list_attached_alerts(
         opctx: &OpContext,
         datastore: &DataStore,
         authz_problem: &authz::Problem,
     ) -> BTreeSet<AlertUuid> {
-        let (_, problem) = LookupPath::new(opctx, datastore)
-            .problem_id(authz_problem.id())
-            .fetch()
-            .await
-            .expect("looking up the problem should succeed");
-        let filters = AlertFilters::new().for_problem(&problem);
+        let filters = AlertFilters::new().for_problem(authz_problem);
 
         let mut alerts = BTreeSet::new();
         let mut paginator = Paginator::new(

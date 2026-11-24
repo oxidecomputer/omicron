@@ -8,7 +8,6 @@ use super::DataStore;
 use super::RunnableQuery;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::ProblemRevisionFilter;
 use crate::db::model::ProblemSupportBundle;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
@@ -44,6 +43,7 @@ use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ProblemUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -463,31 +463,33 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Lists one page of support bundles attached to a problem as of a
-    /// particular revision, ordered by creation time.
+    /// Lists one page of support bundles attached to a problem as of its
+    /// current revision, ordered by creation time.
     ///
-    /// Only support bundles attached at the requested revision or earlier are
-    /// listed. Support bundles attached to the problem which do not exist (or
-    /// no longer exist) are not listed.
+    /// Only support bundles attached at the problem's current revision or
+    /// earlier are listed. Support bundleshich do not
+    /// exist (or no longer exist) are not listed. If the problem has been
+    /// deleted, no support bundles are listed.
     pub async fn problem_list_support_bundles(
         &self,
         opctx: &OpContext,
-        problem: impl Into<ProblemRevisionFilter>,
+        authz_problem: &authz::Problem,
         pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_problem).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::problem_list_support_bundles_query(problem.into(), pagparams)
+        Self::problem_list_support_bundles_query(authz_problem.id(), pagparams)
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn problem_list_support_bundles_query(
-        ProblemRevisionFilter { id, rev }: ProblemRevisionFilter,
+        problem_id: ProblemUuid,
         pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> impl RunnableQuery<SupportBundle> + use<> {
+        use nexus_db_schema::schema::problem::dsl as problem_dsl;
         use nexus_db_schema::schema::problem_support_bundle::dsl as problem_bundle_dsl;
         use nexus_db_schema::schema::support_bundle::dsl;
 
@@ -503,11 +505,20 @@ impl DataStore {
         )
         .inner_join(
             problem_bundle_dsl::problem_support_bundle.on(
-                problem_bundle_dsl::support_bundle_id
-                    .eq(dsl::id)
-                    .and(problem_bundle_dsl::problem_id.eq(id))
-                    .and(problem_bundle_dsl::revision.le(rev)),
+                problem_bundle_dsl::support_bundle_id.eq(dsl::id).and(
+                    problem_bundle_dsl::problem_id
+                        .eq(problem_id.into_untyped_uuid()),
+                ),
             ),
+        )
+        .inner_join(
+            problem_dsl::problem.on(problem_dsl::id
+                .eq(problem_bundle_dsl::problem_id)
+                .and(problem_dsl::time_deleted.is_null())
+                .and(
+                    problem_bundle_dsl::revision
+                        .le(problem_dsl::current_revision),
+                )),
         )
         .select(SupportBundle::as_select())
     }
@@ -1148,8 +1159,6 @@ mod test {
     #[tokio::test]
     async fn explain_problem_list_support_bundles() {
         use crate::db::explain::ExplainableAsync;
-        use omicron_generation_kinds::ProblemRevNum;
-        use omicron_uuid_kinds::ProblemUuid;
 
         let logctx =
             dev::test_setup_log("explain_problem_list_support_bundles");
@@ -1162,10 +1171,7 @@ mod test {
             limit: NonZeroU32::new(100).unwrap(),
         };
         let query = DataStore::problem_list_support_bundles_query(
-            ProblemRevisionFilter {
-                id: ProblemUuid::new_v4().into(),
-                rev: ProblemRevNum::from_u32(3).into(),
-            },
+            ProblemUuid::new_v4(),
             &pagparams,
         );
         let explanation = query
@@ -2816,12 +2822,6 @@ mod test {
         datastore: &DataStore,
         authz_problem: &authz::Problem,
     ) -> BTreeSet<SupportBundleUuid> {
-        let (_, problem) = LookupPath::new(opctx, datastore)
-            .problem_id(authz_problem.id())
-            .fetch()
-            .await
-            .expect("looking up the problem should succeed");
-
         let mut bundles = BTreeSet::new();
         let mut paginator = Paginator::new(
             // Use a page size of 1 to ensure that any time we list more than
@@ -2833,7 +2833,7 @@ mod test {
             let page = datastore
                 .problem_list_support_bundles(
                     opctx,
-                    &problem,
+                    authz_problem,
                     &p.current_pagparams(),
                 )
                 .await

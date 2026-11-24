@@ -3742,6 +3742,9 @@ table! {
 
 allow_tables_to_appear_in_same_query!(alert, problem_alert);
 allow_tables_to_appear_in_same_query!(rendezvous_alert_created, problem_alert);
+allow_tables_to_appear_in_same_query!(problem, problem_alert);
+allow_tables_to_appear_in_same_query!(alert, problem);
+allow_tables_to_appear_in_same_query!(rendezvous_alert_created, problem);
 
 table! {
     problem_support_bundle (problem_id, support_bundle_id) {
@@ -3752,6 +3755,8 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(support_bundle, problem_support_bundle);
+allow_tables_to_appear_in_same_query!(problem, problem_support_bundle);
+allow_tables_to_appear_in_same_query!(support_bundle, problem);
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

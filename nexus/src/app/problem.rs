@@ -108,12 +108,12 @@ impl Nexus {
         problem_lookup: &lookup::Problem<'_>,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundleInfo> {
-        let (_authz_problem, problem) =
+        let (authz_problem, _problem) =
             fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
 
         let bundles = self
             .db_datastore
-            .problem_list_support_bundles(opctx, &problem, pagparams)
+            .problem_list_support_bundles(opctx, &authz_problem, pagparams)
             .await?
             .into_iter()
             .map(SupportBundleInfo::from)
@@ -133,11 +133,11 @@ impl Nexus {
         // First, return an error on invalid query params (before looking up the
         // problem)
         let filters = AlertFilters::try_from(params.clone())?;
-        let (_authz_problem, problem) =
+        // Next, look up the problem. `fetch_problem` returns a 404 if the
+        // problem has not yet been made visible at its first revision.
+        let (authz_problem, _problem) =
             fetch_problem(problem_lookup, authz::Action::ListChildren).await?;
-        // Next, fetch the problem's current revision, in order to use it to
-        // construct the alert filters.
-        let filters = filters.for_problem(&problem);
+        let filters = filters.for_problem(&authz_problem);
 
         let alerts = self
             .db_datastore
