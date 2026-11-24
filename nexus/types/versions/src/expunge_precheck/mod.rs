@@ -5,8 +5,6 @@
 //! Version `EXPUNGE_PRECHECK` of the Nexus external API.
 //!
 //! Adds an endpoint that checks for conditions that make it risky to expunge a
-//! sled or physical disk, as described in [RFD 747].
-//!
-//! [RFD 747]: https://rfd.shared.oxide.computer/rfd/0747
+//! sled or physical disk.
 
 pub mod expunge_precheck;

@@ -8,20 +8,8 @@ use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Results of checks for conditions that make it risky to expunge a sled or
+/// Result of checking whether it'd be dangerous to expunge a working sled or
 /// physical disk
-///
-/// The system is designed to survive only a limited number of concurrent
-/// failures. When a sled or physical disk is expunged, the system repairs
-/// itself by re-replicating user data and control plane data and by deploying
-/// replacement control plane components. Each expunged component counts as
-/// one failure until these repairs finish. Other conditions, like a sled that
-/// is not reporting its status, can also reduce the number of additional
-/// failures that the system can survive. Before expunging a sled or disk,
-/// operators should use these checks to confirm that it's safe to do so.
-///
-/// These checks do not yet report whether replacement control plane
-/// components have been deployed.
 ///
 /// If `ok` is `true`, no check found any problems. Otherwise, each check lists
 /// the problems that it found.
@@ -32,34 +20,77 @@ pub struct ExpungePrecheck {
     /// This is `true` if and only if none of the checks below found any
     /// problems.
     pub ok: bool,
-    /// The time at which the inventory collection used for these checks was
-    /// completed.
-    ///
-    /// Problems that occurred after this time may not be reflected here.
-    pub inventory_collection_time: DateTime<Utc>,
     /// Whether the inventory collection used for these checks is recent
-    pub inventory: ExpungePrecheckResult<InventoryProblemKind>,
+    pub inventory: InventoryPrecheck,
     /// Whether user data stored on expunged physical disks has been fully
     /// re-replicated
-    pub user_data: ExpungePrecheckResult<UserDataProblemKind>,
+    pub user_data: UserDataPrecheck,
     /// Whether the control plane database is fully replicated
-    pub cockroachdb: ExpungePrecheckResult<CockroachdbProblemKind>,
+    pub cockroachdb: CockroachdbPrecheck,
     /// Whether all sleds are reporting their status
-    pub sleds: ExpungePrecheckResult<SledsProblemKind>,
+    pub sleds: SledsPrecheck,
 }
 
-/// Result of one expunge precheck
+/// Result of the check that the latest inventory collection is recent
+///
+/// The other checks use this inventory collection. Problems that occurred
+/// after it was collected may not be reflected in their results.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[schemars(rename = "ExpungePrecheckResult{K}")]
-pub struct ExpungePrecheckResult<K> {
-    /// A human-readable summary of what this check found
-    ///
-    /// The summary is present whether or not the check found any problems.
-    pub summary: String,
+pub struct InventoryPrecheck {
+    /// The time at which the inventory collection started
+    pub time_started: DateTime<Utc>,
+    /// The time at which the inventory collection finished
+    pub time_done: DateTime<Utc>,
     /// Problems found by this check
     ///
     /// If this list is empty, this check passed.
-    pub problems: Vec<ExpungePrecheckProblem<K>>,
+    pub problems: Vec<ExpungePrecheckProblem<InventoryProblemKind>>,
+}
+
+/// Result of the check that user data on expunged physical disks has been
+/// fully re-replicated
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UserDataPrecheck {
+    /// Number of expunged physical disks that still hold user data
+    pub expunged_disks_with_data: usize,
+    /// Number of region replacements that have not finished
+    pub region_replacements_in_progress: u64,
+    /// Number of region snapshot replacements that have not finished
+    pub region_snapshot_replacements_in_progress: u64,
+    /// Problems found by this check
+    ///
+    /// If this list is empty, this check passed.
+    pub problems: Vec<ExpungePrecheckProblem<UserDataProblemKind>>,
+}
+
+/// Result of the check that the control plane database is fully replicated
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CockroachdbPrecheck {
+    /// Number of CockroachDB nodes that are expected to be running
+    pub nodes_expected: usize,
+    /// Number of CockroachDB nodes that reported their status
+    pub nodes_reporting: usize,
+    /// Number of reporting CockroachDB nodes that reported no
+    /// under-replicated ranges and at least the expected number of live nodes
+    pub nodes_healthy: usize,
+    /// Problems found by this check
+    ///
+    /// If this list is empty, this check passed.
+    pub problems: Vec<ExpungePrecheckProblem<CockroachdbProblemKind>>,
+}
+
+/// Result of the check that all in-service sleds are reporting their status
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SledsPrecheck {
+    /// Number of in-service sleds
+    pub in_service: usize,
+    /// Number of in-service sleds that are present in the latest inventory
+    /// collection
+    pub in_service_in_inventory: usize,
+    /// Problems found by this check
+    ///
+    /// If this list is empty, this check passed.
+    pub problems: Vec<ExpungePrecheckProblem<SledsProblemKind>>,
 }
 
 /// A problem found by an expunge precheck

@@ -19971,6 +19971,43 @@
           "items"
         ]
       },
+      "CockroachdbPrecheck": {
+        "description": "Result of the check that the control plane database is fully replicated",
+        "type": "object",
+        "properties": {
+          "nodes_expected": {
+            "description": "Number of CockroachDB nodes that are expected to be running",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "nodes_healthy": {
+            "description": "Number of reporting CockroachDB nodes that reported no under-replicated ranges and at least the expected number of live nodes",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "nodes_reporting": {
+            "description": "Number of CockroachDB nodes that reported their status",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "problems": {
+            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExpungePrecheckProblemCockroachdbProblemKind"
+            }
+          }
+        },
+        "required": [
+          "nodes_expected",
+          "nodes_healthy",
+          "nodes_reporting",
+          "problems"
+        ]
+      },
       "CockroachdbProblemKind": {
         "description": "Kinds of problems found by the CockroachDB check",
         "oneOf": [
@@ -21531,7 +21568,7 @@
             "description": "Whether the control plane database is fully replicated",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ExpungePrecheckResultCockroachdbProblemKind"
+                "$ref": "#/components/schemas/CockroachdbPrecheck"
               }
             ]
           },
@@ -21539,14 +21576,9 @@
             "description": "Whether the inventory collection used for these checks is recent",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ExpungePrecheckResultInventoryProblemKind"
+                "$ref": "#/components/schemas/InventoryPrecheck"
               }
             ]
-          },
-          "inventory_collection_time": {
-            "description": "The time at which the inventory collection used for these checks was completed.\n\nProblems that occurred after this time may not be reflected here.",
-            "type": "string",
-            "format": "date-time"
           },
           "ok": {
             "description": "Whether all checks passed\n\nThis is `true` if and only if none of the checks below found any problems.",
@@ -21556,7 +21588,7 @@
             "description": "Whether all sleds are reporting their status",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ExpungePrecheckResultSledsProblemKind"
+                "$ref": "#/components/schemas/SledsPrecheck"
               }
             ]
           },
@@ -21564,7 +21596,7 @@
             "description": "Whether user data stored on expunged physical disks has been fully re-replicated",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ExpungePrecheckResultUserDataProblemKind"
+                "$ref": "#/components/schemas/UserDataPrecheck"
               }
             ]
           }
@@ -21572,7 +21604,6 @@
         "required": [
           "cockroachdb",
           "inventory",
-          "inventory_collection_time",
           "ok",
           "sleds",
           "user_data"
@@ -21664,90 +21695,6 @@
         "required": [
           "kind",
           "message"
-        ]
-      },
-      "ExpungePrecheckResultCockroachdbProblemKind": {
-        "description": "Result of one expunge precheck",
-        "type": "object",
-        "properties": {
-          "problems": {
-            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExpungePrecheckProblemCockroachdbProblemKind"
-            }
-          },
-          "summary": {
-            "description": "A human-readable summary of what this check found\n\nThe summary is present whether or not the check found any problems.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "problems",
-          "summary"
-        ]
-      },
-      "ExpungePrecheckResultInventoryProblemKind": {
-        "description": "Result of one expunge precheck",
-        "type": "object",
-        "properties": {
-          "problems": {
-            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExpungePrecheckProblemInventoryProblemKind"
-            }
-          },
-          "summary": {
-            "description": "A human-readable summary of what this check found\n\nThe summary is present whether or not the check found any problems.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "problems",
-          "summary"
-        ]
-      },
-      "ExpungePrecheckResultSledsProblemKind": {
-        "description": "Result of one expunge precheck",
-        "type": "object",
-        "properties": {
-          "problems": {
-            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExpungePrecheckProblemSledsProblemKind"
-            }
-          },
-          "summary": {
-            "description": "A human-readable summary of what this check found\n\nThe summary is present whether or not the check found any problems.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "problems",
-          "summary"
-        ]
-      },
-      "ExpungePrecheckResultUserDataProblemKind": {
-        "description": "Result of one expunge precheck",
-        "type": "object",
-        "properties": {
-          "problems": {
-            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExpungePrecheckProblemUserDataProblemKind"
-            }
-          },
-          "summary": {
-            "description": "A human-readable summary of what this check found\n\nThe summary is present whether or not the check found any problems.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "problems",
-          "summary"
         ]
       },
       "ExternalIp": {
@@ -25342,6 +25289,34 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "InventoryPrecheck": {
+        "description": "Result of the check that the latest inventory collection is recent\n\nThe other checks use this inventory collection. Problems that occurred after it was collected may not be reflected in their results.",
+        "type": "object",
+        "properties": {
+          "problems": {
+            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExpungePrecheckProblemInventoryProblemKind"
+            }
+          },
+          "time_done": {
+            "description": "The time at which the inventory collection finished",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_started": {
+            "description": "The time at which the inventory collection started",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "problems",
+          "time_done",
+          "time_started"
         ]
       },
       "InventoryProblemKind": {
@@ -30062,6 +30037,36 @@
         "type": "string",
         "format": "uuid"
       },
+      "SledsPrecheck": {
+        "description": "Result of the check that all in-service sleds are reporting their status",
+        "type": "object",
+        "properties": {
+          "in_service": {
+            "description": "Number of in-service sleds",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "in_service_in_inventory": {
+            "description": "Number of in-service sleds that are present in the latest inventory collection",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "problems": {
+            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExpungePrecheckProblemSledsProblemKind"
+            }
+          }
+        },
+        "required": [
+          "in_service",
+          "in_service_in_inventory",
+          "problems"
+        ]
+      },
       "SledsProblemKind": {
         "description": "Kinds of problems found by the sleds check",
         "oneOf": [
@@ -32226,6 +32231,43 @@
         "required": [
           "external_id",
           "password"
+        ]
+      },
+      "UserDataPrecheck": {
+        "description": "Result of the check that user data on expunged physical disks has been fully re-replicated",
+        "type": "object",
+        "properties": {
+          "expunged_disks_with_data": {
+            "description": "Number of expunged physical disks that still hold user data",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "problems": {
+            "description": "Problems found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExpungePrecheckProblemUserDataProblemKind"
+            }
+          },
+          "region_replacements_in_progress": {
+            "description": "Number of region replacements that have not finished",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "region_snapshot_replacements_in_progress": {
+            "description": "Number of region snapshot replacements that have not finished",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "expunged_disks_with_data",
+          "problems",
+          "region_replacements_in_progress",
+          "region_snapshot_replacements_in_progress"
         ]
       },
       "UserDataProblemKind": {

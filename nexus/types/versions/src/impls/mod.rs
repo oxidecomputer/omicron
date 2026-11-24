@@ -43,6 +43,7 @@ pub(crate) use path_param;
 
 mod affinity;
 mod alert;
+mod expunge_precheck;
 mod hardware;
 mod instance;
 pub(crate) mod multicast;
@@ -50,7 +51,6 @@ mod networking;
 mod physical_disk;
 mod policy;
 mod problem;
-mod expunge_precheck;
 mod saml;
 mod silo;
 mod sled;

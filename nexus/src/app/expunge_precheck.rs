@@ -17,12 +17,15 @@ use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResourcesMap;
 use nexus_reconfigurator_planning::planner::cockroachdb_unhealthy_reasons;
 use nexus_types::deployment::CockroachdbUnsafeToShutdown;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::expunge_precheck::CockroachdbPrecheck;
 use nexus_types::external_api::expunge_precheck::CockroachdbProblemKind;
 use nexus_types::external_api::expunge_precheck::ExpungePrecheck;
 use nexus_types::external_api::expunge_precheck::ExpungePrecheckProblem;
-use nexus_types::external_api::expunge_precheck::ExpungePrecheckResult;
+use nexus_types::external_api::expunge_precheck::InventoryPrecheck;
 use nexus_types::external_api::expunge_precheck::InventoryProblemKind;
+use nexus_types::external_api::expunge_precheck::SledsPrecheck;
 use nexus_types::external_api::expunge_precheck::SledsProblemKind;
+use nexus_types::external_api::expunge_precheck::UserDataPrecheck;
 use nexus_types::external_api::expunge_precheck::UserDataProblemKind;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
@@ -115,7 +118,6 @@ impl super::Nexus {
         };
 
         Ok(ExpungePrecheck::new(
-            inventory.time_started,
             check_inventory(&inventory, Utc::now()),
             check_crucible_data(&expunged_resources, replacements_in_progress),
             check_cockroachdb(&inventory, cockroachdb_target_count),
@@ -131,25 +133,27 @@ impl super::Nexus {
 fn check_inventory(
     inventory: &Collection,
     now: DateTime<Utc>,
-) -> ExpungePrecheckResult<InventoryProblemKind> {
+) -> InventoryPrecheck {
     let age = now.signed_duration_since(inventory.time_started);
     // `to_std()` fails if `age` is negative.  This is very unlikely but could
     // happen due to clock skew between systems.
     let too_old =
         age.to_std().is_ok_and(|age| age > EXPUNGE_PRECHECK_INVENTORY_MAX_AGE);
-    if too_old {
-        let summary = format!("Using inventory from {age} ago (too old)");
-        let problems = vec![ExpungePrecheckProblem {
+    let problems = if too_old {
+        vec![ExpungePrecheckProblem {
             kind: InventoryProblemKind::TooOld,
             message: format!(
                 "Inventory is too old (age: {}, max: {:?})",
                 age, EXPUNGE_PRECHECK_INVENTORY_MAX_AGE
             ),
-        }];
-        ExpungePrecheckResult { summary, problems }
+        }]
     } else {
-        let summary = format!("Using inventory from {age} ago");
-        ExpungePrecheckResult { summary, problems: Vec::new() }
+        Vec::new()
+    };
+    InventoryPrecheck {
+        time_started: inventory.time_started,
+        time_done: inventory.time_done,
+        problems,
     }
 }
 
@@ -165,7 +169,7 @@ struct InProgressCrucibleReplacements {
 fn check_crucible_data(
     expunged_resources: &ExpungedPhysicalDiskResourcesMap,
     replacements_in_progress: InProgressCrucibleReplacements,
-) -> ExpungePrecheckResult<UserDataProblemKind> {
+) -> UserDataPrecheck {
     let InProgressCrucibleReplacements {
         region_replacements,
         region_snapshot_replacements,
@@ -205,15 +209,12 @@ fn check_crucible_data(
         });
     }
 
-    // XXX-dap it's silly to put this all in text
-    let summary = format!(
-        "Expunged physical disks still holding user data: {}. Region \
-         replacements in progress: {region_replacements}. \
-         Region snapshot replacements in progress: \
-         {region_snapshot_replacements}.",
-        expunged_resources.len(),
-    );
-    ExpungePrecheckResult { summary, problems }
+    UserDataPrecheck {
+        expunged_disks_with_data: expunged_resources.len(),
+        region_replacements_in_progress: region_replacements,
+        region_snapshot_replacements_in_progress: region_snapshot_replacements,
+        problems,
+    }
 }
 
 /// Checks whether CockroachDB is fully healthy
@@ -225,17 +226,12 @@ fn check_crucible_data(
 fn check_cockroachdb(
     inventory: &Collection,
     target: usize,
-) -> ExpungePrecheckResult<CockroachdbProblemKind> {
+) -> CockroachdbPrecheck {
     let reasons = cockroachdb_unhealthy_reasons(inventory, target);
     let nreporting = inventory.cockroach_status.len();
     let unhealthy_nodes: BTreeSet<&InternalNodeId> =
         reasons.iter().filter_map(|(node_id, _)| *node_id).collect();
     let nhealthy = nreporting.saturating_sub(unhealthy_nodes.len());
-    let summary = format!(
-        "{nreporting} of {target} expected CockroachDB nodes reported their \
-         status. {nhealthy} of them reported 0 under-replicated ranges and \
-         at least {target} live nodes."
-    );
 
     let problems = reasons
         .into_iter()
@@ -243,7 +239,12 @@ fn check_cockroachdb(
             cockroachdb_problem(node_id, reason, nreporting, target)
         })
         .collect();
-    ExpungePrecheckResult { summary, problems }
+    CockroachdbPrecheck {
+        nodes_expected: target,
+        nodes_reporting: nreporting,
+        nodes_healthy: nhealthy,
+        problems,
+    }
 }
 
 /// Converts one reason from `cockroachdb_unhealthy_reasons()` into a problem
@@ -308,7 +309,7 @@ fn cockroachdb_problem(
 fn check_sleds(
     inventory: &Collection,
     in_service_sleds: &BTreeMap<SledUuid, String>,
-) -> ExpungePrecheckResult<SledsProblemKind> {
+) -> SledsPrecheck {
     let problems: Vec<_> = in_service_sleds
         .iter()
         .filter(|(sled_id, _)| !inventory.sled_agents.contains_key(*sled_id))
@@ -323,12 +324,11 @@ fn check_sleds(
         .collect();
 
     let nsleds = in_service_sleds.len();
-    let npresent = nsleds - problems.len();
-    let summary = format!(
-        "{npresent} of {nsleds} in-service sleds are present in the latest \
-         inventory collection."
-    );
-    ExpungePrecheckResult { summary, problems }
+    SledsPrecheck {
+        in_service: nsleds,
+        in_service_in_inventory: nsleds - problems.len(),
+        problems,
+    }
 }
 
 #[cfg(test)]
@@ -403,6 +403,7 @@ mod test {
         resources.add_read_only_regions(disk_id, disk_serial.clone(), 2);
         resources.add_region_snapshots(disk_id, disk_serial, 3);
         let check = check_crucible_data(&resources, none_in_progress);
+        assert_eq!(check.expunged_disks_with_data, 1, "{check:?}");
         assert_eq!(check.problems.len(), 1, "{check:?}");
         assert_eq!(
             check.problems[0].kind,
@@ -422,6 +423,12 @@ mod test {
                 region_replacements: 1,
                 region_snapshot_replacements: 2,
             },
+        );
+        assert_eq!(check.expunged_disks_with_data, 0, "{check:?}");
+        assert_eq!(check.region_replacements_in_progress, 1, "{check:?}");
+        assert_eq!(
+            check.region_snapshot_replacements_in_progress, 2,
+            "{check:?}"
         );
         assert_eq!(check.problems.len(), 2, "{check:?}");
         assert!(
@@ -467,13 +474,12 @@ mod test {
             check_sleds(&collection, &in_service_sleds(&planning_input));
         assert!(sleds.problems.is_empty(), "{sleds:?}");
 
-        // The summaries should affirmatively report what was checked.
-        assert!(
-            cockroachdb.summary.starts_with(&format!(
-                "{target} of {target} expected CockroachDB nodes"
-            )),
-            "{cockroachdb:?}"
-        );
+        // The counters should affirmatively report what was checked.
+        assert_eq!(cockroachdb.nodes_expected, target, "{cockroachdb:?}");
+        assert_eq!(cockroachdb.nodes_reporting, target, "{cockroachdb:?}");
+        assert_eq!(cockroachdb.nodes_healthy, target, "{cockroachdb:?}");
+        assert!(sleds.in_service > 0, "{sleds:?}");
+        assert_eq!(sleds.in_service_in_inventory, sleds.in_service);
 
         logctx.cleanup_successful();
     }
@@ -514,6 +520,9 @@ mod test {
             ],
             "{check:?}"
         );
+        assert_eq!(check.nodes_expected, target, "{check:?}");
+        assert_eq!(check.nodes_reporting, target - 1, "{check:?}");
+        assert_eq!(check.nodes_healthy, target - 3, "{check:?}");
 
         // A node that's missing a statistic is reported, too.
         collection
@@ -549,6 +558,11 @@ mod test {
 
         let check =
             check_sleds(&collection, &in_service_sleds(&planning_input));
+        assert_eq!(
+            check.in_service_in_inventory,
+            check.in_service - 1,
+            "{check:?}"
+        );
         assert_eq!(check.problems.len(), 1, "{check:?}");
         assert_eq!(
             check.problems[0].kind,

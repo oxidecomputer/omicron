@@ -396,12 +396,15 @@ pub mod project {
 }
 
 pub mod expunge_precheck {
+    pub use crate::v2026_11_20_00::expunge_precheck::CockroachdbPrecheck;
     pub use crate::v2026_11_20_00::expunge_precheck::CockroachdbProblemKind;
     pub use crate::v2026_11_20_00::expunge_precheck::ExpungePrecheck;
     pub use crate::v2026_11_20_00::expunge_precheck::ExpungePrecheckProblem;
-    pub use crate::v2026_11_20_00::expunge_precheck::ExpungePrecheckResult;
+    pub use crate::v2026_11_20_00::expunge_precheck::InventoryPrecheck;
     pub use crate::v2026_11_20_00::expunge_precheck::InventoryProblemKind;
+    pub use crate::v2026_11_20_00::expunge_precheck::SledsPrecheck;
     pub use crate::v2026_11_20_00::expunge_precheck::SledsProblemKind;
+    pub use crate::v2026_11_20_00::expunge_precheck::UserDataPrecheck;
     pub use crate::v2026_11_20_00::expunge_precheck::UserDataProblemKind;
 }
 

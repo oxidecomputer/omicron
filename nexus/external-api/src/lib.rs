@@ -7948,20 +7948,23 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
 
-    /// Check whether it's safe to expunge sled or physical disk
+    /// Check whether it would be dangerous to expunge a working sled or
+    /// physical disk because the system is currently working on repairs from a
+    /// previous expungement or failure
     ///
-    /// Checks for conditions that make it risky to expunge a sled or physical
-    /// disk, like repairs from previous expungements that have not finished.
-    /// The system is designed to survive only a limited number of concurrent
-    /// failures, and each of these conditions reduces the number of
-    /// additional failures that it can survive. Check that `ok` is `true`
-    /// before expunging a sled or physical disk.
+    /// The system is designed to survive a limited number of concurrent
+    /// failures. When a sled or physical disk is expunged, the system repairs
+    /// itself by re-replicating user data and control plane data and by
+    /// deploying replacement control plane components. Each expunged component
+    /// counts as one failure until these repairs finish.  Before expunging a
+    /// sled or disk that may currently be working, operators can use this API
+    /// to verify that the system is not still recovering from previous
+    /// expungements or repairs.  Note that if a sled or physical disk is
+    /// already not working, expunging it will not make things worse, so there's
+    /// no need to use this API in that case.
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/expunge-precheck",
-        // <review>
-        // TODO is this the right path for this?
-        // </review>
         tags = ["experimental"],
         versions = VERSION_EXPUNGE_PRECHECK..,
     }]
