@@ -12,6 +12,7 @@ use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::AlertFilters;
 use nexus_db_queries::db::model::ProblemView;
@@ -22,6 +23,7 @@ use nexus_types::external_api::support_bundle::SupportBundleInfo;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_generation_kinds::ProblemRevNum;
 use uuid::Uuid;
 
 impl Nexus {
@@ -124,8 +126,16 @@ impl Nexus {
         let filters = AlertFilters::try_from(params.clone())?;
         // Next, fetch the problem's current revision, in order to use it to
         // construct the alert filters.
-        let (.., _authz_problem, problem) =
+        let (.., authz_problem, problem) =
             problem_lookup.fetch_for(authz::Action::ListChildren).await?;
+        // A problem at revision zero is still being created by rendezvous, and
+        // is not visible in the external API until its first revision is
+        // created and set as the current revision. `problem_view` returns a 404
+        // for problems at revision zero, so for consistency, this function
+        // should as well.
+        if problem.current_revision() == ProblemRevNum::ZERO {
+            return Err(authz_problem.not_found());
+        }
         let filters = filters.for_problem(&problem);
 
         let alerts = self
