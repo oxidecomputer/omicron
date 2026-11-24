@@ -207,11 +207,10 @@ impl DataStore {
     /// Insert the initial wicket SSH auth setting (generation 1,
     /// unauthenticated) if it does not already exist.
     ///
-    /// RSS initializes every sled to "generation 1, unauthenticated", and the
-    /// db migration to the version that added this feature backfilled the same
-    /// setting to all existing inventory collections and blueprints. Subsequent
-    /// generations are written in response to operator requests to apply new
-    /// settings.
+    /// RSS initializes every sled to "generation 1, unauthenticated", and this
+    /// method is called by Nexus's startup db population code to ensure it
+    /// always exists. Subsequent generations are written in response to
+    /// operator requests to apply new settings.
     pub async fn load_builtin_wicket_ssh_auth(
         &self,
         opctx: &OpContext,
@@ -220,7 +219,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
-        let row = DbWicketSshAuth::new(
+        let row = DbWicketSshAuth::new_discarding_operator_keys(
             &WicketSshAuth::initial(),
             "initial setting (unauthenticated)".into(),
         );
@@ -262,14 +261,13 @@ impl DataStore {
     /// insert) to ensure they're storing references to a wicket SSH auth
     /// generation that actually exists with the expected contents.
     pub(crate) async fn wicket_ssh_auth_validate_on_connection(
+        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         refs: &WicketSshAuthRefs,
     ) -> Result<(), TransactionError<WicketSshAuthRefError>> {
         for (&generation, expected) in &refs.by_generation {
-            let Some(stored) =
-                Self::wicket_ssh_auth_read_optional_on_connection(
-                    conn, generation,
-                )
+            let Some(stored) = self
+                .wicket_ssh_auth_read_optional_on_connection(conn, generation)
                 .await?
             else {
                 return Err(TransactionError::CustomError(
@@ -292,6 +290,13 @@ impl DataStore {
     }
 
     /// Read the full wicket SSH auth setting for `generation`.
+    ///
+    /// Fails if `generation` refers to a generation that doesn't exist.
+    //
+    // TODO omicron#11821 This returns the sled-agent `WicketSshAuth` type, for
+    // now. As a part of the upcoming external API, we'll want to return a Nexus
+    // type here instead (from which we can project to the sled-agent type as
+    // needed).
     pub async fn wicket_ssh_auth_read(
         &self,
         opctx: &OpContext,
@@ -317,21 +322,7 @@ impl DataStore {
             }
         };
 
-        self.wicket_ssh_auth_read_on_connection(&conn, generation).await
-    }
-
-    /// Read the full wicket SSH auth setting for `generation`.
-    //
-    // TODO omicron#11821 This returns the sled-agent `WicketSshAuth` type, for
-    // now. As a part of the upcoming external API, we'll want to return a Nexus
-    // type here instead (from which we can project to the sled-agent type as
-    // needed).
-    pub(crate) async fn wicket_ssh_auth_read_on_connection(
-        &self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        generation: WicketSshAuthGeneration,
-    ) -> Result<WicketSshAuth, Error> {
-        Self::wicket_ssh_auth_read_optional_on_connection(conn, generation)
+        self.wicket_ssh_auth_read_optional_on_connection(&conn, generation)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .ok_or_else(|| {
@@ -343,7 +334,8 @@ impl DataStore {
 
     /// Read the full wicket SSH auth setting for `generation`, or `None` if
     /// that generation does not exist.
-    async fn wicket_ssh_auth_read_optional_on_connection(
+    pub(crate) async fn wicket_ssh_auth_read_optional_on_connection(
+        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         generation: WicketSshAuthGeneration,
     ) -> Result<Option<WicketSshAuth>, DieselError> {

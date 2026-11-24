@@ -724,7 +724,7 @@ impl DataStore {
                 async move {
             // Check that every wicket SSH auth generation we reference
             // is valid (see above).
-            Self::wicket_ssh_auth_validate_on_connection(
+            self.wicket_ssh_auth_validate_on_connection(
                 &conn,
                 &wicket_ssh_auth_refs,
             )
@@ -4247,14 +4247,24 @@ impl DataStore {
                             }
                             btree_map::Entry::Vacant(entry) => {
                                 let auth = self
-                                    .wicket_ssh_auth_read_on_connection(
-                                        &conn,
-                                        wicket_auth_gen,
+                                .wicket_ssh_auth_read_optional_on_connection(
+                                    &conn,
+                                    wicket_auth_gen,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
                                     )
-                                    .await
-                                    .internal_context(format!(
-                                        "reading inventory collection {id}"
-                                    ))?;
+                                })?
+                                .ok_or_else(|| {
+                                    Error::internal_error(format!(
+                                        "inventory collection {id} refers \
+                                         to nonexistent wicket SSH auth \
+                                         generation {wicket_auth_gen}"
+                                    ))
+                                })?;
                                 entry.insert(auth).clone()
                             }
                         };

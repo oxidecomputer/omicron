@@ -456,7 +456,7 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
                 // Check that every wicket SSH auth generation we reference
                 // is valid (see above).
-                Self::wicket_ssh_auth_validate_on_connection(
+                self.wicket_ssh_auth_validate_on_connection(
                     &conn,
                     &wicket_ssh_auth_refs,
                 )
@@ -847,13 +847,23 @@ impl DataStore {
                     }
                     btree_map::Entry::Vacant(entry) => {
                         entry.insert(
-                            self.wicket_ssh_auth_read_on_connection(
+                            self.wicket_ssh_auth_read_optional_on_connection(
                                 &conn, wicket_gen,
                             )
                             .await
-                            .internal_context(
-                                format!("reading blueprint {blueprint_id}"),
-                            )?,
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })?
+                            .ok_or_else(|| {
+                                Error::internal_error(format!(
+                                    "blueprint {blueprint_id} refers \
+                                     to nonexistent wicket SSH auth \
+                                     generation {wicket_gen}"
+                                ))
+                            })?,
                         );
                     }
                 }

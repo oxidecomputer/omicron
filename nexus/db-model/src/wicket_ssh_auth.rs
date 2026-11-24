@@ -31,7 +31,11 @@ pub struct WicketSshAuth {
 }
 
 impl WicketSshAuth {
-    pub fn new(
+    /// Converts the API-shaped `wicket_ssh_auth` into the db model type.
+    ///
+    /// If `wicket_ssh_auth.kind` contains any operator keys, they're discarded
+    /// by this method; they must be stored as [`WicketSshAuthKey`] rows.
+    pub fn new_discarding_operator_keys(
         wicket_ssh_auth: &sled_agent_types::inventory::WicketSshAuth,
         description: String,
     ) -> Self {
