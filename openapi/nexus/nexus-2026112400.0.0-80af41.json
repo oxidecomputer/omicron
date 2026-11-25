@@ -21551,11 +21551,11 @@
         ]
       },
       "ExpungePrecheck": {
-        "description": "Result of checking whether it'd be dangerous to expunge a working sled or physical disk\n\nIf `ok` is `true`, no check found any problems. Otherwise, each check lists the problems that it found.",
+        "description": "Result of checking whether it'd be dangerous to expunge a working sled or physical disk\n\nIf `ok` is `true`, no check found any risks. Otherwise, each check lists the risks that it found.",
         "type": "object",
         "properties": {
           "ok": {
-            "description": "Whether all checks passed\n\nThis is `true` if and only if none of the checks below found any problems.",
+            "description": "Whether all checks passed\n\nThis is `true` if and only if none of the checks below found any risks.",
             "type": "boolean"
           },
           "user_data": {
@@ -32137,7 +32137,7 @@
             "minimum": 0
           },
           "risks": {
-            "description": "Human-readable descriptions of problems found by this check\n\nIf this list is empty, this check passed.",
+            "description": "Human-readable descriptions of risks found by this check\n\nIf this list is empty, this check passed.",
             "type": "array",
             "items": {
               "type": "string"
