@@ -192,10 +192,14 @@ pub mod instance {
 
     pub use crate::v2026_06_05_00::instance::InstanceDiskAttachment;
 
-    pub use crate::v2026_06_08_00::instance::Instance;
     pub use crate::v2026_06_08_00::instance::InstanceCpuPlatform;
-    pub use crate::v2026_06_08_00::instance::InstanceCreate;
-    pub use crate::v2026_06_08_00::instance::InstanceUpdate;
+
+    pub use crate::v2026_11_11_00::instance::AcpiTimeoutSecs;
+    pub use crate::v2026_11_11_00::instance::Instance;
+    pub use crate::v2026_11_11_00::instance::InstanceCreate;
+    pub use crate::v2026_11_11_00::instance::InstanceShutdownPolicy;
+    pub use crate::v2026_11_11_00::instance::InstanceStopOrRebootParams;
+    pub use crate::v2026_11_11_00::instance::InstanceUpdate;
 }
 
 pub mod internet_gateway {
@@ -453,6 +457,7 @@ pub mod system {
     pub use crate::v2025_11_20_00::system::AllowListUpdate;
     pub use crate::v2025_11_20_00::system::Ping;
     pub use crate::v2025_11_20_00::system::PingStatus;
+    pub use crate::v2026_11_21_00::system::SystemVersion;
 }
 
 pub mod system_networking {
@@ -476,9 +481,9 @@ pub mod update {
     pub use crate::v2026_10_13_00::update::TufRepo;
     pub use crate::v2026_10_13_00::update::TufRepoUpload;
 
-    pub use crate::v2026_11_20_00::update::OperatorNotes;
-    pub use crate::v2026_11_20_00::update::OperatorStatus;
-    pub use crate::v2026_11_20_00::update::UpdateStatus;
+    pub use crate::v2026_11_22_00::update::OperatorNotes;
+    pub use crate::v2026_11_22_00::update::OperatorStatus;
+    pub use crate::v2026_11_22_00::update::UpdateStatus;
 }
 
 pub mod vpc {

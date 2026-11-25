@@ -1119,14 +1119,24 @@ Arguments:
           other value is parsed as a sitrep UUID.
 
 Options:
-  -j, --json
+  -c, --case <CASE_ID>
+          Show details for only the case with this ID, rather than the sitrep.
           
+          With `--json`, only the requested case is serialized.
 
       --log-level <LOG_LEVEL>
           log level filter
           
           [env: LOG_LEVEL=]
           [default: warn]
+
+  -a, --all-cases
+          Show full details for every case in the sitrep, rather than a summary table.
+          
+          This has no effect with `--json`, which always includes every case.
+
+  -j, --json
+          
 
       --color <COLOR>
           Color output

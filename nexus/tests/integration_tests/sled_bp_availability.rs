@@ -18,11 +18,10 @@ use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::pub_test_utils::helpers::small_resource_request;
 use nexus_test_utils::background::run_blueprint_loader;
 use nexus_test_utils::background::run_blueprint_rendezvous;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
-use nexus_types::external_api::instance;
 use omicron_nexus::TestInterfaces as _;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -138,19 +137,7 @@ async fn test_instance_placement_honors_blueprint_availability(
     .await;
 
     // Start an instance -- it must land on the other sled.
-    let instance = create_instance_with(
-        client,
-        PROJECT_NAME,
-        "bird-ecology",
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<instance::InstanceDiskAttachment>::new(),
-        Vec::<instance::ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
-    )
-    .await;
+    let instance = create_instance(client, PROJECT_NAME, "bird-ecology").await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Instance create returns before the start saga has registered the VMM, so

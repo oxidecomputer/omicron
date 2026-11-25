@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::{
 use sled_agent_types_versions::{
     latest, v1, v11, v14, v15, v18, v20, v22, v24, v25, v26, v28, v29, v30,
     v31, v32, v33, v34, v37, v39, v40, v41, v42, v43, v44, v46, v47, v48, v49,
-    v50, v51, v52, v53, v55, v57, v61,
+    v50, v51, v52, v53, v55, v57, v61, v65,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +36,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (67, WICKET_SSH_AUTH),
+    (66, PROPOLIS_ACPI_SHUTDOWN),
     (65, ADD_DISK_LOCATION_TO_INVENTORY),
     (64, TRUST_QUORUM_MEMBERS),
     (63, MULTIRACK_JOIN_COMPLETE_GENERATION),
@@ -390,12 +392,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ARTIFACT_HASH_SCHEMA..,
+        versions = VERSION_WICKET_SSH_AUTH..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions = VERSION_ARTIFACT_HASH_SCHEMA..VERSION_WICKET_SSH_AUTH,
+    }]
+    async fn omicron_config_put_v55(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v55::inventory::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+    }
 
     #[endpoint {
         method = PUT,
@@ -406,7 +420,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v51::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::omicron_config_put_v55(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -572,12 +586,28 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}/state",
+        versions = VERSION_PROPOLIS_ACPI_SHUTDOWN..
     }]
     async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::VmmPutStateBody>,
     ) -> Result<HttpResponseOk<latest::instance::VmmPutStateResponse>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_put_state",
+        method = PUT,
+        path = "/vmms/{propolis_id}/state",
+        versions = ..VERSION_PROPOLIS_ACPI_SHUTDOWN
+    }]
+    async fn vmm_put_state_v1(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v1::instance::VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<v1::instance::VmmPutStateResponse>, HttpError>
+    {
+        Self::vmm_put_state(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         method = GET,
@@ -1132,11 +1162,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..,
+        versions = VERSION_WICKET_SSH_AUTH..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_ADD_DISK_LOCATION_TO_INVENTORY..VERSION_WICKET_SSH_AUTH,
+    }]
+    async fn inventory_v65(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v65::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v65::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -1148,7 +1193,7 @@ pub trait SledAgentApi {
     async fn inventory_v57(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v57::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v65(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v57::inventory::Inventory::from(inv))
         })
     }

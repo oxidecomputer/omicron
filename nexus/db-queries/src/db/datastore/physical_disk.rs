@@ -778,8 +778,8 @@ mod test {
         ConfigReconcilerInventoryStatus, FmdInventory, InstanceManagerStatus,
         Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
         SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
+        WicketSshAuthStatus,
     };
-    use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
@@ -1112,10 +1112,7 @@ mod test {
             .found_sled_inventory(
                 "fake sled agent",
                 Inventory {
-                    baseboard_id: BaseboardId {
-                        part_number: sled.part_number().to_string(),
-                        serial_number: sled.serial_number().to_string(),
-                    },
+                    baseboard_id: sled.baseboard_id(),
                     reservoir_size: ByteCount::from(1024),
                     sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
@@ -1140,6 +1137,7 @@ mod test {
                         SvcsEnabledNotOnlineResult::DataUnavailable,
                     reference_measurements: IdOrdMap::new(),
                     fmd: Ok(FmdInventory::default()),
+                    wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
                 },
             )
             .unwrap();

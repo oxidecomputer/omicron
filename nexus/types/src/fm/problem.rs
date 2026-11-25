@@ -7,7 +7,19 @@
 //! These are *not* part of the external API; for that, see the
 //! [`crate::external_api::problem`] module.
 
+use super::display;
+use chrono::{DateTime, Utc};
+use iddqd::IdOrdMap;
 use omicron_common::api::external::Error;
+use omicron_generation_kinds::ProblemRevNum;
+use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::ProblemUuid;
+use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
 
 /// A structured internal representation of problem codes.
 ///
@@ -27,7 +39,17 @@ use omicron_common::api::external::Error;
 ///
 /// [§7.2 RFD 699]: https://rfd.shared.oxide.computer/rfd/0699#problem-codes
 #[derive(
-    Copy, Clone, Debug, PartialEq, Eq, strum::VariantArray, strum::FromRepr,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    strum::VariantArray,
+    strum::FromRepr,
+    Serialize,
+    Deserialize,
 )]
 #[repr(u32)]
 pub enum ProblemCode {
@@ -45,7 +67,7 @@ macro_rules! problem_descriptions {
         }
     ),+) => {
         impl ProblemCode {
-            pub fn description(&self) -> &'static ProblemCodeDescription {
+            pub const fn description(&self) -> &'static ProblemCodeDescription {
                 match self {
                     $(
                         ProblemCode::$Variant => {
@@ -171,6 +193,578 @@ impl ProblemCodeDescription {
     }
 }
 
+/// A map of all the problems in a sitrep.
+///
+/// Problems may be looked up by ID, or by their [`ProblemCode`], using the
+/// [`AllProblems::by_id`] and [`AllProblems::by_code`] methods, respectively.
+#[derive(Clone, Debug, Default)]
+pub struct AllProblems {
+    by_id: IdOrdMap<Arc<SitrepProblem>>,
+    by_code: BTreeMap<ProblemCode, IdOrdMap<Arc<SitrepProblem>>>,
+}
+
+impl AllProblems {
+    /// Constructs a new `AllProblems` from an iterator of problems.
+    ///
+    /// This is equivalent to calling [`AllProblems::try_extend`] on an empty
+    /// map.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same conditions as
+    /// [`AllProblems::try_extend`].
+    pub fn try_from_iter<I>(
+        problems: impl IntoIterator<Item = I>,
+    ) -> anyhow::Result<Self>
+    where
+        SitrepProblem: From<I>,
+    {
+        let mut this = Self::default();
+        this.try_extend(problems)?;
+        Ok(this)
+    }
+
+    /// Inserts each problem from `problems` into `self`, stopping and returning
+    /// an error at the first invalid problem.
+    ///
+    /// # Errors
+    ///
+    /// If any problem contains no revisions, or is a duplicate of a problem
+    /// that already exists, this function returns an error (i.e., the same
+    /// conditions as [`AllProblems::insert_unique`]). If an error is returned,
+    /// any problems that were inserted prior to the first encountered invalid
+    /// problem are retained in `self`.
+    pub fn try_extend<I>(
+        &mut self,
+        problems: impl IntoIterator<Item = I>,
+    ) -> anyhow::Result<&mut Self>
+    where
+        SitrepProblem: From<I>,
+    {
+        for problem in problems {
+            self.insert_unique(SitrepProblem::from(problem))?;
+        }
+        Ok(self)
+    }
+
+    /// Inserts `problem` into `self`, if a problem with the same UUID does not
+    /// already exist.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the problem itself is invalid (i.e.
+    /// because it contains no revisions), or if a problem with the same UUID
+    /// already exists.
+    pub fn insert_unique(
+        &mut self,
+        problem: SitrepProblem,
+    ) -> anyhow::Result<&mut Self> {
+        // Note: because `try_extend` may have been called with potentially
+        // invalid sets of problems in the `Deserialize` impl or when
+        // loading a sitrep from the database, we must check here that the
+        // problem has at least one revision and reject the problems if it
+        // does not. The `SitrepProblem::code()` method will instead assert
+        // that there is a problem code, so it should really only be used
+        // when the problem has already been constructed and is known to be
+        // valid.
+        let id = problem.id;
+        let code =
+            problem.revisions.last().map(|rev| rev.code).ok_or_else(|| {
+                anyhow::anyhow!("problem {id} has no revisions!")
+            })?;
+        let problem = Arc::new(problem);
+        // Inserting the problem into `by_id` first, before inserting it
+        // into `by_code` ensures that the problem's UUID is unique. This
+        // way, we can panic if the `by_code` insert fails, and enforce
+        // uniqueness in one place. This ensures that if `try_extend` is
+        // called with a duplicate problem UUID, it will not corrupt either
+        // map.
+        self.by_id
+            .insert_unique(problem.clone())
+            .map_err(|e| anyhow::anyhow!("duplicate problem ID {id}: {e}"))?;
+        if let Err(e) = self
+            .by_code
+            .entry(problem.code())
+            .or_default()
+            .insert_unique(problem.clone())
+        {
+            unreachable!(
+                "duplicate problem ID {id} in by-code map for {code:?}: {e}.\n\
+                note: if the by_id insert above succeeded, the problem ID \
+                should be globally unique relative to all problems in this \
+                map. entries in the by-code map only contain problems with \
+                IDs that are unique in the by_id map, so this should be \
+                unreachable!"
+            )
+        }
+
+        Ok(self)
+    }
+
+    pub fn by_id(&self) -> &IdOrdMap<Arc<SitrepProblem>> {
+        &self.by_id
+    }
+
+    pub fn by_code(
+        &self,
+    ) -> &BTreeMap<ProblemCode, IdOrdMap<Arc<SitrepProblem>>> {
+        &self.by_code
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+}
+
+impl<'a> IntoIterator for &'a AllProblems {
+    type Item = &'a Arc<SitrepProblem>;
+    type IntoIter =
+        <&'a IdOrdMap<Arc<SitrepProblem>> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.by_id.iter()
+    }
+}
+
+/// Consumes the map, returning owned problems in ID order.
+///
+/// This avoids cloning the individual [`Arc`]`<`[`SitrepProblem`]`>`s if they
+/// are uniquely owned by this map. If a given problem's [`Arc`] has been cloned
+/// out of [`AllProblems::by_id`] or [`AllProblems::by_code`] and the caller is
+/// still holding a reference to it, that [`SitrepProblem`] is cloned, instead.
+impl IntoIterator for AllProblems {
+    type Item = SitrepProblem;
+    type IntoIter = std::iter::Map<
+        iddqd::id_ord_map::IntoIter<Arc<SitrepProblem>>,
+        fn(Arc<SitrepProblem>) -> SitrepProblem,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let Self { by_id, by_code } = self;
+        // The by-code index holds a second reference to every problem, so it
+        // must be dropped before we drain `by_id`, or else
+        // `Arc::unwrap_or_clone` would always clone because `by_id` is not the
+        // unique owner of the `Arc`s. Therefore, drop it now
+        drop(by_code);
+        by_id.into_iter().map(Arc::unwrap_or_clone)
+    }
+}
+
+impl PartialEq for AllProblems {
+    fn eq(&self, other: &Self) -> bool {
+        // Note: it is not necessary to compare the by-code maps, because the
+        // by-code map is constructed in `AllProblems::try_extend`, and this
+        // function will construct the by-code map identically provided that it
+        // was constructed from the same set of inputs.
+        self.by_id == other.by_id
+    }
+}
+
+impl Eq for AllProblems {}
+
+/// Serializes as a sequence of [`SitrepProblem`]s, in ID order.
+///
+/// Only the by-ID map is serialized, as a sequence. The by-code index is
+/// derived entirely from the contents of the by-ID map in [`Self::try_extend`],
+/// so these types should always round-trip identically without actually
+/// serializing both maps.
+impl Serialize for AllProblems {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.by_id.iter().map(|problem| &**problem))
+    }
+}
+
+impl<'de> Deserialize<'de> for AllProblems {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+
+        let problems = Vec::<SitrepProblem>::deserialize(deserializer)?;
+        Self::try_from_iter(problems)
+            .map_err(|e| D::Error::custom(format!("{e:#}")))
+    }
+}
+
+/// A sitrep-internal representation of a problem.
+///
+/// These records represent a request from the sitrep that a corresponding
+/// externally-visible problem record exists. Externally-visible problem records
+/// are created by FM rendezvous based on the requested problems in the sitrep
+/// being executed.
+///
+/// A problem is carried forward into subsequent sitreps until *both* the
+/// following conditions are true:
+///
+/// 1. The problem reaches the `resolved` state (i.e., its most recent revision
+///    has a non-`None` [`SitrepRevision::time_resolved`]).
+/// 2. Rendezvous has created every requested externally visible record
+///    associated with that problem (including any revisions, alert links,
+///    support bundle records, or impact list records in those revisions).
+///
+/// Once a problem is resolved, diagnosis engines should not request further
+/// revisions of it, but the sitrep must keep tracking it until the externally
+/// visible records have been created.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepProblem {
+    /// The problem's ID.
+    pub id: ProblemUuid,
+    /// The sitrep in which a diagnosis engine first requested this problem.
+    ///
+    /// This is not necessarily the sitrep that was executed when rendezvous
+    /// created the externally visible problem, which may be a later one. It
+    /// remains the same as the problem is carried forward into subsequent
+    /// sitreps.
+    pub requested_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the diagnosis engine created
+    /// this problem.
+    ///
+    /// This is used for debugging the sitrep, and is not part of the
+    /// externally visible problem.
+    pub comment: String,
+    /// The revisions of this problem, ordered by revision number.
+    ///
+    /// A problem in a sitrep always has at least one revision, so this should
+    /// never be empty.
+    pub revisions: IdOrdMap<SitrepRevision>,
+    /// Alerts linked to this problem, indexed by alert ID.
+    ///
+    /// See [`AlertLink`] for details.
+    pub alerts: IdOrdMap<AlertLink>,
+    /// Support bundles linked to this problem, indexed by support
+    /// bundle ID.
+    ///
+    /// See [`SupportBundleLink`] for details.
+    pub support_bundles: IdOrdMap<SupportBundleLink>,
+}
+
+impl iddqd::IdOrdItem for SitrepProblem {
+    type Key<'a> = &'a ProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
+impl SitrepProblem {
+    pub fn current_revision(&self) -> &SitrepRevision {
+        self.revisions.last().expect(
+            "a problem in the sitrep must always have at least one \
+            revision!",
+        )
+    }
+
+    pub fn code(&self) -> ProblemCode {
+        self.current_revision().code
+    }
+
+    pub fn is_resolved(&self) -> bool {
+        self.current_revision().time_resolved.is_some()
+    }
+
+    pub fn display_summary(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayProblemSummary<'_> {
+        DisplayProblemSummary {
+            problem: self,
+            indent,
+            sitrep_id,
+            colored: false,
+        }
+    }
+}
+
+/// Displays a summary of a [`SitrepProblem`] as a single line, as returned by
+/// [`SitrepProblem::display_summary`].
+///
+/// The line begins with a two-column gutter describing whether the problem had
+/// interesting activity in the sitrep being displayed, if this displayer was
+/// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
+///
+/// - `+` if the problem was created in this sitrep,
+/// - `*` if the problem was modified (i.e. it has a new revision) in this
+///   sitrep, but it was not created in this sitrep, and the new revision does
+///   not resolve it,
+/// - `-` if the problem was resolved by a revision requested in this sitrep,
+///   and it was not already created,
+/// - `+-` if the problem was both created and resolved in this sitrep,
+/// - `!` if the problem was created in this sitrep but resolved in an *earlier*
+///   sitrep (i.e., it was resolved before it was created, which shouldn't
+///   happen and is a bug)
+///
+/// If no sitrep ID was provided, the gutter is blank, so that rows remain
+/// aligned.
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayProblemSummary<'a> {
+    problem: &'a SitrepProblem,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayProblemSummary<'_> {
+    /// Explains the gutter markers in [`DisplayProblemSummary`]'s output.
+    /// Callers displaying a list of problem summaries should print this
+    /// legend.
+    pub fn legend() -> DisplayProblemSummaryLegend {
+        DisplayProblemSummaryLegend { colored: false }
+    }
+
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayProblemSummaryLegend {
+    colored: bool,
+}
+
+impl DisplayProblemSummaryLegend {
+    pub fn colored(self, colored: bool) -> Self {
+        Self { colored }
+    }
+}
+
+impl fmt::Display for DisplayProblemSummaryLegend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { colored } = self;
+        let styles = display::Styles::new(colored);
+        write!(
+            f,
+            "activity in this sitrep: \
+            {} created, {} revised, {} resolved\n\n   \
+            STATE            ID                                   CODE SUMMARY",
+            styles.added_marker(),
+            styles.modified_marker(),
+            styles.removed_marker(),
+        )
+    }
+}
+
+impl fmt::Display for DisplayProblemSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { problem, indent, sitrep_id, colored } = self;
+        let SitrepProblem {
+            id,
+            requested_sitrep_id,
+            comment: _,
+            revisions: _,
+            alerts: _,
+            support_bundles: _,
+        } = problem;
+        let current_rev = problem.current_revision();
+
+        let styles = display::Styles::new(colored);
+
+        const ACTIVE: &str = "active";
+        const RESOLVED: &str = "resolved";
+        const STATE_WIDTH: usize = display::const_max_len(&[ACTIVE, RESOLVED]);
+
+        let is_resolved = current_rev.time_resolved.is_some();
+        let state = if is_resolved {
+            styles.normal().style(RESOLVED)
+        } else {
+            styles.warning().style(ACTIVE)
+        };
+        let (diff1, diff2) = match sitrep_id {
+            Some(this_sitrep) => {
+                let created_here = *requested_sitrep_id == this_sitrep;
+                let revised_here =
+                    current_rev.requested_sitrep_id == this_sitrep;
+                let diff1 = if created_here {
+                    styles.added_marker()
+                } else if is_resolved && revised_here {
+                    styles.removed_marker()
+                } else if revised_here {
+                    styles.modified_marker()
+                } else {
+                    styles.normal().style(' ')
+                };
+                let diff2 = if !is_resolved {
+                    styles.normal().style(' ')
+                } else if created_here && revised_here {
+                    styles.removed_marker()
+                } else if created_here {
+                    styles.warning().style('!')
+                } else {
+                    styles.normal().style(' ')
+                };
+                (diff1, diff2)
+            }
+            None => (styles.normal().style(' '), styles.normal().style(' ')),
+        };
+
+        let code = u32::from(current_rev.code);
+        write!(
+            f,
+            "{:>indent$}{diff1}{diff2} {state:>STATE_WIDTH$} {} \
+             {code:04} {}",
+            "",
+            styles.heading().style(format_args!("problem {id}")),
+            current_rev.summary,
+        )?;
+        Ok(())
+    }
+}
+
+/// A sitrep-internal representation of a revision of a problem.
+///
+/// These records represent a request from the sitrep that a corresponding
+/// externally-visible problem revision record exists. Externally-visible
+/// revision records are created by FM rendezvous based on the requested
+/// revisions in the sitrep being executed.
+///
+/// Revisions are carried forward into subsequent sitreps until the problem has
+/// been resolved and rendezvous has created the corresponding
+/// externally-visible revision records.
+///
+/// Diagnosis engines may not request a revision that un-resolves a resolved
+/// problem: if a problem's current revision has a `time_resolved`, the sitrep
+/// builder should not permit further revisions of that problem.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SitrepRevision {
+    /// The revision number.
+    ///
+    /// A revision's number must always be greater than zero. The zeroth
+    /// revision is reserved for a problem that has been created but does not
+    /// yet have a current revision.
+    pub number: ProblemRevNum,
+    /// The sitrep in which a diagnosis engine first requested this revision.
+    pub requested_sitrep_id: SitrepUuid,
+    /// The time at which the problem was resolved, if it is resolved as of
+    /// this revision.
+    ///
+    /// If this is `None`, the problem is active as of this revision; if it is
+    /// `Some`, the problem is resolved.
+    pub time_resolved: Option<DateTime<Utc>>,
+    /// The problem's problem code as of this revision.
+    ///
+    /// This determines the problem's class, as well as its documentation.
+    pub code: ProblemCode,
+    /// A one-sentence, human-readable summary of the problem as of this
+    /// revision.
+    pub summary: String,
+    /// A human-readable description (one or more paragraphs) of the problem as
+    /// of this revision.
+    pub description: String,
+    /// A human-readable description (one or more paragraphs) of any operator
+    /// actions required to address the problem.
+    pub action_required: String,
+}
+
+impl iddqd::IdOrdItem for SitrepRevision {
+    type Key<'a> = &'a ProblemRevNum;
+    fn key(&self) -> Self::Key<'_> {
+        &self.number
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// A link between a problem and an alert.
+///
+/// Linked alerts form a timeline of events over the course of a problem
+/// (see [RFD 699][rfd]). An alert may be linked to a problem in the
+/// same sitrep that requests the alert, or in any later sitrep, including after
+/// the request has been removed from the sitrep. This may occur even if the
+/// alert was created prior to the problem. Therefore, a link refers to
+/// the alert only by its ID, and does not require that a corresponding
+/// [`AlertRequest`](super::case::AlertRequest) exist in the sitrep. The same
+/// alert may be linked to multiple problems.
+///
+/// A link exists for as long as the problem it belongs to remains in the
+/// sitrep, and is never removed or modified once created. Therefore,
+/// rendezvous can create link records without needing a separate generation
+/// counter: as long as the problem itself exists, its links may be created
+/// during execution. Once the problem is no longer part of the sitrep *and*
+/// rendezvous has created the link, the link need not be carried forward.
+///
+/// Rendezvous must not create an externally visible link until both the
+/// problem and the alert exist. Otherwise, a caller listing a problem's
+/// alerts could see alerts that do not exist yet.
+///
+/// [rfd]: https://rfd.shared.oxide.computer/rfd/0699#alerts-as-timeline
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct AlertLink {
+    /// The ID of the linked alert.
+    pub alert_id: AlertUuid,
+    /// The problem revision with which the alert is associated.
+    ///
+    /// This is used to order a problem's alerts by revision. Like all real
+    /// revision numbers, it is greater than zero.
+    pub revision: ProblemRevNum,
+    /// The sitrep in which this link was first created.
+    ///
+    /// This is *not* the sitrep that requested the alert, which may be an
+    /// earlier one.
+    pub linked_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the alert is linked to the
+    /// problem, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for AlertLink {
+    type Key<'a> = &'a AlertUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.alert_id
+    }
+
+    iddqd::id_upcast!();
+}
+
+/// A link between a problem and a support bundle.
+///
+/// Like [`AlertLink`]s, support bundle links may be created in the same sitrep
+/// that requests the support bundle or in any later sitrep, refer to the
+/// support bundle only by its ID, and are never removed or modified while
+/// the problem remains in the sitrep. The same support bundle may be
+/// linked to multiple problems.
+///
+/// Once the problem is no longer part of the sitrep *and* rendezvous has
+/// created the link, the link need not be carried forward. Rendezvous must not
+/// create an externally visible link until both the problem and the support
+/// bundle exist, so that a caller listing a problem's support bundles never
+/// sees one that does not exist yet.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct SupportBundleLink {
+    /// The ID of the linked support bundle.
+    pub support_bundle_id: SupportBundleUuid,
+    /// The problem revision with which the support bundle is associated.
+    ///
+    /// This is used to order a problem's support bundles by revision. Like all
+    /// real revision numbers, it is greater than zero.
+    pub revision: ProblemRevNum,
+    /// The sitrep in which this link was first created.
+    ///
+    /// This is *not* the sitrep that requested the support bundle, which may be
+    /// an earlier one.
+    pub linked_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the support bundle is linked
+    /// to the problem, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for SupportBundleLink {
+    type Key<'a> = &'a SupportBundleUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.support_bundle_id
+    }
+
+    iddqd::id_upcast!();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,5 +865,99 @@ mod tests {
         let path = base_docs_path().join("manifest.json");
 
         expectorate::assert_contents(&path, &manifest)
+    }
+
+    fn test_problem(revisions: u32) -> SitrepProblem {
+        let sitrep_id = SitrepUuid::new_v4();
+        let mut revs = IdOrdMap::new();
+        for number in 1..=revisions {
+            revs.insert_unique(SitrepRevision {
+                number: ProblemRevNum::from_u32(number),
+                requested_sitrep_id: sitrep_id,
+                time_resolved: None,
+                code: ProblemCode::UnhealthyZpool,
+                summary: format!("revision {number}"),
+                description: format!("description of revision {number}"),
+                action_required: "none, it's not a real problem".to_string(),
+            })
+            .expect("revision numbers are distinct");
+        }
+        let mut alerts = IdOrdMap::new();
+        alerts
+            .insert_unique(AlertLink {
+                alert_id: AlertUuid::new_v4(),
+                revision: ProblemRevNum::from_u32(1),
+                linked_sitrep_id: sitrep_id,
+                comment: "linked alert".to_string(),
+            })
+            .expect("map is empty");
+        let mut support_bundles = IdOrdMap::new();
+        support_bundles
+            .insert_unique(SupportBundleLink {
+                support_bundle_id: SupportBundleUuid::new_v4(),
+                revision: ProblemRevNum::from_u32(1),
+                linked_sitrep_id: sitrep_id,
+                comment: "linked support bundle".to_string(),
+            })
+            .expect("map is empty");
+        SitrepProblem {
+            id: ProblemUuid::new_v4(),
+            requested_sitrep_id: sitrep_id,
+            comment: "test problem".to_string(),
+            revisions: revs,
+            alerts,
+            support_bundles,
+        }
+    }
+
+    /// Serializing and deserializing an `AllProblems` must reproduce both the
+    /// by-ID map and the by-code index, even though it only serializes the
+    /// by-ID map.
+    #[test]
+    fn all_problems_serde_roundtrip() {
+        let mut problems = AllProblems::default();
+        problems
+            .try_extend([test_problem(1), test_problem(2), test_problem(3)])
+            .expect("problems are valid");
+
+        let json =
+            serde_json::to_value(&problems).expect("problems should serialize");
+        let serialized = json.as_array().unwrap_or_else(|| {
+            panic!("problems should serialize as a sequence: {json:#}")
+        });
+        assert_eq!(serialized.len(), problems.len());
+
+        let deserialized: AllProblems = serde_json::from_value(json)
+            .expect("serialized problems should deserialize");
+        assert_eq!(deserialized, problems);
+        // `PartialEq` for `AllProblems` only compares the by-ID maps, so
+        // check that the by-code index was rebuilt separately.
+        assert_eq!(deserialized.by_code(), problems.by_code());
+    }
+
+    #[test]
+    fn all_problems_deserialize_rejects_duplicate_ids() {
+        let problem = test_problem(1);
+        let json = serde_json::to_string(&[&problem, &problem])
+            .expect("problems should serialize");
+        let err = serde_json::from_str::<AllProblems>(&json)
+            .expect_err("duplicate problem IDs should be rejected");
+        assert!(
+            err.to_string().contains("duplicate problem ID"),
+            "unexpected error: {err}",
+        );
+    }
+
+    #[test]
+    fn all_problems_deserialize_rejects_empty_revisions() {
+        let problem = test_problem(0);
+        let json = serde_json::to_string(&[&problem])
+            .expect("problems should serialize");
+        let err = serde_json::from_str::<AllProblems>(&json)
+            .expect_err("a problem with no revisions should be rejected");
+        assert!(
+            err.to_string().contains("has no revisions"),
+            "unexpected error: {err}",
+        );
     }
 }
