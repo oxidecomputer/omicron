@@ -32030,7 +32030,7 @@
             "description": "If true, the system has detected one or more known conditions that require Oxide support to resolve\n\nYou should contact support to resolve these issues before proceeding with an update, or after one has completed. The checks underlying this field are not exhaustive, so this being `false` does not mean the entire system is completely healthy.",
             "type": "boolean"
           },
-          "operator_notes": {
+          "notes": {
             "description": "Summary of what system is doing related to updates and repairs",
             "allOf": [
               {
@@ -32060,7 +32060,7 @@
         "required": [
           "components_by_release_version",
           "contact_support",
-          "operator_notes",
+          "notes",
           "suspended",
           "target_release",
           "time_last_step_planned"

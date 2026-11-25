@@ -759,13 +759,13 @@ async fn test_update_status() -> Result<()> {
     .expect("planner should have reported being disabled within 60s");
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
-    assert_eq!(status.operator_notes.status, update::OperatorStatus::Unknown);
+    assert_eq!(status.notes.status, update::OperatorStatus::Unknown);
     assert_eq!(
-        status.operator_notes.status_summary,
+        status.notes.status_summary,
         "Unknown: automatic system changes are disabled"
     );
     assert_eq!(
-        status.operator_notes.status_support_details.0.as_deref(),
+        status.notes.status_support_details.0.as_deref(),
         Some("blueprint planning is disabled")
     );
 
@@ -863,7 +863,7 @@ async fn test_update_status() -> Result<()> {
         || async {
             let status: update::UpdateStatus =
                 object_get(client, "/v1/system/update/status").await;
-            let notes = status.operator_notes;
+            let notes = status.notes;
             if notes.status == update::OperatorStatus::Unknown {
                 Err(CondCheckError::<()>::NotYet {
                     status: Some(format!("operator notes: {notes:?}")),

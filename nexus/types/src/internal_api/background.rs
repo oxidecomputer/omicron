@@ -1014,29 +1014,34 @@ impl BlueprintPlannerLatest {
         time_planned: DateTime<Utc>,
         status: &BlueprintPlannerStatus,
     ) {
-        let failed = |reason: PlannerFailure| BlueprintPlannerLatest::Failed {
-            time_planned,
-            reason,
-        };
-        // <review covers="4 lines above">
-        // Let's inline this.
-        // </review>
         *self = match status {
             BlueprintPlannerStatus::Disabled => {
-                failed(PlannerFailure::Disabled)
+                BlueprintPlannerLatest::Failed {
+                    time_planned,
+                    reason: PlannerFailure::Disabled,
+                }
             }
             BlueprintPlannerStatus::ConfigNotYetLoaded => {
-                failed(PlannerFailure::ConfigNotYetLoaded)
+                BlueprintPlannerLatest::Failed {
+                    time_planned,
+                    reason: PlannerFailure::ConfigNotYetLoaded,
+                }
             }
             BlueprintPlannerStatus::Error(error) => {
-                failed(PlannerFailure::Error(error.clone()))
+                BlueprintPlannerLatest::Failed {
+                    time_planned,
+                    reason: PlannerFailure::Error(error.clone()),
+                }
             }
             // In this case, the planner produced a report, but the blueprint
             // it describes did not become the target and no other planner will
             // make progress either.  The report would describe changes that are
             // not actually happening.
             BlueprintPlannerStatus::LimitReached { limit, report: _ } => {
-                failed(PlannerFailure::LimitReached { limit: *limit })
+                BlueprintPlannerLatest::Failed {
+                    time_planned,
+                    reason: PlannerFailure::LimitReached { limit: *limit },
+                }
             }
             // Another Nexus made a different blueprint the target before we
             // could make ours the target.  Our report may not describe what

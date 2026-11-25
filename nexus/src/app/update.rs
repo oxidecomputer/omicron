@@ -675,7 +675,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let operator_notes = self.operator_notes();
+        let notes = self.operator_notes();
 
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
@@ -683,7 +683,7 @@ impl super::Nexus {
             time_last_step_planned,
             suspended,
             contact_support,
-            operator_notes,
+            notes,
         })
     }
 

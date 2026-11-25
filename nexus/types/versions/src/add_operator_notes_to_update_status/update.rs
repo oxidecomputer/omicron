@@ -59,7 +59,7 @@ pub struct UpdateStatus {
     pub contact_support: bool,
 
     /// Summary of what system is doing related to updates and repairs
-    pub operator_notes: OperatorNotes,
+    pub notes: OperatorNotes,
 }
 
 // Response-only type: convert from new to old.
@@ -74,7 +74,7 @@ impl From<UpdateStatus> for v2026_05_20_00::update::UpdateStatus {
             time_last_step_planned,
             suspended,
             contact_support,
-            operator_notes: _,
+            notes: _,
         } = new;
         Self {
             target_release,
