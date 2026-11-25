@@ -454,7 +454,7 @@ api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
-async-bb8-diesel = "0.2"
+async-bb8-diesel = "0.3.1"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
 attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "994c3fcdb7e3897283f5082a892b67db397c0738" }
@@ -778,11 +778,11 @@ progenitor-extras = "0.3.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3b60af56ed99c4497f02ac9fe014c76adfcf978b" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "9ebcf04a1aef8f6f7b8f468f28b2f8158e3cb50c" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -882,10 +882,10 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
-sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "7ab073efccf0d2ef54a316a00101586547b931d6" }
-sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "7ab073efccf0d2ef54a316a00101586547b931d6" }
-sush-proxy = { git = "https://github.com/oxidecomputer/sush", rev = "7ab073efccf0d2ef54a316a00101586547b931d6" }
-sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "7ab073efccf0d2ef54a316a00101586547b931d6", features = ["embedded"] }
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a" }
+sush-proxy = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "567f562765150baa12ba20b881123e9d6459e09a", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }

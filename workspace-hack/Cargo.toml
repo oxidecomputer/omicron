@@ -18,17 +18,22 @@ workspace = true
 
 ### BEGIN HAKARI SECTION
 [dependencies]
+aead = { version = "0.6.1", default-features = false, features = ["rand_core"] }
+aes = { version = "0.9.1", default-features = false, features = ["zeroize"] }
+aes-gcm = { version = "0.11.0", default-features = false, features = ["aes", "zeroize"] }
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.4" }
 anyhow = { version = "1.0.104", features = ["backtrace"] }
 aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
 aws-lc-sys = { version = "0.45.0", default-features = false, features = ["prebuilt-nasm"] }
-base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
+base16ct-6f8ce4dd05d13bba = { package = "base16ct", version = "0.2.0", default-features = false, features = ["alloc"] }
+base16ct-dff4ba8e3ae991db = { package = "base16ct", version = "1.0.0", default-features = false, features = ["alloc"] }
 base64-2b5c6dc72f624058 = { package = "base64", version = "0.23.1" }
 base64-3c51e837cfc5589a = { package = "base64", version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.11.0", default-features = false, features = ["serde", "std"] }
+block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.2.1", features = ["schemars08", "serde"] }
@@ -44,26 +49,31 @@ const-oid = { version = "0.9.6", default-features = false, features = ["db", "st
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
-crypto-bigint = { version = "0.5.5", features = ["generic-array", "zeroize"] }
+crypto-bigint-ca01ad9e24f5d932 = { package = "crypto-bigint", version = "0.7.5", features = ["alloc", "getrandom", "hybrid-array", "subtle", "zeroize"] }
+crypto-bigint-d8f496e17d97b5cb = { package = "crypto-bigint", version = "0.5.5", features = ["generic-array", "zeroize"] }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2.2", default-features = false, features = ["getrandom"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "std"] }
 ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 daft = { version = "0.1.8", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.10.0" }
-der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
+der-c38e5c1d305a1b54 = { package = "der", version = "0.8.0", default-features = false, features = ["oid", "pem", "std"] }
+der-ca01ad9e24f5d932 = { package = "der", version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 derive_more = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d", default-features = false, features = ["ipcc", "mock"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
-digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
+digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core", "zeroize"] }
 dropshot = { version = "0.17.1", default-features = false, features = ["usdt-probes"] }
-ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
+ecdsa-9067fe90e8c1f593 = { package = "ecdsa", version = "0.17.0", features = ["algorithm", "getrandom", "pem", "std"] }
+ecdsa-986da7b5efc2b80e = { package = "ecdsa", version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
 ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
-elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
+elliptic-curve-582f2526e08bb6a0 = { package = "elliptic-curve", version = "0.14.1", features = ["ecdh", "getrandom", "pem", "std"] }
+elliptic-curve-594e8ee84c453af0 = { package = "elliptic-curve", version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color"] }
-ff = { version = "0.13.1", default-features = false, features = ["alloc"] }
+ff-582f2526e08bb6a0 = { package = "ff", version = "0.14.0", default-features = false, features = ["alloc"] }
+ff-594e8ee84c453af0 = { package = "ff", version = "0.13.1", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.9", features = ["zlib-rs"] }
 foldhash = { version = "0.2.0" }
 form_urlencoded = { version = "1.2.2" }
@@ -77,13 +87,15 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
-group = { version = "0.13.0", default-features = false, features = ["alloc"] }
+group-582f2526e08bb6a0 = { package = "group", version = "0.14.0", default-features = false, features = ["alloc"] }
+group-594e8ee84c453af0 = { package = "group", version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
 hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2", default-features = false, features = ["ahash", "inline-more", "raw"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", default-features = false, features = ["allocator-api2", "default-hasher", "inline-more"] }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
-hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
+hmac-594e8ee84c453af0 = { package = "hmac", version = "0.13.0", default-features = false, features = ["zeroize"] }
+hmac-5ef9efb8ec2df382 = { package = "hmac", version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
 icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
@@ -107,21 +119,27 @@ memchr = { version = "2.8.0" }
 miette = { version = "7.6.0", features = ["fancy"] }
 newtype-uuid = { version = "1.3.2", features = ["proptest1", "schemars08", "serde", "v4"] }
 nix = { version = "0.31.2", features = ["feature", "fs", "net", "signal", "uio"] }
+num-bigint = { version = "0.5.1", features = ["rand_0_10"] }
 num-bigint-dig = { version = "0.8.6", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 once_cell = { version = "1.21.3", features = ["critical-section"] }
 openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_serializing_defaults"] }
+p256 = { version = "0.14.0", features = ["ecdh"] }
+p384 = { version = "0.14.0", features = ["ecdh"] }
+p521 = { version = "0.14.0", features = ["ecdh"] }
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
 petgraph = { version = "0.8.3", features = ["serde-1"] }
+pkcs8 = { version = "0.11.0", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.13.1" }
 postgres-types = { version = "0.2.14", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 potential_utf = { version = "0.1.4", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
+primeorder = { version = "0.14.0", default-features = false, features = ["basepoint-table", "std"] }
 proc-macro2 = { version = "1.0.106" }
 progenitor-extras = { version = "0.3.0", default-features = false, features = ["retry", "slog"] }
 quote = { version = "1.0.45" }
@@ -139,19 +157,21 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["
 rustls = { version = "0.23.46" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
+sec1 = { version = "0.8.1", features = ["ctutils", "pem", "std", "subtle"] }
 semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.154", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_spanned = { version = "1.1.1", default-features = false, features = ["serde", "std"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
-sha2 = { version = "0.10.9", features = ["oid"] }
+sha2-93f6ce9d446188ac = { package = "sha2", version = "0.10.9", features = ["oid"] }
+sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0", features = ["zeroize"] }
 sha3 = { version = "0.10.8", features = ["oid"] }
 simd-adler32 = { version = "0.3.8", default-features = false, features = ["std"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slab = { version = "0.4.12" }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-smallvec = { version = "1.15.1", default-features = false, features = ["const_new", "union"] }
+smallvec = { version = "1.16.5", default-features = false, features = ["const_new", "union"] }
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e", default-features = false, features = ["ipcc"] }
@@ -196,17 +216,22 @@ zip-164d15cefe24d7eb = { package = "zip", version = "4.6.1", default-features = 
 zip-181b0d20215bb231 = { package = "zip", version = "8.6.0", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
+aead = { version = "0.6.1", default-features = false, features = ["rand_core"] }
+aes = { version = "0.9.1", default-features = false, features = ["zeroize"] }
+aes-gcm = { version = "0.11.0", default-features = false, features = ["aes", "zeroize"] }
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.4" }
 anyhow = { version = "1.0.104", features = ["backtrace"] }
 aws-lc-rs = { version = "1.18.1", features = ["prebuilt-nasm"] }
 aws-lc-sys = { version = "0.45.0", default-features = false, features = ["prebuilt-nasm"] }
-base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
+base16ct-6f8ce4dd05d13bba = { package = "base16ct", version = "0.2.0", default-features = false, features = ["alloc"] }
+base16ct-dff4ba8e3ae991db = { package = "base16ct", version = "1.0.0", default-features = false, features = ["alloc"] }
 base64-2b5c6dc72f624058 = { package = "base64", version = "0.23.1" }
 base64-3c51e837cfc5589a = { package = "base64", version = "0.22.1" }
 base64ct = { version = "1.8.3", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.11.0", default-features = false, features = ["serde", "std"] }
+block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 bstr = { version = "1.12.1" }
 buf-list = { version = "1.1.2", default-features = false, features = ["tokio1"] }
 byte-wrapper = { version = "0.2.1", features = ["schemars08", "serde"] }
@@ -223,27 +248,32 @@ const-oid = { version = "0.9.6", default-features = false, features = ["db", "st
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
-crypto-bigint = { version = "0.5.5", features = ["generic-array", "zeroize"] }
+crypto-bigint-ca01ad9e24f5d932 = { package = "crypto-bigint", version = "0.7.5", features = ["alloc", "getrandom", "hybrid-array", "subtle", "zeroize"] }
+crypto-bigint-d8f496e17d97b5cb = { package = "crypto-bigint", version = "0.5.5", features = ["generic-array", "zeroize"] }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2.2", default-features = false, features = ["getrandom"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "std"] }
 ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 daft = { version = "0.1.8", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.10.0" }
-der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
+der-c38e5c1d305a1b54 = { package = "der", version = "0.8.0", default-features = false, features = ["oid", "pem", "std"] }
+der-ca01ad9e24f5d932 = { package = "der", version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 derive_more = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 derive_more-impl = { version = "2.1.1", features = ["as_ref", "is_variant"] }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d", default-features = false, features = ["ipcc", "mock"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "oid", "std"] }
-digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
+digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core", "zeroize"] }
 dropshot = { version = "0.17.1", default-features = false, features = ["usdt-probes"] }
-ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
+ecdsa-9067fe90e8c1f593 = { package = "ecdsa", version = "0.17.0", features = ["algorithm", "getrandom", "pem", "std"] }
+ecdsa-986da7b5efc2b80e = { package = "ecdsa", version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
 ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.2.0", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
-elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
+elliptic-curve-582f2526e08bb6a0 = { package = "elliptic-curve", version = "0.14.1", features = ["ecdh", "getrandom", "pem", "std"] }
+elliptic-curve-594e8ee84c453af0 = { package = "elliptic-curve", version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 env_logger = { version = "0.11.11", default-features = false, features = ["auto-color"] }
-ff = { version = "0.13.1", default-features = false, features = ["alloc"] }
+ff-582f2526e08bb6a0 = { package = "ff", version = "0.14.0", default-features = false, features = ["alloc"] }
+ff-594e8ee84c453af0 = { package = "ff", version = "0.13.1", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.9", features = ["zlib-rs"] }
 foldhash = { version = "0.2.0" }
 form_urlencoded = { version = "1.2.2" }
@@ -257,14 +287,16 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
-group = { version = "0.13.0", default-features = false, features = ["alloc"] }
+group-582f2526e08bb6a0 = { package = "group", version = "0.14.0", default-features = false, features = ["alloc"] }
+group-594e8ee84c453af0 = { package = "group", version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
 hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2", default-features = false, features = ["ahash", "inline-more", "raw"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", default-features = false, features = ["allocator-api2", "default-hasher", "inline-more"] }
 heck = { version = "0.4.1", features = ["unicode"] }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
-hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
+hmac-594e8ee84c453af0 = { package = "hmac", version = "0.13.0", default-features = false, features = ["zeroize"] }
+hmac-5ef9efb8ec2df382 = { package = "hmac", version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.13", default-features = false, features = ["alloc", "ctutils", "extra-sizes", "subtle", "zeroize"] }
 hyper = { version = "1.10.1", features = ["full"] }
 icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
@@ -288,21 +320,27 @@ memchr = { version = "2.8.0" }
 miette = { version = "7.6.0", features = ["fancy"] }
 newtype-uuid = { version = "1.3.2", features = ["proptest1", "schemars08", "serde", "v4"] }
 nix = { version = "0.31.2", features = ["feature", "fs", "net", "signal", "uio"] }
+num-bigint = { version = "0.5.1", features = ["rand_0_10"] }
 num-bigint-dig = { version = "0.8.6", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 once_cell = { version = "1.21.3", features = ["critical-section"] }
 openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_serializing_defaults"] }
+p256 = { version = "0.14.0", features = ["ecdh"] }
+p384 = { version = "0.14.0", features = ["ecdh"] }
+p521 = { version = "0.14.0", features = ["ecdh"] }
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
 petgraph = { version = "0.8.3", features = ["serde-1"] }
+pkcs8 = { version = "0.11.0", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.13.1" }
 postgres-types = { version = "0.2.14", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 potential_utf = { version = "0.1.4", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.4" }
+primeorder = { version = "0.14.0", default-features = false, features = ["basepoint-table", "std"] }
 proc-macro2 = { version = "1.0.106" }
 progenitor-extras = { version = "0.3.0", default-features = false, features = ["retry", "slog"] }
 quote = { version = "1.0.45" }
@@ -320,6 +358,7 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["
 rustls = { version = "0.23.46" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
+sec1 = { version = "0.8.1", features = ["ctutils", "pem", "std", "subtle"] }
 semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
@@ -327,13 +366,14 @@ serde_json = { version = "1.0.154", features = ["alloc", "raw_value", "unbounded
 serde_spanned = { version = "1.1.1", default-features = false, features = ["serde", "std"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 serde_with_macros = { version = "3.21.0", default-features = false, features = ["schemars_0_8"] }
-sha2 = { version = "0.10.9", features = ["oid"] }
+sha2-93f6ce9d446188ac = { package = "sha2", version = "0.10.9", features = ["oid"] }
+sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0", features = ["zeroize"] }
 sha3 = { version = "0.10.8", features = ["oid"] }
 simd-adler32 = { version = "0.3.8", default-features = false, features = ["std"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slab = { version = "0.4.12" }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-smallvec = { version = "1.15.1", default-features = false, features = ["const_new", "union"] }
+smallvec = { version = "1.16.5", default-features = false, features = ["const_new", "union"] }
 spin = { version = "0.9.8" }
 spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "02c7e5414d97c0c85d629cb76d1f6beab73d960e", default-features = false, features = ["ipcc"] }

@@ -117,3 +117,7 @@ pub mod v2026_10_29_00;
 pub mod v2026_11_04_00;
 #[path = "problems/mod.rs"]
 pub mod v2026_11_05_00;
+#[path = "instance_acpi_shutdown/mod.rs"]
+pub mod v2026_11_11_00;
+#[path = "add_version_endpoint/mod.rs"]
+pub mod v2026_11_21_00;

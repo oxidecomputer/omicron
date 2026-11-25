@@ -38,7 +38,6 @@ use omicron_common::api::external::{DataPageParams, Error};
 use omicron_uuid_kinds::{GenericUuid, SledUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-use sled_hardware_types::BaseboardId;
 use slog::KV;
 use slog::Record;
 use slog::Serializer;
@@ -435,6 +434,9 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoUpload, HttpError> {
+        // `tuf_repo_insert` checks this too, but check it here so we don't
+        // stream and verify the whole repo before refusing the request.
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let mut loader = RepositoryLoader::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
@@ -806,15 +808,7 @@ impl super::Nexus {
             )
             .await?
             .iter()
-            .map(|sled| {
-                (
-                    BaseboardId {
-                        part_number: sled.part_number().to_string(),
-                        serial_number: sled.serial_number().to_string(),
-                    },
-                    sled.id(),
-                )
-            })
+            .map(|sled| (sled.baseboard_id(), sled.id()))
             .collect();
 
         // It's weird to use the internal view this way. It would feel more
@@ -918,7 +912,9 @@ mod test {
     use sled_agent_types::inventory::SvcsEnabledNotOnline;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
     use sled_agent_types::inventory::SvcsError;
+    use sled_agent_types::inventory::WicketSshAuthStatus;
     use sled_agent_types::inventory::ZpoolHealth;
+    use sled_hardware_types::BaseboardId;
     use slog::Logger;
     use slog::o;
     use tufaceous_artifact::ArtifactHash;
@@ -957,6 +953,7 @@ mod test {
             smf_services_enabled_not_online: smf_services,
             reference_measurements: iddqd::IdOrdMap::new(),
             fmd: Ok(FmdInventory::default()),
+            wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
         }
     }
 

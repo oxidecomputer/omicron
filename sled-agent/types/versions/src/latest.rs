@@ -110,11 +110,9 @@ pub mod instance {
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestPathParam;
     pub use crate::v1::instance::VmmIssueDiskSnapshotRequestResponse;
     pub use crate::v1::instance::VmmPathParam;
-    pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
     pub use crate::v1::instance::VmmRuntimeState;
     pub use crate::v1::instance::VmmState;
-    pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
 
@@ -131,6 +129,10 @@ pub mod instance {
 
     pub use crate::v59::instance::InstanceEnsureBody;
     pub use crate::v59::instance::InstanceSledLocalConfig;
+
+    pub use crate::v66::instance::InstanceShutdownPolicy;
+    pub use crate::v66::instance::VmmPutStateBody;
+    pub use crate::v66::instance::VmmStateRequested;
 }
 
 pub mod inventory {
@@ -199,24 +201,28 @@ pub mod inventory {
 
     pub use crate::v55::inventory::BootPartitionContents;
     pub use crate::v55::inventory::BootPartitionDetails;
-    pub use crate::v55::inventory::ConfigReconcilerInventory;
-    pub use crate::v55::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v55::inventory::HostPhase2DesiredContents;
     pub use crate::v55::inventory::HostPhase2DesiredSlots;
     pub use crate::v55::inventory::ManifestBootInventory;
     pub use crate::v55::inventory::ManifestInventory;
     pub use crate::v55::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v55::inventory::OmicronSingleMeasurement;
-    pub use crate::v55::inventory::OmicronSledConfig;
     pub use crate::v55::inventory::OmicronZoneConfig;
     pub use crate::v55::inventory::OmicronZoneImageSource;
     pub use crate::v55::inventory::OmicronZonesConfig;
     pub use crate::v55::inventory::ZoneArtifactInventory;
 
-    pub use crate::v65::inventory::Inventory;
+    pub use crate::v62::inventory::SledRegistrationInfo;
+
     pub use crate::v65::inventory::InventoryDisk;
 
-    pub use crate::v62::inventory::SledRegistrationInfo;
+    pub use crate::v67::inventory::ConfigReconcilerInventory;
+    pub use crate::v67::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v67::inventory::Inventory;
+    pub use crate::v67::inventory::OmicronSledConfig;
+    pub use crate::v67::inventory::WicketSshAuth;
+    pub use crate::v67::inventory::WicketSshAuthKind;
+    pub use crate::v67::inventory::WicketSshAuthStatus;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -230,6 +236,7 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
     pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
     pub use crate::impls::inventory::SourceNatConfigError;
+    pub use crate::impls::inventory::WicketSshAuthDisplay;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
     pub use crate::impls::inventory::ZpoolHealthParseError;
 }

@@ -7,6 +7,7 @@
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use omicron_generation_kinds::SledConfigGeneration;
+use omicron_generation_kinds::WicketSshAuthGeneration;
 use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use sled_agent_types::artifact::ArtifactConfig;
@@ -68,6 +69,13 @@ pub enum LedgerNewConfigError {
         current: SledConfigGeneration,
         requested: SledConfigGeneration,
     },
+    #[error(
+        "wicket auth generation out of date (got {requested}, have {current})"
+    )]
+    WicketSshAuthGenerationOutdated {
+        current: WicketSshAuthGeneration,
+        requested: WicketSshAuthGeneration,
+    },
     #[error("sled config changed with the same generation ({generation})")]
     ConfigurationChanged { generation: SledConfigGeneration },
     #[error("failed to commit sled config to ledger")]
@@ -84,6 +92,9 @@ impl From<LedgerNewConfigError> for HttpError {
                 HttpError::for_unavail(None, message)
             }
             LedgerNewConfigError::GenerationOutdated { .. }
+            | LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                ..
+            }
             | LedgerNewConfigError::ConfigurationChanged { .. }
             | LedgerNewConfigError::ValidationFailed(_) => {
                 HttpError::for_bad_request(None, message)
@@ -128,9 +139,10 @@ pub(crate) struct LedgerTaskHandle {
 impl LedgerTaskHandle {
     pub fn spawn_ledger_task<T: SledAgentArtifactStore>(
         internal_disks_rx: InternalDisksReceiver,
+        current_config_tx: watch::Sender<CurrentSledConfig>,
         artifact_store: T,
         log: Logger,
-    ) -> (Self, watch::Receiver<CurrentSledConfig>, oneshot::Receiver<()>) {
+    ) -> (Self, oneshot::Receiver<()>) {
         // We only accept two kinds of requests on this channel, both of which
         // come from HTTP requests to sled agent:
         //
@@ -148,17 +160,12 @@ impl LedgerTaskHandle {
         // too much. This is a WAG at a reasonable number.
         let (request_tx, request_rx) = mpsc::channel(12);
 
-        // We always start in the "waiting for internal disks" state. The
-        // internal disk management task is started more or less concurrently
-        // with us, so we won't stay in this state for long unless something is
-        // very wrong.
-        let (current_config_tx, current_config_rx) =
-            watch::channel(CurrentSledConfig::WaitingForInternalDisks);
-
         // The measurement handler relies on the ledger task running.
         // Give a channel to wait for that to happen instead of relying
         // on polling.
         let (ledger_run_tx, ledger_run_rx) = oneshot::channel();
+
+        let current_config_rx = current_config_tx.subscribe();
 
         tokio::spawn(
             LedgerTask {
@@ -171,11 +178,7 @@ impl LedgerTaskHandle {
             .run(ledger_run_tx),
         );
 
-        (
-            Self { request_tx, current_config_rx: current_config_rx.clone() },
-            current_config_rx,
-            ledger_run_rx,
-        )
+        (Self { request_tx, current_config_rx }, ledger_run_rx)
     }
 
     pub(crate) fn current_config(&self) -> CurrentSledConfig {
@@ -418,6 +421,7 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
             // generation to check.
             CurrentSledConfig::WaitingForInitialConfig => (),
             CurrentSledConfig::Ledgered(omicron_sled_config) => {
+                // Reject stale configs.
                 if new_config.generation < omicron_sled_config.generation {
                     info!(
                         self.log,
@@ -430,9 +434,35 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
                         current: omicron_sled_config.generation,
                         requested: new_config.generation,
                     });
-                } else if new_config.generation
-                    == omicron_sled_config.generation
+                }
+
+                // Also reject configs that contain a stale `wicket_ssh_auth`.
+                // (This should be impossible: if the generation of the overall
+                // config is newer, the inner auth setting should never go
+                // backwards. But it's easy to check as a safeguard anyway.)
+                if new_config.wicket_ssh_auth.generation
+                    < omicron_sled_config.wicket_ssh_auth.generation
                 {
+                    info!(
+                        self.log,
+                        "rejecting config request due to \
+                         out-of-date wicket SSH auth generation";
+                        "current-gen" =>
+                            %omicron_sled_config.wicket_ssh_auth.generation,
+                        "request-gen" =>
+                            %new_config.wicket_ssh_auth.generation,
+                    );
+                    return Err(
+                        LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                            current: omicron_sled_config
+                                .wicket_ssh_auth
+                                .generation,
+                            requested: new_config.wicket_ssh_auth.generation,
+                        },
+                    );
+                }
+
+                if new_config.generation == omicron_sled_config.generation {
                     if *new_config != *omicron_sled_config {
                         warn!(
                             self.log,
@@ -700,6 +730,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronZoneConfig;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::WicketSshAuth;
     use sled_storage::config::MountConfig;
     use std::collections::BTreeSet;
     use std::time::Duration;
@@ -815,9 +846,12 @@ mod tests {
             }
 
             // Spawn the ledger task.
-            let (task_handle, mut current_config_rx, ledger_task_run_rx) =
+            let (current_config_tx, mut current_config_rx) =
+                watch::channel(CurrentSledConfig::WaitingForInternalDisks);
+            let (task_handle, ledger_task_run_rx) =
                 LedgerTaskHandle::spawn_ledger_task(
                     internal_disks_rx.clone(),
+                    current_config_tx,
                     fake_artifact_store,
                     log,
                 );
@@ -894,6 +928,7 @@ mod tests {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::initial(),
         }
     }
 
@@ -910,20 +945,17 @@ mod tests {
         let (disks_tx, disks_rx) = watch::channel(Vec::new());
         let internal_disks_rx =
             InternalDisksReceiver::fake_dynamic(mount_config.into(), disks_rx);
+        let (current_config_tx, mut current_config_rx) =
+            watch::channel(CurrentSledConfig::WaitingForInternalDisks);
 
-        // Spawn the ledger task. It should sit in the `WaitingForInternalDisks`
-        // state.
-        let (_task_handle, mut current_config_rx, ledger_task_run_rx) =
+        // Spawn the ledger task.
+        let (_task_handle, ledger_task_run_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 internal_disks_rx,
+                current_config_tx,
                 FakeArtifactStore::default(),
                 logctx.log.clone(),
             );
-
-        assert_eq!(
-            *current_config_rx.borrow_and_update(),
-            CurrentSledConfig::WaitingForInternalDisks
-        );
 
         // Populate a fake disk.
         disks_tx.send(vec![make_fake_disk()]).expect("receiver still exists");
@@ -1040,6 +1072,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reject_old_wicket_ssh_auth_generation() {
+        let logctx =
+            dev::test_setup_log("reject_old_wicket_ssh_auth_generation");
+
+        // Set up the ledger task with an initial config (with a wicket SSH auth
+        // generation > `WicketSshAuthGeneration::new()`, so we can test sending
+        // a lower generation).
+        let mut sled_config = make_nonempty_sled_config();
+        sled_config.wicket_ssh_auth.generation =
+            WicketSshAuthGeneration::new().next();
+
+        let test_harness =
+            TestHarness::with_initial_config(logctx.log.clone(), &sled_config)
+                .await;
+
+        // Try to send a lower generation; the task should reject this.
+        sled_config.wicket_ssh_auth.generation = WicketSshAuthGeneration::new();
+        let err = test_harness
+            .task_handle
+            .set_new_config(sled_config)
+            .await
+            .expect("no ledger task error")
+            .expect_err("new config should be rejected");
+
+        match err {
+            LedgerNewConfigError::WicketSshAuthGenerationOutdated {
+                ..
+            } => (),
+            _ => panic!("unexpected error {}", InlineErrorChain::new(&err)),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn reject_config_changed_without_generation_bump() {
         const TEST_NAME: &str =
             "reject_configs_referencing_nonexistent_artifacts";
@@ -1099,6 +1166,7 @@ mod tests {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::initial(),
         };
 
         // The ledger task should reject this config due to a missing artifact.
