@@ -4239,6 +4239,48 @@
           {
             "type": "object",
             "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "cosmo"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "metro"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "system_type": {
+                "type": "string",
+                "enum": [
+                  "observer"
+                ]
+              }
+            },
+            "required": [
+              "system_type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "id": {
                 "type": "integer",
                 "format": "uint16",
@@ -4253,20 +4295,6 @@
             },
             "required": [
               "id",
-              "system_type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "system_type": {
-                "type": "string",
-                "enum": [
-                  "cosmo"
-                ]
-              }
-            },
-            "required": [
               "system_type"
             ]
           }

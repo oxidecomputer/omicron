@@ -71,9 +71,9 @@ pub mod ignition {
     pub use crate::v1::ignition::IgnitionCommand;
     pub use crate::v1::ignition::PathSpIgnitionCommand;
 
-    pub use crate::v2::ignition::SpIgnition;
-    pub use crate::v2::ignition::SpIgnitionInfo;
-    pub use crate::v2::ignition::SpIgnitionSystemType;
+    pub use crate::v9::ignition::SpIgnition;
+    pub use crate::v9::ignition::SpIgnitionInfo;
+    pub use crate::v9::ignition::SpIgnitionSystemType;
 }
 
 pub mod rot {

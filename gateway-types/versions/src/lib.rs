@@ -43,3 +43,5 @@ pub mod v5;
 pub mod v6;
 #[path = "reject_local_switch_resets/mod.rs"]
 pub mod v8;
+#[path = "metro_observer/mod.rs"]
+pub mod v9;
