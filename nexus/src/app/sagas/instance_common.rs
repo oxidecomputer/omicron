@@ -959,6 +959,8 @@ pub(super) async fn ensure_vmm_record_unwound(
     instance_id: &InstanceUuid,
     propolis_id: &PropolisUuid,
 ) {
+    use nexus_db_queries::db::datastore::vmm::MarkSagaUnwoundOutcome as Outcome;
+
     let osagactx = sagactx.user_data();
     retry_notify_ext(
         retry_policy_internal_service(),
@@ -967,14 +969,48 @@ pub(super) async fn ensure_vmm_record_unwound(
                 .datastore()
                 .vmm_mark_saga_unwound(&opctx, propolis_id)
                 .await
-                .map_err(BackoffError::transient);
-            info!(
-                opctx.log,
-                "ensured VMM record has been deleted or `SagaUnwound``";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "outcome" => ?outcome,
-            );
+                .map_err(BackoffError::transient)?;
+            match outcome {
+                // We have successfully changed the VMM record's state.
+                Outcome::StateChanged { new_state } => {
+                    info!(
+                        opctx.log,
+                        "marked VMM record as `{new_state:?}`";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %propolis_id,
+                    );
+                }
+                // The VMM record was already `SagaUnwound` (presumably by a
+                // previous execution of this action), so we have nothing left
+                // to do here.
+                Outcome::StateChangeNotNeeded { current_state } => {
+                    debug!(
+                        opctx.log,
+                        "VMM was already `{current_state:?}`, continuing to \
+                         unwind...";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %propolis_id,
+                    );
+                }
+                // Something else has deleted the VMM record while we were
+                // unwinding. This is a bit odd, but it means we don't have to
+                // do anything else to it, so that's fine.
+                //
+                // This may happen if a previous execution of this action
+                // successfully marked the VMM as `SagaUnwound`, and then the
+                // Nexus executing it crashed before recording that the action
+                // has completed, and then someone came along and deleted it
+                // before we resumed the unwinding saga.
+                Outcome::VmmDeleted => {
+                    info!(
+                        opctx.log,
+                        "VMM record was deleted while this saga was still \
+                         unwinding. continuing to unwind...";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %propolis_id,
+                    );
+                }
+            }
             Ok::<(), BackoffError<Error>>(())
         },
         |error, attempts, total_duration| {
