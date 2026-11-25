@@ -73,6 +73,7 @@ pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
+mod expunge_precheck;
 pub(crate) mod external_client;
 mod external_dns;
 pub(crate) mod external_endpoints;
