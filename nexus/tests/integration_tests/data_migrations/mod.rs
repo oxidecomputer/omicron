@@ -41,6 +41,7 @@ mod inv_service_processor_rack_id;
 mod inventory_zone_multiple_external_ips;
 mod normalize_service_external_ips;
 mod prune_service_nat_entries;
+mod reconfigurator_config_enable_sled_evacuation;
 mod remove_cross_project_affinity_memberships;
 mod rename_default_igw_ip_pool;
 mod sled_resource_vmm_state;
@@ -98,6 +99,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(drop_multicast_deleted_state);
     register!(widen_lldp_system_description);
     register!(remove_cross_project_affinity_memberships);
+    register!(reconfigurator_config_enable_sled_evacuation);
 
     map
 }
