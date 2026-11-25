@@ -3268,7 +3268,7 @@ dependencies = [
  "dropshot 0.18.0",
  "git-stub-vcs",
  "hickory-client",
- "hickory-proto 0.25.2",
+ "hickory-proto 0.26.3",
  "hickory-resolver 0.25.2",
  "hickory-server",
  "internal-dns-types",
@@ -5186,6 +5186,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hickory-proto"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12b92608f679a6fa515dd1d15c1ff89443026e391200a2c840c7afcba482893d"
+dependencies = [
+ "data-encoding",
+ "idna",
+ "ipnet",
+ "jni",
+ "once_cell",
+ "rand 0.10.1",
+ "ring",
+ "thiserror 2.0.18",
+ "tinyvec",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "hickory-resolver"
 version = "0.24.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6229,7 +6248,7 @@ dependencies = [
  "dropshot 0.18.0",
  "expectorate",
  "futures",
- "hickory-proto 0.25.2",
+ "hickory-proto 0.26.3",
  "hickory-resolver 0.25.2",
  "internal-dns-types",
  "omicron-common",
@@ -17692,7 +17711,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dropshot 0.18.0",
- "hickory-proto 0.25.2",
+ "hickory-proto 0.26.3",
  "hickory-resolver 0.25.2",
  "internal-dns-types",
  "omicron-workspace-hack",
