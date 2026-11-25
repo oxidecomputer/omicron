@@ -6,6 +6,7 @@
 //! [`RegionSnapshotReplacementStep`] objects.
 
 use super::DataStore;
+use super::count_to_u64;
 use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model::ReadOnlyTargetReplacement;
@@ -228,6 +229,26 @@ impl DataStore {
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns the number of region snapshot replacement requests that are not
+    /// yet in state `Complete`.
+    pub async fn count_incomplete_region_snapshot_replacements(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<u64, Error> {
+        use nexus_db_schema::schema::region_snapshot_replacement::dsl;
+
+        let count = dsl::region_snapshot_replacement
+            .filter(
+                dsl::replacement_state
+                    .ne(RegionSnapshotReplacementState::Complete),
+            )
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        count_to_u64(count)
     }
 
     /// Return region snapshot replacement requests that are in state
@@ -1578,6 +1599,14 @@ mod test {
             .await
             .unwrap();
 
+        assert_eq!(
+            datastore
+                .count_incomplete_region_snapshot_replacements(&opctx)
+                .await
+                .unwrap(),
+            0
+        );
+
         let request_1 = RegionSnapshotReplacement::new_from_region_snapshot(
             dataset_1_id,
             region_1_id,
@@ -1603,6 +1632,15 @@ mod test {
             )
             .await
             .unwrap_err();
+
+        // Only the first request was inserted, and it has not completed.
+        assert_eq!(
+            datastore
+                .count_incomplete_region_snapshot_replacements(&opctx)
+                .await
+                .unwrap(),
+            1
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1996,6 +2034,15 @@ mod test {
             )
             .await
             .unwrap();
+
+        // The only request is complete.
+        assert_eq!(
+            datastore
+                .count_incomplete_region_snapshot_replacements(&opctx)
+                .await
+                .unwrap(),
+            0
+        );
 
         assert!(
             datastore

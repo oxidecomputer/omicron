@@ -121,5 +121,7 @@ pub mod v2026_11_05_00;
 pub mod v2026_11_11_00;
 #[path = "add_version_endpoint/mod.rs"]
 pub mod v2026_11_21_00;
+#[path = "expunge_precheck/mod.rs"]
+pub mod v2026_11_24_00;
 #[path = "add_operator_notes_to_update_status/mod.rs"]
-pub mod v2026_11_22_00;
+pub mod v2026_11_25_00;

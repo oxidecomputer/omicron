@@ -399,6 +399,11 @@ pub mod project {
     pub use crate::v2026_09_08_00::project::ProjectCreateDefaults;
 }
 
+pub mod expunge_precheck {
+    pub use crate::v2026_11_24_00::expunge_precheck::DistributedStoragePrecheck;
+    pub use crate::v2026_11_24_00::expunge_precheck::ExpungePrecheck;
+}
+
 pub mod saml {
     pub use crate::v2025_11_20_00::saml::RelativeUri;
     pub use crate::v2025_11_20_00::saml::RelayState;
@@ -481,9 +486,9 @@ pub mod update {
     pub use crate::v2026_10_13_00::update::TufRepo;
     pub use crate::v2026_10_13_00::update::TufRepoUpload;
 
-    pub use crate::v2026_11_22_00::update::OperatorNotes;
-    pub use crate::v2026_11_22_00::update::OperatorStatus;
-    pub use crate::v2026_11_22_00::update::UpdateStatus;
+    pub use crate::v2026_11_25_00::update::OperatorNotes;
+    pub use crate::v2026_11_25_00::update::OperatorStatus;
+    pub use crate::v2026_11_25_00::update::UpdateStatus;
 }
 
 pub mod vpc {
