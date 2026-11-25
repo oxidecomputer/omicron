@@ -2193,9 +2193,14 @@ impl JsonSchema for MacAddr {
     Ord,
     Deserialize,
     Serialize,
+    // TODO: Ideally the JSON schema would reflect the maximum VNI value, but
+    // doing that without changing blessed docs requires organizing Vni in the
+    // RFD 619 style rather than just putting it in omicron-common. We should
+    // bite the bullet and do this at some point.
     JsonSchema,
     Diffable,
 )]
+#[serde(try_from = "u32")]
 #[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct Vni(
     #[cfg_attr(any(test, feature = "testing"), strategy(0..=Vni::MAX_VNI))] u32,
@@ -2239,27 +2244,42 @@ impl From<Vni> for u32 {
     }
 }
 
-impl TryFrom<u32> for Vni {
-    type Error = Error;
+/// The error returned when a value is outside the 24-bit range of a Geneve VNI.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error(
+    "invalid Geneve VNI {value}: must be between 0 and {} inclusive",
+    Vni::MAX_VNI
+)]
+pub struct VniRangeError {
+    value: i64,
+}
 
-    fn try_from(x: u32) -> Result<Self, Error> {
+impl VniRangeError {
+    /// Return the value that was out of range.
+    pub fn value(&self) -> i64 {
+        self.value
+    }
+}
+
+impl TryFrom<u32> for Vni {
+    type Error = VniRangeError;
+
+    fn try_from(x: u32) -> Result<Self, Self::Error> {
         if x <= Self::MAX_VNI {
             Ok(Self(x))
         } else {
-            Err(Error::internal_error(
-                format!("Invalid Geneve VNI: {}", x).as_str(),
-            ))
+            Err(VniRangeError { value: i64::from(x) })
         }
     }
 }
 
 impl TryFrom<i32> for Vni {
-    type Error = Error;
+    type Error = VniRangeError;
 
-    fn try_from(x: i32) -> Result<Self, Error> {
-        Self::try_from(u32::try_from(x).map_err(|_| {
-            Error::internal_error(format!("Invalid Geneve VNI: {}", x).as_str())
-        })?)
+    fn try_from(x: i32) -> Result<Self, Self::Error> {
+        let x = u32::try_from(x)
+            .map_err(|_| VniRangeError { value: i64::from(x) })?;
+        Self::try_from(x)
     }
 }
 
@@ -2546,25 +2566,13 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
 
 #[cfg(test)]
 mod test {
-    use serde::Deserialize;
-    use serde::Serialize;
-
-    use super::RouteDestination;
-    use super::RouteTarget;
-    use super::VpcFirewallIcmpFilter;
-    use super::VpcFirewallRuleHostFilter;
-    use super::VpcFirewallRuleTarget;
-    use super::{
-        ByteCount, ByteCountParseError, ByteCountRangeError, Digest, L4Port,
-        L4PortRange, Name, VpcFirewallRuleAction, VpcFirewallRuleDirection,
-        VpcFirewallRuleFilter, VpcFirewallRulePriority,
-        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
-        VpcFirewallRuleUpdateParams,
-    };
+    use super::*;
     use crate::api::external::Error;
     use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
     use semver::Version;
+    use serde::Deserialize;
+    use serde::Serialize;
     use std::convert::TryFrom;
     use std::str::FromStr;
 
@@ -3418,5 +3426,58 @@ mod test {
         assert!(Hostname::from_str("hypen.cannot.end-").is_err());
         assert!(Hostname::from_str("hyphen-cannot-end-").is_err());
         assert!(Hostname::from_str(&"too-long".repeat(100)).is_err());
+    }
+
+    #[test]
+    fn test_vni_try_from() {
+        assert_eq!(Vni::try_from(0u32).unwrap().as_u32(), 0);
+        assert_eq!(Vni::try_from(Vni::MAX_VNI).unwrap().as_u32(), Vni::MAX_VNI);
+        assert_eq!(
+            Vni::try_from(Vni::MAX_VNI + 1).unwrap_err(),
+            VniRangeError { value: 16_777_216 },
+        );
+        assert_eq!(
+            Vni::try_from(u32::MAX).unwrap_err(),
+            VniRangeError { value: i64::from(u32::MAX) },
+        );
+
+        assert_eq!(Vni::try_from(0i32).unwrap().as_u32(), 0);
+        assert_eq!(
+            Vni::try_from(i32::try_from(Vni::MAX_VNI).unwrap())
+                .unwrap()
+                .as_u32(),
+            Vni::MAX_VNI
+        );
+        assert_eq!(
+            Vni::try_from(-1i32).unwrap_err(),
+            VniRangeError { value: -1 }
+        );
+        assert_eq!(
+            Vni::try_from(i32::MIN).unwrap_err(),
+            VniRangeError { value: i64::from(i32::MIN) },
+        );
+    }
+
+    #[test]
+    fn test_vni_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<Vni>("0").unwrap(),
+            Vni::try_from(0u32).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_str::<Vni>("16777215").unwrap(),
+            Vni::try_from(Vni::MAX_VNI).unwrap()
+        );
+        assert_eq!(
+            serde_json::from_str::<Vni>("16777216").unwrap_err().to_string(),
+            "invalid Geneve VNI 16777216: must be between 0 and 16777215 \
+             inclusive",
+        );
+        // Negative numbers fail to deserialize when serde parses the u32,
+        // before the range check runs.
+        assert_eq!(
+            serde_json::from_str::<Vni>("-1").unwrap_err().to_string(),
+            "invalid value: integer `-1`, expected u32 at line 1 column 2",
+        );
     }
 }
