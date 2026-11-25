@@ -1139,17 +1139,15 @@ async fn sis_ensure_unregistered(
                 .vmm_mark_saga_unwinding(&opctx, &propolis_id)
                 .await
             {
-                Ok(true) => {
+                Ok(outcome) => {
                     debug!(
                         osagactx.log(),
                         "start saga unwind: marked VMM as `Cancelling`";
                         "instance_id" => %instance_id,
                         "propolis_id" => %propolis_id,
+                        "updated" => ?outcome,
                     );
                 }
-                // Either we already marked it as nonexistent in a past life, or
-                // we never had to in the first place. Carry on!
-                Ok(false) => {}
                 // If the VMM record has been hard-deleted, then the query that
                 // marks it as `Cancelling` is totally fine: we no longer need
                 // to ensure it is in a non-existent state, since no other actor

@@ -142,6 +142,19 @@ impl From<nexus_types::instance::VmmRuntimeState> for RuntimeStateChangeset {
     }
 }
 
+/// The result of a successful call to [`DataStore::vmm_mark_saga_unwinding`]
+/// and [`DataStore::vmm_mark_saga_unwound`].
+#[derive(Debug, PartialEq)]
+pub enum MarkSagaUnwoundOutcome {
+    /// The VMM record's state has changed to `new_state`
+    StateChanged { new_state: DbVmmState },
+    /// The VMM record was already in a state from which no state change was
+    /// necessary.
+    StateChangeNotNeeded { current_state: DbVmmState },
+    /// The VMM record has been soft-deleted.
+    VmmDeleted,
+}
+
 impl DataStore {
     pub async fn vmm_insert(
         &self,
@@ -488,10 +501,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
-    ) -> Result<bool, Error> {
-        diesel::update(dsl::vmm)
+    ) -> Result<MarkSagaUnwoundOutcome, Error> {
+        let result = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            // If the state is already SagaUnwound, we need not advance its
+            // generation again.
+            .filter(dsl::state.ne(DbVmmState::SagaUnwound))
             .set((
                 dsl::state.eq(DbVmmState::SagaUnwound),
                 // We deliberately do not alter or unset the failure reason here
@@ -504,20 +520,42 @@ impl DataStore {
             ))
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map(|r| match r.status {
-                UpdateStatus::Updated => true,
-                UpdateStatus::NotUpdatedButExists => false,
-            })
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vmm,
-                        LookupType::ById(vmm_id.into_untyped_uuid()),
-                    ),
-                )
-            })
+            .await;
+
+        match result {
+            // If the record has been hard-deleted, we don't need to change its
+            // state, as nothing else will ever see it, so we can just return
+            // `Ok` here. Note that nothing ever actually hard-deletes VMM
+            // records at present, but we treat soft-deleted records as an `Ok`
+            // result, so we may as well handle this gracefully too.
+            Err(diesel::result::Error::NotFound) => {
+                Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+            }
+            // Other errors should be treated as errors
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+            // We changed the VMM record's state successfully.
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::Updated, ..
+            }) => Ok(MarkSagaUnwoundOutcome::StateChanged {
+                new_state: DbVmmState::SagaUnwound,
+            }),
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                found,
+            }) => {
+                if found.time_deleted.is_some() {
+                    // If the record is soft-deleted, nothing else will ever
+                    // try to interact with it, so we need not change its state.
+                    Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+                } else {
+                    // The record was already in a state where no state change
+                    // was necessary.
+                    Ok(MarkSagaUnwoundOutcome::StateChangeNotNeeded {
+                        current_state: found.state,
+                    })
+                }
+            }
+        }
     }
 
     /// Transitions a VMM to the `Cancelling` state as part of an unwinding
@@ -546,8 +584,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
-    ) -> Result<bool, Error> {
-        diesel::update(dsl::vmm)
+    ) -> Result<MarkSagaUnwoundOutcome, Error> {
+        let result = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             // if the VMM record is already in a potentially non-existent state,
@@ -570,20 +608,42 @@ impl DataStore {
             ))
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map(|r| match r.status {
-                UpdateStatus::Updated => true,
-                UpdateStatus::NotUpdatedButExists => false,
-            })
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vmm,
-                        LookupType::ById(vmm_id.into_untyped_uuid()),
-                    ),
-                )
-            })
+            .await;
+
+        match result {
+            // If the record has been hard-deleted, we don't need to change its
+            // state, as nothing else will ever see it, so we can just return
+            // `Ok` here. Note that nothing ever actually hard-deletes VMM
+            // records at present, but we treat soft-deleted records as an `Ok`
+            // result, so we may as well handle this gracefully too.
+            Err(diesel::result::Error::NotFound) => {
+                Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+            }
+            // Other errors should be treated as errors
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+            // We changed the VMM record's state successfully.
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::Updated, ..
+            }) => Ok(MarkSagaUnwoundOutcome::StateChanged {
+                new_state: DbVmmState::Cancelling,
+            }),
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                found,
+            }) => {
+                if found.time_deleted.is_some() {
+                    // If the record is soft-deleted, nothing else will ever
+                    // try to interact with it, so we need not change its state.
+                    Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+                } else {
+                    // The record was already in a state where no state change
+                    // was necessary.
+                    Ok(MarkSagaUnwoundOutcome::StateChangeNotNeeded {
+                        current_state: found.state,
+                    })
+                }
+            }
+        }
     }
 
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
@@ -1777,7 +1837,13 @@ mod tests {
             .vmm_mark_saga_unwound(&opctx, &vmm_id)
             .await
             .expect("failed VMM should be marked saga-unwound");
-        assert!(updated, "VMM should have been updated to SagaUnwound");
+        assert_eq!(
+            updated,
+            MarkSagaUnwoundOutcome::StateChanged {
+                new_state: DbVmmState::SagaUnwound
+            },
+            "VMM should have been updated to SagaUnwound"
+        );
         let unwound_vmm = assert_vmm_transitioned(
             &opctx,
             &datastore,
@@ -1793,7 +1859,13 @@ mod tests {
             .vmm_mark_saga_unwound(&opctx, &vmm_id)
             .await
             .expect("saga-unwound VMM should be marked saga-unwound again");
-        assert!(updated, "VMM should have been updated again");
+        assert_eq!(
+            updated,
+            MarkSagaUnwoundOutcome::StateChangeNotNeeded {
+                current_state: DbVmmState::SagaUnwound
+            },
+            "VMM should already be SagaUnwound",
+        );
         assert_vmm_transitioned(
             &opctx,
             &datastore,
