@@ -3781,3 +3781,23 @@ allow_columns_to_appear_in_same_group_by_clause!(
     physical_disk::serial,
     region::read_only,
 );
+
+table! {
+    sled_expunge_request (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+        sp_slot -> Nullable<Int4>,
+        sp_slot_source -> Nullable<crate::enums::SledExpungeSpSlotSourceEnum>,
+        tq_epoch -> Int8,
+        state -> crate::enums::SledExpungeRequestStateEnum,
+        power_off_outcome -> Nullable<crate::enums::SledExpungePowerOffOutcomeEnum>,
+        last_error -> Nullable<Text>,
+        failure_reason -> Nullable<Text>,
+        time_completed -> Nullable<Timestamptz>,
+    }
+}

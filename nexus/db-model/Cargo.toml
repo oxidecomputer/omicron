@@ -47,6 +47,7 @@ steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true
 trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
