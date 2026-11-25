@@ -25,7 +25,7 @@ use rand::{Rng, distr::Alphanumeric};
 use regex::Regex;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map};
 use zip::{result::ZipError, write::FullFileOptions};
 
 // The name of the snapshot created from the zone root filesystem.
@@ -543,7 +543,8 @@ impl LogsHandle {
     /// files), and a file that may hold any content from within the window
     /// is included in full, so the output may contain data from outside the
     /// window. Rotated logs are additionally limited to `max_rotated` files
-    /// when a count cap is supplied.
+    /// when a count cap is supplied. Archived logs that share a name are
+    /// collected once.
     ///
     /// Note that this log retrieval will automatically take and cleanup
     /// necessary zfs snapshots along the way. The logs are listed, dated, and
@@ -618,7 +619,7 @@ impl LogsHandle {
         mut zip: zip::ZipWriter<W>,
     ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
-            let SmfLogs { in_zone, mut archived } = SmfLogs::new(&service_logs);
+            let SmfLogs { in_zone, archived } = SmfLogs::new(&service_logs);
 
             //  - Grab all of the service's SMF logs in the zone -
 
@@ -631,6 +632,42 @@ impl LogsHandle {
             }
 
             //  - Grab all of the service's archived logs -
+
+            // Debug datasets can hold copies of a log under the same name,
+            // and the zip can hold only one. Keep the largest, based on the
+            // guess that the other is a partial copy from an interrupted
+            // archive.
+            let mut by_name: BTreeMap<&str, &LogFile> = BTreeMap::new();
+            for log in archived {
+                let Some(name) = log.path.file_name() else {
+                    warn!(
+                        self.log,
+                        "sled-diagnostics unable to determine filename for \
+                        logfile";
+                        "logfile" => %log.path,
+                    );
+                    continue;
+                };
+                let skipped = match by_name.entry(name) {
+                    btree_map::Entry::Vacant(entry) => {
+                        entry.insert(log);
+                        continue;
+                    }
+                    btree_map::Entry::Occupied(mut entry) => {
+                        if log.size > entry.get().size {
+                            entry.insert(log)
+                        } else {
+                            log
+                        }
+                    }
+                };
+                warn!(
+                    self.log,
+                    "skipping archived log with the same name as another";
+                    "logfile" => %skipped.path,
+                );
+            }
+            let mut archived: Vec<&LogFile> = by_name.into_values().collect();
 
             // Since these logs can be spread out across multiple U.2 devices
             // we need to sort them by timestamp.
@@ -1009,6 +1046,8 @@ mod test {
     use std::collections::HashMap;
 
     use camino::Utf8PathBuf;
+    use omicron_test_utils::dev::TestTempDir;
+    use omicron_test_utils::dev::test_setup_log;
 
     use super::*;
 
@@ -1170,6 +1209,70 @@ mod test {
             names(archived),
             vec!["oxide-mg-ddm:default.log.1790585101"]
         );
+    }
+
+    // Regression test for omicron#11891.
+    #[test]
+    fn test_archived_logs_with_same_name() {
+        let logctx = test_setup_log("test_archived_logs_with_same_name");
+        let tempdir = TestTempDir::new(&logctx.log);
+
+        let newer = "oxide-foo:default.log.1761000001";
+        let older = "oxide-foo:default.log.1761000000";
+        let archived = [
+            ("a", newer, "partial"),
+            ("b", newer, "the complete log"),
+            ("a", older, "an older log"),
+        ]
+        .into_iter()
+        .map(|(pool, name, contents)| {
+            let dir = tempdir.path().join(pool).join("crypt/debug/oxz_foo");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(name);
+            std::fs::write(&path, contents).unwrap();
+            oxlog::LogFile {
+                path,
+                size: Some(contents.len() as u64),
+                modified: None,
+                age: None,
+            }
+        })
+        .collect();
+        let zone_logs = BTreeMap::from([(
+            "foo".to_string(),
+            SvcLogs { current: None, archived, extra: vec![] },
+        )]);
+
+        // The copies of the newer log count once towards the cap.
+        let mut zipfile = std::io::Cursor::new(Vec::new());
+        LogsHandle::new(logctx.log.clone())
+            .get_zone_logs_inner(
+                zone_logs,
+                Some(2),
+                zip::ZipWriter::new(&mut zipfile),
+            )
+            .unwrap();
+
+        let mut archive = zip::ZipArchive::new(zipfile).unwrap();
+        let mut entries: Vec<(String, String)> = (0..archive.len())
+            .map(|i| {
+                let entry = archive.by_index(i).unwrap();
+                let name = entry.name().to_string();
+                let contents = zstd::decode_all(entry).unwrap();
+                (name, String::from_utf8(contents).unwrap())
+            })
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            [
+                (format!("foo/archive/{older}.zst"), "an older log".into()),
+                (format!("foo/archive/{newer}.zst"), "the complete log".into()),
+            ]
+        );
+
+        tempdir.cleanup_successful();
+        logctx.cleanup_successful();
     }
 }
 
