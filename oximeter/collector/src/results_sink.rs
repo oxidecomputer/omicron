@@ -145,6 +145,19 @@ pub async fn database_batcher(
 // ClickHouse is slow or unreachable), new samples evict the oldest ones once
 // this limit is reached. This bounds memory consumption while preferring
 // recent data.
+//
+// Note: sizing this constant, as well as DbConfig::DEFAULT_BATCH_SIZE, should
+// consider the average rate of samples flowing in and out of the queue, as well
+// as the number of samples likely to arrive at the same moment. Even if the
+// queue drains quickly, if we receive more than MAX_BUFFER_SIZE_MULTIPLIER *
+// batch_size samples at the same time, we'll necessarily drop samples. For
+// example, as of this writing, the mgs producer produces about 21,600 samples
+// for each collection: 32 sleds * 135 sensors/sled * 5 samples/sensor. In the
+// worst case, where oximeter samples the two mgs producers at the same time,
+// mgs alone generates 43,200 samples every 10s. If we increase average metrics
+// volume, or especially the number of samples we expect to receive within a
+// short interval, we'll increase this constant (and/or
+// DbConfig::DEFAULT_BATCH_SIZE) accordingly.
 const MAX_BUFFER_SIZE_MULTIPLIER: usize = 100;
 
 // A handoff point for a batch of samples from collectors and the database
