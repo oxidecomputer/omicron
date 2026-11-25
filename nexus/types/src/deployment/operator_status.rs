@@ -137,43 +137,33 @@ impl OperatorStatus {
                     "Unknown: the system is determining next steps",
                 )
             }
-            OperatorStatus::Unknown(UnknownReason::PlannerFailed(reason)) => {
-                describe_planner_failure(reason)
-            }
-        }
-    }
-}
-
-fn describe_planner_failure(
-    reason: &PlannerFailure,
-) -> OperatorStatusDescription {
-    match reason {
-        PlannerFailure::Disabled => {
-            OperatorStatusDescription::summary_with_details(
+            OperatorStatus::Unknown(UnknownReason::PlannerFailed(
+                PlannerFailure::Disabled,
+            )) => OperatorStatusDescription::summary_with_details(
                 "Unknown: automatic system changes are disabled",
                 "blueprint planning is disabled",
-            )
-        }
-        PlannerFailure::ConfigNotYetLoaded => {
-            OperatorStatusDescription::summary_with_details(
+            ),
+            OperatorStatus::Unknown(UnknownReason::PlannerFailed(
+                PlannerFailure::ConfigNotYetLoaded,
+            )) => OperatorStatusDescription::summary_with_details(
                 "Unknown: the system is determining next steps",
                 "reconfigurator config not yet loaded",
-            )
-        }
-        PlannerFailure::LimitReached { limit } => {
-            OperatorStatusDescription::summary_with_details(
+            ),
+            OperatorStatus::Unknown(UnknownReason::PlannerFailed(
+                PlannerFailure::LimitReached { limit },
+            )) => OperatorStatusDescription::summary_with_details(
                 "Unknown: automatic system changes have stopped",
                 format!(
                     "blueprint planning stopped because the system has \
                      reached its limit of {limit} blueprints"
                 ),
-            )
-        }
-        PlannerFailure::Error(error) => {
-            OperatorStatusDescription::summary_with_details(
+            ),
+            OperatorStatus::Unknown(UnknownReason::PlannerFailed(
+                PlannerFailure::Error(error),
+            )) => OperatorStatusDescription::summary_with_details(
                 "Unknown: error determining next steps",
                 format!("planner error: {error}"),
-            )
+            ),
         }
     }
 }
