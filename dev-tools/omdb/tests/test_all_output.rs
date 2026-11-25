@@ -331,6 +331,7 @@ async fn test_omdb_success_cases() {
         &["db", "sleds", "-F", "discretionary"],
         &["db", "sitrep", "show", "current"],
         &["db", "sitrep", "show", "current", "--all-cases"],
+        &["db", "sled-expunge-requests", "list"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         // Hide "currently executing" to avoid a test flake in case a task is

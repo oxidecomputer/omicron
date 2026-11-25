@@ -8,6 +8,7 @@ use anyhow::bail;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::ColorChoice;
+use nexus_types::sled_expunge::SledExpungeSpSlotSource;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
@@ -48,6 +49,24 @@ pub(crate) fn display_option_blank<T: std::fmt::Display>(
     opt: &Option<T>,
 ) -> String {
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
+
+pub(crate) fn display_option_dash<T: std::fmt::Display>(
+    opt: &Option<T>,
+) -> String {
+    match opt {
+        Some(value) => value.to_string(),
+        None => String::from("-"),
+    }
+}
+
+// TODO-RAINCLAUDE: Every sled expunge view writes a cubby and its source the
+// same way, so the two outputs can be compared at a glance.
+pub(crate) fn sled_cubby_with_source_text(
+    slot: u16,
+    source: SledExpungeSpSlotSource,
+) -> String {
+    format!("cubby {slot} (source: {source})")
 }
 
 /// Display the string `<INVALID>` for an Option<T> if it's None.

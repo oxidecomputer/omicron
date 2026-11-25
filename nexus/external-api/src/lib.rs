@@ -92,6 +92,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_24_00, SLED_EXPUNGE_REQUESTS),
     (2026_11_21_00, ADD_VERSION_ENDPOINT),
     (2026_11_11_00, ACPI_SHUTDOWN),
     (2026_11_10_00, RACK_MEMBERSHIP_ABORT_BY_VERSION),
@@ -8112,6 +8113,66 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::sled::SledProvisionPolicyResponse>,
         HttpError,
     >;
+
+    // TODO-RAINCLAUDE: Expunge sled
+    //
+    // Rain will write the rest of this doc. It should cover the following:
+    // * What the endpoint does, and that the expunge is carried out
+    //   asynchronously through a sled expunge request.
+    // * The serial number in the body, which confirms which sled the caller
+    //   means.
+    // * The two dispositions in the response.
+    // * The refusals. This includes the 503, which is returned for a sled that
+    //   is missing from inventory when MGS or a switch's ignition state is
+    //   unavailable, so the rack can't be checked for the sled. The caller
+    //   should retry later.
+    // * How the sled is powered off, in brief. The details are on
+    //   `SledExpungePowerOffOutcome`.
+    // * That a scrimlet can't be expunged through this endpoint.
+    // * The risks described in RFD 747.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/sleds/{sled_id}/expunge",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_EXPUNGE_REQUESTS..,
+    }]
+    async fn sled_expunge(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledPath>,
+        params: TypedBody<latest::sled::SledExpungeParams>,
+    ) -> Result<
+        HttpResponseAccepted<latest::sled::SledExpungeResponse>,
+        HttpError,
+    >;
+
+    // TODO-RAINCLAUDE: List sled expunge requests
+    //
+    // Requests in every state are listed, oldest first by default.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sled-expunge-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_EXPUNGE_REQUESTS..,
+    }]
+    async fn sled_expunge_request_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::sled::SledExpungeRequest>>,
+        HttpError,
+    >;
+
+    // TODO-RAINCLAUDE: Fetch sled expunge request
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/sled-expunge-requests/{sled_expunge_request_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_SLED_EXPUNGE_REQUESTS..,
+    }]
+    async fn sled_expunge_request_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SledExpungeRequestPath>,
+    ) -> Result<HttpResponseOk<latest::sled::SledExpungeRequest>, HttpError>;
 
     /// List instances running on given sled
     #[endpoint {

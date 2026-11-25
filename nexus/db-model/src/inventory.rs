@@ -703,7 +703,7 @@ impl From<InvServiceProcessor> for nexus_types::inventory::ServiceProcessor {
 /// slot number with a u32.  We truncate it to a u16 (which still requires
 /// storing it as an i32 in the database, since the database doesn't natively
 /// support signed integers).
-#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, AsExpression, FromSqlRow)]
 #[diesel(sql_type = sql_types::Int4)]
 pub struct SpMgsSlot(SqlU16);
 

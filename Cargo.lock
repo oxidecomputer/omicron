@@ -7786,6 +7786,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]
@@ -8260,6 +8261,8 @@ dependencies = [
  "anyhow",
  "futures",
  "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
  "gateway-types",
  "iddqd",
  "internal-dns-resolver",
@@ -8267,8 +8270,10 @@ dependencies = [
  "ipnetwork",
  "nexus-db-lookup",
  "nexus-db-queries",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -8280,8 +8285,10 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "sp-sim",
  "static_assertions",
  "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 

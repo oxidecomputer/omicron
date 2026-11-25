@@ -1019,6 +1019,7 @@ pub enum ResourceType {
     SiloQuotas,
     SiloUser,
     Sled,
+    SledExpungeRequest,
     SledInstance,
     SledLedger,
     Snapshot,

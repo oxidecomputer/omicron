@@ -287,6 +287,7 @@ impl_dyn_authorized_resource_for_resource!(authz::SiloGroup);
 impl_dyn_authorized_resource_for_resource!(authz::SiloImage);
 impl_dyn_authorized_resource_for_resource!(authz::SiloUser);
 impl_dyn_authorized_resource_for_resource!(authz::Sled);
+impl_dyn_authorized_resource_for_resource!(authz::SledExpungeRequest);
 impl_dyn_authorized_resource_for_resource!(authz::Snapshot);
 impl_dyn_authorized_resource_for_resource!(authz::SshKey);
 impl_dyn_authorized_resource_for_resource!(authz::SubnetPool);
