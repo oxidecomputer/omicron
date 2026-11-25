@@ -2530,7 +2530,7 @@ checksum = "c839348835bc8a59714d79797f2f1bca237ca043e3d2d5ce4e727606396fb834"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2624,7 +2624,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim 0.11.1",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2668,7 +2668,7 @@ checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
 dependencies = [
  "darling_core 0.24.1",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3132,7 +3132,7 @@ checksum = "de6c008369e0bc4e26f385874b8d1da517112b4ebe2f8e6b1e3331c781039d71"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3146,7 +3146,7 @@ dependencies = [
  "dsl_auto_type",
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3155,7 +3155,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05c7977b58892eda3f17d46fd57fb23e865d1e54f59b224a6cc09935013747c"
 dependencies = [
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3656,7 +3656,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_tokenstream 0.3.0",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3679,7 +3679,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -7896,6 +7896,78 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-db-queries-preinstantiate-0"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-1"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-2"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-3"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-4"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-5"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-6"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
+name = "nexus-db-queries-preinstantiate-7"
+version = "0.1.0"
+dependencies = [
+ "nexus-db-queries",
+ "omicron-workspace-hack",
+ "preinstantiate",
+]
+
+[[package]]
 name = "nexus-db-schema"
 version = "0.1.0"
 dependencies = [
@@ -9748,6 +9820,14 @@ dependencies = [
  "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-db-queries-preinstantiate-0",
+ "nexus-db-queries-preinstantiate-1",
+ "nexus-db-queries-preinstantiate-2",
+ "nexus-db-queries-preinstantiate-3",
+ "nexus-db-queries-preinstantiate-4",
+ "nexus-db-queries-preinstantiate-5",
+ "nexus-db-queries-preinstantiate-6",
+ "nexus-db-queries-preinstantiate-7",
  "nexus-db-schema",
  "nexus-defaults",
  "nexus-external-api",
@@ -10577,6 +10657,7 @@ dependencies = [
  "potential_utf",
  "ppv-lite86",
  "predicates",
+ "preinstantiate",
  "primeorder 0.14.0",
  "proc-macro2",
  "progenitor-extras",
@@ -10622,7 +10703,7 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.117",
- "syn 3.0.3",
+ "syn 3.0.10",
  "textwrap 0.16.4",
  "time",
  "time-macros",
@@ -10936,7 +11017,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream 0.3.0",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -12361,6 +12442,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "preinstantiate"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b14ad9393564a9b588011fddec30bb884bfa135c70251ed233ee16bc6ce4a2f"
+dependencies = [
+ "atomicwrites",
+ "camino",
+ "proc-macro2",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "pretty-hex"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12489,9 +12582,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.106"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
+checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
@@ -12674,7 +12767,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "syn 3.0.3",
+ "syn 3.0.10",
  "thiserror 2.0.18",
  "typify 0.8.0",
  "unicode-ident",
@@ -12696,7 +12789,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "syn 3.0.3",
+ "syn 3.0.10",
  "thiserror 2.0.18",
  "typify 0.8.0",
  "unicode-ident",
@@ -12753,7 +12846,7 @@ dependencies = [
  "serde_json",
  "serde_tokenstream 0.3.0",
  "serde_yaml",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -12771,7 +12864,7 @@ dependencies = [
  "serde_json",
  "serde_tokenstream 0.3.0",
  "serde_yaml",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -14581,7 +14674,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -14698,7 +14791,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -16609,9 +16702,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -16652,7 +16745,7 @@ checksum = "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -18138,7 +18231,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "syn 3.0.3",
+ "syn 3.0.10",
  "thiserror 2.0.18",
  "unicode-ident",
 ]
@@ -18173,7 +18266,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream 0.3.0",
- "syn 3.0.3",
+ "syn 3.0.10",
  "typify-impl 0.8.0",
 ]
 
@@ -19738,7 +19831,7 @@ checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
  "synstructure 0.14.0",
 ]
 
@@ -19878,7 +19971,7 @@ checksum = "c3743ddbf47738d929cd1ae2e199d40d0162979dfe31aef8ae646d2bf00bf97a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]

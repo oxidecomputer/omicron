@@ -102,6 +102,14 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-queries/preinstantiate/shard0",
+    "nexus/db-queries/preinstantiate/shard1",
+    "nexus/db-queries/preinstantiate/shard2",
+    "nexus/db-queries/preinstantiate/shard3",
+    "nexus/db-queries/preinstantiate/shard4",
+    "nexus/db-queries/preinstantiate/shard5",
+    "nexus/db-queries/preinstantiate/shard6",
+    "nexus/db-queries/preinstantiate/shard7",
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
@@ -304,6 +312,14 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-queries/preinstantiate/shard0",
+    "nexus/db-queries/preinstantiate/shard1",
+    "nexus/db-queries/preinstantiate/shard2",
+    "nexus/db-queries/preinstantiate/shard3",
+    "nexus/db-queries/preinstantiate/shard4",
+    "nexus/db-queries/preinstantiate/shard5",
+    "nexus/db-queries/preinstantiate/shard6",
+    "nexus/db-queries/preinstantiate/shard7",
     "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
@@ -662,6 +678,14 @@ nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
+nexus-db-queries-preinstantiate-0 = { path = "nexus/db-queries/preinstantiate/shard0" }
+nexus-db-queries-preinstantiate-1 = { path = "nexus/db-queries/preinstantiate/shard1" }
+nexus-db-queries-preinstantiate-2 = { path = "nexus/db-queries/preinstantiate/shard2" }
+nexus-db-queries-preinstantiate-3 = { path = "nexus/db-queries/preinstantiate/shard3" }
+nexus-db-queries-preinstantiate-4 = { path = "nexus/db-queries/preinstantiate/shard4" }
+nexus-db-queries-preinstantiate-5 = { path = "nexus/db-queries/preinstantiate/shard5" }
+nexus-db-queries-preinstantiate-6 = { path = "nexus/db-queries/preinstantiate/shard6" }
+nexus-db-queries-preinstantiate-7 = { path = "nexus/db-queries/preinstantiate/shard7" }
 nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
@@ -768,6 +792,7 @@ petgraph = "0.8.2"
 port-file = { version = "0.1.0", features = ["tokio"] }
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"
+preinstantiate = "0.1.1"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.36", features = ["verbatim"] }
