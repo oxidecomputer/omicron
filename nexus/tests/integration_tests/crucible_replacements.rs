@@ -349,18 +349,25 @@ mod region_replacement {
             let status = expunge_precheck_get(client).await;
             assert!(!status.ok, "{status:#?}");
             assert_eq!(
-                status.user_data.expunged_disks_with_data, 0,
+                status.distributed_storage.expunged_disks_with_data, 0,
                 "{status:#?}"
             );
             assert_eq!(
-                status.user_data.region_replacements_in_progress, 1,
+                status.distributed_storage.region_replacements_in_progress, 1,
                 "{status:#?}"
             );
             assert_eq!(
-                status.user_data.region_snapshot_replacements_in_progress, 0,
+                status
+                    .distributed_storage
+                    .region_snapshot_replacements_in_progress,
+                0,
                 "{status:#?}"
             );
-            assert_eq!(status.user_data.risks.len(), 1, "{status:#?}");
+            assert_eq!(
+                status.distributed_storage.risks.len(),
+                1,
+                "{status:#?}"
+            );
 
             DeletedVolumeTest {
                 log: cptestctx.logctx.log.new(o!()),
@@ -2084,7 +2091,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Before anything is expunged, the expunge precheck passes.
     let status = expunge_precheck_get(client).await;
     assert!(status.ok, "{status:#?}");
-    assert!(status.user_data.risks.is_empty(), "{status:#?}");
+    assert!(status.distributed_storage.risks.is_empty(), "{status:#?}");
 
     // Before expunging the physical disk, save the DB model
     let Disk::Crucible(db_disk) =
@@ -2138,10 +2145,13 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
 
     let status = expunge_precheck_get(client).await;
     assert!(!status.ok, "{status:#?}");
-    assert_eq!(status.user_data.expunged_disks_with_data, 1, "{status:#?}");
+    assert_eq!(
+        status.distributed_storage.expunged_disks_with_data, 1,
+        "{status:#?}"
+    );
     assert!(
         status
-            .user_data
+            .distributed_storage
             .risks
             .iter()
             .any(|p| p.contains(&physical_disk_id.to_string())),
@@ -2673,9 +2683,13 @@ async fn test_read_only_replacement_sanity(
         // Verify that the expunge precheck reports this replacement.
         let status = expunge_precheck_get(client).await;
         assert!(!status.ok, "{status:#?}");
-        assert_eq!(status.user_data.expunged_disks_with_data, 0, "{status:#?}");
         assert_eq!(
-            status.user_data.region_snapshot_replacements_in_progress, 1,
+            status.distributed_storage.expunged_disks_with_data, 0,
+            "{status:#?}"
+        );
+        assert_eq!(
+            status.distributed_storage.region_snapshot_replacements_in_progress,
+            1,
             "{status:#?}"
         );
 

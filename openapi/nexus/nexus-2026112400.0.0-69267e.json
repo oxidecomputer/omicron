@@ -7918,7 +7918,7 @@
           "experimental"
         ],
         "summary": "Check whether expunging a working sled or physical disk will create",
-        "description": "a problem due to ongoing repairs\n\nThe system is designed to survive a limited number of concurrent failures. When a sled or physical disk is expunged, the system repairs itself by re-replicating user data and control plane data and by deploying replacement control plane components. Each expunged component counts as one failure until these repairs finish. Before expunging a sled or disk that may currently be working, operators can use this API to verify that the system is not still recovering from previous expungements or repairs. Note that if a sled or physical disk is already not working, expunging it will not make things worse, so there's no need to use this API in that case.",
+        "description": "a problem due to ongoing repairs\n\nThe system is designed to survive a limited number of concurrent failures. When a sled or physical disk is expunged, the system repairs itself by re-replicating both control plane data and data on users' distributed disks and by deploying replacement control plane components. Each expunged component counts as one failure until these repairs finish.  Before expunging a sled or disk that may currently be working, operators can use this API to verify that the system is not still recovering from previous expungements or repairs. Note that if a sled or physical disk is already not working, expunging it will not make things worse, so there's no need to use this API in that case.",
         "operationId": "expunge_precheck_view",
         "responses": {
           "200": {
@@ -21393,6 +21393,43 @@
           "local"
         ]
       },
+      "DistributedStoragePrecheck": {
+        "description": "Result of the check that data in distributed storage that was stored on expunged physical disks has been fully re-replicated\n\nDistributed storage includes distributed disks, snapshots, and images.  It does not include local disks.",
+        "type": "object",
+        "properties": {
+          "expunged_disks_with_data": {
+            "description": "Number of expunged physical disks that still hold data for distributed storage",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "region_replacements_in_progress": {
+            "description": "Number of region replacements that have not finished",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "region_snapshot_replacements_in_progress": {
+            "description": "Number of region snapshot replacements that have not finished",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "risks": {
+            "description": "Human-readable descriptions of risks found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "expunged_disks_with_data",
+          "region_replacements_in_progress",
+          "region_snapshot_replacements_in_progress",
+          "risks"
+        ]
+      },
       "Distributiondouble": {
         "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
@@ -21554,22 +21591,22 @@
         "description": "Result of checking whether it'd be dangerous to expunge a working sled or physical disk\n\nIf `ok` is `true`, no check found any risks. Otherwise, each check lists the risks that it found.",
         "type": "object",
         "properties": {
+          "distributed_storage": {
+            "description": "Whether data in distributed storage that was stored on expunged physical disks has been fully re-replicated",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DistributedStoragePrecheck"
+              }
+            ]
+          },
           "ok": {
             "description": "Whether all checks passed\n\nThis is `true` if and only if none of the checks below found any risks.",
             "type": "boolean"
-          },
-          "user_data": {
-            "description": "Whether user data stored on expunged physical disks has been fully re-replicated",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UserDataPrecheck"
-              }
-            ]
           }
         },
         "required": [
-          "ok",
-          "user_data"
+          "distributed_storage",
+          "ok"
         ]
       },
       "ExternalIp": {
@@ -32112,43 +32149,6 @@
         "required": [
           "external_id",
           "password"
-        ]
-      },
-      "UserDataPrecheck": {
-        "description": "Result of the check that user data on expunged physical disks has been fully re-replicated",
-        "type": "object",
-        "properties": {
-          "expunged_disks_with_data": {
-            "description": "Number of expunged physical disks that still hold user data",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "region_replacements_in_progress": {
-            "description": "Number of region replacements that have not finished",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "region_snapshot_replacements_in_progress": {
-            "description": "Number of region snapshot replacements that have not finished",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "risks": {
-            "description": "Human-readable descriptions of risks found by this check\n\nIf this list is empty, this check passed.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "expunged_disks_with_data",
-          "region_replacements_in_progress",
-          "region_snapshot_replacements_in_progress",
-          "risks"
         ]
       },
       "UserId": {

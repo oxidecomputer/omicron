@@ -12,8 +12,8 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResources;
 use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResourcesMap;
+use nexus_types::external_api::expunge_precheck::DistributedStoragePrecheck;
 use nexus_types::external_api::expunge_precheck::ExpungePrecheck;
-use nexus_types::external_api::expunge_precheck::UserDataPrecheck;
 use omicron_common::api::external::Error;
 use std::fmt;
 
@@ -31,7 +31,7 @@ impl super::Nexus {
 
         // Fetch information about Crucible resources on expunged disks.  If
         // these are present, then expunging another disk further risks
-        // durability and availability of user data.
+        // durability and availability of data in distributed storage.
         let expunged_resources = datastore
             .crucible_resources_on_expunged_physical_disks(opctx)
             .await?;
@@ -70,7 +70,7 @@ struct InProgressCrucibleReplacements {
 fn check_crucible_data(
     expunged_resources: &ExpungedPhysicalDiskResourcesMap,
     replacements_in_progress: InProgressCrucibleReplacements,
-) -> Result<UserDataPrecheck, Error> {
+) -> Result<DistributedStoragePrecheck, Error> {
     let expunged_disks_with_data = u64::try_from(expunged_resources.len())
         .map_err(|_| {
             Error::internal_error(&format!(
@@ -84,7 +84,7 @@ fn check_crucible_data(
             .iter()
             .map(|p| p.to_string())
             .collect();
-    Ok(UserDataPrecheck {
+    Ok(DistributedStoragePrecheck {
         expunged_disks_with_data,
         region_replacements_in_progress: replacements_in_progress
             .region_replacements,
@@ -98,7 +98,7 @@ fn check_crucible_data(
 fn crucible_data_risks(
     expunged_resources: &ExpungedPhysicalDiskResourcesMap,
     replacements_in_progress: InProgressCrucibleReplacements,
-) -> Vec<UserDataRisk<'_>> {
+) -> Vec<DistributedStorageRisk<'_>> {
     let InProgressCrucibleReplacements {
         region_replacements,
         region_snapshot_replacements,
@@ -106,28 +106,30 @@ fn crucible_data_risks(
 
     let mut risks: Vec<_> = expunged_resources
         .iter()
-        .map(UserDataRisk::ExpungedDiskHasData)
+        .map(DistributedStorageRisk::ExpungedDiskHasData)
         .collect();
     if region_replacements > 0 {
-        risks.push(UserDataRisk::RegionReplacementsInProgress(
+        risks.push(DistributedStorageRisk::RegionReplacementsInProgress(
             region_replacements,
         ));
     }
     if region_snapshot_replacements > 0 {
-        risks.push(UserDataRisk::RegionSnapshotReplacementsInProgress(
-            region_snapshot_replacements,
-        ));
+        risks.push(
+            DistributedStorageRisk::RegionSnapshotReplacementsInProgress(
+                region_snapshot_replacements,
+            ),
+        );
     }
     risks
 }
 
-/// A risk identified by the user data check
+/// A risk identified by the distributed storage check
 ///
 /// The external API reports only the `Display` form of these.
 #[derive(Debug, PartialEq, Eq)]
-enum UserDataRisk<'a> {
-    /// an expunged physical disk still holds user data that has not been
-    /// re-replicated elsewhere
+enum DistributedStorageRisk<'a> {
+    /// an expunged physical disk still holds data for distributed storage that
+    /// has not been re-replicated elsewhere
     ExpungedDiskHasData(&'a ExpungedPhysicalDiskResources),
     /// some region replacements have not finished
     RegionReplacementsInProgress(u64),
@@ -135,10 +137,10 @@ enum UserDataRisk<'a> {
     RegionSnapshotReplacementsInProgress(u64),
 }
 
-impl fmt::Display for UserDataRisk<'_> {
+impl fmt::Display for DistributedStorageRisk<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UserDataRisk::ExpungedDiskHasData(r) => write!(
+            DistributedStorageRisk::ExpungedDiskHasData(r) => write!(
                 f,
                 "physical disk {} (serial {}) is expunged but still holds data \
                  (read-write regions: {}, read-only regions: {}, region \
@@ -149,10 +151,10 @@ impl fmt::Display for UserDataRisk<'_> {
                 r.num_read_only_regions,
                 r.num_region_snapshots,
             ),
-            UserDataRisk::RegionReplacementsInProgress(n) => {
+            DistributedStorageRisk::RegionReplacementsInProgress(n) => {
                 write!(f, "region replacements in progress: {n}")
             }
-            UserDataRisk::RegionSnapshotReplacementsInProgress(n) => {
+            DistributedStorageRisk::RegionSnapshotReplacementsInProgress(n) => {
                 write!(f, "region snapshot replacements in progress: {n}")
             }
         }
@@ -165,7 +167,7 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
 
     #[test]
-    fn test_check_user_data() {
+    fn test_check_distributed_storage() {
         let none_in_progress = InProgressCrucibleReplacements {
             region_replacements: 0,
             region_snapshot_replacements: 0,
@@ -176,7 +178,7 @@ mod test {
             &ExpungedPhysicalDiskResourcesMap::default(),
             none_in_progress,
         )
-        .expect("checked user data");
+        .expect("checked distributed storage");
         assert!(check.risks.is_empty(), "{check:?}");
 
         // A disk with resources on it is a risk even when no replacement
@@ -188,12 +190,13 @@ mod test {
         resources.add_read_only_regions(disk_id, disk_serial.clone(), 2);
         resources.add_region_snapshots(disk_id, disk_serial.clone(), 3);
         let risks = crucible_data_risks(&resources, none_in_progress);
-        let [UserDataRisk::ExpungedDiskHasData(r)] = risks.as_slice() else {
+        let [DistributedStorageRisk::ExpungedDiskHasData(r)] = risks.as_slice()
+        else {
             panic!("unexpected risks: {risks:?}");
         };
         assert_eq!(r.disk_id, disk_id);
         let check = check_crucible_data(&resources, none_in_progress)
-            .expect("checked user data");
+            .expect("checked distributed storage");
         assert_eq!(check.expunged_disks_with_data, 1, "{check:?}");
         assert_eq!(check.risks.len(), 1, "{check:?}");
         assert!(
@@ -212,12 +215,12 @@ mod test {
         assert_eq!(
             crucible_data_risks(&no_resources, in_progress),
             [
-                UserDataRisk::RegionReplacementsInProgress(1),
-                UserDataRisk::RegionSnapshotReplacementsInProgress(2),
+                DistributedStorageRisk::RegionReplacementsInProgress(1),
+                DistributedStorageRisk::RegionSnapshotReplacementsInProgress(2),
             ]
         );
         let check = check_crucible_data(&no_resources, in_progress)
-            .expect("checked user data");
+            .expect("checked distributed storage");
         assert_eq!(check.expunged_disks_with_data, 0, "{check:?}");
         assert_eq!(check.region_replacements_in_progress, 1, "{check:?}");
         assert_eq!(

@@ -2446,7 +2446,10 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
     // The expunge precheck reports these disks right away.
     let status = expunge_precheck_get(client).await;
     assert!(!status.ok, "{status:#?}");
-    assert_eq!(status.user_data.expunged_disks_with_data, 3, "{status:#?}");
+    assert_eq!(
+        status.distributed_storage.expunged_disks_with_data, 3,
+        "{status:#?}"
+    );
 }
 
 #[nexus_test(extra_sled_agents = 3)]

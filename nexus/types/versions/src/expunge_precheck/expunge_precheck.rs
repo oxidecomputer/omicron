@@ -19,16 +19,20 @@ pub struct ExpungePrecheck {
     /// This is `true` if and only if none of the checks below found any
     /// risks.
     pub ok: bool,
-    /// Whether user data stored on expunged physical disks has been fully
-    /// re-replicated
-    pub user_data: UserDataPrecheck,
+    /// Whether data in distributed storage that was stored on expunged
+    /// physical disks has been fully re-replicated
+    pub distributed_storage: DistributedStoragePrecheck,
 }
 
-/// Result of the check that user data on expunged physical disks has been
-/// fully re-replicated
+/// Result of the check that data in distributed storage that was stored on
+/// expunged physical disks has been fully re-replicated
+///
+/// Distributed storage includes distributed disks, snapshots, and images.  It
+/// does not include local disks.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UserDataPrecheck {
-    /// Number of expunged physical disks that still hold user data
+pub struct DistributedStoragePrecheck {
+    /// Number of expunged physical disks that still hold data for distributed
+    /// storage
     pub expunged_disks_with_data: u64,
     /// Number of region replacements that have not finished
     pub region_replacements_in_progress: u64,
