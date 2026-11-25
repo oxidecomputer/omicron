@@ -174,6 +174,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloUser::init(),
         SiloGroup::init(),
         SupportBundle::init(),
+        SledExpungeRequest::init(),
         IdentityProvider::init(),
         SamlIdentityProvider::init(),
         Sled::init(),

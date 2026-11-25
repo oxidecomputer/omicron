@@ -7786,6 +7786,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-protocol",
+ "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]
