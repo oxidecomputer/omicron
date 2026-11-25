@@ -13,6 +13,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::AlertFilters;
 use nexus_db_queries::db::model::ProblemView;
 use nexus_types::external_api::alert;
 use nexus_types::external_api::problem as api;
@@ -51,6 +52,9 @@ impl Nexus {
         opctx: &OpContext,
         problem_lookup: &lookup::Problem<'_>,
     ) -> LookupResult<ProblemView> {
+        // If the problem is still being created by rendezvous (i.e., it is at
+        // revision zero), it has no current revision record, so this returns
+        // a 404.
         let (authz_problem, problem) =
             problem_lookup.fetch_for(authz::Action::Read).await?;
         self.db_datastore
@@ -100,26 +104,47 @@ impl Nexus {
     /// Lists the support bundles attached to the requested problem.
     pub async fn problem_support_bundles_list(
         &self,
+        opctx: &OpContext,
         problem_lookup: &lookup::Problem<'_>,
-        _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundleInfo> {
-        let (.., _authz_problem) =
+        let (.., authz_problem) =
             problem_lookup.lookup_for(authz::Action::ListChildren).await?;
-        // TODO(eliza): actually add a way to associate problems and support
-        // bundles...
-        Ok(Vec::new())
+
+        let bundles = self
+            .db_datastore
+            .problem_list_support_bundles(opctx, &authz_problem, pagparams)
+            .await?
+            .into_iter()
+            .map(SupportBundleInfo::from)
+            .collect();
+
+        Ok(bundles)
     }
 
     /// Lists alerts associated with the requested problem.
     pub async fn problem_alert_list(
         &self,
+        opctx: &OpContext,
         problem_lookup: &lookup::Problem<'_>,
-        _params: &alert::AlertListParams,
-        _pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+        params: &alert::AlertListParams,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<alert::Alert> {
-        let (.., _authz_problem) =
+        // First, return an error on invalid query params (before looking up the
+        // problem)
+        let filters = AlertFilters::try_from(params.clone())?;
+        let (.., authz_problem) =
             problem_lookup.lookup_for(authz::Action::ListChildren).await?;
-        // TODO(eliza): actually add a way to associate problems and alerts...
-        Ok(Vec::new())
+        let filters = filters.for_problem(&authz_problem);
+
+        let alerts = self
+            .db_datastore
+            .alert_list_matching(opctx, &filters, &pagparams)
+            .await?
+            .into_iter()
+            .map(|(alert, _)| alert.into())
+            .collect();
+
+        Ok(alerts)
     }
 }

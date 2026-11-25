@@ -9268,7 +9268,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let problem_lookup =
                 nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let bundles = nexus
-                .problem_support_bundles_list(&problem_lookup, &pag_params)
+                .problem_support_bundles_list(
+                    &opctx,
+                    &problem_lookup,
+                    &pag_params,
+                )
                 .await?;
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
@@ -9302,6 +9306,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.problem_lookup(&opctx, path_params.into_inner())?;
             let alerts = nexus
                 .problem_alert_list(
+                    &opctx,
                     &problem_lookup,
                     &scan_params.selector,
                     &pag_params,

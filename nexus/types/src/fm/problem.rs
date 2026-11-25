@@ -705,9 +705,9 @@ impl SitrepRevision {
 /// during execution. Once the problem is no longer part of the sitrep *and*
 /// rendezvous has created the link, the link need not be carried forward.
 ///
-/// Rendezvous must not create an externally visible link until both the
-/// problem and the alert exist. Otherwise, a caller listing a problem's
-/// alerts could see alerts that do not exist yet.
+/// Rendezvous may create the externally visible link before the alert itself
+/// exists. Listing a problem's alerts selects from the `alert` table, so a link
+/// to an alert that does not exist is not visible.
 ///
 /// [rfd]: https://rfd.shared.oxide.computer/rfd/0699#alerts-as-timeline
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -747,10 +747,11 @@ impl iddqd::IdOrdItem for AlertLink {
 /// linked to multiple problems.
 ///
 /// Once the problem is no longer part of the sitrep *and* rendezvous has
-/// created the link, the link need not be carried forward. Rendezvous must not
-/// create an externally visible link until both the problem and the support
-/// bundle exist, so that a caller listing a problem's support bundles never
-/// sees one that does not exist yet.
+/// created the link, the link need not be carried forward. Rendezvous may
+/// create the externally visible link before the support bundle itself exists,
+/// so listing a problem's support bundles must select from the
+/// `support_bundle` table, so that a link to a support bundle that does not
+/// exist is not visible.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SupportBundleLink {
     /// The ID of the linked support bundle.
