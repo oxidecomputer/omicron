@@ -30,6 +30,7 @@ function usage
   echo "   -y: Assume 'yes' instead of showing confirmation prompts"
   echo "   -p: Skip checking paths"
   echo "   -r: Number of retries to perform for network operations (default: 3)"
+  echo "   -s: Skip using sudo on Linux systems"
   exit 1
 }
 
