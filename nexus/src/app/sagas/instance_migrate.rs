@@ -20,15 +20,11 @@ use nexus_types::internal_api::params::{
 };
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::backoff::{
-    BackoffError, retry_notify_ext, retry_policy_internal_service,
-};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use slog::warn;
-use slog_error_chain::InlineErrorChain;
 use std::net::{Ipv6Addr, SocketAddr};
 use steno::ActionError;
 use steno::Node;
