@@ -19,3 +19,6 @@ serde_json.workspace = true
 slog.workspace = true
 oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
+
+[build-dependencies]
+git-stub-vcs.workspace = true

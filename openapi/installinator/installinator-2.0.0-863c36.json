@@ -7,10 +7,10 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
-    "/artifacts/by-hash/{kind}/{hash}": {
+    "/artifacts/sha256/{hash}": {
       "get": {
         "summary": "Fetch an artifact by hash.",
         "operationId": "get_artifact_by_hash",
@@ -21,23 +21,21 @@
             "description": "The hash of the artifact.",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "byte-wrapper",
+                "path": "byte_wrapper::HexArray::<32>",
+                "version": "0.1.0"
+              },
               "type": "string",
-              "format": "hex string (32 bytes)"
-            }
-          },
-          {
-            "in": "path",
-            "name": "kind",
-            "description": "The kind of artifact this is.",
-            "required": true,
-            "schema": {
-              "type": "string"
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "minLength": 64,
+              "maxLength": 64
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
               "*/*": {
                 "schema": {}
@@ -134,31 +132,52 @@
         ]
       },
       "EventReportForGenericSpec": {
-        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "description": "An oxide-update-engine event report.\n\nRemote reports can be passed into a `StepContext`, in which case they show up as nested events.",
+        "x-rust-type": {
+          "crate": "oxide-update-engine-types",
+          "parameters": [
+            {
+              "x-rust-type": {
+                "crate": "oxide-update-engine-types",
+                "path": "oxide_update_engine_types::spec::GenericSpec",
+                "version": "0.1.2"
+              }
+            }
+          ],
+          "path": "oxide_update_engine_types::events::EventReport",
+          "version": "0.1.2"
+        },
         "type": "object",
         "properties": {
           "last_seen": {
             "nullable": true,
-            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "description": "The last event seen.",
             "type": "integer",
             "format": "uint",
             "minimum": 0
           },
           "progress_events": {
-            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ProgressEventForGenericSpec"
             }
           },
           "root_execution_id": {
-            "nullable": true,
-            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The root execution ID for this report.",
+            "allOf": [
+              {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExecutionUuid"
+                  }
+                ]
+              }
+            ]
           },
           "step_events": {
-            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "description": "A list of step events.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/StepEventForGenericSpec"
@@ -170,8 +189,22 @@
           "step_events"
         ]
       },
+      "ExecutionUuid": {
+        "x-rust-type": {
+          "crate": "oxide-update-engine-types",
+          "path": "oxide_update_engine_types::events::ExecutionUuid",
+          "version": "0.1.2"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "ProgressCounter": {
-        "description": "Current progress.\n\nBoth `current` and `total` are abstract counters. These counters are often a number of bytes. There is no guarantee that the counter won't go back in subsequent events; that can happen e.g. if a fetch happens from multiple peers within a single attempt.",
+        "description": "Current progress.",
+        "x-rust-type": {
+          "crate": "oxide-update-engine-types",
+          "path": "oxide_update_engine_types::events::ProgressCounter",
+          "version": "0.1.2"
+        },
         "type": "object",
         "properties": {
           "current": {
@@ -189,7 +222,11 @@
           },
           "units": {
             "description": "Progress units.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressUnits"
+              }
+            ]
           }
         },
         "required": [
@@ -198,6 +235,20 @@
         ]
       },
       "ProgressEventForGenericSpec": {
+        "x-rust-type": {
+          "crate": "oxide-update-engine-types",
+          "parameters": [
+            {
+              "x-rust-type": {
+                "crate": "oxide-update-engine-types",
+                "path": "oxide_update_engine_types::spec::GenericSpec",
+                "version": "0.1.2"
+              }
+            }
+          ],
+          "path": "oxide_update_engine_types::events::ProgressEvent",
+          "version": "0.1.2"
+        },
         "type": "object",
         "properties": {
           "data": {
@@ -210,11 +261,14 @@
           },
           "execution_id": {
             "description": "The execution ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionUuid"
+              }
+            ]
           },
           "spec": {
-            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "description": "The specification that this event belongs to.",
             "type": "string"
           },
           "total_elapsed": {
@@ -419,6 +473,14 @@
           }
         ]
       },
+      "ProgressUnits": {
+        "x-rust-type": {
+          "crate": "oxide-update-engine-types",
+          "path": "oxide_update_engine_types::events::ProgressUnits",
+          "version": "0.1.2"
+        },
+        "type": "string"
+      },
       "StepComponentSummaryForGenericSpec": {
         "type": "object",
         "properties": {
@@ -438,6 +500,20 @@
         ]
       },
       "StepEventForGenericSpec": {
+        "x-rust-type": {
+          "crate": "oxide-update-engine-types",
+          "parameters": [
+            {
+              "x-rust-type": {
+                "crate": "oxide-update-engine-types",
+                "path": "oxide_update_engine_types::spec::GenericSpec",
+                "version": "0.1.2"
+              }
+            }
+          ],
+          "path": "oxide_update_engine_types::events::StepEvent",
+          "version": "0.1.2"
+        },
         "type": "object",
         "properties": {
           "data": {
@@ -456,11 +532,14 @@
           },
           "execution_id": {
             "description": "The execution ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionUuid"
+              }
+            ]
           },
           "spec": {
-            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "description": "The specification that this event belongs to.",
             "type": "string"
           },
           "total_elapsed": {
@@ -562,7 +641,7 @@
                 ]
               },
               "message": {
-                "description": "A message assocaited with the reset.",
+                "description": "A message associated with the reset.",
                 "type": "string"
               },
               "metadata": {
