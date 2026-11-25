@@ -56,7 +56,8 @@ use slog::info;
 use sp_sim::SimRack;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::{Ipv6Addr, SocketAddrV6};
+use std::ops::DerefMut;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use transient_dns_server::TransientDnsServer;
@@ -145,7 +146,8 @@ pub struct ControlPlaneTestContext<N> {
     pub(crate) simrack: Option<Arc<SimRack>>,
     /// All dpd instances, whether currently running or not, indexed by switch
     /// slot.
-    pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
+    pub(crate) dendrite:
+        RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchSlot, dev::maghemite::MgdInstance>,
     pub ddm: HashMap<SwitchSlot, dev::maghemite::DdmInstance>,
     pub external_dns_zone_name: String,
@@ -573,6 +575,65 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         )
     }
 
+    /// Return the Dendrite proxy port for this slot.
+    ///
+    /// Returns `None` if the slot is empty or the instance is checked out by
+    /// another caller.
+    pub fn dendrite_port(&self, switch_slot: SwitchSlot) -> Option<u16> {
+        self.dendrite
+            .read()
+            .unwrap()
+            .get(&switch_slot)
+            .map(dev::dendrite::DendriteInstance::port)
+    }
+
+    /// Return the address that the current dpd process for this slot listens
+    /// on.
+    ///
+    /// Returns `None` if the slot is empty, the instance is checked out by
+    /// another caller, or dpd has been stopped. Use the address only until the
+    /// process stops.
+    pub fn dendrite_backend_address(
+        &self,
+        switch_slot: SwitchSlot,
+    ) -> Option<SocketAddrV6> {
+        self.dendrite
+            .read()
+            .unwrap()
+            .get(&switch_slot)
+            .and_then(dev::dendrite::DendriteInstance::dpd_backend_address)
+    }
+
+    /// Take the Dendrite instance out of its switch slot.
+    ///
+    /// The guard provides mutable access to the instance without holding
+    /// the map lock. Dropping the guard puts the instance back into its
+    /// original slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the instance is missing or already checked out by another
+    /// caller.
+    fn checkout_dendrite(
+        &self,
+        switch_slot: SwitchSlot,
+    ) -> impl DerefMut<Target = dev::dendrite::DendriteInstance> + '_ {
+        let instances = &self.dendrite;
+        let dendrite = instances.write().unwrap().remove(&switch_slot);
+        let dendrite = dendrite.unwrap_or_else(|| {
+            panic!(
+                "a dendrite instance should exist \
+                 for switch slot {switch_slot:?}"
+            );
+        });
+        scopeguard::guard(dendrite, move |dendrite| {
+            instances
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(switch_slot, dendrite);
+        })
+    }
+
     /// Stop a Dendrite instance for testing failure scenarios.
     ///
     /// Panics if no Dendrite was found for the given switch slot, or it was
@@ -585,15 +646,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         debug!(log, "Stopping Dendrite"; "switch_slot" => ?switch_slot);
 
         // Extract from mutex first to avoid holding lock across await
-        let mut dendrite =
-            self.dendrite.write().unwrap().remove(&switch_slot).unwrap_or_else(
-                || {
-                    panic!(
-                        "a dendrite instance should exist \
-                         for switch slot {switch_slot:?}"
-                    );
-                },
-            );
+        let mut dendrite = self.checkout_dendrite(switch_slot);
 
         let prior_dpd_state = dendrite.stop_dpd().await.unwrap();
         assert_eq!(
@@ -601,7 +654,67 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             dev::dendrite::PriorDpdState::Running,
             "dendrite should have been running before stop_dendrite"
         );
-        self.dendrite.write().unwrap().insert(switch_slot, dendrite);
+    }
+
+    /// Cut off Nexus access to dpd through the proxy while dpd keeps running.
+    ///
+    /// The proxy refuses new connections and resets open ones. dpd can still
+    /// contact Nexus and finish requests it has already received. Use
+    /// [`crate::dpd_backend_client_for_switch`] to inspect switch state.
+    ///
+    /// [`Self::restart_dendrite`] points the proxy at the new dpd process and
+    /// resumes forwarding.
+    ///
+    /// # Panics
+    ///
+    /// - The slot contains no Dendrite instance or another caller has it
+    ///   already checked out.
+    /// - dpd is stopped.
+    /// - The proxy is not forwarding to the running dpd process, e.g., because
+    ///   it is already isolated.
+    /// - Isolation exceeds [`dev::dendrite::DENDRITE_ISOLATE_TIMEOUT`].
+    ///
+    /// # Cancel safety
+    ///
+    /// Dropping the future during retargeting puts the running dpd instance
+    /// back into its slot. If the proxy has already switched to refusing
+    /// connections, it remains isolated. In this case, the connection tasks
+    /// still close their sockets.
+    pub async fn isolate_dendrite(&self, switch_slot: SwitchSlot) {
+        use slog::debug;
+        let log = &self.logctx.log;
+        debug!(log, "Isolating Dendrite"; "switch_slot" => ?switch_slot);
+
+        let dendrite = self.checkout_dendrite(switch_slot);
+        tokio::time::timeout(
+            dev::dendrite::DENDRITE_ISOLATE_TIMEOUT,
+            dendrite.isolate_dpd(),
+        )
+        .await
+        .expect("isolated dpd within timeout")
+        .unwrap();
+    }
+
+    /// Reconnect a Dendrite instance isolated with [`Self::isolate_dendrite`].
+    ///
+    /// # Panics
+    ///
+    /// - The slot contains no Dendrite instance or another caller has it
+    ///   already checked out.
+    /// - dpd is stopped.
+    /// - The proxy is already forwarding connections.
+    ///
+    /// # Cancel safety
+    ///
+    /// Dropping the future while it waits to retarget the proxy returns the
+    /// instance to its slot and leaves the current target in place.
+    pub async fn reconnect_dendrite(&self, switch_slot: SwitchSlot) {
+        use slog::debug;
+        let log = &self.logctx.log;
+        debug!(log, "Reconnecting Dendrite"; "switch_slot" => ?switch_slot);
+
+        let dendrite = self.checkout_dendrite(switch_slot);
+        dendrite.reconnect_dpd().await.unwrap();
     }
 
     /// Restart a Dendrite instance for testing drift correction scenarios.
@@ -626,15 +739,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         // Extract from mutex first to avoid holding the lock across an await
         // point. This does mean that while restart_dendrite is running, other
         // code wouldn't be able to find the dpd instance via the switch slot.
-        let mut dendrite =
-            self.dendrite.write().unwrap().remove(&switch_slot).unwrap_or_else(
-                || {
-                    panic!(
-                        "a dendrite instance should exist \
-                         for switch slot {switch_slot:?}"
-                    );
-                },
-            );
+        let mut dendrite = self.checkout_dendrite(switch_slot);
         let port = dendrite.port();
         debug!(log, "Restarting dpd behind its proxy"; "port" => port);
 
@@ -666,8 +771,6 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         )
         .await
         .expect("contacted dpd within timeout after restart");
-
-        self.dendrite.write().unwrap().insert(switch_slot, dendrite);
     }
 
     pub async fn teardown(mut self) {

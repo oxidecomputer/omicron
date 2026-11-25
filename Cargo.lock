@@ -8674,6 +8674,7 @@ dependencies = [
  "oxnet",
  "pq-sys",
  "pretty_assertions",
+ "scopeguard",
  "serde",
  "serde_json",
  "serde_urlencoded",

@@ -150,6 +150,64 @@ pub fn dpd_client<N: NexusServer>(
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
 }
 
+/// Build a dpd client for the given switch slot, going through its proxy.
+///
+/// # Panics
+///
+/// Panics if the slot contains no Dendrite instance or another caller has it
+/// checked out.
+pub fn dpd_client_for_switch<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+    switch_slot: sled_agent_types::early_networking::SwitchSlot,
+) -> dpd_client::Client {
+    let port = cptestctx.dendrite_port(switch_slot).unwrap_or_else(|| {
+        panic!("no dendrite instance for {switch_slot:?} in test fixture")
+    });
+
+    let client_state = dpd_client::ClientState {
+        tag: String::from("nexus-test"),
+        log: cptestctx.logctx.log.new(slog::o!(
+            "component" => "DpdClient",
+            "switch_slot" => format!("{switch_slot:?}"),
+        )),
+    };
+
+    let addr = Ipv6Addr::LOCALHOST;
+    dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
+}
+
+/// Build a dpd client for the given switch slot that bypasses its proxy.
+///
+/// Use this to inspect the entries still installed on the switch after
+/// [`ControlPlaneTestContext::isolate_dendrite`].
+///
+/// Use the client only for the current dpd process. After a stop or restart,
+/// the backend port can be reused by another test.
+///
+/// # Panics
+///
+/// Panics if the slot contains no Dendrite instance or another caller has it
+/// checked out. Also panics if dpd is stopped.
+pub fn dpd_backend_client_for_switch<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+    switch_slot: sled_agent_types::early_networking::SwitchSlot,
+) -> dpd_client::Client {
+    let addr =
+        cptestctx.dendrite_backend_address(switch_slot).unwrap_or_else(|| {
+            panic!("no running dpd for {switch_slot:?} in test fixture")
+        });
+
+    let client_state = dpd_client::ClientState {
+        tag: String::from("nexus-test"),
+        log: cptestctx.logctx.log.new(slog::o!(
+            "component" => "DpdBackendClient",
+            "switch_slot" => format!("{switch_slot:?}"),
+        )),
+    };
+
+    dpd_client::Client::new(&format!("http://{addr}"), client_state)
+}
+
 #[cfg(test)]
 mod test {
     use crate::TEST_SUITE_PASSWORD;

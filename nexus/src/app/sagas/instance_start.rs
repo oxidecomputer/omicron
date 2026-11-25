@@ -1484,13 +1484,9 @@ mod test {
             .expect("unable to update switch1 settings");
 
         // Shutdown one of the switch daemons
-        let switch0_port = {
-            let dendrite_guard = cptestctx.dendrite.read().unwrap();
-            dendrite_guard
-                .get(&SwitchSlot::Switch0)
-                .expect("a dendrite instance should exist for switch0")
-                .port()
-        };
+        let switch0_port = cptestctx
+            .dendrite_port(SwitchSlot::Switch0)
+            .expect("a dendrite instance should exist for switch0");
         cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
         let log = &opctx.log;
@@ -1532,13 +1528,9 @@ mod test {
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
 
-        let port = {
-            let dendrite_guard = cptestctx.dendrite.read().unwrap();
-            dendrite_guard
-                .get(&SwitchSlot::Switch1)
-                .expect("two dendrites should be present in test context")
-                .port()
-        };
+        let port = cptestctx
+            .dendrite_port(SwitchSlot::Switch1)
+            .expect("two dendrites should be present in test context");
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),

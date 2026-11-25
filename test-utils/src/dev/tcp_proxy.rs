@@ -31,7 +31,7 @@ use std::time::Duration;
 use slog::{Logger, debug, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{RwLock, oneshot, watch};
 
 /// The target for a [`RetargetableTcpProxy`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +48,7 @@ pub enum ProxyTarget {
 pub struct RetargetableTcpProxy {
     local_addr: SocketAddrV6,
     target: Arc<RwLock<ProxyTarget>>,
+    reset_tx: Arc<watch::Sender<()>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
     log: Logger,
@@ -76,10 +77,12 @@ impl RetargetableTcpProxy {
         info!(log, "TCP proxy listening"; "target" => ?target);
 
         let target = Arc::new(RwLock::new(target));
+        let reset_tx = Arc::new(watch::Sender::new(()));
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let task = tokio::spawn(run_proxy(
             listener,
             Arc::clone(&target),
+            Arc::clone(&reset_tx),
             shutdown_rx,
             log.clone(),
         ));
@@ -87,6 +90,7 @@ impl RetargetableTcpProxy {
         Ok(Self {
             local_addr,
             target,
+            reset_tx,
             shutdown_tx: Some(shutdown_tx),
             task: Some(task),
             log,
@@ -121,6 +125,46 @@ impl RetargetableTcpProxy {
         };
         info!(
             self.log, "retargeted TCP proxy";
+            "old_target" => ?old_target,
+            "new_target" => ?target,
+        );
+        old_target
+    }
+
+    /// Set a new target and force established connections to reset.
+    ///
+    /// After [`Self::set_target`], an HTTP client can keep reaching the old
+    /// target over a keep-alive connection. This method resets the client
+    /// socket of each established connection and waits for the proxy to close
+    /// both of its sockets before returning the previous target. Clients then
+    /// have to reconnect, and new connections only reach the new target.
+    ///
+    /// The write lock stays held for the entire wait. New connections and
+    /// [`Self::set_target`] calls queue up behind it.
+    ///
+    /// # Cancel safety
+    ///
+    /// Dropping the future while it waits for the write lock leaves the
+    /// target unchanged. If the future is dropped while it waits for the
+    /// sockets to close, the new target remains in place. The connection
+    /// tasks will still close their sockets.
+    pub async fn set_target_and_reset_conns(
+        &self,
+        target: ProxyTarget,
+    ) -> ProxyTarget {
+        let old_target = {
+            let mut guard = self.target.write().await;
+            let old_target = std::mem::replace(&mut *guard, target);
+            self.reset_tx.send_replace(());
+            // Unlike `set_target`, this holds the write guard across
+            // `closed()`. Connections only subscribe while holding the read
+            // guard. Holding the write guard therefore keeps new receivers out
+            // while this waits for the existing ones to drop.
+            self.reset_tx.closed().await;
+            old_target
+        };
+        info!(
+            self.log, "retargeted TCP proxy and reset established connections";
             "old_target" => ?old_target,
             "new_target" => ?target,
         );
@@ -166,6 +210,7 @@ impl Drop for RetargetableTcpProxy {
 async fn run_proxy(
     listener: TcpListener,
     target: Arc<RwLock<ProxyTarget>>,
+    reset_tx: Arc<watch::Sender<()>>,
     mut shutdown_rx: oneshot::Receiver<()>,
     log: Logger,
 ) {
@@ -180,6 +225,7 @@ async fn run_proxy(
                         tokio::spawn(run_connection(
                             client_stream,
                             Arc::clone(&target),
+                            Arc::clone(&reset_tx),
                             log,
                         ));
                     }
@@ -226,14 +272,16 @@ fn reset_on_drop(stream: &TcpStream, log: &Logger) {
 async fn run_connection(
     mut client_stream: TcpStream,
     target: Arc<RwLock<ProxyTarget>>,
+    reset_tx: Arc<watch::Sender<()>>,
     log: Logger,
 ) {
-    let mut backend_stream = {
+    let (mut reset_rx, mut backend_stream) = {
         // Here, the read guard _is_ held across the connect await point so that
         // it is synchronized with set_target (which acquires a write lock). But
         // it is _not_ held across copy_bidirectional below -- we do not want
         // deadlocks involving `set_target` and open connections!
         let guard = target.read().await;
+        let reset_rx = reset_tx.subscribe();
         match *guard {
             ProxyTarget::Forward(backend_addr) => {
                 match TcpStream::connect(backend_addr).await {
@@ -242,7 +290,7 @@ async fn run_connection(
                             log, "connected to backend";
                             "backend_addr" => backend_addr,
                         );
-                        stream
+                        (reset_rx, stream)
                     }
                     Err(error) => {
                         warn!(
@@ -284,17 +332,28 @@ async fn run_connection(
         );
     }
 
-    match tokio::io::copy_bidirectional(&mut client_stream, &mut backend_stream)
-        .await
-    {
-        Ok((client_to_backend, backend_to_client)) => {
+    let copy_res = tokio::select! {
+        biased;
+        Ok(()) = reset_rx.changed() => None,
+        res = tokio::io::copy_bidirectional(
+            &mut client_stream,
+            &mut backend_stream,
+        ) => Some(res),
+    };
+
+    match copy_res {
+        None => {
+            debug!(log, "resetting proxied connection after retargeting");
+            reset_on_drop(&client_stream, &log);
+        }
+        Some(Ok((client_to_backend, backend_to_client))) => {
             debug!(
                 log, "proxied connection closed";
                 "bytes_client_to_backend" => client_to_backend,
                 "bytes_backend_to_client" => backend_to_client,
             );
         }
-        Err(error) => {
+        Some(Err(error)) => {
             // This is expected when the backend is SIGKILLed mid-connection.
             // Log it as a warning anyway to flag cases where the process
             // aborted or similar.
@@ -304,6 +363,12 @@ async fn run_connection(
             );
         }
     }
+
+    // Dropping the last receiver completes the wait in `reset_tx.closed()`.
+    // We keep this receiver alive until both sockets have closed.
+    drop(client_stream);
+    drop(backend_stream);
+    drop(reset_rx);
 }
 
 #[cfg(test)]
@@ -311,6 +376,8 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const SET_TARGET_TIMEOUT: Duration = Duration::from_secs(10);
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Persistence {
@@ -508,7 +575,6 @@ mod tests {
 
         // Attempt to call set_target while the connection is open. If the
         // timeout is hit, then the read guard is held for some reason.
-        const SET_TARGET_TIMEOUT: Duration = Duration::from_secs(10);
         tokio::time::timeout(
             SET_TARGET_TIMEOUT,
             proxy.set_target(ProxyTarget::Refuse),
@@ -532,6 +598,63 @@ mod tests {
             .await
             .expect_err("new connection is refused after retarget");
         assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+
+        proxy.shutdown().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn set_target_and_reset_waits_for_live_connections() {
+        let logctx = crate::dev::test_setup_log(
+            "set_target_and_reset_waits_for_live_connections",
+        );
+        let backend = TestBackend::spawn(b"", Persistence::Persistent).await;
+        let target = ProxyTarget::Forward(backend.addr());
+        let proxy = RetargetableTcpProxy::bind(target, &logctx.log)
+            .await
+            .expect("bound proxy");
+
+        tokio::time::timeout(SET_TARGET_TIMEOUT, async {
+            let mut conn = TcpStream::connect(proxy.local_addr())
+                .await
+                .expect("connected to proxy");
+
+            conn.write_all(b"hello").await.expect("wrote request");
+            let mut response = [0; 5];
+
+            conn.read_exact(&mut response).await.expect("read echo reply");
+            assert_eq!(&response, b"hello");
+
+            assert_eq!(proxy.reset_tx.receiver_count(), 1);
+            let retarget =
+                proxy.set_target_and_reset_conns(ProxyTarget::Refuse);
+
+            tokio::pin!(retarget);
+
+            assert!(futures::poll!(retarget.as_mut()).is_pending());
+            assert_eq!(retarget.await, target);
+            assert_eq!(proxy.reset_tx.receiver_count(), 0);
+
+            let err = conn
+                .read(&mut response)
+                .await
+                .expect_err("established connection is reset after retarget");
+            assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
+
+            let mut fresh_conn = TcpStream::connect(proxy.local_addr())
+                .await
+                .expect("connected to proxy");
+            let mut fresh_resp = Vec::new();
+
+            let err = fresh_conn
+                .read_to_end(&mut fresh_resp)
+                .await
+                .expect_err("new connection is reset after retarget");
+            assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
+            assert_eq!(backend.accepted(), 1);
+        })
+        .await
+        .expect("retarget and reset completed within timeout");
 
         proxy.shutdown().await;
         logctx.cleanup_successful();
