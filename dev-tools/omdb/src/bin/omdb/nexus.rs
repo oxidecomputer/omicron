@@ -1624,16 +1624,15 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
             );
             println!("{report}");
         }
-        BlueprintPlannerStatus::Planned {
+        BlueprintPlannerStatus::LostRace {
             parent_blueprint_id,
-            error,
             report,
             blueprint_count,
             limit,
         } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
-                     but could not make it the target: {error}"
+                     but another Nexus changed the target first"
             );
             println!(
                 "    note: {}/{} blueprints in database",

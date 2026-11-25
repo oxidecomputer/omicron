@@ -12,6 +12,8 @@
 use crate::deployment::MgsUpdateComponent;
 use crate::deployment::planning_report::WaitingOnSledEvacuationDetails;
 use crate::external_api::update as external_api_update;
+use crate::internal_api::background::BlueprintPlannerLatest;
+use crate::internal_api::background::PlannerFailure;
 use crate::internal_api::views::QuiesceState;
 use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
@@ -41,6 +43,27 @@ pub enum OperatorStatus {
 }
 
 impl OperatorStatus {
+    /// Returns the status implied by this Nexus's most recent planner
+    /// activation
+    pub fn from_planner(
+        latest: &BlueprintPlannerLatest,
+        quiesce: QuiesceInfo<'_>,
+    ) -> OperatorStatus {
+        match latest {
+            BlueprintPlannerLatest::NotYetRun { .. } => {
+                OperatorStatus::Unknown(UnknownReason::PlannerNotYetRun)
+            }
+            BlueprintPlannerLatest::Succeeded { report, .. } => {
+                report.operator_status(quiesce)
+            }
+            BlueprintPlannerLatest::Failed { reason, .. } => {
+                OperatorStatus::Unknown(UnknownReason::PlannerFailed(
+                    reason.clone(),
+                ))
+            }
+        }
+    }
+
     /// Returns a human-readable description of this status
     pub fn describe(&self) -> OperatorStatusDescription {
         match self {
@@ -114,12 +137,43 @@ impl OperatorStatus {
                     "Unknown: the system is determining next steps",
                 )
             }
-            OperatorStatus::Unknown(UnknownReason::PlannerFailed { error }) => {
-                OperatorStatusDescription::summary_with_details(
-                    "Unknown: planner error",
-                    format!("planner error: {error}"),
-                )
+            OperatorStatus::Unknown(UnknownReason::PlannerFailed(reason)) => {
+                describe_planner_failure(reason)
             }
+        }
+    }
+}
+
+fn describe_planner_failure(
+    reason: &PlannerFailure,
+) -> OperatorStatusDescription {
+    match reason {
+        PlannerFailure::Disabled => {
+            OperatorStatusDescription::summary_with_details(
+                "Unknown: automatic system changes are disabled",
+                "blueprint planning is disabled",
+            )
+        }
+        PlannerFailure::ConfigNotYetLoaded => {
+            OperatorStatusDescription::summary_with_details(
+                "Unknown: the system is determining next steps",
+                "reconfigurator config not yet loaded",
+            )
+        }
+        PlannerFailure::LimitReached { limit } => {
+            OperatorStatusDescription::summary_with_details(
+                "Unknown: automatic system changes have stopped",
+                format!(
+                    "blueprint planning stopped because the system has \
+                     reached its limit of {limit} blueprints"
+                ),
+            )
+        }
+        PlannerFailure::Error(error) => {
+            OperatorStatusDescription::summary_with_details(
+                "Unknown: error determining next steps",
+                format!("planner error: {error}"),
+            )
         }
     }
 }
@@ -239,11 +293,8 @@ pub enum QuiesceInfo<'a> {
 pub enum UnknownReason {
     /// The planner has not yet run
     PlannerNotYetRun,
-    /// The planner has run, but it has never succeeded
-    PlannerFailed {
-        /// Error from the most recent planning run
-        error: String,
-    },
+    /// The most recent planning run did not produce a usable plan
+    PlannerFailed(PlannerFailure),
 }
 
 /// What an automated software update is waiting for
@@ -309,6 +360,7 @@ pub enum SledEvacuationProgress {
 mod test {
     use super::*;
     use crate::deployment::planning_report::WaitingOnSledEvacuationDetailsDiscriminants;
+    use crate::internal_api::background::PlannerFailureDiscriminants;
     use expectorate::assert_contents;
     use omicron_generation_kinds::SledConfigGeneration;
     use omicron_uuid_kinds::GenericUuid;
@@ -356,25 +408,43 @@ mod test {
             }
             OperatorStatusDiscriminants::Unknown => {
                 UnknownReasonDiscriminants::iter()
-                    .map(unknown_reason_example)
+                    .flat_map(unknown_reason_examples)
                     .map(OperatorStatus::Unknown)
                     .collect()
             }
         }
     }
 
-    fn unknown_reason_example(
+    fn unknown_reason_examples(
         kind: UnknownReasonDiscriminants,
-    ) -> UnknownReason {
+    ) -> Vec<UnknownReason> {
         match kind {
             UnknownReasonDiscriminants::PlannerNotYetRun => {
-                UnknownReason::PlannerNotYetRun
+                vec![UnknownReason::PlannerNotYetRun]
             }
             UnknownReasonDiscriminants::PlannerFailed => {
-                UnknownReason::PlannerFailed {
-                    error: String::from("blueprint planning is disabled"),
-                }
+                PlannerFailureDiscriminants::iter()
+                    .map(planner_failure_example)
+                    .map(UnknownReason::PlannerFailed)
+                    .collect()
             }
+        }
+    }
+
+    fn planner_failure_example(
+        kind: PlannerFailureDiscriminants,
+    ) -> PlannerFailure {
+        match kind {
+            PlannerFailureDiscriminants::Disabled => PlannerFailure::Disabled,
+            PlannerFailureDiscriminants::ConfigNotYetLoaded => {
+                PlannerFailure::ConfigNotYetLoaded
+            }
+            PlannerFailureDiscriminants::LimitReached => {
+                PlannerFailure::LimitReached { limit: 20000 }
+            }
+            PlannerFailureDiscriminants::Error => PlannerFailure::Error(
+                String::from("failed to assemble planning input"),
+            ),
         }
     }
 

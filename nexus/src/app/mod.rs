@@ -401,7 +401,7 @@ impl Nexus {
 
         let (blueprint_load_tx, blueprint_load_rx) = watch::channel(None);
         let (blueprint_planner_latest_tx, blueprint_planner_latest_rx) =
-            watch::channel(BlueprintPlannerLatest::NotYetRun);
+            watch::channel(BlueprintPlannerLatest::not_yet_run());
         let quiesce_log = log.new(o!("component" => "NexusQuiesceHandle"));
         let quiesce_opctx = OpContext::for_background(
             quiesce_log,

@@ -21,6 +21,7 @@ use nexus_db_model::saga_types::Saga;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OperatorStatus;
 use nexus_types::deployment::OperatorStatusDescription;
 use nexus_types::deployment::QuiesceInfo;
 use nexus_types::deployment::SledFilter;
@@ -674,7 +675,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let (operator_notes, planner_error) = self.operator_notes();
+        let operator_notes = self.operator_notes();
 
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
@@ -683,28 +684,32 @@ impl super::Nexus {
             suspended,
             contact_support,
             operator_notes,
-            planner_error: Nullable(planner_error),
         })
     }
 
-    /// Returns operator notes based on this Nexus's most recent planning
-    /// report, plus the error from the most recent planning activation (if it
-    /// failed).
-    fn operator_notes(&self) -> (update::OperatorNotes, Option<String>) {
-        // Clone what we need so that we don't hold the channel's lock.
-        let latest = self.update_status.latest_planner.borrow().clone();
+    /// Returns operator notes based on this Nexus's most recent planner
+    /// activation
+    fn operator_notes(&self) -> update::OperatorNotes {
         let quiesce_state = self.quiesce.state();
-        let status = latest.operator_status(QuiesceInfo::Known(&quiesce_state));
-        let time_planned = latest.latest_report().map(|r| r.time_planned);
+        let (time_updated, status) = {
+            // We borrow from the watch channel within this small block because
+            // the lock is held until this value is dropped.
+            let latest = self.update_status.latest_planner.borrow();
+            let time_updated = latest.time_updated();
+            let status = OperatorStatus::from_planner(
+                &latest,
+                QuiesceInfo::Known(&quiesce_state),
+            );
+            (time_updated, status)
+        };
         let OperatorStatusDescription { summary, support_details } =
             status.describe();
-        let notes = update::OperatorNotes {
-            time_planned: Nullable(time_planned),
+        update::OperatorNotes {
+            time_updated,
             status: update::OperatorStatus::from(&status),
             status_summary: summary,
             status_support_details: Nullable(support_details),
-        };
-        (notes, latest.last_error().map(String::from))
+        }
     }
 
     /// Identify known reasons why we would want a customer to call support

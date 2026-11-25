@@ -16,6 +16,7 @@ use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::BlueprintTargetSetError;
 use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
@@ -380,12 +381,25 @@ impl BlueprintPlanner {
                         );
                     }
                 }
-                return Ok(BlueprintPlannerStatus::Planned {
-                    parent_blueprint_id,
-                    error: format!("{error}"),
-                    report,
-                    blueprint_count,
-                    limit: self.blueprint_limit,
+                return Ok(match error {
+                    // This is expected when another Nexus made its own
+                    // blueprint the target after we read the current target.
+                    BlueprintTargetSetError::ParentNotTarget(_) => {
+                        BlueprintPlannerStatus::LostRace {
+                            parent_blueprint_id,
+                            report,
+                            blueprint_count,
+                            limit: self.blueprint_limit,
+                        }
+                    }
+                    BlueprintTargetSetError::NoSuchBlueprint(_)
+                    | BlueprintTargetSetError::Other(_) => {
+                        BlueprintPlannerStatus::Error(format!(
+                            "failed to make new blueprint the current \
+                             target: {}",
+                            InlineErrorChain::new(&error),
+                        ))
+                    }
                 });
             }
         }
@@ -593,7 +607,7 @@ mod test {
 
         // Finally, spin up the planner background task.
         let (tx_latest, rx_latest) =
-            watch::channel(BlueprintPlannerLatest::NotYetRun);
+            watch::channel(BlueprintPlannerLatest::not_yet_run());
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
@@ -626,10 +640,35 @@ mod test {
         };
 
         // The planner should have published its report.
+        let time_planned = match &*rx_latest.borrow() {
+            BlueprintPlannerLatest::Succeeded { time_planned, .. } => {
+                *time_planned
+            }
+            other => panic!("expected successful activation, found {other:?}"),
+        };
+
+        // We have not yet loaded the new target, so the planner still sees the
+        // initial blueprint as the target.  This is the same situation the
+        // planner would be in if another Nexus had made its own blueprint the
+        // target after we loaded the initial one.  Planning again should
+        // produce another child of the initial blueprint, which cannot become
+        // the target.
+        let status = serde_json::from_value::<BlueprintPlannerStatus>(
+            planner.activate(&opctx).await,
+        )
+        .expect("can't re-activate planner");
         assert_matches!(
-            *rx_latest.borrow(),
-            BlueprintPlannerLatest::Succeeded { .. }
+            status,
+            BlueprintPlannerStatus::LostRace {
+                parent_blueprint_id,
+                report: _,
+                blueprint_count: _,
+                limit: _,
+            } if parent_blueprint_id == initial_blueprint.id
         );
+        // The planner should have kept the results of the previous
+        // activation.
+        assert_eq!(rx_latest.borrow().time_updated(), time_planned);
 
         // Load and check the new target blueprint.
         bp_loader.activate(&opctx).await;
@@ -797,7 +836,7 @@ mod test {
             rx_config_loader,
             rx_inventory,
             rx_blueprint,
-            watch::Sender::new(BlueprintPlannerLatest::NotYetRun),
+            watch::Sender::new(BlueprintPlannerLatest::not_yet_run()),
             debug_dropbox,
             test_nexus_id,
         );

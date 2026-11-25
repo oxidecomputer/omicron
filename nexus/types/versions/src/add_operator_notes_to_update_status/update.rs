@@ -58,20 +58,16 @@ pub struct UpdateStatus {
     /// `false` does not mean the entire system is completely healthy.
     pub contact_support: bool,
 
-    /// Summary of what the update / reconfiguration system is doing
+    /// Summary of what system is doing related to updates and repairs
     pub operator_notes: OperatorNotes,
-
-    /// Error from the most recent run of the update / reconfiguration planner,
-    /// if it failed
-    pub planner_error: Nullable<String>,
 }
 
 // Response-only type: convert from new to old.
 impl From<UpdateStatus> for v2026_05_20_00::update::UpdateStatus {
     fn from(new: UpdateStatus) -> Self {
         // Destructure the whole struct so that adding a field causes a compile
-        // error here.  The older version has no place for the operator notes
-        // or the planner error, but those can be safely dropped.
+        // error here.  The older version has no place for the operator notes,
+        // but those can be safely dropped.
         let UpdateStatus {
             target_release,
             components_by_release_version,
@@ -79,7 +75,6 @@ impl From<UpdateStatus> for v2026_05_20_00::update::UpdateStatus {
             suspended,
             contact_support,
             operator_notes: _,
-            planner_error: _,
         } = new;
         Self {
             target_release,
@@ -94,16 +89,17 @@ impl From<UpdateStatus> for v2026_05_20_00::update::UpdateStatus {
 /// Summary of what the system is doing, intended for operators
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct OperatorNotes {
-    /// Time when the summarized planning run started
+    /// Time when these notes were last updated
     ///
-    /// This is null if no planning run has completed, in which case the status
-    /// is `unknown`.
-    pub time_planned: Nullable<DateTime<Utc>>,
+    /// The system updates these notes periodically, even when nothing has
+    /// changed. By contrast, `time_last_step_planned` in `UpdateStatus` only
+    /// changes when the system decides to take a new step.
+    pub time_updated: DateTime<Utc>,
 
     /// What the reconfiguration system is doing at a high level
     ///
     /// This is a best-effort debugging aid that may be incomplete or even
-    /// misleading.  (It should not be incorrect.  However, the system is often
+    /// misleading. (It should not be incorrect. However, the system is often
     /// waiting for more than one different thing to happen and the one reported
     /// here may not always be the most salient.)
     pub status: OperatorStatus,
@@ -111,7 +107,7 @@ pub struct OperatorNotes {
     /// Human-readable summary of what the system is doing
     ///
     /// This is a best-effort debugging aid that may be incomplete or even
-    /// misleading.  (It should not be incorrect.  However, the system is often
+    /// misleading. (It should not be incorrect. However, the system is often
     /// waiting for more than one different thing to happen and the one reported
     /// here may not always be the most salient.)
     pub status_summary: String,
@@ -128,7 +124,7 @@ pub struct OperatorNotes {
     pub status_support_details: Nullable<String>,
 }
 
-/// What the system is doing, as summarized for operators
+/// What the system is doing at a high level, as summarized for operators
 ///
 /// The `status_summary` and `status_support_details` fields of
 /// `OperatorNotes` describe the status in more detail.
@@ -147,8 +143,5 @@ pub enum OperatorStatus {
     /// The system is working on an automated software update
     WaitingForUpdate,
     /// Unable to determine the current status
-    ///
-    /// If the most recent planning run failed, `planner_error` in
-    /// `UpdateStatus` describes the error.
     Unknown,
 }

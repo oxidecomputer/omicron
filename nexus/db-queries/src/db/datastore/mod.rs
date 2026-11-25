@@ -166,6 +166,7 @@ pub use alert::FmRendezvousAlertCreateError;
 pub use bootstore::BootstoreGenerationBump;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
+pub use deployment::BlueprintTargetSetError;
 pub use deployment::BpTargetPruneable;
 pub use deployment::ExternalServiceNetworkingConfig;
 pub use deployment::KeepWhat;

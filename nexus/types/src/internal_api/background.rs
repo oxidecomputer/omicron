@@ -2,10 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::deployment::OperatorStatus;
 use crate::deployment::PlanningReport;
-use crate::deployment::QuiesceInfo;
-use crate::deployment::UnknownReason;
 use crate::external_api::alert;
 use chrono::DateTime;
 use chrono::Utc;
@@ -964,61 +961,48 @@ pub enum InventoryLoadStatus {
 #[derive(Clone, Debug)]
 pub enum BlueprintPlannerLatest {
     /// the planner has not run since this Nexus started
-    NotYetRun,
-    /// the planner has run, but no activation has succeeded since this Nexus
-    /// started
-    NeverSucceeded { error: String },
+    NotYetRun { time_created: DateTime<Utc> },
     /// the most recent planner activation succeeded
-    Succeeded { report: TimestampedPlanningReport },
-    /// the most recent planner activation failed
-    ///
-    /// `last_report` is the report from the most recent activation that
-    /// succeeded.
-    Failed { last_report: TimestampedPlanningReport, error: String },
+    Succeeded { time_planned: DateTime<Utc>, report: Arc<PlanningReport> },
+    /// the most recent planner activation did not produce a usable plan
+    Failed { time_planned: DateTime<Utc>, reason: PlannerFailure },
+}
+
+/// Why a planner activation did not produce a usable plan
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    test,
+    derive(strum::EnumDiscriminants),
+    strum_discriminants(derive(strum::EnumIter))
+)]
+pub enum PlannerFailure {
+    /// automatic blueprint planning is disabled
+    Disabled,
+    /// the reconfigurator config has not been loaded yet
+    ConfigNotYetLoaded,
+    /// the system has reached its limit on the number of blueprints
+    LimitReached { limit: u64 },
+    /// some other error occurred
+    Error(String),
 }
 
 impl BlueprintPlannerLatest {
-    /// Returns a summary of what the system is doing, intended for operators
+    /// Returns a value for a planner that has not yet run
+    pub fn not_yet_run() -> BlueprintPlannerLatest {
+        BlueprintPlannerLatest::NotYetRun { time_created: Utc::now() }
+    }
+
+    /// Returns when this value was last updated
     ///
-    /// If the planner has not produced a report, the status says why it is
-    /// unknown.
-    pub fn operator_status(&self, quiesce: QuiesceInfo<'_>) -> OperatorStatus {
+    /// This is when the planner activation described by this value started or,
+    /// if the planner has not yet run, when this value was created.
+    pub fn time_updated(&self) -> DateTime<Utc> {
         match self {
-            BlueprintPlannerLatest::NotYetRun => {
-                OperatorStatus::Unknown(UnknownReason::PlannerNotYetRun)
+            BlueprintPlannerLatest::NotYetRun { time_created } => *time_created,
+            BlueprintPlannerLatest::Succeeded { time_planned, .. }
+            | BlueprintPlannerLatest::Failed { time_planned, .. } => {
+                *time_planned
             }
-            BlueprintPlannerLatest::NeverSucceeded { error } => {
-                OperatorStatus::Unknown(UnknownReason::PlannerFailed {
-                    error: error.clone(),
-                })
-            }
-            BlueprintPlannerLatest::Succeeded { report }
-            | BlueprintPlannerLatest::Failed { last_report: report, .. } => {
-                report.report.operator_status(quiesce)
-            }
-        }
-    }
-
-    /// Returns the most recent report that the planner produced, if any
-    pub fn latest_report(&self) -> Option<&TimestampedPlanningReport> {
-        match self {
-            BlueprintPlannerLatest::NotYetRun
-            | BlueprintPlannerLatest::NeverSucceeded { .. } => None,
-            BlueprintPlannerLatest::Succeeded { report }
-            | BlueprintPlannerLatest::Failed { last_report: report, .. } => {
-                Some(report)
-            }
-        }
-    }
-
-    /// Returns the error from the most recent planner activation, if it
-    /// failed
-    pub fn last_error(&self) -> Option<&str> {
-        match self {
-            BlueprintPlannerLatest::NotYetRun
-            | BlueprintPlannerLatest::Succeeded { .. } => None,
-            BlueprintPlannerLatest::NeverSucceeded { error }
-            | BlueprintPlannerLatest::Failed { error, .. } => Some(error),
         }
     }
 
@@ -1030,67 +1014,47 @@ impl BlueprintPlannerLatest {
         time_planned: DateTime<Utc>,
         status: &BlueprintPlannerStatus,
     ) {
-        match status {
-            BlueprintPlannerStatus::Disabled => self
-                .record_error(String::from("blueprint planning is disabled")),
-            BlueprintPlannerStatus::ConfigNotYetLoaded => self.record_error(
-                String::from("reconfigurator config not yet loaded"),
-            ),
+        let failed = |reason: PlannerFailure| BlueprintPlannerLatest::Failed {
+            time_planned,
+            reason,
+        };
+        // <review covers="4 lines above">
+        // Let's inline this.
+        // </review>
+        *self = match status {
+            BlueprintPlannerStatus::Disabled => {
+                failed(PlannerFailure::Disabled)
+            }
+            BlueprintPlannerStatus::ConfigNotYetLoaded => {
+                failed(PlannerFailure::ConfigNotYetLoaded)
+            }
             BlueprintPlannerStatus::Error(error) => {
-                self.record_error(error.clone())
+                failed(PlannerFailure::Error(error.clone()))
             }
-            // In these two cases, the planner produced a report, but the
-            // blueprint it describes did not become the target.  That report
-            // would describe changes that are not actually happening, so we
-            // keep the report from the last activation that succeeded.
-            BlueprintPlannerStatus::LimitReached { limit, report: _ } => self
-                .record_error(format!(
-                    "blueprint planning stopped because the system has \
-                     reached its limit of {limit} blueprints"
-                )),
-            BlueprintPlannerStatus::Planned { error, .. } => {
-                self.record_error(format!(
-                    "failed to make new blueprint the current target: {error}"
-                ))
+            // In this case, the planner produced a report, but the blueprint
+            // it describes did not become the target and no other planner will
+            // make progress either.  The report would describe changes that are
+            // not actually happening.
+            BlueprintPlannerStatus::LimitReached { limit, report: _ } => {
+                failed(PlannerFailure::LimitReached { limit: *limit })
             }
+            // Another Nexus made a different blueprint the target before we
+            // could make ours the target.  Our report may not describe what
+            // the system is actually doing, so we keep whatever we had before.
+            // That may be a step behind, but it's not incorrect, and it will
+            // be replaced as soon as the planner runs again from the new
+            // target (which should happen within seconds, since a new target
+            // activates the planner).
+            BlueprintPlannerStatus::LostRace { .. } => return,
             BlueprintPlannerStatus::Unchanged { report, .. }
             | BlueprintPlannerStatus::Targeted { report, .. } => {
-                *self = BlueprintPlannerLatest::Succeeded {
-                    report: TimestampedPlanningReport {
-                        time_planned,
-                        report: Arc::clone(report),
-                    },
-                };
-            }
-        }
-    }
-
-    /// Records a failed activation
-    ///
-    /// This keeps the report from the most recent activation that succeeded,
-    /// if any.
-    fn record_error(&mut self, error: String) {
-        *self = match self {
-            BlueprintPlannerLatest::NotYetRun
-            | BlueprintPlannerLatest::NeverSucceeded { .. } => {
-                BlueprintPlannerLatest::NeverSucceeded { error }
-            }
-            BlueprintPlannerLatest::Succeeded { report: last_report }
-            | BlueprintPlannerLatest::Failed { last_report, .. } => {
-                BlueprintPlannerLatest::Failed {
-                    last_report: last_report.clone(),
-                    error,
+                BlueprintPlannerLatest::Succeeded {
+                    time_planned,
+                    report: Arc::clone(report),
                 }
             }
         };
     }
-}
-
-/// Planning report along with when the planner produced it
-#[derive(Clone, Debug)]
-pub struct TimestampedPlanningReport {
-    pub time_planned: DateTime<Utc>,
-    pub report: Arc<PlanningReport>,
 }
 
 /// The status of a `blueprint_planner` background task activation.
@@ -1124,11 +1088,14 @@ pub enum BlueprintPlannerStatus {
         limit: u64,
     },
 
-    /// Planning produced a new blueprint, but we failed to make it
-    /// the current target and so deleted it.
-    Planned {
+    /// Planning produced a new blueprint, but another Nexus made a different
+    /// blueprint the target first, so we deleted ours.
+    ///
+    /// This is expected when multiple Nexus instances plan concurrently.  If
+    /// we failed to make the new blueprint the target for any other reason,
+    /// the status is `Error` instead.
+    LostRace {
         parent_blueprint_id: BlueprintUuid,
-        error: String,
         report: Arc<PlanningReport>,
         blueprint_count: u64,
         limit: u64,
@@ -1996,6 +1963,7 @@ pub struct PhysicalDiskAdoptionStatus {
 mod test {
     use super::BlueprintPlannerLatest;
     use super::BlueprintPlannerStatus;
+    use super::PlannerFailure;
     use super::TufRepoInfo;
     use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
@@ -2016,154 +1984,173 @@ mod test {
     use std::sync::Arc;
     use std::time::Duration;
 
-    /// Returns the report and planning time that `latest` holds, panicking if
-    /// it holds none
-    fn latest_report(
-        latest: &BlueprintPlannerLatest,
-    ) -> (&Arc<PlanningReport>, DateTime<Utc>) {
-        let Some(report) = latest.latest_report() else {
-            panic!("expected a report, found: {latest:?}");
-        };
-        (&report.report, report.time_planned)
-    }
-
-    fn targeted(report: &Arc<PlanningReport>) -> BlueprintPlannerStatus {
-        BlueprintPlannerStatus::Targeted {
-            parent_blueprint_id: BlueprintUuid::new_v4(),
-            blueprint_id: BlueprintUuid::new_v4(),
-            report: Arc::clone(report),
-            blueprint_count: 1,
-            limit: 10,
-        }
-    }
-
-    // Before any activation succeeds, failed activations are recorded without
-    // a report, and the operator status says why it is unknown.
+    // Before the planner runs, the operator status says why it is unknown.
     #[test]
-    fn test_planner_latest_never_succeeded() {
-        let mut latest = BlueprintPlannerLatest::NotYetRun;
+    fn test_planner_latest_not_yet_run() {
+        let time = Utc::now();
+        let latest = BlueprintPlannerLatest::NotYetRun { time_created: time };
+        assert_eq!(latest.time_updated(), time);
         assert_eq!(
-            latest.operator_status(QuiesceInfo::Unknown),
+            OperatorStatus::from_planner(&latest, QuiesceInfo::Unknown),
             OperatorStatus::Unknown(UnknownReason::PlannerNotYetRun)
         );
-        assert!(latest.latest_report().is_none());
-        assert_eq!(latest.last_error(), None);
+    }
 
+    // Failed activations are recorded with their reason, and the operator
+    // status reports that reason.
+    #[test]
+    fn test_planner_latest_failed() {
         let cases = [
             (
                 BlueprintPlannerStatus::ConfigNotYetLoaded,
-                "reconfigurator config not yet loaded",
+                PlannerFailure::ConfigNotYetLoaded,
+            ),
+            (BlueprintPlannerStatus::Disabled, PlannerFailure::Disabled),
+            (
+                BlueprintPlannerStatus::Error(String::from("boom")),
+                PlannerFailure::Error(String::from("boom")),
             ),
             (
-                BlueprintPlannerStatus::Disabled,
-                "blueprint planning is disabled",
-            ),
-            (BlueprintPlannerStatus::Error(String::from("boom")), "boom"),
-            (
-                // A report from an activation whose blueprint did not become
-                // the target is not kept.
                 BlueprintPlannerStatus::LimitReached {
                     limit: 10,
                     report: Arc::new(PlanningReport::new()),
                 },
-                "blueprint planning stopped because the system has reached \
-                 its limit of 10 blueprints",
-            ),
-            (
-                BlueprintPlannerStatus::Planned {
-                    parent_blueprint_id: BlueprintUuid::new_v4(),
-                    error: String::from("boom"),
-                    report: Arc::new(PlanningReport::new()),
-                    blueprint_count: 1,
-                    limit: 10,
-                },
-                "failed to make new blueprint the current target: boom",
+                PlannerFailure::LimitReached { limit: 10 },
             ),
         ];
-        for (status, expected_error) in cases {
-            latest.record_activation(Utc::now(), &status);
+        for (status, expected_reason) in cases {
+            let time = Utc::now();
+            let latest = recorded(time, &status);
             match &latest {
-                BlueprintPlannerLatest::NeverSucceeded { error } => {
-                    assert_eq!(error, expected_error, "after {status:?}");
+                BlueprintPlannerLatest::Failed { time_planned, reason } => {
+                    assert_eq!(*time_planned, time, "after {status:?}");
+                    assert_eq!(*reason, expected_reason, "after {status:?}");
                 }
                 other => panic!("unexpected state after {status:?}: {other:?}"),
             }
-            assert!(latest.latest_report().is_none());
-            assert_eq!(latest.last_error(), Some(expected_error));
+            assert_eq!(latest.time_updated(), time);
             assert_eq!(
-                latest.operator_status(QuiesceInfo::Unknown),
-                OperatorStatus::Unknown(UnknownReason::PlannerFailed {
-                    error: String::from(expected_error),
-                })
+                OperatorStatus::from_planner(&latest, QuiesceInfo::Unknown),
+                OperatorStatus::Unknown(UnknownReason::PlannerFailed(
+                    expected_reason
+                ))
             );
         }
     }
 
-    // Once an activation succeeds, failed activations keep that activation's
-    // report, even if they produced a report of their own.
+    // Successful activations keep their report, and the operator status
+    // comes from it.
     #[test]
-    fn test_planner_latest_keeps_last_successful_report() {
-        let mut latest = BlueprintPlannerLatest::NotYetRun;
-
-        let report1 = Arc::new(PlanningReport::new());
-        let time1 = Utc::now();
-        latest.record_activation(time1, &targeted(&report1));
-        assert!(matches!(latest, BlueprintPlannerLatest::Succeeded { .. }));
-        let (report, time) = latest_report(&latest);
-        assert!(Arc::ptr_eq(report, &report1));
-        assert_eq!(time, time1);
-        assert_eq!(latest.last_error(), None);
-        assert_eq!(
-            latest.operator_status(QuiesceInfo::Unknown),
-            report1.operator_status(QuiesceInfo::Unknown)
-        );
-
-        let failures = [
-            BlueprintPlannerStatus::ConfigNotYetLoaded,
-            BlueprintPlannerStatus::Disabled,
-            BlueprintPlannerStatus::Error(String::from("boom")),
-            BlueprintPlannerStatus::LimitReached {
-                limit: 10,
-                report: Arc::new(PlanningReport::new()),
-            },
-            BlueprintPlannerStatus::Planned {
+    fn test_planner_latest_succeeded() {
+        let report = Arc::new(PlanningReport::new());
+        let cases = [
+            BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id: BlueprintUuid::new_v4(),
-                error: String::from("boom"),
-                report: Arc::new(PlanningReport::new()),
+                blueprint_id: BlueprintUuid::new_v4(),
+                report: Arc::clone(&report),
+                blueprint_count: 1,
+                limit: 10,
+            },
+            BlueprintPlannerStatus::Unchanged {
+                parent_blueprint_id: BlueprintUuid::new_v4(),
+                report: Arc::clone(&report),
                 blueprint_count: 1,
                 limit: 10,
             },
         ];
-        for status in failures {
-            latest.record_activation(Utc::now(), &status);
-            assert!(
-                matches!(latest, BlueprintPlannerLatest::Failed { .. }),
-                "unexpected state after {status:?}: {latest:?}"
+        for status in cases {
+            let time = Utc::now();
+            let latest = recorded(time, &status);
+            let BlueprintPlannerLatest::Succeeded {
+                time_planned,
+                report: latest_report,
+            } = &latest
+            else {
+                panic!("unexpected state after {status:?}: {latest:?}");
+            };
+            assert_eq!(*time_planned, time, "after {status:?}");
+            assert!(Arc::ptr_eq(latest_report, &report), "after {status:?}");
+            assert_eq!(latest.time_updated(), time);
+            assert_eq!(
+                OperatorStatus::from_planner(&latest, QuiesceInfo::Unknown),
+                report.operator_status(QuiesceInfo::Unknown),
+                "after {status:?}",
             );
-            let (report, time) = latest_report(&latest);
-            assert!(Arc::ptr_eq(report, &report1), "after {status:?}");
-            assert_eq!(time, time1, "after {status:?}");
-            assert!(latest.last_error().is_some(), "after {status:?}");
         }
+    }
 
-        // A later successful activation replaces the report and clears the
-        // error.
-        let report2 = Arc::new(PlanningReport::new());
-        let time2 = Utc::now();
-        latest.record_activation(
-            time2,
+    // When another Nexus wins the race to set the target, we keep whatever we
+    // had before.
+    #[test]
+    fn test_planner_latest_lost_race() {
+        let lost_race = BlueprintPlannerStatus::LostRace {
+            parent_blueprint_id: BlueprintUuid::new_v4(),
+            report: Arc::new(PlanningReport::new()),
+            blueprint_count: 1,
+            limit: 10,
+        };
+
+        let time0 = Utc::now();
+        let mut latest =
+            BlueprintPlannerLatest::NotYetRun { time_created: time0 };
+        latest.record_activation(Utc::now(), &lost_race);
+        assert!(
+            matches!(
+                latest,
+                BlueprintPlannerLatest::NotYetRun { time_created }
+                    if time_created == time0
+            ),
+            "{latest:?}"
+        );
+
+        let time1 = Utc::now();
+        let mut latest = recorded(
+            time1,
+            &BlueprintPlannerStatus::Error(String::from("boom")),
+        );
+        latest.record_activation(Utc::now(), &lost_race);
+        assert!(
+            matches!(
+                &latest,
+                BlueprintPlannerLatest::Failed {
+                    time_planned,
+                    reason: PlannerFailure::Error(error),
+                } if *time_planned == time1 && error == "boom"
+            ),
+            "{latest:?}"
+        );
+
+        let report1 = Arc::new(PlanningReport::new());
+        let time1 = Utc::now();
+        let mut latest = recorded(
+            time1,
             &BlueprintPlannerStatus::Unchanged {
                 parent_blueprint_id: BlueprintUuid::new_v4(),
-                report: Arc::clone(&report2),
+                report: Arc::clone(&report1),
                 blueprint_count: 1,
                 limit: 10,
             },
         );
-        assert!(matches!(latest, BlueprintPlannerLatest::Succeeded { .. }));
-        let (report, time) = latest_report(&latest);
-        assert!(Arc::ptr_eq(report, &report2));
-        assert_eq!(time, time2);
-        assert_eq!(latest.last_error(), None);
+        latest.record_activation(Utc::now(), &lost_race);
+        assert!(
+            matches!(
+                &latest,
+                BlueprintPlannerLatest::Succeeded { time_planned, report }
+                    if *time_planned == time1 && Arc::ptr_eq(report, &report1)
+            ),
+            "{latest:?}"
+        );
+    }
+
+    /// Returns the value that results from recording `status` (at time `time`)
+    /// starting from `NotYetRun`
+    fn recorded(
+        time: DateTime<Utc>,
+        status: &BlueprintPlannerStatus,
+    ) -> BlueprintPlannerLatest {
+        let mut latest = BlueprintPlannerLatest::not_yet_run();
+        latest.record_activation(time, status);
+        latest
     }
 
     #[test]

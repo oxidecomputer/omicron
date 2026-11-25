@@ -4,7 +4,6 @@
 
 //! Version `ADD_OPERATOR_NOTES_TO_UPDATE_STATUS` of the Nexus external API.
 //!
-//! Adds `operator_notes` and `planner_error` fields to the `UpdateStatus`
-//! response type.
+//! Adds an `operator_notes` field to the `UpdateStatus` response type.
 
 pub mod update;
