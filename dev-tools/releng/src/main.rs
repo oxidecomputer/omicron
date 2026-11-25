@@ -93,6 +93,9 @@ const TUF_PACKAGES: [&PackageName; 12] = [
 
 const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/3/dev/";
 const HELIOS_REPO: &str = "https://github.com/oxidecomputer/helios.git";
+/// The default branch for Helios packages; appended to `opte_version` when a
+/// branch is not listed.
+const HELIOS_BRANCH: &str = "3.0";
 
 static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
@@ -269,8 +272,14 @@ async fn main() -> Result<()> {
         &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
             .await?,
     )?);
-    let opte_version =
+    let mut opte_version =
         fs::read_to_string(WORKSPACE_DIR.join("tools/opte_version")).await?;
+    if !opte_version.contains('-') {
+        // If no branch is present, append the default Helios branch, so that we
+        // don't accidentally install a version from a backport.
+        opte_version = format!("{}-{HELIOS_BRANCH}", opte_version.trim());
+    }
+    let opte_version = opte_version.trim();
 
     // Parse tools/opte_version_override for OPTE_COMMIT. When set, we
     // download the override p5p from buildomat and use it as a package
@@ -282,7 +291,6 @@ async fn main() -> Result<()> {
     if let Some(ov) = &opte_override {
         info!(logger, "OPTE override active: commit={}", ov.commit);
     }
-    let opte_version = opte_version.trim();
 
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(Duration::from_secs(15))

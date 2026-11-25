@@ -54,6 +54,11 @@ fi
 
 # Grab the version of the opte package to install
 OPTE_VERSION="$(cat "$OMICRON_TOP/tools/opte_version")"
+if [[ $OPTE_VERSION != *-* ]]; then
+    # If no branch is present, append the default Helios branch, so that we
+    # don't accidentally install a version from a backport.
+    OPTE_VERSION+=-3.0
+fi
 
 # Source the OPTE override (if any). When OPTE_COMMIT is set, the desired
 # OPTE version isn't published to the helios pkg repo yet, so we install
