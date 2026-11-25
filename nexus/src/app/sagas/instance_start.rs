@@ -1081,8 +1081,6 @@ async fn sis_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
 async fn sis_ensure_unregistered(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-
-    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
