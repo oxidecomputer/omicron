@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -41,6 +42,7 @@ impl DataStore {
         opctx: &OpContext,
         config: &networking::BfdSessionEnable,
     ) -> CreateResult<BfdSession> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -72,6 +74,7 @@ impl DataStore {
         opctx: &OpContext,
         config: &networking::BfdSessionDisable,
     ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 

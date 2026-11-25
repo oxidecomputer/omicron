@@ -14,7 +14,7 @@ use crate::fm::{CertificateFact, DiskFact, SagaFact, SmfServiceFact};
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
-    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, SitrepUuid,
+    AlertUuid, CaseEreportUuid, CaseUuid, FactUuid, ProblemUuid, SitrepUuid,
     SupportBundleUuid,
 };
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,10 @@ pub struct Case {
     /// Diagnosis-engine-derived facts attached to this case. See
     /// [`Fact`] for semantics.
     pub facts: IdOrdMap<Fact>,
+    /// Problems associated with this case, indexed by their ID.
+    ///
+    /// See [`CaseProblem`] for details.
+    pub problems: IdOrdMap<CaseProblem>,
 }
 
 impl Case {
@@ -50,6 +54,40 @@ impl Case {
         sitrep_id: Option<SitrepUuid>,
     ) -> DisplayCase<'_> {
         DisplayCase { case: self, indent, sitrep_id, colored: false }
+    }
+
+    pub fn display_summary(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayCaseSummary<'_> {
+        DisplayCaseSummary { case: self, indent, sitrep_id, colored: false }
+    }
+
+    /// Returns `true` if any records were added to this case in the given
+    /// `sitrep_id`.
+    fn additions_in_sitrep(&self, sitrep_id: SitrepUuid) -> bool {
+        self.ereports.iter().any(|e| e.assigned_sitrep_id == sitrep_id)
+            || self
+                .alerts_requested
+                .iter()
+                .any(|a| a.requested_sitrep_id == sitrep_id)
+            || self
+                .support_bundles_requested
+                .iter()
+                .any(|b| b.requested_sitrep_id == sitrep_id)
+            || self
+                .facts
+                .iter()
+                .any(|f| f.metadata.created_sitrep_id == sitrep_id)
+            || self.problems.iter().any(|p| {
+                // TODO(eliza): we *might* also consider checking if the problem
+                // itself has a revision that was created in this sitrep, but
+                // that would require passing in the whole sitrep...and, I'm on
+                // the fence as to whether that should be considered a change to
+                // the *case* or not...
+                p.linked_sitrep_id == sitrep_id
+            })
     }
 }
 
@@ -312,7 +350,7 @@ impl fmt::Display for DisplayFact<'_> {
         let payload =
             serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
         display::fmt_json_value(f, "payload", &payload, indent, styles)?;
-        writeln!(f)
+        Ok(())
     }
 }
 
@@ -357,6 +395,53 @@ impl iddqd::IdOrdItem for SupportBundleRequest {
     iddqd::id_upcast!();
 }
 
+/// An association between a [`Case`] and a problem.
+///
+/// These associations are used by diagnosis engines to track whether a problem
+/// exists for a given case across multiple sitreps. The relationship between
+/// cases and problems is many-to-many: a problem may be created due to the
+/// observations contained in one case, but diagnosis engines may determine
+/// that other cases contain observations also related to the same problem. In
+/// the other direction, a case may result in the diagnosis of any number of
+/// problems.
+///
+/// These associations are purely internal to the sitrep, and are used for
+/// internal bookkeeping, such as tracking whether or not a case already has an
+/// active problem of a given code. Unlike problem revision requests and alert
+/// or support bundle link requests, they do not correspond to any record
+/// outside the sitrep, and do not request that rendezvous take any externally
+/// visible action.
+///
+/// The lifetime of this association is tied to that of the case. When the
+/// linked case is no longer present in the current sitrep, these associations
+/// are not carried forward into the next sitrep. However, they may outlive the
+/// presence of the linked problem in the sitrep: if the problem is resolved,
+/// this record should be kept to represent that a resolved problem was created
+/// for the case.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaseProblem {
+    /// The ID of the associated problem.
+    pub problem_id: ProblemUuid,
+    /// The sitrep in which this association between the case and the problem
+    /// was first created.
+    ///
+    /// This is *not* the sitrep in which either the case or the problem was
+    /// created.
+    pub linked_sitrep_id: SitrepUuid,
+    /// A human-readable comment explaining why the problem is associated with
+    /// the case, for debugging purposes.
+    pub comment: String,
+}
+
+impl iddqd::IdOrdItem for CaseProblem {
+    type Key<'a> = &'a ProblemUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.problem_id
+    }
+
+    iddqd::id_upcast!();
+}
+
 /// Displays a [`Case`], as returned by [`Case::display_indented`].
 #[must_use = "this struct does nothing unless displayed"]
 pub struct DisplayCase<'a> {
@@ -374,10 +459,10 @@ impl DisplayCase<'_> {
     }
 }
 
+const BULLET: &str = "* ";
+
 impl fmt::Display for DisplayCase<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const BULLET: &str = "* ";
-
         let &Self {
             case:
                 Case {
@@ -387,6 +472,7 @@ impl fmt::Display for DisplayCase<'_> {
                     alerts_requested,
                     support_bundles_requested,
                     facts,
+                    problems,
                 },
             indent,
             sitrep_id,
@@ -405,20 +491,13 @@ impl fmt::Display for DisplayCase<'_> {
             if indent > 0 { BULLET } else { "" },
             heading.style(format_args!("case {id}")),
         )?;
-        writeln!(
-            f,
-            "{:>indent$}{}",
-            "",
-            heading.style("=========================================")
-        )?;
         metadata
             .display_multiline(indent, sitrep_id)
             .colored(colored)
             .fmt(f)?;
 
         if !ereports.is_empty() {
-            writeln!(f, "\n{:>indent$}{}:", "", heading.style("ereports"))?;
-            writeln!(f, "{:>indent$}{}", "", heading.style("---------"))?;
+            writeln!(f, "{:>indent$}{}:", "", heading.style("ereports"))?;
 
             let indent = indent + 2;
             for CaseEreport { id, ereport, assigned_sitrep_id, comment } in
@@ -476,13 +555,11 @@ impl fmt::Display for DisplayCase<'_> {
                     "",
                     styles.label(ASSIGNMENT_ID, WIDTH)
                 )?;
-                writeln!(f)?;
             }
         }
 
         if !facts.is_empty() {
-            writeln!(f, "\n{:>indent$}{}:", "", heading.style("facts"))?;
-            writeln!(f, "{:>indent$}{}", "", heading.style("------"))?;
+            writeln!(f, "{:>indent$}{}:", "", heading.style("facts"))?;
 
             let indent = indent + 2;
             for fact in facts.iter() {
@@ -495,15 +572,9 @@ impl fmt::Display for DisplayCase<'_> {
         if !alerts_requested.is_empty() {
             writeln!(
                 f,
-                "\n{:>indent$}{}:",
+                "{:>indent$}{}:",
                 "",
                 heading.style("alerts requested")
-            )?;
-            writeln!(
-                f,
-                "{:>indent$}{}",
-                "",
-                heading.style("-----------------")
             )?;
 
             let indent = indent + 2;
@@ -543,22 +614,15 @@ impl fmt::Display for DisplayCase<'_> {
                     styles.label(REQUESTED_IN, WIDTH),
                     this_sitrep(*requested_sitrep_id)
                 )?;
-                writeln!(f)?;
             }
         }
 
         if !support_bundles_requested.is_empty() {
             writeln!(
                 f,
-                "\n{:>indent$}{}:",
+                "{:>indent$}{}:",
                 "",
                 heading.style("support bundles requested")
-            )?;
-            writeln!(
-                f,
-                "{:>indent$}{}",
-                "",
-                heading.style("-------------------------")
             )?;
 
             let indent = indent + 2;
@@ -591,12 +655,179 @@ impl fmt::Display for DisplayCase<'_> {
                 )?;
                 writeln!(f, "{:>indent$}{}", "", styles.label(DATA, 0))?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
-                writeln!(f)?;
             }
         }
 
-        writeln!(f)?;
+        if !problems.is_empty() {
+            writeln!(
+                f,
+                "{:>indent$}{}:",
+                "",
+                heading.style("active problems")
+            )?;
 
+            let indent = indent + 2;
+            for CaseProblem { problem_id, linked_sitrep_id, comment } in
+                problems.iter()
+            {
+                const ADDED_IN: &str = "added in:";
+                const WIDTH: usize = const_max_len(&[ADDED_IN]);
+
+                writeln!(
+                    f,
+                    "{BULLET:>indent$}{}",
+                    heading.style(format_args!("problem {problem_id}"))
+                )?;
+                display::Comment::from(comment)
+                    .indent(indent)
+                    .colored(colored)
+                    .fmt(f)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {linked_sitrep_id}{}",
+                    "",
+                    styles.label(ADDED_IN, WIDTH),
+                    this_sitrep(*linked_sitrep_id)
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Displays a summary of a [`Case`] as a single line, as returned by
+/// [`Case::display_summary`].
+///
+/// The line begins with a two-column gutter describing whether the case had
+/// interesting activity in the sitrep being displayed, if this displayer was
+/// provided with a sitrep UUID. This format is summarized by [`Self::legend`].
+///
+/// - `+` if the case was opened in the current sitrep,
+/// - `*` if it was opened in an earlier sitrep and data was added in the
+///   current sitrep,
+/// - `-` if the case was opened in an earlier sitrep and closed in this sitrep,
+/// - `+-` if the case was added and closed in this sitrep,
+/// - `*-` if the case was both modified *and* closed in this sitrep,
+/// - `+!` if the case was opened in this sitrep and closed in an earlier
+///   sitrep, which is probably a bug
+///
+/// Alongside the `open`/`closed` state that follows, the gutter allows the
+/// reader to determine whether these states are the result of changes in the
+/// current sitrep, or if the case was already in that state in an earlier
+/// sitrep. If no sitrep ID was provided, the gutter is blank, so that rows
+/// remain aligned.
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayCaseSummary<'a> {
+    case: &'a Case,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayCaseSummary<'_> {
+    /// Explains the gutter markers in [`DisplayCaseSummary`]'s output. Callers
+    /// displaying a list of case summaries should print this legend.
+    pub fn legend() -> DisplayCaseSummaryLegend {
+        DisplayCaseSummaryLegend { colored: false }
+    }
+
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+pub struct DisplayCaseSummaryLegend {
+    colored: bool,
+}
+
+impl DisplayCaseSummaryLegend {
+    pub fn colored(self, colored: bool) -> Self {
+        Self { colored }
+    }
+}
+
+impl fmt::Display for DisplayCaseSummaryLegend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { colored } = self;
+        let styles = display::Styles::new(colored);
+        write!(
+            f,
+            "activity in this sitrep: {} created, {} changed, {} closed",
+            styles.added_marker(),
+            styles.modified_marker(),
+            styles.removed_marker(),
+        )
+    }
+}
+
+impl fmt::Display for DisplayCaseSummary<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { case, indent, sitrep_id, colored } = self;
+        let Case {
+            id,
+            metadata,
+            ereports: _,
+            alerts_requested: _,
+            support_bundles_requested: _,
+            facts: _,
+            problems: _,
+        } = case;
+        let Metadata { created_sitrep_id, closed_sitrep_id, de, comment } =
+            metadata;
+
+        let styles = display::Styles::new(colored);
+
+        const OPEN: &str = "open";
+        const CLOSED: &str = "closed";
+        const STATE_WIDTH: usize = display::const_max_len(&[OPEN, CLOSED]);
+
+        let state = if closed_sitrep_id.is_some() { CLOSED } else { OPEN };
+        let (diff1, diff2) = match sitrep_id {
+            Some(this_sitrep) => {
+                let opened_here = *created_sitrep_id == this_sitrep;
+                let closed_here = closed_sitrep_id == &Some(this_sitrep);
+                let modified_here = case.additions_in_sitrep(this_sitrep);
+                let diff1 = if opened_here {
+                    styles.added_marker()
+                } else if modified_here {
+                    styles.modified_marker()
+                } else if closed_here {
+                    styles.removed_marker()
+                } else {
+                    styles.normal().style(' ')
+                };
+                let diff2 = if closed_here && (opened_here || modified_here) {
+                    // If we are already displaying an added or modified marker,
+                    // and the case was closed in this sitrep, add the removed
+                    // marker in the second column.
+                    styles.removed_marker()
+                } else if opened_here && closed_sitrep_id.is_some() {
+                    // If the case was opened in this sitrep, and closed in an
+                    // *earlier* sitrep, that...doesn't make sense! Display a
+                    // warning marker.
+                    styles.warning().style('!')
+                } else {
+                    styles.normal().style(' ')
+                };
+                (diff1, diff2)
+            }
+            None => (styles.normal().style(' '), styles.normal().style(' ')),
+        };
+        let de_width = DiagnosisEngineKind::MAX_WIDTH;
+
+        let comment = display::Comment::new(comment, 0)
+            .wrap_mode(display::WrapMode::SingleLine)
+            .colored(colored);
+        write!(
+            f,
+            "{:>indent$}{diff1}{diff2} {} \
+             {state:<STATE_WIDTH$} {de:<de_width$} {comment}",
+            "",
+            styles.heading().style(format_args!("case {id}")),
+        )?;
         Ok(())
     }
 }
@@ -612,8 +843,8 @@ mod tests {
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
         AlertUuid, CaseUuid, CollectionUuid, EreporterRestartUuid, FactUuid,
-        OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid, SupportBundleUuid,
-        ZpoolUuid,
+        OmicronZoneUuid, PhysicalDiskUuid, ProblemUuid, SitrepUuid,
+        SupportBundleUuid, ZpoolUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -782,6 +1013,18 @@ mod tests {
             })
             .unwrap();
 
+        let mut problems = IdOrdMap::new();
+        problems
+            .insert_unique(CaseProblem {
+                problem_id: ProblemUuid::from_str(
+                    "a0b1e3a0-4c0d-4e5f-8a9b-0c1d2e3f4a5b",
+                )
+                .unwrap(),
+                linked_sitrep_id: closed_sitrep_id,
+                comment: "the rectifier is missing".to_string(),
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -796,6 +1039,7 @@ mod tests {
             alerts_requested,
             support_bundles_requested,
             facts,
+            problems,
         };
 
         (case, closed_sitrep_id)

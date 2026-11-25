@@ -9,6 +9,7 @@ use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
 use nexus_db_model::SemverVersion;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::helpers::insert_test_tuf_repo;
 use nexus_test_interface::NexusServer;
@@ -16,13 +17,16 @@ use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::policy::FleetRole;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::TufRepoUpload;
 use nexus_types::external_api::update::TufRepoUploadStatus;
+use nexus_types::identity::Asset;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
@@ -607,6 +611,35 @@ fn assert_error_message_contains(
         body
     );
     Ok(())
+}
+
+#[nexus_test]
+async fn test_repo_upload_requires_fleet_admin(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Fleet collaborator is the highest role that can't upload a repo. Pass a
+    // malformed body to verify that Nexus rejects the request with 403 before
+    // validating the body (which would fail with 400).
+    grant_iam(
+        client,
+        "/v1/system",
+        FleetRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+    let url = "/v1/system/update/repositories?file_name=repo.zip";
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, url)
+            .raw_body(Some("not a zip".to_string()))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 #[nexus_test]

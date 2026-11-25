@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::SP_SIM_CONFIG_PATH;
 use gateway_ereport_messages::Ena;
 use gateway_ereport_messages::Request;
 use gateway_ereport_messages::RequestIdV0;
@@ -18,14 +19,6 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use zerocopy::IntoBytes;
 use zerocopy::TryFromBytes;
-
-/// Path to the sp-sim configuration.
-///
-/// Thie is shared with gateway's integration tests.
-const SP_SIM_CONFIG_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../gateway-test-utils/configs/sp_sim_config.test.toml"
-);
 
 fn ereport_request(request_id: RequestIdV0) -> Request {
     Request::V0(RequestV0::new(RestartId::ZERO, request_id, Ena::NONE, 1, None))
@@ -139,5 +132,6 @@ async fn ereports_survive_malformed_requests() {
     send_probe_and_check_response(&sock, RequestIdV0(3), expected_restart_id)
         .await;
 
+    simrack.teardown().await.expect("simulated SP tasks ran until teardown");
     logctx.cleanup_successful();
 }

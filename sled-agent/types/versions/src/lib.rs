@@ -133,6 +133,10 @@ pub mod v63;
 pub mod v64;
 #[path = "add_disk_location_to_inventory/mod.rs"]
 pub mod v65;
+#[path = "add_acpi_shutdown_timeout/mod.rs"]
+pub mod v66;
+#[path = "wicket_ssh_auth/mod.rs"]
+pub mod v67;
 #[path = "multicast_support/mod.rs"]
 pub mod v7;
 #[path = "delegate_zvol_to_propolis/mod.rs"]
