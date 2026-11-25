@@ -360,7 +360,7 @@ mod region_replacement {
                 status.user_data.region_snapshot_replacements_in_progress, 0,
                 "{status:#?}"
             );
-            assert_eq!(status.user_data.problems.len(), 1, "{status:#?}");
+            assert_eq!(status.user_data.risks.len(), 1, "{status:#?}");
 
             DeletedVolumeTest {
                 log: cptestctx.logctx.log.new(o!()),
@@ -2084,7 +2084,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Before anything is expunged, the expunge precheck passes.
     let status = expunge_precheck_get(client).await;
     assert!(status.ok, "{status:#?}");
-    assert!(status.user_data.problems.is_empty(), "{status:#?}");
+    assert!(status.user_data.risks.is_empty(), "{status:#?}");
 
     // Before expunging the physical disk, save the DB model
     let Disk::Crucible(db_disk) =
@@ -2142,7 +2142,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     assert!(
         status
             .user_data
-            .problems
+            .risks
             .iter()
             .any(|p| p.contains(&physical_disk_id.to_string())),
         "{status:#?}"

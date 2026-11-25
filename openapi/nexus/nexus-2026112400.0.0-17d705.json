@@ -32124,13 +32124,6 @@
             "format": "uint64",
             "minimum": 0
           },
-          "problems": {
-            "description": "Human-readable descriptions of problems found by this check\n\nIf this list is empty, this check passed.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "region_replacements_in_progress": {
             "description": "Number of region replacements that have not finished",
             "type": "integer",
@@ -32142,13 +32135,20 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "risks": {
+            "description": "Human-readable descriptions of problems found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "expunged_disks_with_data",
-          "problems",
           "region_replacements_in_progress",
-          "region_snapshot_replacements_in_progress"
+          "region_snapshot_replacements_in_progress",
+          "risks"
         ]
       },
       "UserId": {

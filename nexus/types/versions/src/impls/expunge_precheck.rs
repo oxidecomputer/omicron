@@ -8,11 +8,11 @@ use crate::latest::expunge_precheck::UserDataPrecheck;
 impl ExpungePrecheck {
     /// Assembles an `ExpungePrecheck` from the results of each check.
     ///
-    /// This computes `ok` from the checks' problems. Callers should use this
+    /// This computes `ok` from the checks' risks. Callers should use this
     /// rather than constructing an `ExpungePrecheck` directly so that `ok` is
     /// always consistent with the checks.
     pub fn new(user_data: UserDataPrecheck) -> Self {
-        let ok = user_data.problems.is_empty();
+        let ok = user_data.risks.is_empty();
         ExpungePrecheck { ok, user_data }
     }
 }

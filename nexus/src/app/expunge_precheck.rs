@@ -18,9 +18,9 @@ use omicron_common::api::external::Error;
 use std::fmt;
 
 impl super::Nexus {
-    /// Checks whether expunging a working sled or physical disk would create
-    /// problems because the system is still recovering from previous
-    /// expungements or failures
+    /// Checks whether expunging a working sled or physical disk would be risky
+    /// because the system is still recovering from previous expungements or
+    /// failures
     pub(crate) async fn expunge_precheck(
         &self,
         opctx: &OpContext,
@@ -79,8 +79,8 @@ fn check_crucible_data(
                 expunged_resources.len()
             ))
         })?;
-    let problems =
-        crucible_data_problems(expunged_resources, replacements_in_progress)
+    let risks =
+        crucible_data_risks(expunged_resources, replacements_in_progress)
             .iter()
             .map(|p| p.to_string())
             .collect();
@@ -90,42 +90,42 @@ fn check_crucible_data(
             .region_replacements,
         region_snapshot_replacements_in_progress: replacements_in_progress
             .region_snapshot_replacements,
-        problems,
+        risks,
     })
 }
 
-/// Returns the problems that the user data check found.
-fn crucible_data_problems(
+/// Returns expungement risks related to Crucible data
+fn crucible_data_risks(
     expunged_resources: &ExpungedPhysicalDiskResourcesMap,
     replacements_in_progress: InProgressCrucibleReplacements,
-) -> Vec<UserDataProblem<'_>> {
+) -> Vec<UserDataRisk<'_>> {
     let InProgressCrucibleReplacements {
         region_replacements,
         region_snapshot_replacements,
     } = replacements_in_progress;
 
-    let mut problems: Vec<_> = expunged_resources
+    let mut risks: Vec<_> = expunged_resources
         .iter()
-        .map(UserDataProblem::ExpungedDiskHasData)
+        .map(UserDataRisk::ExpungedDiskHasData)
         .collect();
     if region_replacements > 0 {
-        problems.push(UserDataProblem::RegionReplacementsInProgress(
+        risks.push(UserDataRisk::RegionReplacementsInProgress(
             region_replacements,
         ));
     }
     if region_snapshot_replacements > 0 {
-        problems.push(UserDataProblem::RegionSnapshotReplacementsInProgress(
+        risks.push(UserDataRisk::RegionSnapshotReplacementsInProgress(
             region_snapshot_replacements,
         ));
     }
-    problems
+    risks
 }
 
-/// A problem found by the user data check
+/// A risk identified by the user data check
 ///
 /// The external API reports only the `Display` form of these.
 #[derive(Debug, PartialEq, Eq)]
-enum UserDataProblem<'a> {
+enum UserDataRisk<'a> {
     /// an expunged physical disk still holds user data that has not been
     /// re-replicated elsewhere
     ExpungedDiskHasData(&'a ExpungedPhysicalDiskResources),
@@ -135,10 +135,10 @@ enum UserDataProblem<'a> {
     RegionSnapshotReplacementsInProgress(u64),
 }
 
-impl fmt::Display for UserDataProblem<'_> {
+impl fmt::Display for UserDataRisk<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UserDataProblem::ExpungedDiskHasData(r) => write!(
+            UserDataRisk::ExpungedDiskHasData(r) => write!(
                 f,
                 "physical disk {} (serial {}) is expunged but still holds data \
                  (read-write regions: {}, read-only regions: {}, region \
@@ -149,10 +149,10 @@ impl fmt::Display for UserDataProblem<'_> {
                 r.num_read_only_regions,
                 r.num_region_snapshots,
             ),
-            UserDataProblem::RegionReplacementsInProgress(n) => {
+            UserDataRisk::RegionReplacementsInProgress(n) => {
                 write!(f, "region replacements in progress: {n}")
             }
-            UserDataProblem::RegionSnapshotReplacementsInProgress(n) => {
+            UserDataRisk::RegionSnapshotReplacementsInProgress(n) => {
                 write!(f, "region snapshot replacements in progress: {n}")
             }
         }
@@ -171,15 +171,15 @@ mod test {
             region_snapshot_replacements: 0,
         };
 
-        // Nothing outstanding: no problems.
+        // Nothing outstanding: no risks.
         let check = check_crucible_data(
             &ExpungedPhysicalDiskResourcesMap::default(),
             none_in_progress,
         )
         .expect("checked user data");
-        assert!(check.problems.is_empty(), "{check:?}");
+        assert!(check.risks.is_empty(), "{check:?}");
 
-        // A disk with resources on it is a problem even when no replacement
+        // A disk with resources on it is a risk even when no replacement
         // requests exist yet.
         let disk_id = PhysicalDiskUuid::new_v4();
         let disk_serial = String::from("disk-serial");
@@ -187,23 +187,22 @@ mod test {
         resources.add_read_write_regions(disk_id, disk_serial.clone(), 1);
         resources.add_read_only_regions(disk_id, disk_serial.clone(), 2);
         resources.add_region_snapshots(disk_id, disk_serial.clone(), 3);
-        let problems = crucible_data_problems(&resources, none_in_progress);
-        let [UserDataProblem::ExpungedDiskHasData(r)] = problems.as_slice()
-        else {
-            panic!("unexpected problems: {problems:?}");
+        let risks = crucible_data_risks(&resources, none_in_progress);
+        let [UserDataRisk::ExpungedDiskHasData(r)] = risks.as_slice() else {
+            panic!("unexpected risks: {risks:?}");
         };
         assert_eq!(r.disk_id, disk_id);
         let check = check_crucible_data(&resources, none_in_progress)
             .expect("checked user data");
         assert_eq!(check.expunged_disks_with_data, 1, "{check:?}");
-        assert_eq!(check.problems.len(), 1, "{check:?}");
+        assert_eq!(check.risks.len(), 1, "{check:?}");
         assert!(
-            check.problems[0].contains(&disk_id.to_string())
-                && check.problems[0].contains(&disk_serial),
+            check.risks[0].contains(&disk_id.to_string())
+                && check.risks[0].contains(&disk_serial),
             "{check:?}"
         );
 
-        // In-progress replacements are problems even when no resources remain
+        // In-progress replacements are risks even when no resources remain
         // on expunged disks.
         let no_resources = ExpungedPhysicalDiskResourcesMap::default();
         let in_progress = InProgressCrucibleReplacements {
@@ -211,10 +210,10 @@ mod test {
             region_snapshot_replacements: 2,
         };
         assert_eq!(
-            crucible_data_problems(&no_resources, in_progress),
+            crucible_data_risks(&no_resources, in_progress),
             [
-                UserDataProblem::RegionReplacementsInProgress(1),
-                UserDataProblem::RegionSnapshotReplacementsInProgress(2),
+                UserDataRisk::RegionReplacementsInProgress(1),
+                UserDataRisk::RegionSnapshotReplacementsInProgress(2),
             ]
         );
         let check = check_crucible_data(&no_resources, in_progress)
@@ -225,6 +224,6 @@ mod test {
             check.region_snapshot_replacements_in_progress, 2,
             "{check:?}"
         );
-        assert_eq!(check.problems.len(), 2, "{check:?}");
+        assert_eq!(check.risks.len(), 2, "{check:?}");
     }
 }

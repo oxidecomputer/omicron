@@ -10,14 +10,14 @@ use serde::{Deserialize, Serialize};
 /// Result of checking whether it'd be dangerous to expunge a working sled or
 /// physical disk
 ///
-/// If `ok` is `true`, no check found any problems. Otherwise, each check lists
-/// the problems that it found.
+/// If `ok` is `true`, no check found any risks. Otherwise, each check lists the
+/// risks that it found.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExpungePrecheck {
     /// Whether all checks passed
     ///
     /// This is `true` if and only if none of the checks below found any
-    /// problems.
+    /// risks.
     pub ok: bool,
     /// Whether user data stored on expunged physical disks has been fully
     /// re-replicated
@@ -34,8 +34,8 @@ pub struct UserDataPrecheck {
     pub region_replacements_in_progress: u64,
     /// Number of region snapshot replacements that have not finished
     pub region_snapshot_replacements_in_progress: u64,
-    /// Human-readable descriptions of problems found by this check
+    /// Human-readable descriptions of risks found by this check
     ///
     /// If this list is empty, this check passed.
-    pub problems: Vec<String>,
+    pub risks: Vec<String>,
 }
