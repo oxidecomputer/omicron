@@ -41,6 +41,7 @@ members = [
     "dev-tools/db-dev",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
+    "dev-tools/jbor",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
@@ -241,6 +242,7 @@ default-members = [
     "dev-tools/db-dev",
     "dev-tools/downloader",
     "dev-tools/dropshot-apis",
+    "dev-tools/jbor",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",
@@ -650,6 +652,7 @@ mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6
 mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
 ddm-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "6fee306970763d27025c408cbbf690d6e30a9593" }
+loopback-ip-mgr = { git = "https://github.com/oxidecomputer/falcon", rev = "5b63d311d14a540d79a8318b972b5bc316436ea8" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }

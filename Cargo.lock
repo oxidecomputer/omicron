@@ -6425,6 +6425,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
+name = "jbor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "dropshot 0.18.0",
+ "fmd-adm-sys",
+ "futures",
+ "gateway-client",
+ "gateway-test-utils",
+ "libc",
+ "loopback-ip-mgr",
+ "mg-admin-client",
+ "mg-api-types",
+ "nexus-config",
+ "nexus-test-interface",
+ "nexus-test-utils",
+ "omicron-common",
+ "omicron-dev-lib",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "pq-sys",
+ "serde",
+ "serde_json",
+ "signal-hook-tokio",
+ "sled-agent-types",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "jiff"
 version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7076,6 +7114,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loopback-ip-mgr"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/falcon?rev=5b63d311d14a540d79a8318b972b5bc316436ea8#5b63d311d14a540d79a8318b972b5bc316436ea8"
+dependencies = [
+ "libc",
+ "libnet",
+ "network-interface",
+ "oxnet",
+ "slog",
+]
+
+[[package]]
 name = "lpc55_areas"
 version = "0.2.5"
 source = "git+https://github.com/oxidecomputer/lpc55_support?rev=fc64732faf5511850b35f1734d572b9953d73374#fc64732faf5511850b35f1734d572b9953d73374"
@@ -7524,6 +7574,17 @@ name = "nested"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca2b420f638f07fe83056b55ea190bb815f609ec5a35e7017884a10f78839c9e"
+
+[[package]]
+name = "network-interface"
+version = "0.1.7"
+source = "git+https://github.com/oxidecomputer/network-interface?branch=illumos#5a696e910333bdc50ef56cebe9cdd78e40127d87"
+dependencies = [
+ "cc",
+ "libc",
+ "thiserror 1.0.69",
+ "winapi",
+]
 
 [[package]]
 name = "new_debug_unreachable"
@@ -8648,6 +8709,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
+ "loopback-ip-mgr",
  "nexus-client",
  "nexus-config",
  "nexus-db-queries",
@@ -9474,10 +9536,17 @@ dependencies = [
 name = "omicron-dev-lib"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
+ "dropshot 0.18.0",
+ "futures",
  "libc",
+ "nexus-config",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "signal-hook-tokio",
  "subprocess",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -10399,6 +10468,7 @@ dependencies = [
  "hex",
  "http",
  "libc",
+ "loopback-ip-mgr",
  "nexus-config",
  "omicron-common",
  "omicron-debug-dropbox",

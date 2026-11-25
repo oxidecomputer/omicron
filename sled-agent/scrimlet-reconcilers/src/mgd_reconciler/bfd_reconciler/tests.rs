@@ -16,6 +16,7 @@ use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkPorts;
 use std::collections::BTreeMap;
+use std::net::SocketAddrV4;
 use tokio::task::block_in_place;
 
 fn desired_bfd_peer(
@@ -551,7 +552,8 @@ async fn proptest_full_reconciliation() {
     .await;
     let mut mgdctx = omicron_test_utils::dev::maghemite::MgdInstance::start(
         0,
-        mgsctx.address().into(),
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
+        Some(mgsctx.address().into()),
     )
     .await
     .expect("started mgd");
