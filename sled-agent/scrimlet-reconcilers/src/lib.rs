@@ -28,8 +28,14 @@
 //! * Configuration of SMF properties for `uplinkd` and `lldpd`
 //! * Configuration of the front ports that DDM runs on
 //!
+//! as well as some non-networking-but-still-scrimlet-related responsibilities,
+//! including:
+//!
+//! * Configuration of the `wicket` user's SSH auth settings
+//!
 //! The specific configuration that should be applied comes from Nexus (or RSS,
-//! at rack setup time) and is sent to `sled-agent` via the bootstore.
+//! at rack setup time) and is sent to `sled-agent` via the bootstore and the
+//! sled's ledgered config.
 //!
 //! In the past, responsibility for this configuration was split: sled-agent was
 //! responsible for applying an initial config on sled boot (required for cold
@@ -52,13 +58,16 @@ mod reconciler_task;
 mod status;
 mod switch_zone_slot;
 mod uplinkd_reconciler;
+mod wicket_ssh_auth_reconciler;
 
 pub use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletStatus;
-
 pub use handle::BgpSocketConfig;
 pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;
+pub use wicket_ssh_auth_reconciler::SwitchZoneBootedGuard;
+pub use wicket_ssh_auth_reconciler::WicketSshAuthReconciler;
+pub use wicket_ssh_auth_reconciler::WicketSshAuthReconcilerError;
 
 // TODO-cleanup The SMF-based reconcilers need to know the name of the switch
 // zone. This is a little spread out today: `illumos-utils` defines

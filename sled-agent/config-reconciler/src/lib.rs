@@ -93,4 +93,8 @@ pub use sled_agent_facilities::SledAgentFacilities;
 #[cfg(any(test, feature = "testing"))]
 pub use handle::FakeUpdateDispositionSender;
 #[cfg(any(test, feature = "testing"))]
+pub use handle::FakeWicketSshAuthConfig;
+#[cfg(any(test, feature = "testing"))]
+pub use handle::FakeWicketSshAuthSender;
+#[cfg(any(test, feature = "testing"))]
 pub use internal_disks::InternalDiskDetails;

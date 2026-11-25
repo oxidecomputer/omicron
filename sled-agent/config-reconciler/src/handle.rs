@@ -178,6 +178,11 @@ impl WicketSshAuthReceiver {
 
     /// Waits for a change notification in the underlying watch channel, then
     /// marks the current value as seen and returns it.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. The only `.await` point it contains is a
+    /// call to [`watch::Receiver::changed()`], which itself is cancel safe.
     pub async fn changed_value(
         &mut self,
     ) -> Result<WicketSshAuth, WicketSshAuthReceiverError> {
@@ -191,6 +196,65 @@ impl WicketSshAuthReceiver {
                 return Ok(auth);
             }
         }
+    }
+
+    /// Create a fake receiver whose observed config can be changed by the
+    /// calling test via the returned [`FakeWicketSshAuthSender`].
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_dynamic(
+        initial: FakeWicketSshAuthConfig,
+    ) -> (Self, FakeWicketSshAuthSender) {
+        let (ledger_tx, ledger_rx) = watch::channel(initial.into());
+        (Self::new(ledger_rx), FakeWicketSshAuthSender { ledger_tx })
+    }
+}
+
+/// Type used by [`FakeWicketSshAuthSender`] to represent all the possible
+/// states of the actual [`OmicronSledConfig`] plus its [`WicketSshAuth`]
+/// projection (as reported by [`WicketSshAuthReceiver`]).
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug, Clone)]
+pub enum FakeWicketSshAuthConfig {
+    NoInternalDisks,
+    WaitingForInitialConfig,
+    Ledgered(WicketSshAuth),
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl From<FakeWicketSshAuthConfig> for CurrentSledConfig {
+    fn from(config: FakeWicketSshAuthConfig) -> Self {
+        match config {
+            FakeWicketSshAuthConfig::NoInternalDisks => {
+                Self::WaitingForInternalDisks
+            }
+            FakeWicketSshAuthConfig::WaitingForInitialConfig => {
+                Self::WaitingForInitialConfig
+            }
+            FakeWicketSshAuthConfig::Ledgered(wicket_ssh_auth) => {
+                Self::Ledgered(Box::new(OmicronSledConfig {
+                    wicket_ssh_auth,
+                    ..Default::default()
+                }))
+            }
+        }
+    }
+}
+
+/// Test-only handle controlling the config observed by
+/// receivers created via [`WicketSshAuthReceiver::fake_dynamic`].
+///
+/// Dropping this sender closes the underlying watch channel, which will
+/// cause [`WicketSshAuthReceiver::changed_value()`] to return a RecvError.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug)]
+pub struct FakeWicketSshAuthSender {
+    ledger_tx: watch::Sender<CurrentSledConfig>,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl FakeWicketSshAuthSender {
+    pub fn set(&self, config: FakeWicketSshAuthConfig) {
+        self.ledger_tx.send_replace(config.into());
     }
 }
 
