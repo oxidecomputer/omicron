@@ -288,17 +288,6 @@ pub enum SledUpdateRebootPolicy {
     ///
     /// This results in the fastest update time, but is the most disruptive to
     /// instances on the sled: the sled will be rebooted out from under them.
-    ///
-    /// This is currently the default, but we expect to change the default to
-    /// `Evacuate` once all the supporting work to enable that is complete.
-    //
-    // TODO-correctness: This must remain the default until all the pieces
-    // required for sled evacuation land (in particular: the planner bits to
-    // mark sleds for evacuation and the Nexus bg task to enact sled
-    // evacuation). Once those are in place, we'll need to change this to
-    // `Evacuate` and update any existing configs persisted in the db to
-    // flip from this setting to `Evacuate`.
-    #[default]
     ImmediateNoEvacuation,
 
     /// Evacuate sleds before rebooting.
@@ -307,6 +296,7 @@ pub enum SledUpdateRebootPolicy {
     /// cause a sled to reboot, it will first mark the sled for evacuation and
     /// then wait for the sled to be fully evacuated before scheduling that
     /// update.
+    #[default]
     Evacuate,
 }
 

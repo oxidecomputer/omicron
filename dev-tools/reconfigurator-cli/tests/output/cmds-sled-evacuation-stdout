@@ -444,14 +444,6 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron config from latest bluepri
 generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
 
 
-> # Set the planner config to perform sled evacuation.
-> set planner-config --sled-update-reboot-policy evacuate
-planner config updated:
-    disruption policy:::::::::   terminate (unchanged)
-*   sled update reboot policy:   immediate (no evacuation) -> evacuate
-
-
-
 > # Setup is now done -- create another TUF repository which will act as the
 > # target release being updated to.
 > generate-fake-repo 1.0.0
@@ -477,10 +469,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * zone updates waiting on reference measurement changes
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
@@ -804,10 +792,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 1 sled changed update disposition:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0: evacuating (terminate)
 * zone updates waiting on sled update disposition changes
@@ -938,10 +922,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 1 blocked MGS update:
   * 913-0000019:serial0: cannot update SP until sled is evacuated: waiting for ledgered sled config generation to be 5 (currently 4)
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1005,10 +985,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 1 blocked MGS update:
   * 913-0000019:serial0: cannot update SP until sled is evacuated: instance manager still has 2 registered VMMs
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1069,10 +1045,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 1 pending MGS update:
   * 913-0000019:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1143,10 +1115,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 1 pending MGS update:
   * 913-0000019:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1298,10 +1266,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 2 sleds changed update disposition:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, baseboard 913-0000019:serial1: evacuating (terminate)
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, baseboard 913-0000019:serial0: available
@@ -1527,10 +1491,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
-planner config:
-    disruption policy : terminate
-    sled update reboot policy: evacuate
-
 * 1 blocked MGS update:
   * 913-0000019:serial1: cannot update SP until sled is evacuated: instance manager still has 2 registered VMMs
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1591,6 +1551,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
+
 * 1 pending MGS update:
   * 913-0000019:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1658,6 +1622,10 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
+
 * 1 pending MGS update:
   * 913-0000019:serial1: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash(HexArray(0101010101010101010101010101010101010101010101010101010101010101)), expected_active_phase_2_hash: ArtifactHash(HexArray(0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a)), expected_inactive_phase_1_hash: ArtifactHash(HexArray(0202020202020202020202020202020202020202020202020202020202020202)), expected_inactive_phase_2_hash: ArtifactHash(HexArray(c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d)), sled_agent_address: [fd00:1122:3344:102::1]:12345 })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1814,6 +1782,10 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
+planner config:
+    disruption policy : terminate
+    sled update reboot policy: immediate (no evacuation)
+
 * 1 pending MGS update:
   * 913-0000019:serial2: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
 * 1 sled changed update disposition:

@@ -9320,7 +9320,7 @@
           "planner_config": {
             "default": {
               "disruption_policy": "terminate",
-              "sled_update_reboot_policy": "immediate_no_evacuation"
+              "sled_update_reboot_policy": "evacuate"
             },
             "allOf": [
               {
@@ -10224,7 +10224,7 @@
         "description": "Controls how the planner interacts with sleds that it needs to reboot to perform an update (e.g., of the SP or host OS).",
         "oneOf": [
           {
-            "description": "Reboot sleds without evacuating them first.\n\nThis results in the fastest update time, but is the most disruptive to instances on the sled: the sled will be rebooted out from under them.\n\nThis is currently the default, but we expect to change the default to `Evacuate` once all the supporting work to enable that is complete.",
+            "description": "Reboot sleds without evacuating them first.\n\nThis results in the fastest update time, but is the most disruptive to instances on the sled: the sled will be rebooted out from under them.",
             "type": "string",
             "enum": [
               "immediate_no_evacuation"
