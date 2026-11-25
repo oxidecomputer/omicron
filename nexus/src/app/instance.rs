@@ -1635,11 +1635,12 @@ impl super::Nexus {
         // will have advanced, and such actions never loop. But, infinite loops
         // are scary, so we shall nonetheless bound the number of times we loop
         // and return an internal error if we fall past the end of the loop.
-        let iters = if matches!(requested, InstanceStateChangeRequest::Stop) {
-            2
-        } else {
-            1
-        };
+        let iters =
+            if matches!(requested, InstanceStateChangeRequest::Stop { .. }) {
+                2
+            } else {
+                1
+            };
         for _ in 0..iters {
             match Self::select_runtime_change_action(
                 &self.log,
@@ -1685,7 +1686,9 @@ impl super::Nexus {
                                 state: requested.to_vmm(
                                     prev_instance_state
                                         .shutdown_policy()
-                                        .map_err(InstanceStateChangeError::Other)?,
+                                        .map_err(
+                                            InstanceStateChangeError::Other,
+                                        )?,
                                 ),
                             },
                         )
