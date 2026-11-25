@@ -2243,13 +2243,13 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=f85cf0dc3631e2f0c13384787efb0efc1b642162#f85cf0dc3631e2f0c13384787efb0efc1b642162"
+source = "git+https://github.com/oxidecomputer/crucible?rev=8f4f7c526b0ebfff97b3527720bc9b7f85a3fca0#8f4f7c526b0ebfff97b3527720bc9b7f85a3fca0"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.15.1",
+ "progenitor 0.16.1",
  "reqwest",
  "schemars 0.8.22",
  "serde",
