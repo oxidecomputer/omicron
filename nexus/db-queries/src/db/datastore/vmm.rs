@@ -552,7 +552,9 @@ impl DataStore {
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             // if the VMM record is already in a potentially non-existent state,
             // then we need not munge it now; the entire purpose of this thingy
-            // is to make sure it is considered q
+            // is to make sure it is considered non-existent so that it won't be
+            // health checked and subsequent requests to act on the instance
+            // won't be sent to the sled.
             .filter(
                 dsl::state.ne_all(DbVmmState::POTENTIALLY_NONEXISTENT_STATES),
             )
