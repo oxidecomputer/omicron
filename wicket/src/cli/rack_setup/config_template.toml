@@ -81,11 +81,11 @@ infra_ip_last = ""
 [rack_network_config.switch0.qsfp0]
 
     # Routes associated with this port.
-    # { nexthop = "1.2.3.4", destination = "0.0.0.0/0" }
+    # { nexthop = "1.2.3.5", destination = "0.0.0.0/0" }
     routes = []
 
     # Addresses associated with this port.
-    # "1.2.3.4/24"
+    # "1.2.3.4/31"
     addresses = []
 
     # `speed40_g`, `speed100_g`, ...
