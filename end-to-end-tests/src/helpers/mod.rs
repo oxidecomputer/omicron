@@ -4,7 +4,6 @@
 
 pub mod cli;
 pub mod ctx;
-pub mod icmp;
 
 use self::ctx::nexus_addr;
 use anyhow::{Result, bail};
