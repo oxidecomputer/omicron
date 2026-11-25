@@ -1866,14 +1866,19 @@ mod tests {
             },
             "VMM should already be SagaUnwound",
         );
-        assert_vmm_transitioned(
-            &opctx,
-            &datastore,
-            &unwound_vmm,
-            db::model::VmmState::SagaUnwound,
-            Some(db::model::VmmFailureReason::NoSuchInstance),
-        )
-        .await;
+        let current = datastore
+            .vmm_fetch(&opctx, &vmm_id)
+            .await
+            .expect("vmm must still be fetchable");
+        assert_eq!(
+            current.state,
+            DbVmmState::SagaUnwound,
+            "vmm state should still be SagaUnwound"
+        );
+        assert_eq!(
+            current.generation, unwound_vmm.generation,
+            "generation does not need to be advanced if the state did not change"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
