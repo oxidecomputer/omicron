@@ -50,13 +50,13 @@ impl OperatorStatus {
                 )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::ServiceRecovery {
-                service,
-            }) => OperatorStatusDescription::summary_with_details(
-                "Waiting for internal services to recover after recent changes",
-                format!(
-                    "Internal service awaiting recovery: {}",
-                    service.report_str()
-                ),
+                services,
+            }) => describe_zone_kinds(
+                "Waiting for internal services to recover after recent \
+                 changes",
+                "Internal service",
+                "awaiting recovery",
+                services,
             ),
             OperatorStatus::WaitingForUpdate(UpdateWait::SledEvacuation {
                 sled_id,
@@ -77,19 +77,12 @@ impl OperatorStatus {
                 "Waiting for update of {component} on {baseboard_id}"
             )),
             OperatorStatus::WaitingForUpdate(UpdateWait::Zones { kinds }) => {
-                let summary = "Waiting for a control plane zone to start";
-                if kinds.is_empty() {
-                    OperatorStatusDescription::summary(summary)
-                } else {
-                    let s = if kinds.len() == 1 { "" } else { "s" };
-                    let kinds = kinds.iter().map(|k| k.report_str()).join(", ");
-                    OperatorStatusDescription::summary_with_details(
-                        summary,
-                        format!(
-                            "Control plane service{s} being started: {kinds}"
-                        ),
-                    )
-                }
+                describe_zone_kinds(
+                    "Waiting for a control plane zone to start",
+                    "Control plane service",
+                    "being started",
+                    kinds,
+                )
             }
             OperatorStatus::WaitingForUpdate(UpdateWait::HandoffSagas) => {
                 OperatorStatusDescription::summary(
@@ -154,6 +147,30 @@ impl OperatorStatusDescription {
             support_details: Some(support_details.into()),
         }
     }
+}
+
+/// Returns the description of a status waiting on services provided by zones
+/// of the given kinds
+///
+/// The support details list the kinds, as in "{noun}s {verb}: {kinds}" (with
+/// the plural only when there's more than one kind).  If there are no kinds,
+/// then there are no support details.
+fn describe_zone_kinds(
+    summary: &str,
+    noun: &str,
+    verb: &str,
+    kinds: &BTreeSet<ZoneKind>,
+) -> OperatorStatusDescription {
+    if kinds.is_empty() {
+        return OperatorStatusDescription::summary(summary);
+    }
+
+    let s = if kinds.len() == 1 { "" } else { "s" };
+    let kinds = kinds.iter().map(|k| k.report_str()).join(", ");
+    OperatorStatusDescription::summary_with_details(
+        summary,
+        format!("{noun}{s} {verb}: {kinds}"),
+    )
 }
 
 /// Returns the description of a status waiting for a sled to be evacuated
@@ -237,8 +254,8 @@ pub enum UpdateWait {
     /// The system is waiting for internal services to recover before proceeding
     /// with next steps
     ServiceRecovery {
-        /// kind of zone providing the service
-        service: ZoneKind,
+        /// kinds of the zones providing the services (may be empty if unknown)
+        services: BTreeSet<ZoneKind>,
     },
     /// The system is waiting for a sled to be evacuated so it can be updated
     SledEvacuation {
@@ -265,6 +282,14 @@ impl UpdateWait {
     /// Returns an `UpdateWait::Zones` for zones of the given kinds
     pub fn for_zones(kinds: impl IntoIterator<Item = ZoneKind>) -> Self {
         UpdateWait::Zones { kinds: kinds.into_iter().collect() }
+    }
+
+    /// Returns an `UpdateWait::ServiceRecovery` for services provided by zones
+    /// of the given kinds
+    pub fn for_service_recovery(
+        kinds: impl IntoIterator<Item = ZoneKind>,
+    ) -> Self {
+        UpdateWait::ServiceRecovery { services: kinds.into_iter().collect() }
     }
 }
 
@@ -360,11 +385,14 @@ mod test {
 
     fn update_wait_examples(kind: UpdateWaitDiscriminants) -> Vec<UpdateWait> {
         match kind {
-            UpdateWaitDiscriminants::ServiceRecovery => {
-                vec![UpdateWait::ServiceRecovery {
-                    service: ZoneKind::InternalDns,
-                }]
-            }
+            UpdateWaitDiscriminants::ServiceRecovery => vec![
+                UpdateWait::for_service_recovery([]),
+                UpdateWait::for_service_recovery([ZoneKind::InternalDns]),
+                UpdateWait::for_service_recovery([
+                    ZoneKind::CockroachDb,
+                    ZoneKind::InternalDns,
+                ]),
+            ],
             UpdateWaitDiscriminants::SledEvacuation => {
                 SledEvacuationProgressDiscriminants::iter()
                     .flat_map(sled_evacuation_progress_examples)

@@ -6,10 +6,10 @@
 //! planning steps that involve bouncing other components.
 
 use crate::blueprint_builder::BlueprintBuilder;
-use itertools::Itertools;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::CockroachdbUnsafeToShutdown;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::UnsafeZones;
 use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -88,18 +88,13 @@ impl ZoneSafetyChecks {
     }
 
     /// If this sled is hosting any zones that are unsafe to shut down, returns
-    /// `Some(reason)`; otherwise, returns `None`.
+    /// `Some(zones)` describing them; otherwise, returns `None`.
     pub fn sled_unsafe_shutdown_reason(
         &self,
         sled_id: &SledUuid,
-    ) -> Option<String> {
+    ) -> Option<UnsafeZones> {
         let zones = self.sleds_with_unsafe_zones.get(sled_id)?;
-        Some(
-            zones
-                .iter()
-                .map(|(zone_id, reason)| format!("{zone_id}: {reason}"))
-                .join(", "),
-        )
+        Some(UnsafeZones::new(zones.clone()))
     }
 
     // Helper method only used by `ZoneSafetyChecksBuilder` during our

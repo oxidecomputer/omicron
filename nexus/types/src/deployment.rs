@@ -171,6 +171,7 @@ pub use planning_report::PlanningNoopImageSourceSkipZoneReason;
 pub use planning_report::PlanningNoopImageSourceStepReport;
 pub use planning_report::PlanningReport;
 pub use planning_report::PlanningZoneUpdatesStepReport;
+pub use planning_report::UnsafeZones;
 pub use planning_report::ZoneAddWaitingOn;
 pub use planning_report::ZoneUnsafeToShutdown;
 pub use planning_report::ZoneUpdatesWaitingOn;

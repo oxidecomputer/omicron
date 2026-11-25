@@ -7,9 +7,16 @@ Busy
 WaitingForMupdateResolution
     summary: Waiting for MUPdate resolution
 
-WaitingForUpdate(ServiceRecovery { service: InternalDns })
+WaitingForUpdate(ServiceRecovery { services: {} })
+    summary: Waiting for internal services to recover after recent changes
+
+WaitingForUpdate(ServiceRecovery { services: {InternalDns} })
     summary: Waiting for internal services to recover after recent changes
     support details: Internal service awaiting recovery: internal_dns
+
+WaitingForUpdate(ServiceRecovery { services: {CockroachDb, InternalDns} })
+    summary: Waiting for internal services to recover after recent changes
+    support details: Internal services awaiting recovery: cockroach_db, internal_dns
 
 WaitingForUpdate(SledEvacuation { sled_id: 00000000-0000-0000-0000-000000000001 (sled), baseboard_id: BaseboardId { part_number: "913-0000019", serial_number: "serial0" }, progress: Starting })
     summary: Evacuating instances from sled in preparation for update (sled 00000000-0000-0000-0000-000000000001, baseboard 913-0000019:serial0)

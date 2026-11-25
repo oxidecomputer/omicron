@@ -240,7 +240,7 @@ fn sim_assert_planning_makes_no_changes(
 }
 
 /// Asserts that the operator status for `blueprint`'s planning report says
-/// that the system is waiting for `service` to recover
+/// that the system is waiting for `service` (and only that service) to recover
 fn assert_waiting_on_service_recovery(
     blueprint: &Blueprint,
     service: ZoneKind,
@@ -251,7 +251,7 @@ fn assert_waiting_on_service_recovery(
     assert_eq!(
         report.operator_status(QuiesceInfo::Unknown),
         OperatorStatus::WaitingForUpdate(UpdateWait::ServiceRecovery {
-            service
+            services: BTreeSet::from([service]),
         }),
     );
 }

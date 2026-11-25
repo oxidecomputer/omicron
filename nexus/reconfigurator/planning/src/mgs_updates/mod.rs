@@ -972,6 +972,7 @@ mod test {
     use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
     use nexus_types::deployment::planning_report::FailedRotUpdateReason;
     use nexus_types::deployment::planning_report::FailedSpUpdateReason;
+    use nexus_types::deployment::planning_report::UnsafeZones;
     use nexus_types::deployment::planning_report::WaitingOnSledEvacuationDetails;
     use nexus_types::deployment::planning_report::ZoneUnsafeToShutdown;
     use nexus_types::inventory::Caboose;
@@ -2512,11 +2513,14 @@ mod test {
             total_internal_dns_zones: 3,
             synchronized_count: 2,
         };
+        let unsafe_zone_id = OmicronZoneUuid::new_v4();
         let zone_safety_checks = ZoneSafetyChecks::new_for_test([(
             sled_0_id,
-            OmicronZoneUuid::new_v4(),
+            unsafe_zone_id,
             unsafe_reason.clone(),
         )]);
+        let expected_unsafe_zones =
+            UnsafeZones::new(BTreeMap::from([(unsafe_zone_id, unsafe_reason)]));
         let assert_blocked_by_unsafe_zone = |planned: &PlannedMgsUpdates| {
             assert!(planned.pending_updates.is_empty());
             assert!(planned.pending_update_disposition_changes.is_empty());
@@ -2525,12 +2529,9 @@ mod test {
             assert_eq!(blocked.baseboard_id.serial_number, sled_0_serial);
             match &blocked.reason {
                 FailedMgsUpdateReason::Sp(
-                    FailedSpUpdateReason::UnsafeZoneFound(reason),
+                    FailedSpUpdateReason::UnsafeZoneFound(zones),
                 ) => {
-                    assert!(
-                        reason.contains(&unsafe_reason.to_string()),
-                        "unexpected reason: {reason}"
-                    );
+                    assert_eq!(*zones, expected_unsafe_zones);
                 }
                 other => panic!("unexpected blocked reason: {other:?}"),
             }
