@@ -356,16 +356,23 @@ async fn sis_destroy_vmm_record(
     );
 
     let db_instance = params.db_instance;
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     info!(
         osagactx.log(),
         "destroying vmm record for start saga unwind";
-        "instance_id" => %db_instance.id(),
+        "instance_id" => %instance_id,
         "propolis_id" => %propolis_id,
         "start_reason" => ?params.reason,
     );
 
-    osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+    super::instance_common::ensure_vmm_record_unwound(
+        &sagactx,
+        &opctx,
+        &instance_id,
+        &propolis_id,
+    )
+    .await;
 
     // Now that the VMM record has been marked as `SagaUnwound`, the instance
     // may be permitted to reincarnate. If it is, and the reason for it to be
@@ -391,7 +398,7 @@ async fn sis_destroy_vmm_record(
         info!(
             osagactx.log(),
             "start saga unwound; instance may reincarnate";
-            "instance_id" => %db_instance.id(),
+            "instance_id" => %instance_id,
             "auto_restart_config" => ?db_instance.auto_restart,
             "start_reason" => ?params.reason,
         );
@@ -405,7 +412,7 @@ async fn sis_destroy_vmm_record(
             osagactx.log(),
             "start saga unwound; instance may reincarnate during the next \
              periodic run of the instance reincarnation background task";
-            "instance_id" => %db_instance.id(),
+            "instance_id" => %instance_id,
             "auto_restart_config" => ?db_instance.auto_restart,
             "start_reason" => ?params.reason,
             "karmic_status" => ?karmic_status,
@@ -414,7 +421,7 @@ async fn sis_destroy_vmm_record(
         debug!(
             osagactx.log(),
             "start saga unwound; but instance will not reincarnate";
-            "instance_id" => %db_instance.id(),
+            "instance_id" => %instance_id,
             "auto_restart_config" => ?db_instance.auto_restart,
             "start_reason" => ?params.reason,
             "karmic_status" => ?karmic_status,

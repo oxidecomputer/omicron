@@ -946,6 +946,53 @@ pub(super) async fn ensure_vmm_unregistered(
     .expect("this never returns an error");
 }
 
+/// Ensures that the VMM record for `propolis_id` has transitioned to
+/// [`VmmState::SagaUnwound`], or has been deleted.
+///
+/// This is intended to be called by unwinding `instance_start` and
+/// `instance_migrate` sagas. Therefore, it will retry all database errors until
+/// the query either successfully marks the VMM record as `SagaUnwound` or
+/// indicates that it has been deleted.
+pub(super) async fn ensure_vmm_record_unwound(
+    sagactx: &NexusActionContext,
+    opctx: &OpContext,
+    instance_id: &InstanceUuid,
+    propolis_id: &PropolisUuid,
+) {
+    let osagactx = sagactx.user_data();
+    retry_notify_ext(
+        retry_policy_internal_service(),
+        || async {
+            let outcome = osagactx
+                .datastore()
+                .vmm_mark_saga_unwound(&opctx, propolis_id)
+                .await
+                .map_err(BackoffError::transient);
+            info!(
+                opctx.log,
+                "ensured VMM record has been deleted or `SagaUnwound``";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "outcome" => ?outcome,
+            );
+            Ok::<(), BackoffError<Error>>(())
+        },
+        |error, attempts, total_duration| {
+            warn!(
+                opctx.log,
+                "failed to mark VMM record as `SagaUnwound`, retrying...";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "call_count" => attempts,
+                "total_duration" => ?total_duration,
+                InlineErrorChain::new(&error),
+            );
+        },
+    )
+    .await
+    .expect("this never returns an error");
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ExternalIpAttach {
     Ephemeral { pool: Option<NameOrId>, ip_version: Option<IpVersion> },
