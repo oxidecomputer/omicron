@@ -21,4 +21,4 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}  # see omicron#4461
       - name: Check License Header
-        uses: apache/skywalking-eyes/header@e9f91c35e4d4ae4420f722aa6598c4a13cc69093 # v0.8.0
+        uses: apache/skywalking-eyes/header@61275cc80d0798a405cb070f7d3a8aaf7cf2c2c1 # v0.8.0
