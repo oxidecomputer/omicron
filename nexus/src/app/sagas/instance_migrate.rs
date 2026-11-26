@@ -413,14 +413,23 @@ async fn sim_destroy_vmm_record(
         &params.serialized_authn,
     );
 
+    let instance_id = InstanceUuid::from_untyped_uuid(params.instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     info!(
         osagactx.log(),
         "destroying vmm record for migration unwind";
         "propolis_id" => %propolis_id,
+        "instance_id" => %instance_id,
     );
 
-    osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+    super::instance_common::ensure_vmm_record_unwound(
+        &sagactx,
+        &opctx,
+        &instance_id,
+        &propolis_id,
+    )
+    .await;
+
     Ok(())
 }
 
