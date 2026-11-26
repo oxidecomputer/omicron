@@ -65,13 +65,10 @@ use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_generation_kinds::{NexusGeneration, TargetReleaseGeneration};
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::disk::M2Slot;
-use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
-use sled_agent_types::inventory::OmicronZoneImageSource;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
 use slog::error;
@@ -94,11 +91,16 @@ use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
-pub(crate) use self::zone_safety::ZoneSafetyChecks;
+pub use self::zone_propagation::ZonePropagationIncomplete;
+pub use self::zone_propagation::ZonePropagationStatus;
+pub use self::zone_propagation::zones_not_yet_propagated_to_inventory;
+pub use self::zone_safety::ZoneSafetyChecks;
+pub use self::zone_safety::ZoneSafetyTargets;
 
 mod image_source;
 mod omicron_zone_placement;
 pub(crate) mod rng;
+mod zone_propagation;
 mod zone_safety;
 
 /// Maximum number of MGS-managed updates (updates to SP, RoT, RoT bootloader,
@@ -129,41 +131,6 @@ mod zone_safety;
 /// Note that a change here probably requires rethinking how the operator status
 /// summarizes the contents of a planning report.
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
-
-// Details of how a zone's status differs between the blueprint and the sled
-// inventory
-#[derive(Debug)]
-#[expect(dead_code)]
-struct ZonePropagationIncomplete<'a> {
-    zone_id: OmicronZoneUuid,
-    zone_kind: ZoneKind,
-    reason: ZonePropagationStatus<'a>,
-}
-
-#[derive(Debug)]
-#[expect(dead_code)]
-enum ZonePropagationStatus<'a> {
-    // The current blueprint and the sled inventory disagree
-    // about the image source for a zone.
-    //
-    // This can mean that the sled inventory is out-of-date, or
-    // that a different blueprint has been applied.
-    ImageSourceMismatch {
-        bp_image_source: &'a BlueprintZoneImageSource,
-        inv_image_source: &'a OmicronZoneImageSource,
-    },
-    // Although this zone appears in the blueprint, it does
-    // not exist on the sled's inventory.
-    MissingInInventory {
-        bp_image_source: &'a BlueprintZoneImageSource,
-    },
-    // The last reconciliation attempt for this zone failed
-    ReconciliationError {
-        bp_image_source: &'a BlueprintZoneImageSource,
-        inv_image_source: &'a OmicronZoneImageSource,
-        message: &'a str,
-    },
-}
 
 pub struct Planner<'a> {
     log: Logger,
@@ -1699,92 +1666,12 @@ impl<'a> Planner<'a> {
         &self,
     ) -> Vec<ZonePropagationIncomplete<'_>> {
         // We are only interested in non-decommissioned sleds.
-        let sleds = self
-            .input
-            .all_sleds(SledFilter::Commissioned)
-            .map(|(id, _details)| id)
-            .collect::<Vec<_>>();
-
-        // Wait for zones to appear up-to-date in the inventory.
-        let inventory_zones = self
-            .inventory
-            .all_reconciled_omicron_zones()
-            .map(|(z, sa_result)| (z.id, (&z.image_source, sa_result)))
-            .collect::<BTreeMap<_, _>>();
-
-        let mut updating = vec![];
-        for &sled_id in &sleds {
-            // Build a list of zones currently in the blueprint but where
-            // inventory has a mismatch or does not know about the zone.
-            //
-            // What about the case where a zone is in inventory but not in the
-            // blueprint? See
-            // https://github.com/oxidecomputer/omicron/issues/8589.
-            let mut zones_currently_updating = self
-                .blueprint
-                .current_in_service_sled_zones(sled_id)
-                .filter_map(|zone| {
-                    let bp_image_source =
-                        OmicronZoneImageSource::from(zone.image_source.clone());
-                    match inventory_zones.get(&zone.id) {
-                        Some((
-                            inv_image_source,
-                            ConfigReconcilerInventoryResult::Ok,
-                        )) if *inv_image_source == &bp_image_source => {
-                            // The inventory and blueprint image sources match
-                            // -- this means that the zone is up-to-date.
-                            None
-                        }
-                        Some((
-                            inv_image_source,
-                            ConfigReconcilerInventoryResult::Ok,
-                        )) => {
-                            // The inventory and blueprint image sources differ.
-                            Some(ZonePropagationIncomplete {
-                                zone_id: zone.id,
-                                zone_kind: zone.kind(),
-                                reason:
-                                    ZonePropagationStatus::ImageSourceMismatch {
-                                        bp_image_source: &zone.image_source,
-                                        inv_image_source,
-                                    },
-                            })
-                        }
-                        Some((
-                            inv_image_source,
-                            ConfigReconcilerInventoryResult::Err { message },
-                        )) => {
-                            // The inventory reports this zone but there was an
-                            // error reconciling it (most likely an error
-                            // starting the zone).
-                            Some(ZonePropagationIncomplete {
-                                zone_id: zone.id,
-                                zone_kind: zone.kind(),
-                                reason:
-                                    ZonePropagationStatus::ReconciliationError {
-                                        bp_image_source: &zone.image_source,
-                                        inv_image_source,
-                                        message,
-                                    },
-                            })
-                        }
-                        None => {
-                            // The blueprint has a zone that inventory does not have.
-                            Some(ZonePropagationIncomplete {
-                                zone_id: zone.id,
-                                zone_kind: zone.kind(),
-                                reason:
-                                    ZonePropagationStatus::MissingInInventory {
-                                        bp_image_source: &zone.image_source,
-                                    },
-                            })
-                        }
-                    }
-                })
-                .collect::<Vec<_>>();
-            updating.append(&mut zones_currently_updating);
-        }
-        updating
+        let zones = self.input.all_sleds(SledFilter::Commissioned).flat_map(
+            |(sled_id, _details)| {
+                self.blueprint.current_in_service_sled_zones(sled_id)
+            },
+        );
+        zones_not_yet_propagated_to_inventory(zones, &self.inventory)
     }
 
     /// Update at most one existing zone to use a new image source.

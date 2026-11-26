@@ -25,6 +25,7 @@ mod data_migrations;
 mod demo_saga;
 mod device_auth;
 mod disks;
+mod expunge_precheck;
 mod external_ips;
 mod external_subnets;
 mod images;

@@ -43,6 +43,7 @@ use nexus_types_versions::v2026_05_20_00;
 use nexus_types_versions::v2026_06_05_00;
 use nexus_types_versions::v2026_06_08_00;
 use nexus_types_versions::v2026_08_14_00;
+use nexus_types_versions::v2026_11_24_00;
 
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
@@ -93,6 +94,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_11_25_01, EXPUNGE_PRECHECK_CONTROL_PLANE),
     (2026_11_25_00, ADD_OPERATOR_NOTES_TO_UPDATE_STATUS),
     (2026_11_24_00, EXPUNGE_PRECHECK),
     (2026_11_21_00, ADD_VERSION_ENDPOINT),
@@ -8175,7 +8177,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/expunge-precheck",
         tags = ["experimental"],
-        versions = VERSION_EXPUNGE_PRECHECK..,
+        versions = VERSION_EXPUNGE_PRECHECK_CONTROL_PLANE..,
     }]
     async fn expunge_precheck_view(
         rqctx: RequestContext<Self::Context>,
@@ -8183,6 +8185,37 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::expunge_precheck::ExpungePrecheck>,
         HttpError,
     >;
+
+    /// Check whether expunging a working sled or physical disk will create
+    /// a problem due to ongoing repairs
+    ///
+    /// The system is designed to survive a limited number of concurrent
+    /// failures. When a sled or physical disk is expunged, the system repairs
+    /// itself by re-replicating both control plane data and data on users'
+    /// distributed disks and by deploying replacement control plane components.
+    /// Each expunged component counts as one failure until these repairs
+    /// finish.  Before expunging a sled or disk that may currently be working,
+    /// operators can use this API to verify that the system is not still
+    /// recovering from previous expungements or repairs. Note that if a sled or
+    /// physical disk is already not working, expunging it will not make things
+    /// worse, so there's no need to use this API in that case.
+    #[endpoint {
+        operation_id = "expunge_precheck_view",
+        method = GET,
+        path = "/v1/system/hardware/expunge-precheck",
+        tags = ["experimental"],
+        versions = VERSION_EXPUNGE_PRECHECK..VERSION_EXPUNGE_PRECHECK_CONTROL_PLANE,
+    }]
+    async fn expunge_precheck_view_v2026_11_24_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v2026_11_24_00::expunge_precheck::ExpungePrecheck>,
+        HttpError,
+    > {
+        Ok(Self::expunge_precheck_view(rqctx)
+            .await?
+            .map(v2026_11_24_00::expunge_precheck::ExpungePrecheck::from))
+    }
 
     /// List physical disks that have not yet been adopted for use
     #[endpoint {

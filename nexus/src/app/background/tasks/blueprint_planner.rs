@@ -639,9 +639,15 @@ mod test {
             other => panic!("expected new target blueprint, found {other:?}"),
         };
 
-        // The planner should have published its report.
+        // The planner should have published its report, along with the id of
+        // the blueprint it made the target.
         let time_planned = match &*rx_latest.borrow() {
-            BlueprintPlannerLatest::Succeeded { time_planned, .. } => {
+            BlueprintPlannerLatest::Succeeded {
+                time_planned,
+                blueprint_id: published_blueprint_id,
+                report: _,
+            } => {
+                assert_eq!(*published_blueprint_id, blueprint_id);
                 *time_planned
             }
             other => panic!("expected successful activation, found {other:?}"),

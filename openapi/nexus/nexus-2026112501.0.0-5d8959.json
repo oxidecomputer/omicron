@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026112500.0.0"
+    "version": "2026112501.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -20069,6 +20069,22 @@
           "items"
         ]
       },
+      "ControlPlanePrecheck": {
+        "description": "Result of the check that the control plane has finished recovering from previous expungements\n\nThis check passes when the system has accounted for all expunged sleds and physical disks, has finished deploying replacements for any control plane components that were lost, and those replacements are working.",
+        "type": "object",
+        "properties": {
+          "risks": {
+            "description": "Human-readable descriptions of risks found by this check\n\nIf this list is empty, this check passed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "risks"
+        ]
+      },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
         "type": "object",
@@ -21591,6 +21607,14 @@
         "description": "Result of checking whether it'd be dangerous to expunge a working sled or physical disk\n\nIf `ok` is `true`, no check found any risks. Otherwise, each check lists the risks that it found.",
         "type": "object",
         "properties": {
+          "control_plane": {
+            "description": "Whether the control plane has finished recovering from previous expungements",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ControlPlanePrecheck"
+              }
+            ]
+          },
           "distributed_storage": {
             "description": "Whether data in distributed storage that was stored on expunged physical disks has been fully re-replicated",
             "allOf": [
@@ -21605,6 +21629,7 @@
           }
         },
         "required": [
+          "control_plane",
           "distributed_storage",
           "ok"
         ]

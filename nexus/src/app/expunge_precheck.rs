@@ -10,12 +10,11 @@
 
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResources;
-use nexus_db_queries::db::datastore::ExpungedPhysicalDiskResourcesMap;
-use nexus_types::external_api::expunge_precheck::DistributedStoragePrecheck;
 use nexus_types::external_api::expunge_precheck::ExpungePrecheck;
 use omicron_common::api::external::Error;
-use std::fmt;
+
+mod control_plane;
+mod crucible;
 
 impl super::Nexus {
     /// Checks whether expunging a working sled or physical disk would be risky
@@ -29,204 +28,25 @@ impl super::Nexus {
 
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        // Fetch information about Crucible resources on expunged disks.  If
-        // these are present, then expunging another disk further risks
-        // durability and availability of data in distributed storage.
-        let expunged_resources = datastore
-            .crucible_resources_on_expunged_physical_disks(opctx)
-            .await?;
+        let distributed_storage = crucible::check(opctx, datastore).await?;
 
-        // Fetch information about ongoing Crucible replacements.  These too
-        // indicate that expunging another disk is risky.  This is largely
-        // redundant with looking at expunged resources, since in practice
-        // replacements correspond with resources on expunged disks.  However,
-        // it is possible to request a region replacement on an in-service disk
-        // using `omdb`.  This catches those, too.
-        let replacements_in_progress = InProgressCrucibleReplacements {
-            region_replacements: datastore
-                .count_incomplete_region_replacements(opctx)
-                .await?,
-            region_snapshot_replacements: datastore
-                .count_incomplete_region_snapshot_replacements(opctx)
-                .await?,
-        };
-
-        Ok(ExpungePrecheck::new(check_crucible_data(
-            &expunged_resources,
-            replacements_in_progress,
-        )?))
-    }
-}
-
-/// Counts of Crucible replacement requests that have not yet completed
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct InProgressCrucibleReplacements {
-    region_replacements: u64,
-    region_snapshot_replacements: u64,
-}
-
-/// Checks whether Crucible data on expunged physical disks has been fully
-/// re-replicated.
-fn check_crucible_data(
-    expunged_resources: &ExpungedPhysicalDiskResourcesMap,
-    replacements_in_progress: InProgressCrucibleReplacements,
-) -> Result<DistributedStoragePrecheck, Error> {
-    let expunged_disks_with_data = u64::try_from(expunged_resources.len())
-        .map_err(|_| {
-            Error::internal_error(&format!(
-                "number of expunged physical disks with data does not fit in \
-                 a u64: {}",
-                expunged_resources.len()
-            ))
-        })?;
-    let risks =
-        crucible_data_risks(expunged_resources, replacements_in_progress)
-            .iter()
-            .map(|p| p.to_string())
-            .collect();
-    Ok(DistributedStoragePrecheck {
-        expunged_disks_with_data,
-        region_replacements_in_progress: replacements_in_progress
-            .region_replacements,
-        region_snapshot_replacements_in_progress: replacements_in_progress
-            .region_snapshot_replacements,
-        risks,
-    })
-}
-
-/// Returns expungement risks related to Crucible data
-fn crucible_data_risks(
-    expunged_resources: &ExpungedPhysicalDiskResourcesMap,
-    replacements_in_progress: InProgressCrucibleReplacements,
-) -> Vec<DistributedStorageRisk<'_>> {
-    let InProgressCrucibleReplacements {
-        region_replacements,
-        region_snapshot_replacements,
-    } = replacements_in_progress;
-
-    let mut risks: Vec<_> = expunged_resources
-        .iter()
-        .map(DistributedStorageRisk::ExpungedDiskHasData)
-        .collect();
-    if region_replacements > 0 {
-        risks.push(DistributedStorageRisk::RegionReplacementsInProgress(
-            region_replacements,
-        ));
-    }
-    if region_snapshot_replacements > 0 {
-        risks.push(
-            DistributedStorageRisk::RegionSnapshotReplacementsInProgress(
-                region_snapshot_replacements,
-            ),
-        );
-    }
-    risks
-}
-
-/// A risk identified by the distributed storage check
-///
-/// The external API reports only the `Display` form of these.
-#[derive(Debug, PartialEq, Eq)]
-enum DistributedStorageRisk<'a> {
-    /// an expunged physical disk still holds data for distributed storage that
-    /// has not been re-replicated elsewhere
-    ExpungedDiskHasData(&'a ExpungedPhysicalDiskResources),
-    /// some region replacements have not finished
-    RegionReplacementsInProgress(u64),
-    /// some region snapshot replacements have not finished
-    RegionSnapshotReplacementsInProgress(u64),
-}
-
-impl fmt::Display for DistributedStorageRisk<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DistributedStorageRisk::ExpungedDiskHasData(r) => write!(
-                f,
-                "physical disk {} (serial {}) is expunged but still holds data \
-                 (read-write regions: {}, read-only regions: {}, region \
-                 snapshots: {})",
-                r.disk_id,
-                r.disk_serial,
-                r.num_read_write_regions,
-                r.num_read_only_regions,
-                r.num_region_snapshots,
-            ),
-            DistributedStorageRisk::RegionReplacementsInProgress(n) => {
-                write!(f, "region replacements in progress: {n}")
-            }
-            DistributedStorageRisk::RegionSnapshotReplacementsInProgress(n) => {
-                write!(f, "region snapshot replacements in progress: {n}")
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use omicron_uuid_kinds::PhysicalDiskUuid;
-
-    #[test]
-    fn test_check_distributed_storage() {
-        let none_in_progress = InProgressCrucibleReplacements {
-            region_replacements: 0,
-            region_snapshot_replacements: 0,
-        };
-
-        // Nothing outstanding: no risks.
-        let check = check_crucible_data(
-            &ExpungedPhysicalDiskResourcesMap::default(),
-            none_in_progress,
+        // Clone these out of their watch channels so that we don't hold the
+        // channels' locks while querying the database.
+        let planner_latest = self.update_status.latest_planner();
+        let target_blueprint = self
+            .update_status
+            .latest_blueprint()
+            .map(|loaded| loaded.blueprint);
+        let inventory = self.inventory_load_rx().borrow().clone();
+        let control_plane = control_plane::check(
+            opctx,
+            datastore,
+            planner_latest,
+            target_blueprint,
+            inventory,
         )
-        .expect("checked distributed storage");
-        assert!(check.risks.is_empty(), "{check:?}");
+        .await?;
 
-        // A disk with resources on it is a risk even when no replacement
-        // requests exist yet.
-        let disk_id = PhysicalDiskUuid::new_v4();
-        let disk_serial = String::from("disk-serial");
-        let mut resources = ExpungedPhysicalDiskResourcesMap::default();
-        resources.add_read_write_regions(disk_id, disk_serial.clone(), 1);
-        resources.add_read_only_regions(disk_id, disk_serial.clone(), 2);
-        resources.add_region_snapshots(disk_id, disk_serial.clone(), 3);
-        let risks = crucible_data_risks(&resources, none_in_progress);
-        let [DistributedStorageRisk::ExpungedDiskHasData(r)] = risks.as_slice()
-        else {
-            panic!("unexpected risks: {risks:?}");
-        };
-        assert_eq!(r.disk_id, disk_id);
-        let check = check_crucible_data(&resources, none_in_progress)
-            .expect("checked distributed storage");
-        assert_eq!(check.expunged_disks_with_data, 1, "{check:?}");
-        assert_eq!(check.risks.len(), 1, "{check:?}");
-        assert!(
-            check.risks[0].contains(&disk_id.to_string())
-                && check.risks[0].contains(&disk_serial),
-            "{check:?}"
-        );
-
-        // In-progress replacements are risks even when no resources remain
-        // on expunged disks.
-        let no_resources = ExpungedPhysicalDiskResourcesMap::default();
-        let in_progress = InProgressCrucibleReplacements {
-            region_replacements: 1,
-            region_snapshot_replacements: 2,
-        };
-        assert_eq!(
-            crucible_data_risks(&no_resources, in_progress),
-            [
-                DistributedStorageRisk::RegionReplacementsInProgress(1),
-                DistributedStorageRisk::RegionSnapshotReplacementsInProgress(2),
-            ]
-        );
-        let check = check_crucible_data(&no_resources, in_progress)
-            .expect("checked distributed storage");
-        assert_eq!(check.expunged_disks_with_data, 0, "{check:?}");
-        assert_eq!(check.region_replacements_in_progress, 1, "{check:?}");
-        assert_eq!(
-            check.region_snapshot_replacements_in_progress, 2,
-            "{check:?}"
-        );
-        assert_eq!(check.risks.len(), 2, "{check:?}");
+        Ok(ExpungePrecheck::new(distributed_storage, control_plane))
     }
 }

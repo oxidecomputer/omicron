@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`PhysicalDisk`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
@@ -19,6 +20,7 @@ use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -768,6 +770,42 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns all physical disks matching `disk_filter`, fetching them from
+    /// the database in batches
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    // TODO-correctness We currently _do_ use this method in an API handler
+    // (specifically, the "expunge precheck" endpoint). This is okay in a
+    // single-rack world because a rack has at most a few hundred physical
+    // disks, so one page is usually enough to fetch them all, but we should fix
+    // this before we add support for multirack (at which point this should
+    // have an `opctx.check_complex_operations_allowed()?` guard).
+    pub async fn physical_disk_list_all_batched(
+        &self,
+        opctx: &OpContext,
+        disk_filter: DiskFilter,
+    ) -> ListResultVec<PhysicalDisk> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let mut all_disks = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .physical_disk_list(opctx, &p.current_pagparams(), disk_filter)
+                .await?;
+            paginator = p.found_batch(&batch, &|d: &PhysicalDisk| {
+                d.id().into_untyped_uuid()
+            });
+            all_disks.extend(batch);
+        }
+        Ok(all_disks)
     }
 
     /// Return a page of active physical disk adoption requests.
