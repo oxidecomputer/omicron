@@ -2088,9 +2088,10 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Before anything is expunged, the expunge precheck passes.
+    // Before anything is expunged, the distributed storage check passes.  (The
+    // control plane check does not pass in this environment because the
+    // blueprint planner is disabled.)
     let status = expunge_precheck_get(client).await;
-    assert!(status.ok, "{status:#?}");
     assert!(status.distributed_storage.risks.is_empty(), "{status:#?}");
 
     // Before expunging the physical disk, save the DB model
@@ -2189,10 +2190,10 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
             .is_empty()
     );
 
-    // Now that all replacements have finished, the expunge precheck passes
-    // again.
+    // Now that all replacements have finished, the distributed storage check
+    // passes again.
     let status = expunge_precheck_get(client).await;
-    assert!(status.ok, "{status:#?}");
+    assert!(status.distributed_storage.risks.is_empty(), "{status:#?}");
 }
 
 /// Tests that multiple replacements can occur until completion
@@ -2758,9 +2759,10 @@ async fn test_read_only_replacement_sanity(
             .is_empty()
     );
 
-    // Now that all replacements have finished, the expunge precheck passes.
+    // Now that all replacements have finished, the distributed storage check
+    // passes.
     let status = expunge_precheck_get(client).await;
-    assert!(status.ok, "{status:#?}");
+    assert!(status.distributed_storage.risks.is_empty(), "{status:#?}");
 }
 
 /// `test_replacement_sanity_twice`, but delete the snapshot before doing the

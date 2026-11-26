@@ -963,7 +963,17 @@ pub enum BlueprintPlannerLatest {
     /// the planner has not run since this Nexus started
     NotYetRun { time_created: DateTime<Utc> },
     /// the most recent planner activation succeeded
-    Succeeded { time_planned: DateTime<Utc>, report: Arc<PlanningReport> },
+    Succeeded {
+        time_planned: DateTime<Utc>,
+        /// id of the blueprint that the planner produced
+        ///
+        /// If the planner made a new blueprint the target, this is that
+        /// blueprint.  If the planner found nothing to change, this is the
+        /// parent blueprint, which is identical to the one the planner
+        /// produced.
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    },
     /// the most recent planner activation did not produce a usable plan
     Failed { time_planned: DateTime<Utc>, reason: PlannerFailure },
 }
@@ -1051,13 +1061,18 @@ impl BlueprintPlannerLatest {
             // target (which should happen within seconds, since a new target
             // activates the planner).
             BlueprintPlannerStatus::LostRace { .. } => return,
-            BlueprintPlannerStatus::Unchanged { report, .. }
-            | BlueprintPlannerStatus::Targeted { report, .. } => {
-                BlueprintPlannerLatest::Succeeded {
-                    time_planned,
-                    report: Arc::clone(report),
-                }
+            BlueprintPlannerStatus::Unchanged {
+                parent_blueprint_id: blueprint_id,
+                report,
+                ..
             }
+            | BlueprintPlannerStatus::Targeted {
+                blueprint_id, report, ..
+            } => BlueprintPlannerLatest::Succeeded {
+                time_planned,
+                blueprint_id: *blueprint_id,
+                report: Arc::clone(report),
+            },
         };
     }
 }
@@ -2048,32 +2063,47 @@ mod test {
     #[test]
     fn test_planner_latest_succeeded() {
         let report = Arc::new(PlanningReport::new());
+        // For `Targeted`, the planned blueprint is the new target.  For
+        // `Unchanged`, it's the parent.
+        let targeted_id = BlueprintUuid::new_v4();
+        let unchanged_id = BlueprintUuid::new_v4();
         let cases = [
-            BlueprintPlannerStatus::Targeted {
-                parent_blueprint_id: BlueprintUuid::new_v4(),
-                blueprint_id: BlueprintUuid::new_v4(),
-                report: Arc::clone(&report),
-                blueprint_count: 1,
-                limit: 10,
-            },
-            BlueprintPlannerStatus::Unchanged {
-                parent_blueprint_id: BlueprintUuid::new_v4(),
-                report: Arc::clone(&report),
-                blueprint_count: 1,
-                limit: 10,
-            },
+            (
+                BlueprintPlannerStatus::Targeted {
+                    parent_blueprint_id: BlueprintUuid::new_v4(),
+                    blueprint_id: targeted_id,
+                    report: Arc::clone(&report),
+                    blueprint_count: 1,
+                    limit: 10,
+                },
+                targeted_id,
+            ),
+            (
+                BlueprintPlannerStatus::Unchanged {
+                    parent_blueprint_id: unchanged_id,
+                    report: Arc::clone(&report),
+                    blueprint_count: 1,
+                    limit: 10,
+                },
+                unchanged_id,
+            ),
         ];
-        for status in cases {
+        for (status, expected_blueprint_id) in cases {
             let time = Utc::now();
             let latest = recorded(time, &status);
             let BlueprintPlannerLatest::Succeeded {
                 time_planned,
+                blueprint_id,
                 report: latest_report,
             } = &latest
             else {
                 panic!("unexpected state after {status:?}: {latest:?}");
             };
             assert_eq!(*time_planned, time, "after {status:?}");
+            assert_eq!(
+                *blueprint_id, expected_blueprint_id,
+                "after {status:?}"
+            );
             assert!(Arc::ptr_eq(latest_report, &report), "after {status:?}");
             assert_eq!(latest.time_updated(), time);
             assert_eq!(
@@ -2140,8 +2170,11 @@ mod test {
         assert!(
             matches!(
                 &latest,
-                BlueprintPlannerLatest::Succeeded { time_planned, report }
-                    if *time_planned == time1 && Arc::ptr_eq(report, &report1)
+                BlueprintPlannerLatest::Succeeded {
+                    time_planned,
+                    report,
+                    ..
+                } if *time_planned == time1 && Arc::ptr_eq(report, &report1)
             ),
             "{latest:?}"
         );

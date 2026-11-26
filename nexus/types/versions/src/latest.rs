@@ -401,7 +401,9 @@ pub mod project {
 
 pub mod expunge_precheck {
     pub use crate::v2026_11_24_00::expunge_precheck::DistributedStoragePrecheck;
-    pub use crate::v2026_11_24_00::expunge_precheck::ExpungePrecheck;
+
+    pub use crate::v2026_11_25_01::expunge_precheck::ControlPlanePrecheck;
+    pub use crate::v2026_11_25_01::expunge_precheck::ExpungePrecheck;
 }
 
 pub mod saml {

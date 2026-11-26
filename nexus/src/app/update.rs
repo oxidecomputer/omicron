@@ -101,6 +101,16 @@ impl UpdateStatusHandle {
     ) -> Self {
         Self { latest_blueprint, latest_planner }
     }
+
+    /// Returns the most recently loaded target blueprint, if any
+    pub(crate) fn latest_blueprint(&self) -> Option<LoadedTargetBlueprint> {
+        self.latest_blueprint.borrow().clone()
+    }
+
+    /// Returns the outcome of this Nexus's most recent planner activation
+    pub(crate) fn latest_planner(&self) -> BlueprintPlannerLatest {
+        self.latest_planner.borrow().clone()
+    }
 }
 
 /// Inputs used to decide, based on health checks of a subset of system

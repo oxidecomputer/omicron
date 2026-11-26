@@ -9764,6 +9764,7 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-rendezvous",
+ "nexus-reconfigurator-simulation",
  "nexus-saga-recovery",
  "nexus-switch-config",
  "nexus-switch-config-preparation",

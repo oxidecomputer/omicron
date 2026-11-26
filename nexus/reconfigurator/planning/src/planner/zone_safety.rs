@@ -12,6 +12,7 @@ use nexus_types::deployment::CockroachdbUnsafeToShutdown;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::inventory::Collection;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::ZoneKind;
@@ -19,7 +20,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
-pub(crate) struct ZoneSafetyChecks {
+pub struct ZoneSafetyChecks {
     // The actual content of all zones unsafe to shut down, mapped by sled ID
     // first then zone ID.
     sleds_with_unsafe_zones:
@@ -52,7 +53,29 @@ impl ZoneSafetyChecks {
         inventory: &Collection,
         input: &PlanningInput,
     ) -> Self {
-        ZoneSafetyChecksBuilder::new(blueprint, inventory, input).build()
+        Self::from_zones(
+            blueprint.current_in_service_zones(),
+            inventory,
+            &ZoneSafetyTargets::from_planning_input(input),
+        )
+    }
+
+    /// Calculate the set of zones that are not currently safe to shut down,
+    /// given the in-service zones on commissioned sleds
+    ///
+    /// This is the same as [`ZoneSafetyChecks::new()`] for callers outside the
+    /// planner, which have a blueprint rather than a `BlueprintBuilder` and
+    /// cannot assemble a `PlanningInput`.
+    pub fn from_zones<'a>(
+        in_service_zones: impl IntoIterator<
+            Item = (SledUuid, &'a BlueprintZoneConfig),
+        >,
+        inventory: &Collection,
+        targets: &ZoneSafetyTargets,
+    ) -> Self {
+        let in_service_zones: Vec<_> = in_service_zones.into_iter().collect();
+        ZoneSafetyChecksBuilder::new(&in_service_zones, inventory, targets)
+            .build()
     }
 
     #[cfg(test)]
@@ -73,6 +96,17 @@ impl ZoneSafetyChecks {
             sleds_with_unsafe_zones: BTreeMap::new(),
             zone_to_sled: BTreeMap::new(),
         }
+    }
+
+    /// Iterates over the zones that are unsafe to shut down, along with the
+    /// sled that each one is on and the reason that it's unsafe
+    pub fn unsafe_zones(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, OmicronZoneUuid, &ZoneUnsafeToShutdown)>
+    {
+        self.sleds_with_unsafe_zones.iter().flat_map(|(sled_id, zones)| {
+            zones.iter().map(|(zone_id, reason)| (*sled_id, *zone_id, reason))
+        })
     }
 
     /// If the specified zone is unsafe to shut down, returns `Some(reason)`;
@@ -118,10 +152,42 @@ impl ZoneSafetyChecks {
     }
 }
 
+/// Policy and database state used to decide whether zones are safe to shut down
+///
+/// The planner gets these from its `PlanningInput`.  Callers outside the
+/// planner must get them from the same places that
+/// `nexus_reconfigurator_preparation::PlanningInputFromDb::assemble()` does.
+#[derive(Clone, Debug)]
+pub struct ZoneSafetyTargets {
+    /// number of boundary NTP zones that must be synchronized
+    pub target_boundary_ntp_zone_count: usize,
+    /// number of internal DNS zones that must be at `internal_dns_version`
+    pub target_internal_dns_zone_count: usize,
+    /// number of CockroachDB nodes that must be live and reporting
+    pub target_cockroachdb_zone_count: usize,
+    /// current internal DNS version, as found in the database
+    pub internal_dns_version: Generation,
+}
+
+impl ZoneSafetyTargets {
+    /// Returns the targets used by the planner for this planning input
+    pub fn from_planning_input(input: &PlanningInput) -> Self {
+        ZoneSafetyTargets {
+            target_boundary_ntp_zone_count: input
+                .target_boundary_ntp_zone_count(),
+            target_internal_dns_zone_count: input
+                .target_internal_dns_zone_count(),
+            target_cockroachdb_zone_count: input
+                .target_cockroachdb_zone_count(),
+            internal_dns_version: input.internal_dns_version(),
+        }
+    }
+}
+
 struct ZoneSafetyChecksBuilder<'a> {
-    blueprint: &'a BlueprintBuilder<'a>,
+    in_service_zones: &'a [(SledUuid, &'a BlueprintZoneConfig)],
     inventory: &'a Collection,
-    input: &'a PlanningInput,
+    targets: &'a ZoneSafetyTargets,
     internal_dns_zones: BTreeSet<OmicronZoneUuid>,
     boundary_ntp_zones: BTreeSet<OmicronZoneUuid>,
     checks: ZoneSafetyChecks,
@@ -129,16 +195,16 @@ struct ZoneSafetyChecksBuilder<'a> {
 
 impl<'a> ZoneSafetyChecksBuilder<'a> {
     fn new(
-        blueprint: &'a BlueprintBuilder<'a>,
+        in_service_zones: &'a [(SledUuid, &'a BlueprintZoneConfig)],
         inventory: &'a Collection,
-        input: &'a PlanningInput,
+        targets: &'a ZoneSafetyTargets,
     ) -> Self {
         let mut internal_dns_zones = BTreeSet::new();
         let mut boundary_ntp_zones = BTreeSet::new();
 
         // Precalculate sets of particular zone kinds that we care about in
         // other checks below.
-        for (_sled_id, zone) in blueprint.current_in_service_zones() {
+        for (_sled_id, zone) in in_service_zones {
             match zone.zone_type.kind() {
                 ZoneKind::BoundaryNtp => {
                     boundary_ntp_zones.insert(zone.id);
@@ -151,9 +217,9 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         }
 
         Self {
-            blueprint,
+            in_service_zones,
             inventory,
-            input,
+            targets,
             internal_dns_zones,
             boundary_ntp_zones,
             checks: ZoneSafetyChecks::empty(),
@@ -161,7 +227,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
     }
 
     fn build(mut self) -> ZoneSafetyChecks {
-        for (sled_id, zone) in self.blueprint.current_in_service_zones() {
+        for &(sled_id, zone) in self.in_service_zones {
             if let Some(reason) = self.reason_zone_unsafe_to_shut_down(zone) {
                 self.checks.insert(sled_id, zone.id, reason);
             }
@@ -216,7 +282,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         }
 
         let target_boundary_ntp_zone_count =
-            self.input.target_boundary_ntp_zone_count();
+            self.targets.target_boundary_ntp_zone_count;
         if synchronized_boundary_ntp_count < target_boundary_ntp_zone_count {
             return Some(ZoneUnsafeToShutdown::BoundaryNtp {
                 total_boundary_ntp_zones: self.boundary_ntp_zones.len(),
@@ -234,7 +300,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         use ZoneUnsafeToShutdown::Cockroachdb;
 
         let target_cockroachdb_zone_count =
-            self.input.target_cockroachdb_zone_count();
+            self.targets.target_cockroachdb_zone_count;
 
         // We must hear from all nodes
         let all_statuses = &self.inventory.cockroach_status;
@@ -289,7 +355,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
             // Either way, from our perspective, the internal DNS zone
             // shouldn't be considered "ready-to-shutdown".
             if self.internal_dns_zones.contains(&status.zone_id)
-                && status.generation == self.input.internal_dns_version()
+                && status.generation == self.targets.internal_dns_version
             {
                 synchronized_internal_dns_count += 1;
             }
@@ -304,7 +370,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         // tolerate "at least one upgrade, and at least one failure during that
         // upgrade window" (e.g., it should be "at least 3" in production).
         let target_internal_dns_zone_count =
-            self.input.target_internal_dns_zone_count();
+            self.targets.target_internal_dns_zone_count;
         if synchronized_internal_dns_count >= target_internal_dns_zone_count {
             return None;
         } else {
