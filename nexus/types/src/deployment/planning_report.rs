@@ -629,6 +629,18 @@ pub enum FailedRotBootloaderUpdateReason {
     TargetArtifact(#[from] TargetArtifactError),
 }
 
+impl FailedRotBootloaderUpdateReason {
+    /// Returns what an automated update is waiting for, if this failure means
+    /// that it's waiting for something specific
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
+        match self {
+            FailedRotBootloaderUpdateReason::Caboose(_)
+            | FailedRotBootloaderUpdateReason::SpNotInInventory
+            | FailedRotBootloaderUpdateReason::TargetArtifact(_) => None,
+        }
+    }
+}
+
 /// Describes the reason why an RoT failed to update
 #[derive(
     Error,
@@ -662,6 +674,19 @@ pub enum FailedRotUpdateReason {
     TargetArtifact(#[from] TargetArtifactError),
 }
 
+impl FailedRotUpdateReason {
+    /// Returns what an automated update is waiting for, if this failure means
+    /// that it's waiting for something specific
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
+        match self {
+            FailedRotUpdateReason::Caboose(_)
+            | FailedRotUpdateReason::RotStateNotInInventory
+            | FailedRotUpdateReason::SpNotInInventory
+            | FailedRotUpdateReason::TargetArtifact(_) => None,
+        }
+    }
+}
+
 /// Describes the reason why an SP failed to update
 #[derive(
     Error,
@@ -692,8 +717,23 @@ pub enum FailedSpUpdateReason {
     TargetArtifact(#[from] TargetArtifactError),
     /// The component's corresponding sled contains zones that are unsafe to
     /// shut down
-    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
-    UnsafeZoneFound(String),
+    #[error("sled contains zones that are unsafe to shut down: {0}")]
+    UnsafeZoneFound(UnsafeZones),
+}
+
+impl FailedSpUpdateReason {
+    /// Returns what an automated update is waiting for, if this failure means
+    /// that it's waiting for something specific
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
+        match self {
+            FailedSpUpdateReason::UnsafeZoneFound(zones) => {
+                Some(zones.to_update_wait())
+            }
+            FailedSpUpdateReason::Caboose(_)
+            | FailedSpUpdateReason::SpNotInInventory
+            | FailedSpUpdateReason::TargetArtifact(_) => None,
+        }
+    }
 }
 
 /// Describes the reason why the artifact that an SP, RoT, or RoT bootloader
@@ -725,6 +765,54 @@ pub enum TargetArtifactError {
     /// found
     #[error("too many artifacts matching {0} were found")]
     TooManyMatchingArtifacts(String),
+}
+
+/// Zones on one sled that are unsafe to shut down, with the reason for each
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+)]
+#[serde(transparent)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub struct UnsafeZones(BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>);
+
+impl UnsafeZones {
+    pub fn new(zones: BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>) -> Self {
+        UnsafeZones(zones)
+    }
+
+    /// Returns the zones that are unsafe to shut down, with the reason for each
+    pub fn zones(&self) -> &BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown> {
+        &self.0
+    }
+
+    /// Returns what an automated update is waiting for because of these zones
+    ///
+    /// The update is waiting for the services provided by these zones to
+    /// recover.
+    pub fn to_update_wait(&self) -> UpdateWait {
+        UpdateWait::for_service_recovery(
+            self.0.values().map(ZoneUnsafeToShutdown::zone_kind),
+        )
+    }
+}
+
+impl fmt::Display for UnsafeZones {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut prefix = "";
+        for (zone_id, reason) in &self.0 {
+            write!(f, "{prefix}{zone_id}: {reason}")?;
+            prefix = ", ";
+        }
+        Ok(())
+    }
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -779,8 +867,36 @@ pub enum FailedHostOsUpdateReason {
     UnableToRetrieveBootDiskPhase2Image(String),
     /// The component's corresponding sled contains zones that are unsafe to
     /// shut down
-    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
-    UnsafeZoneFound(String),
+    #[error("sled contains zones that are unsafe to shut down: {0}")]
+    UnsafeZoneFound(UnsafeZones),
+}
+
+impl FailedHostOsUpdateReason {
+    /// Returns what an automated update is waiting for, if this failure means
+    /// that it's waiting for something specific
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
+        match self {
+            FailedHostOsUpdateReason::UnsafeZoneFound(zones) => {
+                Some(zones.to_update_wait())
+            }
+            FailedHostOsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
+                _,
+            )
+            | FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(_)
+            | FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory
+            | FailedHostOsUpdateReason::InactiveHostPhase1HashNotInInventory(
+                _,
+            )
+            | FailedHostOsUpdateReason::LastReconciliationNotInInventory
+            | FailedHostOsUpdateReason::SledAgentInfoNotInInventory
+            | FailedHostOsUpdateReason::SpNotInInventory
+            | FailedHostOsUpdateReason::TargetArtifact(_)
+            | FailedHostOsUpdateReason::UnableToDetermineBootDisk(_)
+            | FailedHostOsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
+                _,
+            ) => None,
+        }
+    }
 }
 
 /// Describes the reason why the host OS artifacts that a sled ought to be
@@ -882,6 +998,36 @@ pub struct BlockedMgsUpdate {
     pub baseboard_id: Arc<BaseboardId>,
     /// reason why the update failed
     pub reason: FailedMgsUpdateReason,
+}
+
+impl BlockedMgsUpdate {
+    /// Returns what an automated update is waiting for, if this blocked update
+    /// means that it's waiting for something specific
+    pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
+        match &self.reason {
+            FailedMgsUpdateReason::WaitingOnSledEvacuation {
+                sled_id,
+                component: _,
+                details,
+            } => Some(UpdateWait::SledEvacuation {
+                sled_id: *sled_id,
+                baseboard_id: (*self.baseboard_id).clone(),
+                progress: SledEvacuationProgress::Waiting(details.clone()),
+            }),
+            FailedMgsUpdateReason::HostOs(reason) => {
+                reason.indicates_update_waiting()
+            }
+            FailedMgsUpdateReason::Rot(reason) => {
+                reason.indicates_update_waiting()
+            }
+            FailedMgsUpdateReason::RotBootloader(reason) => {
+                reason.indicates_update_waiting()
+            }
+            FailedMgsUpdateReason::Sp(reason) => {
+                reason.indicates_update_waiting()
+            }
+        }
+    }
 }
 
 impl IdOrdItem for BlockedMgsUpdate {
@@ -1029,95 +1175,101 @@ impl PlanningMgsUpdatesStepReport {
     /// Returns what an automated update is waiting for, if this step is
     /// waiting on anything
     pub fn indicates_update_waiting(&self) -> Option<UpdateWait> {
-        // A single blueprint can both mark one sled for evacuation and bring
-        // another sled back into service.  In that case, report the
-        // evacuation, since that's what the planner is actually waiting for.
-        // So first, sort the disposition changes by kind.
-        let mut evacuating = None;
-        let mut available = None;
+        // This planning step report can indicate a lot of different things:
+        //
+        // - we're waiting for a sled to be evacuated for an update
+        // - we're waiting for a board update (MGS-driven update) to finish
+        // - we're waiting for control plane services to recover after an update
+        // - we're waiting to bring a sled back into service after an update
+        //
+        // Some of these can be going on concurrently and we want to prioritize
+        // what's most relevant to the user.  For clarity, we'll assemble the
+        // full list of things we might be waiting on and then choose what's
+        // most important.
+        //
+        // Start by looking at changes to a sled's update disposition.  These
+        // reflect that the sled is either being evacuated or being brought back
+        // into service.  This is an edge-triggered check: we'll only see this
+        // in the blueprint that changes the disposition.  (Below, we'll check
+        // for sleds that are being evacuated without an update disposition
+        // change.  There is no analog for a sled that's waiting to become
+        // available without an update disposition change because the planner
+        // doesn't really wait for this per se.)
+        let mut blocked_on_evacuation = None;
+        let mut blocked_on_available = None;
         for change in self.update_disposition_changes.iter() {
             match change.kind {
                 BlueprintSledUpdateDispositionKind::Evacuating { .. } => {
-                    evacuating.get_or_insert(change);
+                    blocked_on_evacuation.get_or_insert_with(|| {
+                        UpdateWait::SledEvacuation {
+                            sled_id: change.sled_id,
+                            baseboard_id: (*change.baseboard_id).clone(),
+                            progress: SledEvacuationProgress::Starting,
+                        }
+                    });
                 }
                 BlueprintSledUpdateDispositionKind::Available => {
-                    available.get_or_insert(change);
+                    blocked_on_available.get_or_insert_with(|| {
+                        UpdateWait::SledAvailable {
+                            sled_id: change.sled_id,
+                            baseboard_id: (*change.baseboard_id).clone(),
+                        }
+                    });
                 }
             }
         }
 
-        // If this blueprint marks a sled for evacuation, then we're waiting
-        // for that sled to be evacuated.  In the current implementation, we'll
-        // only see this in the first blueprint in which we start waiting for a
-        // sled to be evacuated.  See the next block for more.
-        if let Some(change) = evacuating {
-            return Some(UpdateWait::SledEvacuation {
-                sled_id: change.sled_id,
-                baseboard_id: (*change.baseboard_id).clone(),
-                progress: SledEvacuationProgress::Starting,
-            });
+        // Next, look for any reasons why an MGS update might be blocked.
+        let mut blocked_on_other = None;
+        for wait in self
+            .blocked_mgs_updates
+            .iter()
+            .filter_map(BlockedMgsUpdate::indicates_update_waiting)
+        {
+            match wait {
+                UpdateWait::SledEvacuation { .. } => {
+                    blocked_on_evacuation.get_or_insert(wait);
+                }
+                UpdateWait::ServiceRecovery { .. }
+                | UpdateWait::SledAvailable { .. }
+                | UpdateWait::Mgs { .. }
+                | UpdateWait::Zones { .. }
+                | UpdateWait::HandoffSagas
+                | UpdateWait::HandoffFinal => {
+                    blocked_on_other.get_or_insert(wait);
+                }
+            }
         }
 
-        // We can also be waiting for sled evacuation if there's an MGS update
-        // that's blocked on it.  This is what happens for blueprints after the
-        // first one where we changed the sled's disposition.
-        let blocked_on_evacuation =
-            self.blocked_mgs_updates.iter().find_map(|blocked| match &blocked
-                .reason
-            {
-                FailedMgsUpdateReason::WaitingOnSledEvacuation {
-                    sled_id,
-                    component: _,
-                    details,
-                } => Some((blocked, *sled_id, details)),
-                FailedMgsUpdateReason::HostOs(..)
-                | FailedMgsUpdateReason::Rot(..)
-                | FailedMgsUpdateReason::RotBootloader(..)
-                | FailedMgsUpdateReason::Sp(..) => None,
+        // Next, check if we're waiting for a pending MGS update.
+        let blocked_on_update =
+            self.pending_mgs_updates.iter().next().map(|update| {
+                UpdateWait::Mgs {
+                    baseboard_id: (*update.baseboard_id).clone(),
+                    component: MgsUpdateComponent::from(&update.details),
+                }
             });
-        if let Some((blocked, sled_id, details)) = blocked_on_evacuation {
-            return Some(UpdateWait::SledEvacuation {
-                sled_id,
-                baseboard_id: (*blocked.baseboard_id).clone(),
-                progress: SledEvacuationProgress::Waiting(details.clone()),
-            });
-        }
 
-        // Check whether we're waiting for a pending MGS update.  This takes
-        // priority over a sled returning to service (below) because the same
-        // blueprint can bring one sled back into service and start an update
-        // on another board.  In that case, the system is really waiting on the
-        // update.
-        if let Some(update) = self.pending_mgs_updates.iter().next() {
-            return Some(UpdateWait::Mgs {
-                baseboard_id: (*update.baseboard_id).clone(),
-                component: MgsUpdateComponent::from(&update.details),
-            });
-        }
-
-        // If we're looking at a blueprint in which the planner is bringing a
-        // sled back into service and isn't starting any other MGS update, then
-        // it's fair to report that the planner is waiting for the sled to go
-        // back in service.  In practice, today, if you ran the planner again
-        // immediately, it would plan the next update step.  So it's not really
-        // waiting for this step to finish.  But it's the most accurate thing we
-        // can report.
-        //
-        // (Note: when evacuating a sled, we had two cases to consider: the
-        // blueprint in which the disposition changed and subsequent ones before
-        // the sled was observed to be evacuated.  The condition below is
-        // analogous to the first case (the blueprint where the disposition
-        // changed).  There's no analog to the second case here for the reason
-        // mentioned above: subsequent planner runs won't actually wait for this
-        // to finish.)
-        if let Some(change) = available {
-            return Some(UpdateWait::SledAvailable {
-                sled_id: change.sled_id,
-                baseboard_id: (*change.baseboard_id).clone(),
-            });
-        }
-
-        None
+        // We've now assembled all the reasons that we could report.  Report the
+        // most salient one.  This order is somewhat arbitrary.  We prioritize
+        // an ongoing update, then a sled evacuation, then any other reason why
+        // an update is blocked.  We deprioritize reporting that we're waiting
+        // for a sled to return to service (`blocked_on_available`) because the
+        // planner doesn't wait for this per se.  (If you re-ran the planner
+        // immediately, it would plan the next thing.)
+        [
+            blocked_on_update,
+            blocked_on_evacuation,
+            // The "other" category includes other reasons why an MGS update
+            // might be blocked, like that it's unsafe to shut down internal DNS
+            // or CockroachDB right now (usually because they're recovering from
+            // a previous update that took out one of their instances).
+            blocked_on_other,
+            blocked_on_available,
+        ]
+        .into_iter()
+        .flatten()
+        .next()
     }
 }
 
@@ -1830,10 +1982,10 @@ impl PlanningZoneUpdatesStepReport {
             }
         }
 
-        if let Some((_zone_id, why)) = self.unsafe_zones.first_key_value() {
-            return Some(UpdateWait::ServiceRecovery {
-                service: why.zone_kind(),
-            });
+        if !self.unsafe_zones.is_empty() {
+            return Some(UpdateWait::for_service_recovery(
+                self.unsafe_zones.values().map(ZoneUnsafeToShutdown::zone_kind),
+            ));
         }
 
         None
@@ -1986,7 +2138,16 @@ impl ZoneUpdatesWaitingOn {
 /// Zones which should not be shut down, because their lack of availability
 /// could be problematic for the successful functioning of the deployed system.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Diffable,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
@@ -2155,7 +2316,16 @@ impl NexusGenerationBumpWaitingOn {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Diffable,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
@@ -2371,6 +2541,90 @@ mod tests {
             }
             Some(other) => panic!("unexpected update wait: {other:?}"),
             None => panic!("expected an operator status, found none"),
+        }
+    }
+
+    // When an MGS update is blocked because a sled hosts zones that are unsafe
+    // to shut down, the operator status should report that the system is
+    // waiting for the service to recover.  That takes priority over a sled
+    // returning to service, but not over a sled evacuation.
+    #[test]
+    fn unsafe_zones_report_service_recovery() {
+        let board = |serial: &str| {
+            Arc::new(BaseboardId {
+                part_number: String::from("913-0000019"),
+                serial_number: String::from(serial),
+            })
+        };
+        let unsafe_zones = UnsafeZones::new(BTreeMap::from([(
+            OmicronZoneUuid::from_untyped_uuid(Uuid::from_u128(1)),
+            ZoneUnsafeToShutdown::InternalDns {
+                total_internal_dns_zones: 3,
+                synchronized_count: 2,
+            },
+        )]));
+        let expected_wait = UpdateWait::ServiceRecovery {
+            services: BTreeSet::from([ZoneKind::InternalDns]),
+        };
+
+        // Check both kinds of updates that can be blocked this way.
+        let blocked_reasons = [
+            FailedMgsUpdateReason::Sp(FailedSpUpdateReason::UnsafeZoneFound(
+                unsafe_zones.clone(),
+            )),
+            FailedMgsUpdateReason::HostOs(
+                FailedHostOsUpdateReason::UnsafeZoneFound(unsafe_zones),
+            ),
+        ];
+        for reason in blocked_reasons {
+            let mut report = PlanningMgsUpdatesStepReport::new();
+            report.blocked_mgs_updates.push(BlockedMgsUpdate {
+                baseboard_id: board("serial0"),
+                reason: reason.clone(),
+            });
+            assert_eq!(
+                report.indicates_update_waiting(),
+                Some(expected_wait.clone()),
+                "blocked reason: {reason:?}",
+            );
+
+            // A sled returning to service does not change the result.
+            report
+                .update_disposition_changes
+                .insert_unique(SledUpdateDispositionChange {
+                    sled_id: SledUuid::from_untyped_uuid(Uuid::from_u128(1)),
+                    baseboard_id: board("serial1"),
+                    kind: BlueprintSledUpdateDispositionKind::Available,
+                })
+                .expect("sled ids are unique");
+            assert_eq!(
+                report.indicates_update_waiting(),
+                Some(expected_wait.clone()),
+                "blocked reason: {reason:?}",
+            );
+
+            // A sled evacuation does change the result.
+            let evacuating_sled_id =
+                SledUuid::from_untyped_uuid(Uuid::from_u128(2));
+            report
+                .update_disposition_changes
+                .insert_unique(SledUpdateDispositionChange {
+                    sled_id: evacuating_sled_id,
+                    baseboard_id: board("serial2"),
+                    kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: ReconfiguratorDisruptionPolicy::default(),
+                    },
+                })
+                .expect("sled ids are unique");
+            assert_eq!(
+                report.indicates_update_waiting(),
+                Some(UpdateWait::SledEvacuation {
+                    sled_id: evacuating_sled_id,
+                    baseboard_id: (*board("serial2")).clone(),
+                    progress: SledEvacuationProgress::Starting,
+                }),
+                "blocked reason: {reason:?}",
+            );
         }
     }
 

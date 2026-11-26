@@ -4886,7 +4886,10 @@
                 ]
               },
               "value": {
-                "type": "string"
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ZoneUnsafeToShutdown"
+                }
               }
             },
             "required": [
@@ -5210,7 +5213,10 @@
                 ]
               },
               "value": {
-                "type": "string"
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ZoneUnsafeToShutdown"
+                }
               }
             },
             "required": [
