@@ -6,7 +6,10 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use diesel::{allow_tables_to_appear_in_same_query, joinable};
+use diesel::{
+    allow_columns_to_appear_in_same_group_by_clause,
+    allow_tables_to_appear_in_same_query, joinable,
+};
 
 /// Shadow of `diesel::table!` that also auto-registers table metadata
 /// into the test-only `DIESEL_TABLES` list for validation.
@@ -3770,3 +3773,11 @@ joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
 // would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
 allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
 allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);
+
+// Used to count the regions on each expunged physical disk, grouped by
+// whether they're read-only.
+allow_columns_to_appear_in_same_group_by_clause!(
+    physical_disk::id,
+    physical_disk::serial,
+    region::read_only,
+);

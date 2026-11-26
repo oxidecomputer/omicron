@@ -43,6 +43,7 @@ pub(crate) use path_param;
 
 mod affinity;
 mod alert;
+mod expunge_precheck;
 mod hardware;
 mod instance;
 pub(crate) mod multicast;
