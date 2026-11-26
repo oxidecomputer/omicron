@@ -35,6 +35,7 @@ pub mod server;
 pub mod services;
 mod sled_agent;
 mod support_bundle;
+pub mod sush;
 mod swap_device;
 mod vmm_reservoir;
 mod zone_bundle;

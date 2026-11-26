@@ -32,3 +32,5 @@ pub mod latest;
 
 #[path = "initial/mod.rs"]
 pub mod v1;
+#[path = "trust_quorum_members/mod.rs"]
+pub mod v2;

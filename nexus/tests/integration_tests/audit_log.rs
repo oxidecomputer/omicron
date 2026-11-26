@@ -9,20 +9,17 @@ use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    DiskTest, create_console_session, create_default_ip_pools, create_disk,
-    create_instance_with, create_local_user, create_project, create_silo,
-    get_device_token, grant_iam, object_create_error, object_create_no_body,
-    object_delete, objects_list_page_authz, test_params,
+    DiskTest, InstanceCreateBuilder, create_console_session,
+    create_default_ip_pools, create_disk, create_instance_from_body,
+    create_local_user, create_project, create_silo, get_device_token,
+    grant_iam, object_create_error, object_create_no_body, object_delete,
+    objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::audit::{
     self, AuditLogEntry, AuditLogEntryActor, AuditLogEntryResult,
 };
 use nexus_types::external_api::device;
-use nexus_types::external_api::instance::{
-    ExternalIpCreate, InstanceAutoRestartPolicy, InstanceCpuPlatform,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-};
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project::ProjectCreate;
 use nexus_types::external_api::scim;
@@ -399,17 +396,13 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     let t1 = Utc::now();
 
     let _project = create_project(client, "test-project").await;
-    let _instance = create_instance_with(
+    let _instance = create_instance_from_body(
         client,
         "test-project",
-        "test-instance",
-        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<InstanceDiskAttachment>::new(),
-        Vec::<ExternalIpCreate>::new(),
-        false, // start=false, so instance is created in stopped state
-        None::<InstanceAutoRestartPolicy>,
-        None::<InstanceCpuPlatform>,
-        Vec::new(),
+        InstanceCreateBuilder::new("test-instance")
+            // create the instance in the stopped state
+            .with_start(false)
+            .finish(),
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;
@@ -517,6 +510,7 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket
+                | AllowedMethod::GetWebsocketUnavailable
                 | AllowedMethod::Head
                 | AllowedMethod::HeadNonexistent => false,
             };
@@ -538,14 +532,27 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 .url
                 .replace("{id}", "00000000-0000-0000-0000-000000000000");
 
-            let result = NexusRequest::new(
+            let mut builder =
                 RequestBuilder::new(client, http_method.clone(), &url)
                     .body(body.as_ref())
-                    .expect_status(None), // accept any status
-            )
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await;
+                    .expect_status(None); // accept any status
+
+            // A websocket endpoint rejects a request without handshake
+            // headers before it reaches authorization, and thus before
+            // any audit entry is made; send the headers so its coverage
+            // is actually measured.
+            if matches!(
+                method,
+                AllowedMethod::GetWebsocket
+                    | AllowedMethod::GetWebsocketUnavailable
+            ) {
+                builder = builder.websocket_handshake_headers();
+            }
+
+            let result = NexusRequest::new(builder)
+                .authn_as(AuthnMode::UnprivilegedUser)
+                .execute()
+                .await;
 
             if result.is_err() {
                 // Request itself failed (connection error, etc), skip
@@ -788,7 +795,11 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     }
 
     // GET endpoints that are intentionally audit-logged (should be rare).
-    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+    let allowed_audited_gets: BTreeMap<&str, (&str, &str)> =
+        BTreeMap::from([(
+            "rack_support_shell_tunnel",
+            ("get", "/v1/system/hardware/racks/{rack_id}/support-shell/tunnel"),
+        )]);
 
     let unexpected_audited: Vec<_> = unexpected_get_audit
         .keys()
@@ -821,6 +832,29 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         "Unexpected audited GET endpoints: {:?}",
         unexpected_audited,
     );
+
+    // Check that every allowed_audited_gets entry was in fact observed
+    // to produce an audit entry, so that dropping the audit logging from
+    // such an endpoint fails this test.
+    for (op, (method, path)) in &allowed_audited_gets {
+        match unexpected_get_audit.get(*op) {
+            None => {
+                panic!(
+                    "Stale allowed_audited_gets entry: {} ({} {:?}); \
+                     endpoint lost its audit logging or no longer exists",
+                    op, method, path,
+                );
+            }
+            Some((actual_method, actual_path)) => {
+                assert_eq!(
+                    (actual_method.as_str(), actual_path.as_str()),
+                    (*method, *path),
+                    "allowed_audited_gets entry for {} has wrong method/path",
+                    op,
+                );
+            }
+        }
+    }
 }
 
 fn verify_entry(

@@ -38,6 +38,7 @@ progenitor::generate_api!(
         StartSledAgentStatus = bootstrap_agent_lockstep_types::StartSledAgentStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
+        TrustQuorumMembers = trust_quorum_types::membership::TrustQuorumMembers,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,
         UplinkPorts = sled_agent_types::early_networking::UplinkPorts,
     },

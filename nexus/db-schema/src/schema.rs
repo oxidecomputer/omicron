@@ -6,7 +6,10 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use diesel::{allow_tables_to_appear_in_same_query, joinable};
+use diesel::{
+    allow_columns_to_appear_in_same_group_by_clause,
+    allow_tables_to_appear_in_same_query, joinable,
+};
 
 /// Shadow of `diesel::table!` that also auto-registers table metadata
 /// into the test-only `DIESEL_TABLES` list for validation.
@@ -453,6 +456,8 @@ table! {
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
         enable_jumbo_frames -> Bool,
+        shutdown_policy_timeout -> Nullable<Interval>,
+        shutdown_policy_action -> crate::enums::InstanceShutdownActionEnum,
     }
 }
 
@@ -931,6 +936,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(silo_group, silo);
 allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_user);
+allow_tables_to_appear_in_same_query!(role_assignment, silo_group);
 
 table! {
     identity_provider (silo_id, id) {
@@ -2148,6 +2155,8 @@ table! {
         serial -> Text,
 
         variant -> crate::enums::PhysicalDiskKindEnum,
+
+        location -> Nullable<Text>,
     }
 }
 
@@ -3360,6 +3369,7 @@ table! {
         next_inv_min_time_started -> Timestamptz,
         alert_generation -> Int8,
         support_bundle_generation -> Int8,
+        problem_generation -> Int8,
     }
 }
 
@@ -3571,6 +3581,61 @@ table! {
     }
 }
 
+table! {
+    fm_problem_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_problem_revision_request (sitrep_id, problem_id, revision) {
+        problem_id -> Uuid,
+        revision -> Int8,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        time_resolved -> Nullable<Timestamptz>,
+        code -> Int8,
+        summary -> Text,
+        description -> Text,
+        action_required -> Text,
+    }
+}
+
+table! {
+    fm_case_problem (sitrep_id, case_id, problem_id) {
+        case_id -> Uuid,
+        problem_id -> Uuid,
+        sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_problem_alert (sitrep_id, problem_id, alert_id) {
+        problem_id -> Uuid,
+        alert_id -> Uuid,
+        sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
+        revision -> Int8,
+        comment -> Text,
+    }
+}
+
+table! {
+    fm_problem_support_bundle (sitrep_id, problem_id, support_bundle_id) {
+        problem_id -> Uuid,
+        support_bundle_id -> Uuid,
+        sitrep_id -> Uuid,
+        linked_sitrep_id -> Uuid,
+        revision -> Int8,
+        comment -> Text,
+    }
+}
+
 // Child data selection tables owned by `fm_support_bundle_request`. Each table
 // corresponds to a `BundleData` variant. Row existence means "include this
 // category in the referenced bundle."
@@ -3633,6 +3698,13 @@ allow_tables_to_appear_in_same_query!(alert, rendezvous_alert_created);
 table! {
     rendezvous_support_bundle_created (support_bundle_id) {
         support_bundle_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
+
+table! {
+    rendezvous_problem_created (problem_id) {
+        problem_id -> Uuid,
         created_at_generation -> Int8,
     }
 }
@@ -3701,3 +3773,11 @@ joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
 // would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
 allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
 allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);
+
+// Used to count the regions on each expunged physical disk, grouped by
+// whether they're read-only.
+allow_columns_to_appear_in_same_group_by_clause!(
+    physical_disk::id,
+    physical_disk::serial,
+    region::read_only,
+);

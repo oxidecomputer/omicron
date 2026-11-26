@@ -5,6 +5,8 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
+use crate::integration_tests::crucible_replacements::expunge_precheck_get;
+use crate::integration_tests::crucible_replacements::expunged_resource_counts_checked;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -24,10 +26,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_from_body;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::object_create_error;
@@ -2431,6 +2434,22 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     assert_eq!(expunged_regions.len(), 3);
+
+    // Expunging the sled expunged its three physical disks, and each of them
+    // holds one of the regions.
+    let counts = expunged_resource_counts_checked(datastore, &opctx).await;
+    assert_eq!(counts.len(), 3, "{counts:?}");
+    for r in counts.iter() {
+        assert_eq!(r.num_read_write_regions, 1, "{counts:?}");
+    }
+
+    // The expunge precheck reports these disks right away.
+    let status = expunge_precheck_get(client).await;
+    assert!(!status.ok, "{status:#?}");
+    assert_eq!(
+        status.distributed_storage.expunged_disks_with_data, 3,
+        "{status:#?}"
+    );
 }
 
 #[nexus_test(extra_sled_agents = 3)]
@@ -3222,19 +3241,15 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
     // the instance triggers `sled_reservation_create`, which allocates a
     // dataset for the local storage disk. Without this allocation, the disk
     // delete saga short-circuits and never reaches the retry loop.
-    let instance = create_instance_with(
+    let instance = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![instance::InstanceDiskAttachment::Attach(
-            instance::InstanceDiskAttach { name: local_disk_name.clone() },
-        )],
-        Vec::<instance::ExternalIpCreate>::new(),
-        true,
-        Default::default(),
-        None,
-        Vec::new(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_disks(vec![instance::InstanceDiskAttachment::Attach(
+                instance::InstanceDiskAttach { name: local_disk_name.clone() },
+            )])
+            .with_start(true)
+            .finish(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);

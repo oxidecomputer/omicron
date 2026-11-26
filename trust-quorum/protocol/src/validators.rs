@@ -12,9 +12,6 @@ use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
 use trust_quorum_types::configuration::{ConfigurationError, NewConfigParams};
-use trust_quorum_types::membership::{
-    TRUST_QUORUM_MAX_MEMBERS, TRUST_QUORUM_MIN_MEMBERS,
-};
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::persistent_state::PersistentStateSummary;
 use trust_quorum_types::types::Threshold;
@@ -88,12 +85,6 @@ pub enum ReconfigurationError {
     ThresholdMismatch { num_members: usize, threshold: Threshold },
 
     #[error(
-        "invalid membership size: {0:?}: must be between \
-         {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} inclusive"
-    )]
-    InvalidMembershipSize(usize),
-
-    #[error(
         "invalid threshold: {0:?}: threshold must be between 2 and 31 inclusive"
     )]
     InvalidThreshold(Threshold),
@@ -165,12 +156,6 @@ pub enum LrtqUpgradeError {
         {threshold:?}"
     )]
     ThresholdMismatch { num_members: usize, threshold: Threshold },
-
-    #[error(
-        "invalid membership size: {0:?}: must be between \
-         {TRUST_QUORUM_MIN_MEMBERS} and {TRUST_QUORUM_MAX_MEMBERS} inclusive"
-    )]
-    InvalidMembershipSize(usize),
 
     #[error(
         "invalid threshold: {0:?}: threshold must be between 2 and 31 inclusive"
@@ -270,7 +255,7 @@ impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
         rack_id == other_rack_id
             && epoch == other_epoch
             && last_committed_epoch == other_last_committed_epoch
-            && members == other_members
+            && members.as_set() == other_members
             && threshold == other_threshold
     }
 }
@@ -327,7 +312,7 @@ impl ValidatedReconfigureMsg {
             rack_id,
             epoch,
             last_committed_epoch,
-            members,
+            members: members.into_set(),
             threshold,
             coordinator_id: coordinator_id.clone(),
         }))
@@ -362,20 +347,12 @@ impl ValidatedReconfigureMsg {
     fn check_membership_sizes(
         msg: &ReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
-        let num_members = msg.members.len();
+        let num_members = usize::from(msg.members.num_members());
         if num_members <= msg.threshold.0 as usize {
             return Err(ReconfigurationError::ThresholdMismatch {
                 num_members,
                 threshold: msg.threshold,
             });
-        }
-
-        if num_members < TRUST_QUORUM_MIN_MEMBERS
-            || num_members > TRUST_QUORUM_MAX_MEMBERS
-        {
-            return Err(ReconfigurationError::InvalidMembershipSize(
-                num_members,
-            ));
         }
 
         if msg.threshold.0 < 2 || msg.threshold.0 > 31 {
@@ -567,7 +544,7 @@ impl ValidatedLrtqUpgradeMsg {
         Ok(ValidatedLrtqUpgradeMsg {
             rack_id,
             epoch,
-            members,
+            members: members.into_set(),
             threshold,
             coordinator_id: ctx.platform_id().clone(),
         })
@@ -589,18 +566,12 @@ impl ValidatedLrtqUpgradeMsg {
     fn check_membership_sizes(
         msg: &LrtqUpgradeMsg,
     ) -> Result<(), LrtqUpgradeError> {
-        let num_members = msg.members.len();
+        let num_members = usize::from(msg.members.num_members());
         if num_members <= msg.threshold.0 as usize {
             return Err(LrtqUpgradeError::ThresholdMismatch {
                 num_members,
                 threshold: msg.threshold,
             });
-        }
-
-        if num_members < TRUST_QUORUM_MIN_MEMBERS
-            || num_members > TRUST_QUORUM_MAX_MEMBERS
-        {
-            return Err(LrtqUpgradeError::InvalidMembershipSize(num_members));
         }
 
         if msg.threshold.0 < 2 || msg.threshold.0 > 31 {
@@ -666,6 +637,7 @@ mod tests {
     use omicron_uuid_kinds::{GenericUuid, RackUuid};
     use proptest::prelude::*;
     use test_strategy::{Arbitrary, proptest};
+    use trust_quorum_types::membership::TrustQuorumMembers;
     use uuid::Uuid;
 
     fn arb_member() -> impl Strategy<Value = BaseboardId> {
@@ -718,7 +690,8 @@ mod tests {
             rack_id: input.rack_id,
             epoch: input.epoch,
             last_committed_epoch,
-            members: input.members.clone(),
+            members: TrustQuorumMembers::new(input.members.clone())
+                .expect("test membership is within the size bounds"),
             threshold: Threshold(input.members.len() as u8 - 1),
         };
 
@@ -789,7 +762,8 @@ mod tests {
             rack_id: input.rack_id,
             epoch: input.epoch,
             last_committed_epoch,
-            members: input.members.clone(),
+            members: TrustQuorumMembers::new(input.members.clone())
+                .expect("test membership is within the size bounds"),
             threshold: Threshold(input.members.len() as u8 - 1),
         };
 

@@ -38,6 +38,7 @@ use std::sync::Arc;
 pub struct SitrepGc {
     datastore: Arc<DataStore>,
     batch_size: NonZeroU32,
+    disabled: bool,
 }
 
 impl BackgroundTask for SitrepGc {
@@ -62,18 +63,23 @@ impl BackgroundTask for SitrepGc {
 }
 
 impl SitrepGc {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore, batch_size: datastore::SQL_BATCH_SIZE }
+    pub fn new(datastore: Arc<DataStore>, disabled: bool) -> Self {
+        Self { datastore, batch_size: datastore::SQL_BATCH_SIZE, disabled }
     }
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
         let mut status = Status {
+            disabled: self.disabled,
             orphaned_sitreps_deleted: 0,
             sitrep_metadata_batches: 0,
             batch_size: self.batch_size.get(),
             child_tables: Default::default(),
             errors: Vec::new(),
         };
+        if self.disabled {
+            slog::trace!(&opctx.log, "sitrep GC disabled, doing nothing");
+            return status;
+        }
 
         match self.datastore.fm_sitrep_gc_orphans(&opctx, self.batch_size).await
         {
@@ -122,7 +128,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let mut task = SitrepGc::new(datastore.clone());
+        let mut task = SitrepGc::new(datastore.clone(), false);
         let mut model = SitrepModel::new(datastore.clone());
 
         // First, insert an initial sitrep (v1).
@@ -170,7 +176,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         const LIMIT: u32 = 5;
-        let mut task = SitrepGc::new(datastore.clone());
+        let mut task = SitrepGc::new(datastore.clone(), false);
         let mut model = SitrepModel::new(datastore.clone());
 
         // 8 sitreps, and a history limit of 5: pruning should orphan the
@@ -184,6 +190,28 @@ mod tests {
         // Now, the GC task should clean them up.
         let status = run_gc_and_check(&mut task, &mut model, opctx).await;
         assert_eq!(status.orphaned_sitreps_deleted, 3);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_disabled_gc_deletes_nothing() {
+        let logctx = dev::test_setup_log("test_disabled_gc_deletes_nothing");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut task = SitrepGc::new(datastore.clone(), true);
+        let mut model = SitrepModel::new(datastore.clone());
+
+        model.insert_history(opctx, 1).await;
+        model.insert_orphan(opctx, None).await;
+
+        let status = task.actually_activate(opctx).await;
+        assert!(status.disabled);
+        assert_eq!(status.orphaned_sitreps_deleted, 0);
+        // The orphan is still there.
+        model.assert_matches(opctx).await;
 
         db.terminate().await;
         logctx.cleanup_successful();

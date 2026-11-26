@@ -27,7 +27,6 @@ use nexus_auth::authz::SiloUserList;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatabaseString;
-use nexus_db_model::IdentityType;
 use nexus_types::external_api::policy::SiloRole;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
@@ -507,15 +506,12 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         // Cleanup role assignment records for the deleted user
-        {
-            use nexus_db_schema::schema::role_assignment::dsl;
-
-            diesel::delete(dsl::role_assignment)
-                .filter(dsl::identity_type.eq(IdentityType::SiloUser))
-                .filter(dsl::identity_id.eq(to_db_typed_uuid(user_id)))
-                .execute_async(conn)
-                .await?;
-        }
+        self.datastore
+            .role_assignment_delete_by_identity_on_connection(
+                conn,
+                user_id.into_untyped_uuid(),
+            )
+            .await?;
 
         // Finally we should cleanup all auth related things like sessions and
         // tokens.
@@ -1217,15 +1213,12 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         // Cleanup role assignment records for the deleted group
-        {
-            use nexus_db_schema::schema::role_assignment::dsl;
-
-            diesel::delete(dsl::role_assignment)
-                .filter(dsl::identity_id.eq(to_db_typed_uuid(group_id)))
-                .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
-                .execute_async(conn)
-                .await?;
-        }
+        self.datastore
+            .role_assignment_delete_by_identity_on_connection(
+                conn,
+                group_id.into_untyped_uuid(),
+            )
+            .await?;
 
         Ok(true)
     }

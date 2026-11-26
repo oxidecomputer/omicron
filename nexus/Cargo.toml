@@ -11,6 +11,7 @@ workspace = true
 multicast = []
 
 [build-dependencies]
+omicron-pins.workspace = true
 omicron-rpaths.workspace = true
 
 [dependencies]
@@ -129,6 +130,7 @@ steno.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
+tokio-tungstenite.workspace = true
 tokio-util = { workspace = true, features = ["codec", "rt", "join-map"] }
 trust-quorum-types.workspace = true
 tufaceous.workspace = true

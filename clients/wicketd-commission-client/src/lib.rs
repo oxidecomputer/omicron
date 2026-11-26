@@ -96,6 +96,7 @@ progenitor::generate_api!(
         TransceiverPowerMode = wicketd_commission_types_versions::latest::inventory::TransceiverPowerMode,
         TransceiverStatus = wicketd_commission_types_versions::latest::inventory::TransceiverStatus,
         TransceiverVendor = wicketd_commission_types_versions::latest::inventory::TransceiverVendor,
+        TrustQuorumMembers = trust_quorum_types_versions::latest::membership::TrustQuorumMembers,
         TxEqConfig = wicketd_commission_types_versions::latest::rack_setup::TxEqConfig,
         UnmatchedBootstrapPeer = wicketd_commission_types_versions::latest::inventory::UnmatchedBootstrapPeer,
         UpdateProgress = wicketd_commission_types_versions::latest::update::UpdateProgress,

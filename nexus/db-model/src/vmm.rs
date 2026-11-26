@@ -150,6 +150,7 @@ impl Vmm {
             (VmmState::Migrating, _) => types::VmmState::Migrating,
             (VmmState::Destroyed, _) => types::VmmState::Destroyed,
             (VmmState::SagaUnwound, _) => types::VmmState::SagaUnwound,
+            (VmmState::Cancelling, _) => types::VmmState::Cancelling,
         };
         types::VmmRuntimeState {
             state,

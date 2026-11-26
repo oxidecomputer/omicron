@@ -81,6 +81,8 @@ use sled_agent_types::inventory::SvcEnabledNotOnlineState;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
+use sled_agent_types::inventory::WicketSshAuth;
+use sled_agent_types::inventory::WicketSshAuthStatus;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
@@ -476,6 +478,7 @@ pub fn representative() -> Representative {
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
         update_disposition: OmicronSledUpdateDisposition::Available,
+        wicket_ssh_auth: WicketSshAuth::initial(),
     };
     let sled16 = OmicronSledConfig {
         generation: SledConfigGeneration::from_untyped_generation(
@@ -488,6 +491,7 @@ pub fn representative() -> Representative {
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
         update_disposition: OmicronSledUpdateDisposition::Available,
+        wicket_ssh_auth: WicketSshAuth::initial(),
     };
     let sled17 = OmicronSledConfig {
         generation: SledConfigGeneration::from_untyped_generation(
@@ -500,6 +504,7 @@ pub fn representative() -> Representative {
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
         update_disposition: OmicronSledUpdateDisposition::Evacuating,
+        wicket_ssh_auth: WicketSshAuth::initial(),
     };
 
     // Create iterator producing fixed IDs.
@@ -532,24 +537,10 @@ pub fn representative() -> Representative {
     let sled_agent_id_basic =
         "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
 
-    // Add some disks to this first sled.
+    // Add some disks to this first sled. The datastore reads disks back in
+    // PCIe slot order, so keep this list sorted by `pcie_slot`.
     let disks = vec![
-        // Let's say we have one manufacturer for our M.2...
-        InventoryDisk {
-            identity: DiskIdentity {
-                vendor: "macrohard".to_string(),
-                model: "box".to_string(),
-                serial: "XXIV".to_string(),
-            },
-            variant: DiskVariant::M2,
-            slot: 0,
-            active_firmware_slot: 1,
-            next_active_firmware_slot: None,
-            number_of_firmware_slots: 1,
-            slot1_is_read_only: true,
-            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
-        },
-        // ... and a couple different vendors for our U.2s
+        // Let's say we have a couple different vendors for our U.2s...
         InventoryDisk {
             identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
@@ -557,7 +548,8 @@ pub fn representative() -> Representative {
                 serial: "0001".to_string(),
             },
             variant: DiskVariant::U2,
-            slot: 1,
+            pcie_slot: 0,
+            location: Some("N0".to_string()),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -571,7 +563,8 @@ pub fn representative() -> Representative {
                 serial: "0002".to_string(),
             },
             variant: DiskVariant::U2,
-            slot: 2,
+            pcie_slot: 1,
+            location: Some("N1".to_string()),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -585,7 +578,24 @@ pub fn representative() -> Representative {
                 serial: "5".to_string(),
             },
             variant: DiskVariant::U2,
-            slot: 3,
+            pcie_slot: 2,
+            location: Some("N2".to_string()),
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
+        },
+        // ... and one manufacturer for our M.2.
+        InventoryDisk {
+            identity: DiskIdentity {
+                vendor: "macrohard".to_string(),
+                model: "box".to_string(),
+                serial: "XXIV".to_string(),
+            },
+            variant: DiskVariant::M2,
+            pcie_slot: 18,
+            location: Some("M.2 West".to_string()),
             active_firmware_slot: 1,
             next_active_firmware_slot: None,
             number_of_firmware_slots: 1,
@@ -1376,5 +1386,6 @@ pub fn sled_agent(
         smf_services_enabled_not_online,
         reference_measurements,
         fmd,
+        wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
     }
 }

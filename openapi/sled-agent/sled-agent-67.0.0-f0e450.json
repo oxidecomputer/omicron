@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "63.0.0"
+    "version": "67.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -2914,6 +2914,13 @@
   },
   "components": {
     "schemas": {
+      "AcpiTimeoutSecs": {
+        "description": "ACPI power button timeout in seconds.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 1,
+        "maximum": 900
+      },
       "AddSledRequest": {
         "description": "A request to Add a given sled after rack initialization has occurred",
         "type": "object",
@@ -6189,6 +6196,45 @@
           "sources"
         ]
       },
+      "InstanceShutdownPolicy": {
+        "description": "The method by which the instance will be powered down when transitioning to the stopped state or when rebooting: either forcefully or by giving the guest an ACPI power button signal first.",
+        "oneOf": [
+          {
+            "description": "Instance's VM is forcefully terminated immediately.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "hard_off"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "description": "Instance is sent PWRBTN_STS as described in ACPI chapter 4. If the VM guest has not stopped itself with a power event within the given timeout, it is *then* forcefully terminated.",
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "power_button"
+                ]
+              },
+              "timeout_secs": {
+                "$ref": "#/components/schemas/AcpiTimeoutSecs"
+              }
+            },
+            "required": [
+              "action",
+              "timeout_secs"
+            ]
+          }
+        ]
+      },
       "InstanceSledLocalConfig": {
         "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
         "type": "object",
@@ -6484,6 +6530,9 @@
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
           },
+          "wicket_ssh_auth_status": {
+            "$ref": "#/components/schemas/WicketSshAuthStatus"
+          },
           "zpools": {
             "type": "array",
             "items": {
@@ -6509,6 +6558,7 @@
           "smf_services_enabled_not_online",
           "usable_hardware_threads",
           "usable_physical_ram",
+          "wicket_ssh_auth_status",
           "zpools"
         ]
       },
@@ -6587,6 +6637,11 @@
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
+          "location": {
+            "nullable": true,
+            "description": "Where this disk sits in the chassis, as labelled by the platform's hardware topology: \"N5\" for a U.2 bay, \"M.2 East\" for a boot device.\n\nThis is the operator-facing position, matching what is printed on the sled. It is best-effort: `None` means the topology had no label for the disk or could not be read.",
+            "type": "string"
+          },
           "next_active_firmware_slot": {
             "nullable": true,
             "type": "integer",
@@ -6598,7 +6653,8 @@
             "format": "uint8",
             "minimum": 0
           },
-          "slot": {
+          "pcie_slot": {
+            "description": "PCIe physical slot number of the bridge above this disk.\n\nThis is the `physical-slot#` of the parent `pcieb` device. It is internal to the board's PCIe topology and board-specific: the same U.2 bay is numbered differently on Gimlet and Cosmo. It is not the location label printed on the chassis; see `location` for that. Nothing guarantees the numbering stays the same across host OS versions either, so anything that needs a stable identifier should use `location`.",
             "type": "integer",
             "format": "int64"
           },
@@ -6620,7 +6676,7 @@
           "active_firmware_slot",
           "identity",
           "number_of_firmware_slots",
-          "slot",
+          "pcie_slot",
           "slot1_is_read_only",
           "slot_firmware_versions",
           "variant"
@@ -6960,11 +7016,7 @@
             "minimum": 0
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
@@ -7916,6 +7968,9 @@
           "update_disposition": {
             "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
           },
+          "wicket_ssh_auth": {
+            "$ref": "#/components/schemas/WicketSshAuth"
+          },
           "zones": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -7941,6 +7996,7 @@
           "generation",
           "measurements",
           "update_disposition",
+          "wicket_ssh_auth",
           "zones"
         ]
       },
@@ -9101,11 +9157,7 @@
             "minimum": 0
           },
           "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BaseboardId"
-            },
-            "uniqueItems": true
+            "$ref": "#/components/schemas/TrustQuorumMembers"
           },
           "rack_id": {
             "$ref": "#/components/schemas/RackUuid"
@@ -10526,9 +10578,16 @@
             "description": "The node is not currently coordinating a reconfiguration or LRTQ upgrade.",
             "type": "object",
             "properties": {
+              "latest_committed_epoch": {
+                "nullable": true,
+                "description": "The latest configuration epoch this node has committed.\n\nThis is never greater than `latest_config_epoch`.\n\nIf this value is lower than N (see `latest_config_epoch`), it means that _this_ node has not committed N, not that _no_ node has. (For example, the coordinator may have crashed after Nexus started committing, but before its own commit arrived.)\n\nThis is `None` if the node has not committed a trust quorum configuration, including a node that has not yet upgraded from LRTQ.",
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
               "latest_config_epoch": {
                 "nullable": true,
-                "description": "The latest configuration epoch this node has persisted.\n\nIf this is greater than or equal to the epoch that Nexus is driving, the coordinator started that epoch and then stopped for some reason, and Nexus can abort this configuration. If lower than the Nexus epoch, then reconfiguration has not started yet.",
+                "description": "The latest configuration epoch this node has persisted.\n\nBelow, N is the epoch of a configuration this node was asked to coordinate.\n\n* If lower than N, then this node has not persisted that configuration: it never received or accepted it, or it stopped coordinating it (for example, by restarting) before collecting shares and persisting it.\n\n* If equal to N, then this node started coordinating that epoch but is no longer doing so: either it committed the epoch (see `latest_committed_epoch`), or it lost its coordination state, for example by restarting.\n\n* If greater than N, then this node has moved on to a newer configuration, and N has been superseded.\n\nThis is `None` if the node has not persisted a trust quorum configuration, including an LRTQ node that has not yet persisted an upgrade configuration.",
                 "type": "integer",
                 "format": "uint64",
                 "minimum": 0
@@ -10545,6 +10604,16 @@
             ]
           }
         ]
+      },
+      "TrustQuorumMembers": {
+        "description": "The members of a trust quorum.\n\nA trust quorum has between [`TRUST_QUORUM_MIN_MEMBERS`] and [`TRUST_QUORUM_MAX_MEMBERS`] members, inclusive.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BaseboardId"
+        },
+        "minItems": 3,
+        "maxItems": 32,
+        "uniqueItems": true
       },
       "TrustQuorumNetworkConfig": {
         "description": "Network configuration used to bring up the control plane.\n\nThis type mirrors `bootstore::schemes::v0::NetworkConfig` but adds `JsonSchema` for API compatibility.",
@@ -10968,7 +11037,7 @@
         ]
       },
       "VmmStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
+        "description": "Requestable running state of an Instance.",
         "oneOf": [
           {
             "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
@@ -11013,10 +11082,27 @@
                 "enum": [
                   "stopped"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "description": "The method by which the instance should be stopped *this* time. May be `HardOff` for an instance whose policy is `PowerButton` if the operator wants to use force.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "method"
+                ]
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {
@@ -11028,10 +11114,27 @@
                 "enum": [
                   "reboot"
                 ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "description": "The method by which the instance should be rebooted *this* time. May be `HardOff` for an instance whose policy is `PowerButton` if the operator wants to use force.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InstanceShutdownPolicy"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "method"
+                ]
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           }
         ]
@@ -11195,6 +11298,131 @@
         "required": [
           "rules",
           "vni"
+        ]
+      },
+      "WicketSshAuth": {
+        "description": "Describes the authentication requirements for accessing the `wicket` captive shell over SSH.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/WicketSshAuthGeneration"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WicketSshAuthKind"
+          }
+        },
+        "required": [
+          "generation",
+          "kind"
+        ]
+      },
+      "WicketSshAuthGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "x-rust-type": {
+          "crate": "omicron-generation-kinds",
+          "path": "omicron_generation_kinds::WicketSshAuthGeneration",
+          "version": "*"
+        },
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "WicketSshAuthKind": {
+        "description": "Particular kind of authentication requirement for accessing the `wicket` captive shell over SSH.",
+        "oneOf": [
+          {
+            "description": "`wicket` is publicly accessible to any client.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "`wicket` is only accessible to clients supplying one of the specified SSH keys.",
+            "type": "object",
+            "properties": {
+              "allow_support_keys": {
+                "description": "Whether to allow the built-in support keys shipped with the release direct access to `wicket`.\n\nThis setting only controls the support keys' ability to SSH in as `wicket` directly; even if this is false, the support keys can still be used for support operations, including indirect access to wicket (support access is strictly more powerful than access to `wicket`).",
+                "type": "boolean"
+              },
+              "authorized_keys": {
+                "description": "Set of operator-specified keys allowed to access wicket.\n\nThis set may be empty. If it is empty and `allow_support_keys` is `false`, no SSH connections to `wicket` will succeed.\n\nEach item in this set is expected to be a single, valid `authorized_keys` line. Nexus is expected to perform suitable validation on incoming keys before passing them to sled-agent.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "public_keys"
+                ]
+              }
+            },
+            "required": [
+              "allow_support_keys",
+              "authorized_keys",
+              "type"
+            ]
+          }
+        ]
+      },
+      "WicketSshAuthStatus": {
+        "description": "Status of the application of our configured [`WicketSshAuth`] to our switch zone, if we have one.",
+        "oneOf": [
+          {
+            "description": "We have no switch zone, and therefore have no need to apply SSH settings.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "no_switch_zone"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "We have a switch zone.",
+            "type": "object",
+            "properties": {
+              "effective_auth_gen": {
+                "description": "The current auth generation setting in effect in our switch zone.\n\nThis generation number can be compared against the ledgered generation stored in our [`OmicronSledConfig`] to check for effective application of the latest-known setting.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WicketSshAuthGeneration"
+                  }
+                ]
+              },
+              "last_error": {
+                "nullable": true,
+                "description": "If the most recent attempt to set a new auth generation failed, contains the error.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "switch_zone"
+                ]
+              }
+            },
+            "required": [
+              "effective_auth_gen",
+              "status"
+            ]
+          }
         ]
       },
       "WriteNetworkConfigRequest": {

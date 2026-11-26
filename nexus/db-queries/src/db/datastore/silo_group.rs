@@ -20,13 +20,11 @@ use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
-use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_types::external_api::user;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
@@ -678,71 +676,6 @@ impl DataStore {
             })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn silo_group_delete(
-        &self,
-        opctx: &OpContext,
-        authz_silo_group: &authz::SiloGroup,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_silo_group).await?;
-
-        #[derive(Debug, thiserror::Error)]
-        enum SiloDeleteError {
-            #[error("group {0} still has memberships")]
-            GroupStillHasMemberships(SiloGroupUuid),
-        }
-        type TxnError = TransactionError<SiloDeleteError>;
-
-        let group_id = authz_silo_group.id();
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // Prefer to use "transaction_retry_wrapper"
-        self.transaction_non_retry_wrapper("silo_group_delete")
-            .transaction(&conn, |conn| async move {
-                use nexus_db_schema::schema::silo_group_membership;
-
-                // Don't delete groups that still have memberships
-                let group_memberships =
-                    silo_group_membership::dsl::silo_group_membership
-                        .filter(
-                            silo_group_membership::dsl::silo_group_id
-                                .eq(to_db_typed_uuid(group_id)),
-                        )
-                        .select(SiloGroupMembership::as_returning())
-                        .limit(1)
-                        .load_async(&conn)
-                        .await?;
-
-                if !group_memberships.is_empty() {
-                    return Err(TxnError::CustomError(
-                        SiloDeleteError::GroupStillHasMemberships(group_id),
-                    ));
-                }
-
-                // Delete silo group
-                use nexus_db_schema::schema::silo_group::dsl;
-                diesel::update(dsl::silo_group)
-                    .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
-                    .filter(dsl::time_deleted.is_null())
-                    .set(dsl::time_deleted.eq(Utc::now()))
-                    .execute_async(&conn)
-                    .await?;
-
-                Ok(())
-            })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(
-                    SiloDeleteError::GroupStillHasMemberships(id),
-                ) => Error::invalid_request(&format!(
-                    "group {0} still has memberships",
-                    id
-                )),
-                TxnError::Database(error) => {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                }
-            })
     }
 
     pub async fn silo_groups_list_by_id(

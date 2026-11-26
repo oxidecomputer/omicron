@@ -13,6 +13,7 @@ use sled_agent_types::early_networking::{
     RackNetworkConfig, SwitchSlot, UplinkAddressConfig, UplinkPorts,
 };
 use sled_hardware_types::BaseboardId;
+use trust_quorum_types::membership::TrustQuorumMembers;
 
 fn main() {
     let trust_quorum_peers: BTreeSet<BaseboardId> = [
@@ -111,6 +112,8 @@ fn main() {
         bfd: vec![],
     };
 
+    let trust_quorum_peers = TrustQuorumMembers::new(trust_quorum_peers)
+        .expect("example membership is within the size bounds");
     let req = MultirackJoinRequest { trust_quorum_peers, rack_network_config };
 
     println!("{}", serde_json::to_string_pretty(&req).unwrap());

@@ -141,6 +141,7 @@ use sled_agent_types::inventory::SvcEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::SvcsError;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -244,7 +245,7 @@ impl DataStore {
                             InvNvmeDiskFirmware::new(
                                 collection_id,
                                 sled_agent.sled_id,
-                                disk.slot,
+                                disk.pcie_slot,
                                 firmware,
                             )
                             .map_err(|e| {
@@ -3431,14 +3432,15 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id(), row.slot()));
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id(), row.pcie_slot())
+                });
                 for firmware in batch {
                     disk_firmware
                         .entry(firmware.sled_id().into())
                         .or_default()
                         .insert(
-                            firmware.slot(),
+                            firmware.pcie_slot(),
                             nexus_types::inventory::PhysicalDiskFirmware::from(
                                 firmware,
                             ),
@@ -3477,12 +3479,12 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id, row.slot));
+                    p.found_batch(&batch, &|row| (row.sled_id, row.pcie_slot));
                 for disk in batch {
                     let sled_id = disk.sled_id.into();
                     let firmware = disk_firmware
                         .get(&sled_id)
-                        .and_then(|lookup| lookup.get(&disk.slot))
+                        .and_then(|lookup| lookup.get(&disk.pcie_slot))
                         .unwrap_or(&nexus_types::inventory::PhysicalDiskFirmware::Unknown);
 
                     disks.entry(sled_id).or_default().push(
@@ -3493,7 +3495,8 @@ impl DataStore {
                                 serial: disk.serial,
                             },
                             variant: disk.variant.into(),
-                            slot: disk.slot,
+                            pcie_slot: disk.pcie_slot,
+                            location: disk.location,
                             firmware: firmware.clone(),
                         },
                     );
@@ -4187,6 +4190,12 @@ impl DataStore {
                                 update_disposition: sled_config
                                     .update_disposition
                                     .into(),
+                                // TODO omicron#11821 We should store the
+                                // wicket SSH auth reported in inventory in
+                                // the DB. For now we return the initial value
+                                // in all inventory reports (it's the only value
+                                // any sled-agent can report anyway).
+                                wicket_ssh_auth: WicketSshAuth::initial(),
                             },
                         })
                         .map_err(|e| {
@@ -5918,30 +5927,44 @@ impl ConfigReconcilerRows {
     ) -> anyhow::Result<OmicronSledConfigUuid> {
         let sled_config_id = OmicronSledConfigUuid::new_v4();
 
+        let OmicronSledConfig {
+            generation,
+            disks,
+            datasets,
+            zones,
+            remove_mupdate_override,
+            host_phase_2,
+            measurements,
+            update_disposition,
+            // TODO omicron#11821 We should store the wicket SSH auth reported
+            // in each sled config.
+            wicket_ssh_auth: _,
+        } = config;
+
         self.sled_configs.push(InvOmicronSledConfig::new(
             collection_id,
             sled_config_id,
-            config.generation,
-            config.remove_mupdate_override,
-            config.host_phase_2.clone(),
-            config.measurements.clone(),
-            config.update_disposition,
+            *generation,
+            *remove_mupdate_override,
+            host_phase_2.clone(),
+            measurements.clone(),
+            *update_disposition,
         ));
-        self.disks.extend(config.disks.iter().map(|disk| {
+        self.disks.extend(disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
                 collection_id,
                 sled_config_id,
                 disk.clone(),
             )
         }));
-        self.datasets.extend(config.datasets.iter().map(|dataset| {
+        self.datasets.extend(datasets.iter().map(|dataset| {
             InvOmicronSledConfigDataset::new(
                 collection_id,
                 sled_config_id,
                 dataset,
             )
         }));
-        for zone in &config.zones {
+        for zone in zones {
             self.zones.push(InvOmicronSledConfigZone::new(
                 collection_id,
                 sled_config_id,

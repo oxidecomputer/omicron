@@ -25,10 +25,11 @@ use nexus_db_queries::db::model::IncompleteIpPoolResource;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::InstanceCreateBuilder;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_floating_ip;
-use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_instance_from_body;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
@@ -48,8 +49,7 @@ use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::{
-    Instance, InstanceCpuCount, InstanceNetworkInterfaceAttachment,
-    InstanceState,
+    Instance, InstanceNetworkInterfaceAttachment, InstanceState,
 };
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
@@ -61,7 +61,6 @@ use omicron_common::address::IpVersion;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -1144,35 +1143,16 @@ async fn test_floating_ip_attach_fail_between_projects(
 
     // Create a new instance with a FIP, referenced by ID.
     let url = format!("/v1/instances?project={PROJECT_NAME}");
+    let instance_params = InstanceCreateBuilder::new(INSTANCE_NAMES[1])
+        .with_description("")
+        .with_external_ips(vec![instance::ExternalIpCreate::Floating {
+            floating_ip: fip.identity.id.into(),
+        }])
+        .finish();
     let error = object_create_error(
         client,
         &url,
-        &instance::InstanceCreate {
-            identity: IdentityMetadataCreateParams {
-                name: INSTANCE_NAMES[1].parse().unwrap(),
-                description: "".into(),
-            },
-            ncpus: InstanceCpuCount(4),
-            memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
-            user_data:
-                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                    .to_vec(),
-            ssh_public_keys: Some(Vec::new()),
-            network_interfaces:
-                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-            external_ips: vec![instance::ExternalIpCreate::Floating {
-                floating_ip: fip.identity.id.into(),
-            }],
-            disks: vec![],
-            boot_disk: None,
-            cpu_platform: None,
-            start: true,
-            auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
-            multicast_groups: Vec::new(),
-            enable_jumbo_frames: false,
-        },
+        &instance_params,
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -1699,17 +1679,13 @@ async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
 
     // Create an instance with only a private IPv6 address.
     let instance_name = &INSTANCE_NAMES[0];
-    let inst = create_instance_with(
+    let inst = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv6,
-        vec![],
-        vec![],
-        false,
-        None,
-        None,
-        vec![],
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv6)
+            .finish(),
     )
     .await;
 
@@ -1767,17 +1743,13 @@ async fn cannot_attach_floating_ipv6_to_instance_missing_ipv6_stack(
 
     // Create an instance with only a private IPv4 address.
     let instance_name = &INSTANCE_NAMES[0];
-    let inst = create_instance_with(
+    let inst = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![],
-        vec![],
-        false,
-        None,
-        None,
-        vec![],
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+            .finish(),
     )
     .await;
 
@@ -1833,17 +1805,13 @@ async fn cannot_attach_ephemeral_ipv4_to_instance_missing_ipv4_stack(
 
     // Create an instance with only a private IPv6 address.
     let instance_name = &INSTANCE_NAMES[0];
-    let inst = create_instance_with(
+    let inst = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv6,
-        vec![],
-        vec![],
-        false,
-        None,
-        None,
-        vec![],
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv6)
+            .finish(),
     )
     .await;
 
@@ -1888,17 +1856,13 @@ async fn cannot_attach_ephemeral_ipv6_to_instance_missing_ipv6_stack(
 
     // Create an instance with only a private IPv4 address.
     let instance_name = &INSTANCE_NAMES[0];
-    let inst = create_instance_with(
+    let inst = create_instance_from_body(
         client,
         PROJECT_NAME,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        vec![],
-        vec![],
-        false,
-        None,
-        None,
-        vec![],
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv4)
+            .finish(),
     )
     .await;
 
@@ -2078,21 +2042,18 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
 
     // Create a running instance with an Ephemeral IPv6 address.
     let instance_name = INSTANCE_NAMES[0];
-    let instance = create_instance_with(
-        &client,
+    let instance = create_instance_from_body(
+        client,
         PROJECT_NAME,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv6,
-        /* disks = */ vec![],
-        vec![instance::ExternalIpCreate::Ephemeral {
-            pool_selector: ip_pool::PoolSelector::Explicit {
-                pool: v6_pool.identity.id.into(),
-            },
-        }],
-        /* start = */ false,
-        /* auto_restart_policy = */ Default::default(),
-        /* instance_cpu_platform = */ None,
-        /* multicast_groups = */ vec![],
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv6)
+            .with_external_ips(vec![instance::ExternalIpCreate::Ephemeral {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: v6_pool.identity.id.into(),
+                },
+            }])
+            .finish(),
     )
     .await;
 
@@ -2183,19 +2144,16 @@ async fn can_create_instance_with_floating_ipv6_address(
 
     // Create a running instance with that Floating IPv6 address.
     let instance_name = INSTANCE_NAMES[0];
-    let instance = create_instance_with(
-        &client,
+    let instance = create_instance_from_body(
+        client,
         PROJECT_NAME,
-        instance_name,
-        &InstanceNetworkInterfaceAttachment::DefaultIpv6,
-        /* disks = */ vec![],
-        vec![instance::ExternalIpCreate::Floating {
-            floating_ip: NameOrId::Id(fip.identity.id),
-        }],
-        /* start = */ false,
-        /* auto_restart_policy = */ Default::default(),
-        /* instance_cpu_platform = */ None,
-        /* multicast_groups = */ vec![],
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(false)
+            .with_nics(InstanceNetworkInterfaceAttachment::DefaultIpv6)
+            .with_external_ips(vec![instance::ExternalIpCreate::Floating {
+                floating_ip: NameOrId::Id(fip.identity.id),
+            }])
+            .finish(),
     )
     .await;
 
@@ -2291,17 +2249,14 @@ async fn instance_for_external_ips(
             },
         })
     }
-    create_instance_with(
-        &client,
+    create_instance_from_body(
+        client,
         PROJECT_NAME,
-        instance_name,
-        nic,
-        vec![],
-        eips,
-        start,
-        Default::default(),
-        None,
-        Vec::new(),
+        InstanceCreateBuilder::new(instance_name)
+            .with_start(start)
+            .with_nics(nic.clone())
+            .with_external_ips(eips)
+            .finish(),
     )
     .await
 }
@@ -2468,17 +2423,15 @@ async fn no_automatic_snat_for_ipv6(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let project = create_project_and_pool(client).await;
     let project_name = project.identity.name.as_str();
-    let _ = create_instance_with(
+    let _ = create_instance_from_body(
         client,
         project_name,
-        "niccy",
-        &instance::InstanceNetworkInterfaceAttachment::DefaultDualStack,
-        vec![],
-        vec![],
-        false,
-        None,
-        None,
-        vec![],
+        InstanceCreateBuilder::new("niccy")
+            .with_start(false)
+            .with_nics(
+                instance::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+            )
+            .finish(),
     )
     .await;
 

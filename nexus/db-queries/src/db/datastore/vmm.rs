@@ -26,11 +26,13 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
+use nexus_db_model::InstanceShutdownPolicyColumns;
 use nexus_db_schema::enums::SledBpAvailabilityEnum;
 use nexus_db_schema::enums::VmmStateEnum;
 use nexus_db_schema::schema::vmm;
 use nexus_db_schema::schema::vmm::dsl;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::instance::InstanceShutdownPolicy;
 use nexus_types::instance::Migrations;
 use nexus_types::instance::VmmRuntimeState;
 use omicron_common::api::external::CreateResult;
@@ -82,6 +84,19 @@ pub struct VmmBulkMarkStopForUpdateResult {
     pub batch_size: NonZeroU32,
 }
 
+/// The combination of a VMM that should be stopped for its hosting sled to be
+/// evacuated for an update, paired with its instance's shutdown policy.
+///
+/// This is returned by [`DataStore::vmm_list_stoppable_for_update_by_sled_id`].
+#[derive(Debug, Clone)]
+pub struct VmmStoppableForUpdate {
+    /// The stoppable VMM.
+    pub vmm: Vmm,
+
+    /// The shutdown policy for this VMM's instance.
+    pub shutdown_policy: InstanceShutdownPolicy,
+}
+
 /// Changeset for a VMM's runtime state.
 #[derive(Clone, Debug, AsChangeset)]
 #[diesel(table_name = vmm)]
@@ -125,6 +140,19 @@ impl From<nexus_types::instance::VmmRuntimeState> for RuntimeStateChangeset {
             failure_reason,
         }
     }
+}
+
+/// The result of a successful call to [`DataStore::vmm_mark_saga_unwinding`]
+/// and [`DataStore::vmm_mark_saga_unwound`].
+#[derive(Debug, PartialEq)]
+pub enum MarkSagaUnwoundOutcome {
+    /// The VMM record's state has changed to `new_state`
+    StateChanged { new_state: DbVmmState },
+    /// The VMM record was already in a state from which no state change was
+    /// necessary.
+    StateChangeNotNeeded { current_state: DbVmmState },
+    /// The VMM record has been soft-deleted.
+    VmmDeleted,
 }
 
 impl DataStore {
@@ -179,9 +207,9 @@ impl DataStore {
     /// Marks VMMs sleds that are evacuating as needing to be stopped in order
     /// to update the sled.
     ///
-    /// VMMs that are not in one of the `SHOULD_MARK_TO_STOP_FOR_EVACUATION`
-    /// states do not need to be stopped, so they are left untouched. VMMs that
-    /// are already marked to be stopped by update are also excluded.
+    /// VMMs that are not in one of the `SHOULD_STOP_FOR_EVACUATION` states do
+    /// not need to be stopped, so they are left untouched. VMMs that are
+    /// already marked to be stopped by update are also excluded.
     ///
     /// The task to stop instances only needs to know whether a VMM should be
     /// stopped or not, so a boolean would be enough. But, we mark the VMMs
@@ -473,10 +501,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
-    ) -> Result<bool, Error> {
-        diesel::update(dsl::vmm)
+    ) -> Result<MarkSagaUnwoundOutcome, Error> {
+        let result = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            // If the state is already SagaUnwound, we need not advance its
+            // generation again.
+            .filter(dsl::state.ne(DbVmmState::SagaUnwound))
             .set((
                 dsl::state.eq(DbVmmState::SagaUnwound),
                 // We deliberately do not alter or unset the failure reason here
@@ -489,20 +520,130 @@ impl DataStore {
             ))
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map(|r| match r.status {
-                UpdateStatus::Updated => true,
-                UpdateStatus::NotUpdatedButExists => false,
-            })
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Vmm,
-                        LookupType::ById(vmm_id.into_untyped_uuid()),
-                    ),
-                )
-            })
+            .await;
+
+        match result {
+            // If the record has been hard-deleted, we don't need to change its
+            // state, as nothing else will ever see it, so we can just return
+            // `Ok` here. Note that nothing ever actually hard-deletes VMM
+            // records at present, but we treat soft-deleted records as an `Ok`
+            // result, so we may as well handle this gracefully too.
+            Err(diesel::result::Error::NotFound) => {
+                Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+            }
+            // Other errors should be treated as errors
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+            // We changed the VMM record's state successfully.
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::Updated, ..
+            }) => Ok(MarkSagaUnwoundOutcome::StateChanged {
+                new_state: DbVmmState::SagaUnwound,
+            }),
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                found,
+            }) => {
+                if found.time_deleted.is_some() {
+                    // If the record is soft-deleted, nothing else will ever
+                    // try to interact with it, so we need not change its state.
+                    Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+                } else {
+                    // The record was already in a state where no state change
+                    // was necessary.
+                    Ok(MarkSagaUnwoundOutcome::StateChangeNotNeeded {
+                        current_state: found.state,
+                    })
+                }
+            }
+        }
+    }
+
+    /// Transitions a VMM to the `Cancelling` state as part of an unwinding
+    /// saga. This is necessary to perform in the undo action that attempts to
+    /// ask the sled-agent to unregister the VMM, as it prevents any *other*
+    /// actor that might otherwise attempt to talk to the sled-agent about that
+    /// VMM (say, a stop request that comes in during the unwinding, the
+    /// `instance-watcher` background task, et cetera) from trying to send
+    /// requests for the VMM to the sled-agent and get 404ed.
+    ///
+    /// Executing this query transfers exclusive ownership of the VMM record's
+    /// state to the unwinding saga, which it kinda already had, but now it's,
+    /// like, REALLY exclusively owned by the unwinding saga.
+    ///
+    /// # Warning
+    ///
+    /// This may *only* be called by the saga that created a VMM record, as it
+    /// more or less unconditionally increments the generation number and
+    /// advances the VMM to the `Cancelling` state.
+    ///
+    /// This is necessary as it is executed in compensating actions for
+    /// unwinding saga nodes which cannot easily determine whether other
+    /// actions, which advance the VMM's generation, have executed before the
+    /// saga unwound.
+    pub async fn vmm_mark_saga_unwinding(
+        &self,
+        opctx: &OpContext,
+        vmm_id: &PropolisUuid,
+    ) -> Result<MarkSagaUnwoundOutcome, Error> {
+        let result = diesel::update(dsl::vmm)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            // if the VMM record is already in a potentially non-existent state,
+            // then we need not munge it now; the entire purpose of this thingy
+            // is to make sure it is considered non-existent so that it won't be
+            // health checked and subsequent requests to act on the instance
+            // won't be sent to the sled.
+            .filter(
+                dsl::state.ne_all(DbVmmState::POTENTIALLY_NONEXISTENT_STATES),
+            )
+            .set((
+                dsl::state.eq(DbVmmState::Cancelling),
+                // We deliberately do not alter or unset the failure reason here
+                // to preserve historical failed information. In the future, if
+                // we start tracking the reason a saga was unwound, we would
+                // probably want to extend the schema to store that as a
+                // separate column (or maybe some kind of history table?)
+                dsl::time_state_updated.eq(chrono::Utc::now()),
+                dsl::state_generation.eq(dsl::state_generation + 1),
+            ))
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await;
+
+        match result {
+            // If the record has been hard-deleted, we don't need to change its
+            // state, as nothing else will ever see it, so we can just return
+            // `Ok` here. Note that nothing ever actually hard-deletes VMM
+            // records at present, but we treat soft-deleted records as an `Ok`
+            // result, so we may as well handle this gracefully too.
+            Err(diesel::result::Error::NotFound) => {
+                Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+            }
+            // Other errors should be treated as errors
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+            // We changed the VMM record's state successfully.
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::Updated, ..
+            }) => Ok(MarkSagaUnwoundOutcome::StateChanged {
+                new_state: DbVmmState::Cancelling,
+            }),
+            Ok(UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                found,
+            }) => {
+                if found.time_deleted.is_some() {
+                    // If the record is soft-deleted, nothing else will ever
+                    // try to interact with it, so we need not change its state.
+                    Ok(MarkSagaUnwoundOutcome::VmmDeleted)
+                } else {
+                    // The record was already in a state where no state change
+                    // was necessary.
+                    Ok(MarkSagaUnwoundOutcome::StateChangeNotNeeded {
+                        current_state: found.state,
+                    })
+                }
+            }
+        }
     }
 
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
@@ -594,7 +735,8 @@ impl DataStore {
     }
 
     /// Lists VMMs that have been marked as needing to be stopped for a sled
-    /// update, and that *can* be stopped.
+    /// update, and that *can* be stopped. Returns each such VMM with its
+    /// instance's shutdown policy.
     ///
     /// The query performed by this function is paginated by the sled and
     /// VMM UUIDs, in that order.
@@ -602,19 +744,42 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
-    ) -> ListResultVec<Vmm> {
+    ) -> ListResultVec<VmmStoppableForUpdate> {
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
         use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
-        paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
-            .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::stop_for_update_disposition_generation.is_not_null())
-            .filter(dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION))
-            .sled_filter(SledFilter::InService)
-            .select(Vmm::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let vmms_and_instances =
+            paginated_multicolumn(dsl::vmm, (dsl::sled_id, dsl::id), pagparams)
+                .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
+                .inner_join(
+                    instance_dsl::instance
+                        .on(instance_dsl::id.eq(dsl::instance_id)),
+                )
+                .filter(dsl::time_deleted.is_null())
+                .filter(
+                    dsl::stop_for_update_disposition_generation.is_not_null(),
+                )
+                .filter(
+                    dsl::state.eq_any(DbVmmState::SHOULD_STOP_FOR_EVACUATION),
+                )
+                .sled_filter(SledFilter::InService)
+                .select((
+                    Vmm::as_select(),
+                    InstanceShutdownPolicyColumns::as_select(),
+                ))
+                .load_async(&*self.pool_connection_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+        vmms_and_instances
+            .into_iter()
+            .map(|(vmm, instance)| {
+                let shutdown_policy = instance.shutdown_policy()?;
+                Ok(VmmStoppableForUpdate { vmm, shutdown_policy })
+            })
+            .collect()
     }
 }
 
@@ -632,19 +797,30 @@ mod tests {
     use iddqd::IdOrdMap;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::ActiveSledBpAvailability;
+    use nexus_db_model::Instance;
+    use nexus_db_model::Project;
     use nexus_db_model::SledBlueprintAvailabilityInput;
     use nexus_db_model::SledBpAvailabilityState;
     use nexus_db_model::VmmCpuPlatform;
+    use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::project::ProjectCreate;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState;
+    use nexus_types::silo::DEFAULT_SILO_ID;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_generation_kinds::UpdateDispositionGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::ProjectUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::instance::MigrationState;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::iter;
 
     #[tokio::test]
     async fn test_vmm_and_migration_update_runtime() {
@@ -1111,8 +1287,12 @@ mod tests {
             }
         }
 
-        // There should be 27 unmarked rows. 8 unstoppable VMMs on each of
-        // sleds A and B, all 10 on sled C, plus the 3 deleted VMMs.
+        // There should be 30 unmarked rows. 8 unstoppable VMMs on each of
+        // sleds A and B, all 11 on sled C, plus the 3 deleted VMMs.
+        //
+        // Note: adding a new VMM state which should not be marked to stop for
+        // sled evacuation should increment this value by 3 (1 state * 3 sleds).
+        const N_UNMARKED_VMMS: usize = 30;
         let actual = fetch_all(datastore).await;
         assert_rows(&actual, &expected);
         assert_eq!(
@@ -1120,7 +1300,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            27,
+            N_UNMARKED_VMMS,
             "all rows other than sleds A and B's stoppable VMMs remain unmarked"
         );
 
@@ -1139,7 +1319,7 @@ mod tests {
                 .values()
                 .filter(|v| v.stop_for_update_disposition_generation.is_none())
                 .count(),
-            27
+            N_UNMARKED_VMMS,
         );
 
         // Now sled C evacuates too, moving from generation 1 to generation 2.
@@ -1203,7 +1383,7 @@ mod tests {
             "sled B's marked VMMs are unchanged and sled C's are newly marked"
         );
         assert_eq!(
-            null_count, 24,
+            null_count, 27,
             "the unstoppable and deleted VMMs remain unmarked"
         );
 
@@ -1386,25 +1566,64 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        // The states from which a VMM can still be stopped for an update. Only
-        // marked VMMs in these states should be listed by
-        // `vmm_list_stoppable_for_update_by_sled_id`.
-        let is_stoppable = |state: DbVmmState| {
-            matches!(
-                state,
-                DbVmmState::Starting
-                    | DbVmmState::Running
-                    | DbVmmState::Rebooting
+        // Create a test project to host all our fake instances.
+        let (authz_project, _) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    ProjectUuid::new_v4(),
+                    DEFAULT_SILO_ID,
+                    ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "test-project".parse().unwrap(),
+                            description: "".into(),
+                        },
+                        defaults: None,
+                    },
+                ),
             )
-        };
+            .await
+            .expect("created project");
+
+        // For each stoppable VMM we insert, pick a different shutdown policy
+        // and record the choice to check below.
+        let mut shutdown_policy_iter = iter::once(
+            InstanceShutdownPolicy::HardOff,
+        )
+        .chain((100_u64..).step_by(100).map(|n| {
+            let timeout_secs = n.try_into().expect("these are valid timeouts");
+            InstanceShutdownPolicy::PowerButton { timeout_secs }
+        }));
+        let mut expected_shutdown_policies =
+            BTreeMap::<Uuid, InstanceShutdownPolicy>::new();
 
         // Insert 2 VMMs (one marked to stop, one not) in each state per sled
-        // (2 in-service and 1 expunged).
+        // (2 in-service and 1 expunged). Each VMM also gets an associated
+        // instance, required by `vmm_list_stoppable_for_update_by_sled_id`'s
+        // join against the instance table to look up the shutdown policy.
         let generation = UpdateDispositionGeneration::from(1);
         let sled_a = SledUuid::new_v4();
         let sled_b = SledUuid::new_v4();
         let sled_expunged = SledUuid::new_v4();
         let mut vmms = Vec::new();
+
+        // Do we expect a given VMM to be stoppable (i.e., listed by
+        // `vmm_list_stoppable_for_update_by_sled_id()`)? That requires:
+        //
+        // 1. It has been marked to be stopped
+        // 2. It's not on the sled we're marking expunged
+        // 3. Its state is stoppable
+        let is_stoppable = |vmm: &Vmm| {
+            vmm.stop_for_update_disposition_generation.is_some()
+                && vmm.sled_id() != sled_expunged
+                && matches!(
+                    vmm.state,
+                    DbVmmState::Starting
+                        | DbVmmState::Running
+                        | DbVmmState::Rebooting
+                )
+        };
+
         for sled_id in [sled_a, sled_b, sled_expunged] {
             // The query only returns VMMs on in-service sleds. We store the
             // three sleds in the db.
@@ -1430,28 +1649,77 @@ mod tests {
 
             for &state in DbVmmState::ALL_STATES {
                 for marker in [Some(generation), None] {
+                    let instance_id = InstanceUuid::new_v4();
                     let failure_reason = (state == DbVmmState::Failed)
                         .then_some(db::model::VmmFailureReason::FromSledAgent);
-                    let vmm = datastore
-                        .vmm_insert(
-                            &opctx,
-                            Vmm {
-                                id: Uuid::new_v4(),
-                                time_created: Utc::now(),
-                                time_deleted: None,
-                                instance_id: Uuid::new_v4(),
-                                sled_id: sled_id.into(),
-                                propolis_ip: "10.1.9.32".parse().unwrap(),
-                                propolis_port: 420.into(),
-                                cpu_platform: VmmCpuPlatform::SledDefault,
-                                time_state_updated: Utc::now(),
-                                generation: Generation::new(),
-                                state,
-                                failure_reason,
-                                stop_for_update_disposition_generation: marker
-                                    .map(Into::into),
+                    let vmm = Vmm {
+                        id: Uuid::new_v4(),
+                        time_created: Utc::now(),
+                        time_deleted: None,
+                        instance_id: instance_id.into_untyped_uuid(),
+                        sled_id: sled_id.into(),
+                        propolis_ip: "10.1.9.32".parse().unwrap(),
+                        propolis_port: 420.into(),
+                        cpu_platform: VmmCpuPlatform::SledDefault,
+                        time_state_updated: Utc::now(),
+                        generation: Generation::new(),
+                        state,
+                        failure_reason,
+                        stop_for_update_disposition_generation: marker
+                            .map(Into::into),
+                    };
+
+                    // If this VMM is stoppable, pick a unique shutdown policy
+                    // from our iterator and record the choice for our assertion
+                    // later. Otherwise, pick an arbitrary policy.
+                    let shutdown_policy = if is_stoppable(&vmm) {
+                        let policy = shutdown_policy_iter
+                            .next()
+                            .expect("iter is effectively infinite");
+                        expected_shutdown_policies.insert(vmm.id, policy);
+                        policy
+                    } else {
+                        InstanceShutdownPolicy::HardOff
+                    };
+
+                    datastore.project_create_instance(
+                        &opctx,
+                        &authz_project,
+                        Instance::new(
+                            instance_id,
+                            authz_project.id(),
+                            &InstanceCreate {
+                                identity: IdentityMetadataCreateParams {
+                                    name: format!("instance-{}", vmm.id)
+                                        .parse()
+                                        .unwrap(),
+                                    description: "".into(),
+                                },
+                                ncpus: 2i64.try_into().unwrap(),
+                                memory: ByteCount::from_gibibytes_u32(16),
+                                hostname: "myhostname".try_into().unwrap(),
+                                user_data: Vec::new(),
+                                network_interfaces:
+                                    InstanceNetworkInterfaceAttachment::None,
+                                external_ips: Vec::new(),
+                                disks: Vec::new(),
+                                boot_disk: None,
+                                cpu_platform: None,
+                                ssh_public_keys: None,
+                                start: false,
+                                auto_restart_policy: Default::default(),
+                                anti_affinity_groups: Vec::new(),
+                                multicast_groups: Vec::new(),
+                                enable_jumbo_frames: false,
+                                shutdown_policy,
                             },
-                        )
+                        ),
+                    )
+                    .await
+                    .expect("instance created successfully");
+
+                    let vmm = datastore
+                        .vmm_insert(&opctx, vmm)
                         .await
                         .expect("VMM should be inserted successfully");
                     vmms.push(vmm);
@@ -1459,8 +1727,10 @@ mod tests {
             }
         }
 
-        // There should be 60 VMM rows. 2 VMMs (one marked, one not) per state
+        // There should be 66 VMM rows. 2 VMMs (one marked, one not) per state
         // per sled
+        //
+        // Note: this assertion will fail if you add a new VMM state.
         let row_count: i64 = dsl::vmm
             // Add a filter to ensure there is no full table scan
             .filter(dsl::id.ne(Uuid::nil()))
@@ -1468,18 +1738,11 @@ mod tests {
             .get_result_async(&*conn)
             .await
             .expect("VMMs should be counted");
-        assert_eq!(row_count, 60);
+        assert_eq!(row_count, 66);
 
         // Check there are 6 stoppable VMMs (3 per in-service sled).
-        let expected_ids: BTreeSet<Uuid> = vmms
-            .iter()
-            .filter(|vmm| {
-                vmm.sled_id() != sled_expunged
-                    && vmm.stop_for_update_disposition_generation.is_some()
-                    && is_stoppable(vmm.state)
-            })
-            .map(|vmm| vmm.id)
-            .collect();
+        let expected_ids: BTreeSet<Uuid> =
+            expected_shutdown_policies.keys().copied().collect();
         assert_eq!(expected_ids.len(), 6);
 
         // Check the retrieved ids for stoppable VMMs are the same as the
@@ -1493,8 +1756,16 @@ mod tests {
             .expect("marked VMMs should be listed");
         assert_eq!(listed.len(), expected_ids.len());
         let listed_ids: BTreeSet<Uuid> =
-            listed.iter().map(|vmm| vmm.id).collect();
+            listed.iter().map(|stoppable_vmm| stoppable_vmm.vmm.id).collect();
         assert_eq!(listed_ids, expected_ids);
+        let listed_shutdown_policies: BTreeMap<Uuid, InstanceShutdownPolicy> =
+            listed
+                .iter()
+                .map(|stoppable_vmm| {
+                    (stoppable_vmm.vmm.id, stoppable_vmm.shutdown_policy)
+                })
+                .collect();
+        assert_eq!(listed_shutdown_policies, expected_shutdown_policies);
 
         // Clean up.
         db.terminate().await;
@@ -1566,7 +1837,13 @@ mod tests {
             .vmm_mark_saga_unwound(&opctx, &vmm_id)
             .await
             .expect("failed VMM should be marked saga-unwound");
-        assert!(updated, "VMM should have been updated to SagaUnwound");
+        assert_eq!(
+            updated,
+            MarkSagaUnwoundOutcome::StateChanged {
+                new_state: DbVmmState::SagaUnwound
+            },
+            "VMM should have been updated to SagaUnwound"
+        );
         let unwound_vmm = assert_vmm_transitioned(
             &opctx,
             &datastore,
@@ -1582,15 +1859,26 @@ mod tests {
             .vmm_mark_saga_unwound(&opctx, &vmm_id)
             .await
             .expect("saga-unwound VMM should be marked saga-unwound again");
-        assert!(updated, "VMM should have been updated again");
-        assert_vmm_transitioned(
-            &opctx,
-            &datastore,
-            &unwound_vmm,
-            db::model::VmmState::SagaUnwound,
-            Some(db::model::VmmFailureReason::NoSuchInstance),
-        )
-        .await;
+        assert_eq!(
+            updated,
+            MarkSagaUnwoundOutcome::StateChangeNotNeeded {
+                current_state: DbVmmState::SagaUnwound
+            },
+            "VMM should already be SagaUnwound",
+        );
+        let current = datastore
+            .vmm_fetch(&opctx, &vmm_id)
+            .await
+            .expect("vmm must still be fetchable");
+        assert_eq!(
+            current.state,
+            DbVmmState::SagaUnwound,
+            "vmm state should still be SagaUnwound"
+        );
+        assert_eq!(
+            current.generation, unwound_vmm.generation,
+            "generation does not need to be advanced if the state did not change"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

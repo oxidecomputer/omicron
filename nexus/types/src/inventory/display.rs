@@ -851,9 +851,10 @@ fn display_sleds(
             writeln!(indented, "physical disks:")?;
         }
         for disk in disks {
-            let PhysicalDisk { identity, variant, slot, .. } = disk;
+            let PhysicalDisk { identity, variant, location, .. } = disk;
+            let loc = location.as_deref().unwrap_or("unknown location");
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            writeln!(indent2, "{variant:?}: {identity:?} in {slot}")?;
+            writeln!(indent2, "{variant:?}: {identity:?} in {loc}")?;
         }
 
         if !zpools.is_empty() {
@@ -1411,6 +1412,7 @@ fn display_sled_config(
         host_phase_2,
         measurements,
         update_disposition,
+        wicket_ssh_auth,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1419,6 +1421,7 @@ fn display_sled_config(
     writeln!(indented, "generation: {}", generation)?;
     writeln!(indented, "remove_mupdate_override: {remove_mupdate_override:?}")?;
     writeln!(indented, "update_disposition: {update_disposition:?}")?;
+    writeln!(indented, "wicket SSH auth: {}", wicket_ssh_auth.display())?;
 
     let display_host_phase_2_desired = |desired| match desired {
         HostPhase2DesiredContents::CurrentContents => {

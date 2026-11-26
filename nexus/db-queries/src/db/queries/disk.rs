@@ -6,11 +6,12 @@
 
 use crate::db::queries::next_item::{DefaultShiftGenerator, NextItem};
 use diesel::{
-    Column, QueryResult,
+    AppearsOnTable, Expression, ExpressionMethods, QueryResult,
     pg::Pg,
-    query_builder::{AstPass, QueryFragment, QueryId},
-    sql_types,
+    query_builder::{AsChangeset, AstPass, QueryFragment, QueryId},
 };
+use nexus_db_schema::schema::disk;
+use omicron_common::api::external::DiskState;
 use uuid::Uuid;
 
 /// The maximum number of disks that can be attached to an instance.
@@ -34,14 +35,9 @@ pub const MAX_DISKS_PER_INSTANCE: u32 = 12;
 ///
 /// See the `NextItem` documentation for more details.
 #[derive(Debug, Clone, Copy)]
-struct NextDiskSlot {
-    inner: NextItem<
-        nexus_db_schema::schema::disk::table,
-        i16,
-        nexus_db_schema::schema::disk::dsl::slot,
-        Uuid,
-        nexus_db_schema::schema::disk::dsl::attach_instance_id,
-    >,
+pub struct NextDiskSlot {
+    inner:
+        NextItem<disk::table, i16, disk::slot, Uuid, disk::attach_instance_id>,
 }
 
 impl NextDiskSlot {
@@ -63,13 +59,22 @@ impl QueryId for NextDiskSlot {
 
 impl QueryFragment<Pg> for NextDiskSlot {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
+        out.push_sql("(");
         self.inner.walk_ast(out.reborrow())?;
+        out.push_sql(")");
         Ok(())
     }
 }
 
-/// Produces a query fragment containing the SET clause to use in the UPDATE
-/// statement when attaching a disk to an instance.
+// Lets the subquery be used as the value assigned to `disk.slot`.
+impl Expression for NextDiskSlot {
+    type SqlType = <disk::slot as Expression>::SqlType;
+}
+
+impl AppearsOnTable<disk::table> for NextDiskSlot {}
+
+/// Produces the SET clause to use in the UPDATE statement when attaching a
+/// disk to an instance.
 ///
 /// The expected form of the statement is
 ///
@@ -87,8 +92,8 @@ impl QueryFragment<Pg> for NextDiskSlot {
 ///             LIMIT 1)
 /// ```
 ///
-/// This fragment can be passed to an `attach_resource` operation by supplying
-/// it as the argument to a `set`, e.g.
+/// This can be passed to an `attach_resource` operation by supplying it as the
+/// argument to a `set`, e.g.
 /// `diesel::update(disk::dsl::disk).set(DiskSetClauseForAttach::new(instance_id))`.
 #[derive(Debug, Clone)]
 pub struct DiskSetClauseForAttach {
@@ -105,69 +110,29 @@ impl DiskSetClauseForAttach {
     }
 }
 
-impl QueryId for DiskSetClauseForAttach {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for DiskSetClauseForAttach {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
-        let attached_label =
-            omicron_common::api::external::DiskState::Attached(
-                self.attach_instance_id,
-            )
-            .label();
-
-        // Ideally this code would not have to handcraft the entire SET
-        // statement. It would be cleaner to write something like
-        //
-        // diesel::update(disk::dsl::disk).set(
-        //  (disk::dsl::disk::attach_instance_id.eq(attach_instance_id),
-        //   disk::dsl::disk::disk_state.eq(attached_label),
-        //   disk::dsl::disk::slot.eq(next_slot_query))
-        //
-        // where `next_slot_query` is a wrapper around the `NextItem` query
-        // above that yields the slot-choosing SELECT statement. Diesel provides
-        // a `single_value` adapter function that's supposed to do this: given
-        // a query that returns a single column, it appends a LIMIT 1 to the
-        // query and parenthesizes it so that it can be used as the argument to
-        // a SET statement. The sticky bit is the trait bounds: SingleValueDsl
-        // is implemented for SelectQuery + LimitDsl, and while it's easy enough
-        // to impl SelectQuery for NextDiskSlot, implementing LimitDsl is harder
-        // (and seems to be discouraged by the trait docs)--it is natively
-        // implemented for diesel::Table, but here there's no table type, in
-        // part because the left side of the join is synthesized from thin air
-        // by the NextItem query fragment.
-        //
-        // Rather than spar extensively with Diesel over these details, just
-        // implement the whole SET by hand.
-        out.push_identifier(
-            nexus_db_schema::schema::disk::dsl::attach_instance_id::NAME,
-        )?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.attach_instance_id)?;
-        out.push_sql(", ");
-        out.push_identifier(
-            nexus_db_schema::schema::disk::dsl::disk_state::NAME,
-        )?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Text, str>(attached_label)?;
-        out.push_sql(", ");
-        out.push_identifier(nexus_db_schema::schema::disk::dsl::slot::NAME)?;
-        out.push_sql(" = (");
-        self.next_slot.walk_ast(out.reborrow())?;
-        out.push_sql(")");
-
-        Ok(())
-    }
-}
+type DiskAttachAssignments = (
+    diesel::dsl::Eq<disk::attach_instance_id, Uuid>,
+    diesel::dsl::Eq<disk::disk_state, &'static str>,
+    diesel::dsl::Eq<disk::slot, NextDiskSlot>,
+);
 
 // Required to pass `DiskSetClauseForAttach` to `set`.
-impl diesel::query_builder::AsChangeset for DiskSetClauseForAttach {
-    type Target = nexus_db_schema::schema::disk::dsl::disk;
-    type Changeset = Self;
+//
+// The changeset is built from Diesel's own assignment types, rather than a
+// hand-written `QueryFragment`, because Diesel only allows a `WHERE` clause on
+// an `UPDATE` whose changeset is made of those.
+impl AsChangeset for DiskSetClauseForAttach {
+    type Target = disk::table;
+    type Changeset = <DiskAttachAssignments as AsChangeset>::Changeset;
 
     fn as_changeset(self) -> Self::Changeset {
-        self
+        let attached_label =
+            DiskState::Attached(self.attach_instance_id).label();
+        (
+            disk::attach_instance_id.eq(self.attach_instance_id),
+            disk::disk_state.eq(attached_label),
+            disk::slot.eq(self.next_slot),
+        )
+            .as_changeset()
     }
 }

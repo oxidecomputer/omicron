@@ -3,16 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Paginated GC sweep for the FM rendezvous resource creation marker tables
-//! (`rendezvous_alert_created` and `rendezvous_support_bundle_created`).
+//! (`rendezvous_$RESOURCE_created`).
 //!
-//! Each resource created by FM rendezvous (alert / support bundle) has a
-//! corresponding creation marker, written by
+//! Each resource created by FM rendezvous (alert, support bundles, and active
+//! problems) has a corresponding creation marker, written by
 //! [`crate::db::sitrep_guard::SitrepGuardedInsert`]. The purpose of the marker
 //! is to prevent FM rendezvous from mistakenly resurrecting a resource that was
 //! previously deleted by the user. The marker therefore needs to exist as long
 //! as FM rendezvous *might* attempt to resurrect the resource. But we don't
-//! want to keep these markers around forever -- we want to GC them
-//! eventually -- so the question is, how long is long enough?
+//! want to keep these markers around forever -- we want to GC them eventually
+//! -- so the question is, how long is long enough?
 //!
 //! Suppose we have a sitrep with an `alert_request` to create some alert A, and
 //! the sitrep's `alert_generation` is 1. When FM rendezvous first encounters
@@ -90,6 +90,7 @@ use nexus_db_model::DbTypedGeneration;
 use nexus_db_model::to_db_typed_generation;
 use omicron_common::api::external::Error;
 use omicron_generation_kinds::SitrepAlertGeneration;
+use omicron_generation_kinds::SitrepProblemGeneration;
 use omicron_generation_kinds::SitrepSupportBundleGeneration;
 use omicron_generation_kinds::TypedGeneration;
 use omicron_uuid_kinds::GenericUuid;
@@ -120,6 +121,23 @@ impl DataStore {
             opctx,
             sitrep_id,
             sitrep_alert_generation,
+        )
+        .await
+    }
+
+    /// Garbage-collect `rendezvous_problem_created`, deleting every marker row
+    /// whose referenced problem can no longer be requested by any current or
+    /// future sitrep, as judged from the sitrep being executed.
+    pub async fn fm_rendezvous_problem_marker_gc(
+        &self,
+        opctx: &OpContext,
+        sitrep_id: SitrepUuid,
+        sitrep_problem_generation: SitrepProblemGeneration,
+    ) -> Result<MarkerGcResult, Error> {
+        self.fm_rendezvous_marker_gc::<nexus_db_model::Problem>(
+            opctx,
+            sitrep_id,
+            sitrep_problem_generation,
         )
         .await
     }

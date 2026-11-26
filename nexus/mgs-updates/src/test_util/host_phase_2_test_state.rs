@@ -256,6 +256,8 @@ mod api_impl {
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRegistrationInfo;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::inventory::WicketSshAuth;
+    use sled_agent_types::inventory::WicketSshAuthStatus;
     use sled_agent_types::multirack::MultirackJoinCompleteResponse;
     use sled_agent_types::multirack::MultirackJoinServiceStatus;
     use sled_agent_types::probes::ProbeSet;
@@ -362,6 +364,7 @@ mod api_impl {
                 },
                 measurements: BTreeSet::new(),
                 update_disposition: OmicronSledUpdateDisposition::Available,
+                wicket_ssh_auth: WicketSshAuth::initial(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -422,6 +425,7 @@ mod api_impl {
                 smf_services_enabled_not_online:
                     SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
+                wicket_ssh_auth_status: WicketSshAuthStatus::NoSwitchZone,
             }))
         }
 

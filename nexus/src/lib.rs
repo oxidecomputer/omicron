@@ -62,6 +62,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tokio::sync::watch;
+use trust_quorum_types::membership::TrustQuorumMembers;
 
 #[macro_use]
 extern crate slog;
@@ -577,7 +578,11 @@ impl nexus_test_interface::NexusServer for Server {
                     initial_trust_quorum_configuration: Some(
                         InitialTrustQuorumConfig {
                             // We need at least 3 members
-                            members: tq_members,
+                            members: TrustQuorumMembers::new(tq_members)
+                                .expect(
+                                    "fake trust quorum membership is within \
+                                     the size bounds",
+                                ),
                             // Coordinator must be one of the members
                             coordinator: BaseboardId {
                                 part_number: "_test_fake_tq_9adfa".into(),

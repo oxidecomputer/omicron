@@ -116,7 +116,7 @@ mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
-mod problem;
+pub mod problem;
 mod project;
 mod quota;
 mod rack;
@@ -153,7 +153,7 @@ mod user_data_export;
 mod utilization;
 mod v2p_mapping;
 mod virtual_provisioning_collection;
-mod vmm;
+pub mod vmm;
 mod volume;
 mod volume_repair;
 mod vpc;
@@ -186,6 +186,8 @@ pub use ip_pool::ServiceIpPools;
 use nexus_db_model::AllSchemaVersions;
 use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;
+pub use physical_disk::ExpungedPhysicalDiskResources;
+pub use physical_disk::ExpungedPhysicalDiskResourcesMap;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
 pub use region::RegionAllocationFor;
@@ -222,6 +224,7 @@ pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmBulkMarkStopForUpdateResult;
 pub use vmm::VmmStateUpdateResult;
+pub use vmm::VmmStoppableForUpdate;
 pub use volume::*;
 pub use webhook_delivery::WebhookDeliveryFilters;
 
@@ -235,6 +238,15 @@ pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 /// expensive.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
 pub const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
+
+/// Converts a row count returned by the database into a `u64`.
+fn count_to_u64(count: i64) -> Result<u64, Error> {
+    u64::try_from(count).map_err(|_| {
+        Error::internal_error(&format!(
+            "database returned negative count: {count}"
+        ))
+    })
+}
 
 // Represents a query that is ready to be executed.
 //

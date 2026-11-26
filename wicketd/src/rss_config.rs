@@ -41,6 +41,8 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use trust_quorum_types::membership::TRUST_QUORUM_MIN_MEMBERS;
+use trust_quorum_types::membership::TrustQuorumMembers;
+use trust_quorum_types::membership::TrustQuorumMembersError;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
@@ -188,23 +190,27 @@ impl CurrentRssConfig {
         // TODO: Warn users in the wicket UI if they are configuring
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
-        let trust_quorum_peers: Option<Vec<BaseboardId>> =
-            if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_MEMBERS {
-                Some(
-                    self.common
-                        .bootstrap_sleds
-                        .iter()
-                        .map(|sled| sled.baseboard_id.clone())
-                        .collect(),
-                )
-            } else {
+        let trust_quorum_peers = match TrustQuorumMembers::new(
+            self.common
+                .bootstrap_sleds
+                .iter()
+                .map(|sled| sled.baseboard_id.clone())
+                .collect(),
+        ) {
+            Ok(members) => Some(members),
+            Err(TrustQuorumMembersError::TooFew { .. }) => {
                 warn!(
                     log,
                     "Trust quorum disabled: requires at least {} sleds",
                     TRUST_QUORUM_MIN_MEMBERS
                 );
                 None
-            };
+            }
+            Err(error @ TrustQuorumMembersError::TooMany { .. }) => {
+                return Err(anyhow!(error)
+                    .context("too many bootstrap sleds for a trust quorum"));
+            }
+        };
 
         // Convert between internal and progenitor types.
         let user_password_hash =

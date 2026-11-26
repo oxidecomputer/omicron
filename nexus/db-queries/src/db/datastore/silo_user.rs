@@ -550,6 +550,13 @@ impl DataStore {
                         .await?;
                 }
 
+                // Delete role assignments.
+                self.role_assignment_delete_by_identity_on_connection(
+                    &conn,
+                    authz_silo_user_id.into_untyped_uuid(),
+                )
+                .await?;
+
                 // Delete ssh keys.
                 {
                     use nexus_db_schema::schema::ssh_key::dsl;

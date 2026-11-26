@@ -407,6 +407,15 @@ fn redact_basic(input: &str) -> String {
         .unwrap()
         .replace_all(&s, "<REDACTED_TIMESTAMP>")
         .to_string();
+    // Format: `chrono::DateTime<Utc>`'s `Display` implementation
+    // Examples:
+    //  1970-01-01 00:00:00 UTC
+    //  1970-01-01 00:00:00.000010 UTC
+    let s =
+        regex::Regex::new(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)? UTC")
+            .unwrap()
+            .replace_all(&s, "<REDACTED_TIMESTAMP>")
+            .to_string();
     // HTTP Date headers contain timestamps in the following format:
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Date
     //
@@ -595,13 +604,15 @@ mod tests {
             DateTime::<Utc>::from_timestamp_nanos(2222222222222222222),
         ];
         for time in times {
-            let input = format!("{:?}", time);
-            assert_eq!(
-                Redactor::default().do_redact(&input),
-                "<REDACTED_TIMESTAMP>",
-                "Failed to redact {:?}",
-                time
-            );
+            // `Debug` is RFC 3339; `Display` is "<date> <time> UTC".
+            for input in [format!("{:?}", time), format!("{}", time)] {
+                assert_eq!(
+                    Redactor::default().do_redact(&input),
+                    "<REDACTED_TIMESTAMP>",
+                    "Failed to redact {:?} (formatted as {input:?})",
+                    time
+                );
+            }
         }
     }
 

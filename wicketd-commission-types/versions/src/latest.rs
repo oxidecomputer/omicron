@@ -100,7 +100,6 @@ pub mod rack_setup {
     pub use crate::v5::rack_setup::BgpPeerConfig;
     pub use crate::v5::rack_setup::ImportExportPolicy;
     pub use crate::v5::rack_setup::L1PortConfig;
-    pub use crate::v5::rack_setup::MultirackJoinRequest;
     pub use crate::v5::rack_setup::NumberedRouter;
     pub use crate::v5::rack_setup::PortConfig;
     pub use crate::v5::rack_setup::PutRssUserConfigInsensitive;
@@ -113,6 +112,8 @@ pub mod rack_setup {
     pub use crate::v5::rack_setup::UplinkPorts;
     pub use crate::v5::rack_setup::UserSpecifiedPortConfig;
     pub use crate::v5::rack_setup::UserSpecifiedRackNetworkConfig;
+
+    pub use crate::v7::rack_setup::MultirackJoinRequest;
 }
 
 pub mod update {

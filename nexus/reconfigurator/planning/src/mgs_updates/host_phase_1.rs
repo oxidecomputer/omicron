@@ -726,11 +726,7 @@ mod tests {
         assert!(later_planned.pending_updates.is_empty());
         assert!(later_planned.pending_host_phase_2_changes.is_empty());
         assert_eq!(
-            later_planned
-                .pending_update_disposition_changes
-                .iter()
-                .map(|(sled_id, kind)| (*sled_id, *kind))
-                .collect::<BTreeMap<_, _>>(),
+            later_planned.pending_update_disposition_changes.kinds_by_sled(),
             BTreeMap::from([
                 (sled_0_id, BlueprintSledUpdateDispositionKind::Available),
                 (
@@ -820,11 +816,7 @@ mod tests {
         assert!(later_planned.pending_updates.is_empty());
         assert!(later_planned.pending_host_phase_2_changes.is_empty());
         assert_eq!(
-            later_planned
-                .pending_update_disposition_changes
-                .iter()
-                .map(|(sled_id, kind)| (*sled_id, *kind))
-                .collect::<BTreeMap<_, _>>(),
+            later_planned.pending_update_disposition_changes.kinds_by_sled(),
             BTreeMap::from([(
                 sled_1_id,
                 BlueprintSledUpdateDispositionKind::Available

@@ -2,11 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Typed payloads of diagnosis-engine-derived [`Fact`]s.
+//! The parts of a diagnosis-engine-derived [`Fact`]: its shared
+//! [`FactMetadata`] and its typed [`FactPayload`].
 //!
 //! Each diagnosis engine owns one variant of [`FactPayload`]. A [`Case`]
 //! belongs to exactly one diagnosis engine (see [`Metadata::de`]), so every
 //! fact on a case carries that engine's variant.
+//!
+//! # Adding a fact table
+//!
+//! Each [`FactPayload`] variant has its own `fm_fact_<variant>` table. To
+//! add one:
+//!
+//! 1. Add the fact type and its [`FactPayload`] variant here.
+//! 2. Add the `fm_fact_<variant>` table to the schema.
+//! 3. Add an `FmFact<Variant>` model in `nexus_db_model::fm` that
+//!    implements `FmFactRow`.
+//! 4. Add the variant to `fm_fact_tables!` and `sitrep_child_tables!` in
+//!    `nexus_db_queries::db::datastore::fm`.
 //!
 //! [`Fact`]: super::case::Fact
 //! [`Case`]: super::case::Case
@@ -18,10 +31,24 @@ use crate::observed_saga::{OrphanedReason, SagaProgressState};
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::SiloUuid;
 use omicron_uuid_kinds::{
-    CollectionUuid, OmicronZoneUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
+    CollectionUuid, FactUuid, OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid,
+    SledUuid, ZpoolUuid,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// The diagnosis-engine-agnostic part of a [`Fact`](super::case::Fact):
+/// everything that is not the typed [`payload`](super::case::Fact::payload).
+/// Every diagnosis engine's facts share these fields.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FactMetadata {
+    pub id: FactUuid,
+    /// The sitrep in which this fact was first added. Preserved
+    /// unchanged when the fact is carried forward into a child sitrep.
+    /// Debug-only.
+    pub created_sitrep_id: SitrepUuid,
+    pub comment: String,
+}
 
 /// The typed payload of a [`Fact`](super::case::Fact).
 ///
