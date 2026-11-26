@@ -1,0 +1,79 @@
+> # A new session has one state, the root.
+> state log
+@  0  (root)
+
+
+> # Each command that changes the simulation adds a state.
+> time advance 1m
+advanced time by 1m to 1970-01-01T00:01:00Z
+
+> time advance 2m
+advanced time by 2m to 1970-01-01T00:03:00Z
+
+> state log
+@  2  time advance 2m
+│
+○  1  time advance 1m
+│
+○  0  (root)
+
+
+> # A command that only reads adds nothing, and neither does one that fails.
+> time show
+1970-01-01T00:03:00Z
+
+> time advance 1000000years
+error: duration out of range for the simulated clock
+
+> state log
+@  2  time advance 2m
+│
+○  1  time advance 1m
+│
+○  0  (root)
+
+
+> # `state switch` makes an earlier state current again. The next change then
+> # grows a branch beside the old one.
+> state switch 1
+switched to state 1
+
+> time show
+1970-01-01T00:01:00Z
+
+> time advance 5m
+advanced time by 5m to 1970-01-01T00:06:00Z
+
+> state log
+@  3  time advance 5m
+│
+│ ○  2  time advance 2m
+├─╯
+○  1  time advance 1m
+│
+○  0  (root)
+
+
+> # Every state stays reachable.
+> state switch 2
+switched to state 2
+
+> time show
+1970-01-01T00:03:00Z
+
+> state log
+○  3  time advance 5m
+│
+│ @  2  time advance 2m
+├─╯
+○  1  time advance 1m
+│
+○  0  (root)
+
+
+> # States that don't exist.
+> state switch 9
+error: no such state: 9
+
+> state switch latest
+

@@ -14,8 +14,10 @@ chrono.workspace = true
 clap.workspace = true
 humantime.workspace = true
 nexus-fm-simulation.workspace = true
+nonempty.workspace = true
 omicron-repl-utils.workspace = true
 omicron-workspace-hack.workspace = true
+sapling-renderdag.workspace = true
 shell-words.workspace = true
 thiserror.workspace = true
 
@@ -25,7 +27,9 @@ camino-tempfile.workspace = true
 datatest-stable.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
+proptest.workspace = true
 subprocess.workspace = true
+test-strategy.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373. These docs would not be very useful anyway.
