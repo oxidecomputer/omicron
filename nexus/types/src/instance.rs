@@ -99,6 +99,27 @@ pub enum VmmState {
     /// The start saga which created this VMM has failed and unwound before the
     /// instance was able to start.
     SagaUnwound,
+    /// The start or migrate saga that created this VMM either is unwinding or
+    /// *should* be unwinding, and the VMM either has not yet been registered
+    /// with the sled-agent or be unregistered shortly by the unwinding saga
+    /// that created it.
+    ///
+    /// When a VMM is in this state, it is not guaranteed to be registered with
+    /// the sled-agent. Attempting to act on an instance with a `Cancelling`
+    /// active VMM should not result in a request to the sled-agent, and the VMM
+    /// should not be health-checked, because it either does not exist or will
+    /// not exist shortly.
+    ///
+    /// An in-progress `instance_start` saga which has not yet transitioned the
+    /// VMM's state from [`Self::Creating`] to [`Self::Starting`] may be
+    /// cancelled by changing the state from `Creating` to `Cancelling`,
+    /// provided the state generation has not changed since the VMM was observed
+    /// to be `Creating`.
+    ///
+    /// Instances whose active VMMs are `Cancelling` will appear as
+    /// [`Stopping`](crate::external_api::instance::InstanceState::Stopping) in
+    /// the external API.
+    Cancelling,
 }
 
 impl VmmState {
@@ -115,6 +136,7 @@ impl VmmState {
             VmmState::Failed(_) => "failed",
             VmmState::Destroyed => "destroyed",
             VmmState::SagaUnwound => "saga_unwound",
+            VmmState::Cancelling => "cancelling",
         }
     }
 
@@ -139,14 +161,27 @@ impl VmmState {
         )
     }
 
-    /// Returns `true` if the VMM exists on a sled.
+    /// Returns `true` if the VMM is in a state in which it is not expected to
+    /// exist on a sled.
     ///
-    /// This is `false` for VMMs that have not yet been created, have been
-    /// destroyed, or were produced by an unwound saga and will never exist.
-    pub fn exists_on_sled(&self) -> bool {
-        !matches!(
+    /// In these states, the VMM either *definitely* does not exist (because it
+    /// has been `Destroyed` or was never started because its `SagaUnwound`), or
+    /// it may or may not exist because it is undergoing an existence transition
+    /// (it is `Creating` or `Cancelling`). Regardless of whether its
+    /// nonexistence is certain or dubious, if a VMM is in one of these states
+    /// and a sled-agent indicates it does not know of a VMM with this VMM's ID,
+    /// it should not be marked as having `Failed`, because it is not expected
+    /// to exist on the sled.
+    ///
+    /// This should always be equivalent to the contents of the
+    /// `POSSIBLY_NONEXISTENT_STATES` array in the db-model `VmmState` type.
+    pub fn may_not_exist(&self) -> bool {
+        matches!(
             self,
-            VmmState::Creating | VmmState::SagaUnwound | VmmState::Destroyed
+            VmmState::Creating
+                | VmmState::Cancelling
+                | VmmState::SagaUnwound
+                | VmmState::Destroyed
         )
     }
 }

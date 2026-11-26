@@ -153,7 +153,7 @@ mod user_data_export;
 mod utilization;
 mod v2p_mapping;
 mod virtual_provisioning_collection;
-mod vmm;
+pub mod vmm;
 mod volume;
 mod volume_repair;
 mod vpc;
