@@ -911,9 +911,9 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", rev = "f3b8f10795aa4865cc63638c03d05a64bd7c105f" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", rev = "f3b8f10795aa4865cc63638c03d05a64bd7c105f", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", rev = "f3b8f10795aa4865cc63638c03d05a64bd7c105f" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
