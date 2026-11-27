@@ -1149,6 +1149,10 @@ impl InstanceTicket {
                 terminate_tx.send(InstanceDeregisterRequest { id: self.id });
         }
     }
+
+    pub(crate) fn id(&self) -> PropolisUuid {
+        self.id
+    }
 }
 
 impl Drop for InstanceTicket {
