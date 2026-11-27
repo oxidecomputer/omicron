@@ -1546,6 +1546,8 @@ pub struct FmRendezvousStatus {
     pub alert_marker_gc: fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
     pub support_bundle_marker_gc:
         fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+    pub problem_marker_gc:
+        fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
 }
 
 impl FmRendezvousStatus {

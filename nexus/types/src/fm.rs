@@ -11,6 +11,8 @@ pub mod analysis_reports;
 pub mod ereport;
 pub mod problem;
 pub use ereport::{Ereport, EreportId};
+pub use problem::AllProblems;
+pub use problem::SitrepProblem;
 pub mod case;
 pub use case::Case;
 pub mod config;
@@ -31,7 +33,8 @@ use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use omicron_generation_kinds::{
-    SitrepAlertGeneration, SitrepSupportBundleGeneration,
+    SitrepAlertGeneration, SitrepProblemGeneration,
+    SitrepSupportBundleGeneration,
 };
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
@@ -64,6 +67,8 @@ pub struct Sitrep {
     pub cases: IdOrdMap<Case>,
     /// A map of all ereports associated with cases in this sitrep.
     pub ereports_by_id: IdOrdMap<Arc<Ereport>>,
+    /// All problems in this sitrep.
+    pub problems: AllProblems,
     //
     // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
     // records are top-level children of a sitrep (i.e., like cases), please
@@ -196,6 +201,16 @@ pub struct SitrepMetadata {
     /// a sitrep whose generation no longer matches the current sitrep's has
     /// its inserts rejected as stale.
     pub support_bundle_generation: SitrepSupportBundleGeneration,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose set
+    /// of problems differs from its parent's. Problem creation is guarded on
+    /// this value: a rendezvous task working from a sitrep whose generation no
+    /// longer matches the current sitrep's has its inserts rejected as stale.
+    ///
+    /// This tracks only which problems *exist*. Changes to an existing problem
+    /// are tracked by that problem's own revision number, and do not bump this
+    /// generation.
+    pub problem_generation: SitrepProblemGeneration,
 }
 
 /// A error indicating that an inventory collection is not new enough to produce
@@ -238,10 +253,11 @@ impl PartialEq<Sitrep> for SitrepStateComparison<'_> {
             // they always will if the two sitreps' cases contain the same
             // ereports.
             ereports_by_id: _,
+            problems,
             cases,
         } = self.sitrep;
 
-        cases == &other.cases
+        cases == &other.cases && problems == &other.problems
         // TO FUTURE GENERATIONS: if other top-level sitrep objects which
         // represent the state of the system are added, compare them here!
     }
@@ -273,6 +289,8 @@ pub struct SitrepVersion {
     serde::Serialize,
     serde::Deserialize,
     strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantNames,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -282,4 +300,13 @@ pub enum DiagnosisEngineKind {
     Saga,
     Certificate,
     SmfService,
+}
+
+impl DiagnosisEngineKind {
+    pub const MAX_WIDTH: usize =
+        display::const_max_len(<Self as strum::VariantNames>::VARIANTS);
+
+    pub fn as_str(&self) -> &'static str {
+        self.into()
+    }
 }

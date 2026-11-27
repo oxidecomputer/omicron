@@ -407,7 +407,6 @@ async fn spawn_zone_bundler_tasks(
     ZoneBundler::new(
         log,
         config_reconciler.internal_disks_rx().clone(),
-        config_reconciler.available_datasets_rx(),
         CleanupContext::default(),
     )
     .await

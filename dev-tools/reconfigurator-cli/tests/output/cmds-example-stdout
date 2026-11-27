@@ -728,6 +728,7 @@ T ENA ID                                   PARENT                               
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
@@ -1690,6 +1691,7 @@ LEDGERED SLED CONFIG
     generation: 2
     remove_mupdate_override: None
     update_disposition: Available
+    wicket SSH auth: unauthenticated (generation 1)
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -1846,6 +1848,7 @@ LEDGERED SLED CONFIG
     generation: 2
     remove_mupdate_override: None
     update_disposition: Available
+    wicket SSH auth: unauthenticated (generation 1)
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -2062,6 +2065,7 @@ LEDGERED SLED CONFIG
     generation: 2
     remove_mupdate_override: None
     update_disposition: Available
+    wicket SSH auth: unauthenticated (generation 1)
     desired host phase 2 slot a: keep current contents
     desired host phase 2 slot b: keep current contents
     DISKS: 3
@@ -2198,6 +2202,7 @@ INTERNAL DNS STATUS
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
+operator status: summary: Waiting for MUPdate resolution
 planning report:
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:

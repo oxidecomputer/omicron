@@ -11,6 +11,7 @@ workspace = true
 multicast = []
 
 [build-dependencies]
+omicron-pins.workspace = true
 omicron-rpaths.workspace = true
 
 [dependencies]

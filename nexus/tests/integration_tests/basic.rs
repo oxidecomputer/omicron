@@ -589,6 +589,21 @@ async fn test_ping_on_second_external_address() {
     cptestctx.teardown().await;
 }
 
+#[nexus_test]
+async fn test_version(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // No `authn_as`: the endpoint has to work without authentication.
+    let version = NexusRequest::object_get(client, "/v1/version")
+        .execute_and_parse_unwrap::<system::SystemVersion>()
+        .await;
+    assert_eq!(version.api_version, nexus_external_api::latest_version());
+    // The system version is the major version from tools/pins.toml.
+    let pins = include_str!("../../../tools/pins.toml");
+    let expected = format!("\nsystem_version = \"{}.", version.system_version);
+    assert!(pins.contains(&expected), "{expected:?} not in pins.toml");
+}
+
 /// Test that the external API returns gzip-compressed responses when the
 /// client sends Accept-Encoding: gzip.
 #[nexus_test]

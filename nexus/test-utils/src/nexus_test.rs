@@ -14,6 +14,7 @@ use crate::starter::start_sled_agent;
 use anyhow::Context;
 #[cfg(feature = "omicron-dev")]
 use anyhow::Result;
+use anyhow::bail;
 use camino::Utf8Path;
 #[cfg(feature = "omicron-dev")]
 use camino::Utf8PathBuf;
@@ -45,12 +46,14 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
+use oxide_update_engine_types::spec::merge_anyhow_list;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::inventory::SledRole;
 use slog::debug;
 use slog::info;
+use sp_sim::SimRack;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
@@ -139,6 +142,7 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchSlot, GatewayTestContext>,
+    pub(crate) simrack: Option<Arc<SimRack>>,
     /// All dpd instances, whether currently running or not, indexed by switch
     /// slot.
     pub dendrite: RwLock<HashMap<SwitchSlot, dev::dendrite::DendriteInstance>>,
@@ -417,11 +421,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.gateway
             .values()
             // because all gateways in a given `ControlPlaneTestContext` share
-            // the same sp-sim config, just pick the first one.
-            //
-            // N.B. that if this changes in the future (such as if we add
-            // support for simulating management network partitions?) this may
-            // become wrong!
+            // one simulated rack, just pick the first one.
             .next()
             .map(|gwctx| gwctx.simrack.num_sps())
             .unwrap_or(0)
@@ -671,28 +671,81 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     pub async fn teardown(mut self) {
+        let mut errors = Vec::new();
         self.server.close().await;
-        self.database.cleanup().await.unwrap();
-        self.clickhouse.cleanup().await.unwrap();
+        errors.extend(
+            self.database
+                .cleanup()
+                .await
+                .context("cleaning up CockroachDB")
+                .err(),
+        );
+        errors.extend(
+            self.clickhouse
+                .cleanup()
+                .await
+                .context("cleaning up ClickHouse")
+                .err(),
+        );
 
+        // TODO: The sled agent and gateway teardowns panic internally. They
+        // should bubble up errors instead, like all the other teardown steps,
+        // and be added to the list of errors.
         for sled_agent in self.sled_agents {
             sled_agent.teardown().await;
         }
 
-        self.oximeter.close().await.unwrap();
-        self.producer.close().await.unwrap();
+        errors.extend(
+            self.oximeter.close().await.context("closing oximeter").err(),
+        );
+        errors.extend(
+            self.producer
+                .close()
+                .await
+                .context("closing the test metric producer")
+                .err(),
+        );
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        for (_, dendrite) in self.dendrite.into_inner().unwrap() {
-            dendrite.cleanup().await.unwrap();
+        errors.extend(
+            teardown_shared_simrack(self.simrack)
+                .await
+                .context("tearing down the simulated SP rack")
+                .err(),
+        );
+        for (switch_slot, dendrite) in self.dendrite.into_inner().unwrap() {
+            errors.extend(
+                dendrite
+                    .cleanup()
+                    .await
+                    .with_context(|| {
+                        format!("cleaning up dendrite for {switch_slot:?}")
+                    })
+                    .err(),
+            );
         }
-        for (_, mut mgd) in self.mgd {
-            mgd.cleanup().await.unwrap();
+        for (switch_slot, mut mgd) in self.mgd {
+            errors.extend(
+                mgd.cleanup()
+                    .await
+                    .with_context(|| {
+                        format!("cleaning up mgd for {switch_slot:?}")
+                    })
+                    .err(),
+            );
         }
-        for (_, mut ddm) in self.ddm {
-            ddm.cleanup().await.unwrap();
+        for (switch_slot, mut ddm) in self.ddm {
+            errors.extend(
+                ddm.cleanup()
+                    .await
+                    .with_context(|| {
+                        format!("cleaning up ddm for {switch_slot:?}")
+                    })
+                    .err(),
+            );
         }
+        expect_clean_teardown(errors);
         self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
@@ -757,4 +810,34 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
         true,
     )
     .await)
+}
+
+/// Tear down a shared SP rack, assuming all other references to it have been
+/// dropped.
+///
+/// Returns an error if any other references still exist.
+pub(crate) async fn teardown_shared_simrack(
+    simrack: Option<Arc<SimRack>>,
+) -> anyhow::Result<()> {
+    match simrack {
+        Some(simrack) => {
+            let Some(simrack) = Arc::into_inner(simrack) else {
+                bail!(
+                    "something other than the MGS instances still holds a \
+                     reference to the simulated SP rack, so it could not be \
+                     torn down"
+                );
+            };
+            simrack.teardown().await
+        }
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn expect_clean_teardown(errors: Vec<anyhow::Error>) {
+    if errors.is_empty() {
+        return;
+    }
+    let error = merge_anyhow_list(errors);
+    panic!("control plane test components were torn down cleanly: {error:?}");
 }

@@ -95,8 +95,8 @@ impl<T: MgsFlavor> Harness<T> {
     }
 
     async fn teardown(self) {
-        self.logctx.cleanup_successful();
         self.mgs.teardown().await;
+        self.logctx.cleanup_successful();
     }
 
     fn sled_agent_networking_info(&self) -> SledAgentNetworkingInfo {

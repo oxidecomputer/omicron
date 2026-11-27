@@ -4363,6 +4363,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         ereport_marking: marking,
         alert_marker_gc,
         support_bundle_marker_gc,
+        problem_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -4548,6 +4549,11 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
     print_op(
         "garbage collecting support bundle creation markers",
         &support_bundle_marker_gc,
+        print_marker_gc_details,
+    );
+    print_op(
+        "garbage collecting active problem creation markers",
+        &problem_marker_gc,
         print_marker_gc_details,
     );
 }

@@ -115,8 +115,10 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for instance_types::Instance {
-    fn from(value: InstanceAndActiveVmm) -> Self {
+impl TryFrom<InstanceAndActiveVmm> for instance_types::Instance {
+    type Error = Error;
+
+    fn try_from(value: InstanceAndActiveVmm) -> Result<Self, Self::Error> {
         let time_run_state_updated = value
             .vmm
             .as_ref()
@@ -162,7 +164,8 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
             }
         };
 
-        Self {
+        let shutdown_policy = value.instance.shutdown_policy()?;
+        Ok(Self {
             identity: value.instance.identity(),
             project_id: value.instance.project_id().into_untyped_uuid(),
             ncpus: value.instance.ncpus.into(),
@@ -183,7 +186,8 @@ impl From<InstanceAndActiveVmm> for instance_types::Instance {
             },
             auto_restart_status,
             enable_jumbo_frames: value.instance.enable_jumbo_frames,
-        }
+            shutdown_policy,
+        })
     }
 }
 
@@ -1054,10 +1058,15 @@ impl DataStore {
             .filter(sled_dsl::time_deleted.is_null())
             .filter(vmm_dsl::time_deleted.is_null())
             // Ignore VMMs which are in states that are not known to exist on a
-            // sled. Since this query drives instance-watcher health checking,
-            // it is not necessary to perform health checks for VMMs that don't
-            // actually exist in real life.
-            .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES))
+            // sled. This includes both states where the VMM *definitely* does
+            // not exist and those where it may or may not exist depending on
+            // the progress of an ongoing start or migrate saga. Since this
+            // query drives instance-watcher health checking, it is not
+            // necessary to perform health checks for VMMs that may not actually
+            // exist in real life.
+            .filter(
+                vmm_dsl::state.ne_all(VmmState::POTENTIALLY_NONEXISTENT_STATES),
+            )
             // Also ignore VMMs in terminal states, which will never
             // transition to another state, so a health check can learn
             // nothing further about them.
@@ -1113,6 +1122,8 @@ impl DataStore {
                     memory,
                     cpu_platform,
                     enable_jumbo_frames,
+                    shutdown_policy_action,
+                    shutdown_policy_timeout,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1132,6 +1143,18 @@ impl DataStore {
                             instance_dsl::enable_jumbo_frames
                                 .eq(enable_jumbo_frames),
                         )
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Set the instance shutdown policy.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set((
+                            instance_dsl::shutdown_policy_action
+                                .eq(shutdown_policy_action),
+                            instance_dsl::shutdown_policy_timeout
+                                .eq(shutdown_policy_timeout),
+                        ))
                         .execute_async(&conn)
                         .await?;
 
@@ -2427,6 +2450,8 @@ mod tests {
                         anti_affinity_groups: Vec::new(),
                         multicast_groups: Vec::new(),
                         enable_jumbo_frames: false,
+                        shutdown_policy:
+                            instance_types::InstanceShutdownPolicy::default(),
                     },
                 ),
             )

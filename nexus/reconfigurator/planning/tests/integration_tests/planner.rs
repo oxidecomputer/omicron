@@ -36,14 +36,17 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalSnat;
 use nexus_types::deployment::OmicronZoneExternalSnatIpv6;
+use nexus_types::deployment::OperatorStatus;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
+use nexus_types::deployment::QuiesceInfo;
 use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::ReflectsCollection;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledUpdateRebootPolicy;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::UpdateWait;
 use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::blueprint_zone_type::InternalDns;
@@ -234,6 +237,23 @@ fn sim_assert_planning_makes_no_changes(
     assert_blueprint_diff_is_empty(&blueprint, &new_blueprint);
 
     new_blueprint
+}
+
+/// Asserts that the operator status for `blueprint`'s planning report says
+/// that the system is waiting for `service` to recover
+fn assert_waiting_on_service_recovery(
+    blueprint: &Blueprint,
+    service: ZoneKind,
+) {
+    let BlueprintSource::Planner(report) = &blueprint.source else {
+        panic!("expected a blueprint from the planner: {:?}", blueprint.source);
+    };
+    assert_eq!(
+        report.operator_status(QuiesceInfo::Unknown),
+        OperatorStatus::WaitingForUpdate(UpdateWait::ServiceRecovery {
+            service
+        }),
+    );
 }
 
 /// Runs through a basic sequence of blueprints for adding a sled
@@ -3940,10 +3960,11 @@ fn test_update_cockroach() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::CockroachDb);
 
     // If we don't have valid statuses from enough internal DNS zones, we
     // will refuse to update.
@@ -3953,10 +3974,11 @@ fn test_update_cockroach() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::CockroachDb);
 
     // If we have any non-zero "ranges_underreplicated" in in our inventory,
     // the planner will not update any Cockroach zones.
@@ -3970,10 +3992,11 @@ fn test_update_cockroach() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::CockroachDb);
 
     // If we don't have enough live nodes, we won't update Cockroach zones.
     sim.inventory_edit_latest_raw("too few live nodes", |collection| {
@@ -3986,10 +4009,11 @@ fn test_update_cockroach() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::CockroachDb);
 
     // Once we have zero underreplicated ranges, we can start to update
     // Cockroach zones.
@@ -4344,10 +4368,11 @@ fn test_update_boundary_ntp() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::BoundaryNtp);
 
     // If we don't have enough info from boundary NTP nodes, we'll refuse to
     // update.
@@ -4367,10 +4392,11 @@ fn test_update_boundary_ntp() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::BoundaryNtp);
 
     // If we don't have enough explicitly synced nodes, we'll refuse to
     // update.
@@ -4391,10 +4417,11 @@ fn test_update_boundary_ntp() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::BoundaryNtp);
 
     // Once all nodes are timesync'd, we can start to update boundary NTP
     // zones.
@@ -4719,10 +4746,11 @@ fn test_update_internal_dns() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::InternalDns);
 
     // If we're missing info from even a single zone, we
     // will still refuse to update.
@@ -4742,10 +4770,11 @@ fn test_update_internal_dns() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::InternalDns);
 
     // If we have any out-of-sync generations in our inventory,
     // the planner will not update Internal DNS zones.
@@ -4763,10 +4792,11 @@ fn test_update_internal_dns() {
         Ok(())
     })
     .unwrap();
-    sim_assert_planning_makes_no_changes(
+    let unchanged = sim_assert_planning_makes_no_changes(
         &mut sim,
         AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+    assert_waiting_on_service_recovery(&unchanged, ZoneKind::InternalDns);
 
     // Once we have valid DNS statuses, we can start to update Internal DNS
     // zones.

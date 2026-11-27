@@ -169,27 +169,59 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: ..........<REDACTED_UUID>........... (sitrep)
-                       parent sitrep ID: None
-                             created by: ..........<REDACTED_UUID>...........
-                             created at: <REDACTED_TIMESTAMP>
-                                comment: N/A
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
+created by:                  ..........<REDACTED_UUID>...........
+created at:                  <REDACTED_TIMESTAMP>
+comment:                     N/A
 
-                                 status: this is the current sitrep!
-                                version: v1
-                        made current at: <REDACTED_TIMESTAMP>
+status:                      this is the current sitrep!
+  version:                   v1
+  made current at:           <REDACTED_TIMESTAMP>
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: ..........<REDACTED_UUID>........... (collection)
-                             started at: <REDACTED_TIMESTAMP>
-                            finished at: <REDACTED_TIMESTAMP>
-      next inventory minimum start time: <REDACTED_TIMESTAMP>
-    
-    rendezvous resource generation numbers:
-                       alert generation: 1
-              support bundle generation: 1
-    
-    ereports in this sitrep: 0
+inventory collection ID:     ..........<REDACTED_UUID>...........
+  started at:                <REDACTED_TIMESTAMP>
+  finished at:               <REDACTED_TIMESTAMP>
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     0
+ereports in this sitrep:     0
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "current", "--all-cases"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+ID:                          ..........<REDACTED_UUID>...........
+parent sitrep ID:            N/A
+created by:                  ..........<REDACTED_UUID>...........
+created at:                  <REDACTED_TIMESTAMP>
+comment:                     N/A
+
+status:                      this is the current sitrep!
+  version:                   v1
+  made current at:           <REDACTED_TIMESTAMP>
+
+== DIAGNOSIS INPUTS ============================================================
+inventory collection ID:     ..........<REDACTED_UUID>...........
+  started at:                <REDACTED_TIMESTAMP>
+  finished at:               <REDACTED_TIMESTAMP>
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     0
+ereports in this sitrep:     0
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -931,6 +963,11 @@ task: "fm_rendezvous"
       rows deleted:    0
       batches:         1
       errors:          0
+    garbage collecting active problem creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>m
@@ -1667,6 +1704,11 @@ task: "fm_rendezvous"
       batches:         1
       errors:          0
     garbage collecting support bundle creation markers:
+      started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+      rows deleted:    0
+      batches:         1
+      errors:          0
+    garbage collecting active problem creation markers:
       started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
       rows deleted:    0
       batches:         1
@@ -2723,53 +2765,120 @@ termination: Exited(0)
 stdout:
 
 == FAULT MANAGEMENT SITUATION REPORT ===========================================
-                                     ID: 00000000-0000-0000-0000-000000000001 (sitrep)
-                       parent sitrep ID: None
-                             created by: 00000000-0000-0000-0000-000000000004
-                             created at: <REDACTED_TIMESTAMP>
-                                comment:
-      an example sitrep with cases
-
-                                 status: not committed to the sitrep history
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
+created by:                  00000000-0000-0000-0000-000000000004
+created at:                  <REDACTED_TIMESTAMP>
+comment:
+  an example sitrep with cases and problems
+status:                      not committed to the sitrep history
 
 == DIAGNOSIS INPUTS ============================================================
-                inventory collection ID: 00000000-0000-0000-0000-00000000001e (collection)
-      note: this collection no longer exists (perhaps it has been pruned?)
-      next inventory minimum start time: <REDACTED_TIMESTAMP>
-    
-    rendezvous resource generation numbers:
-                       alert generation: 1
-              support bundle generation: 1
-    
-    ereports in this sitrep: 3
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     7
+ereports in this sitrep:     3
+
+== PROBLEMS ====================================================================
+4 active, 3 resolved
+
+(i) activity in this sitrep: + created, * revised, - resolved
+
+   STATE            ID                                   CODE SUMMARY
++    active problem 00000000-0000-0000-0000-000000000064 0001 Degraded ZFS pool on sled BRM42220007 disk N3
+     active problem 00000000-0000-0000-0000-00000000006e 0001 Faulted ZFS pool on sled BRM42220012 disk N5
+-  resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
+   resolved problem 00000000-0000-0000-0000-000000000082 0001 Faulted disk N9 on sled BRM42220023 has been expunged.
+*    active problem 00000000-0000-0000-0000-00000000008c 0002 3 control plane services on sled BRM42220014 in maintainence
+     active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
++- resolved problem 00000000-0000-0000-0000-0000000000a0 0002 Internal DNS service on sled BRM42220019 in maintainence
+
+== CASES =======================================================================
+3 open, 4 closed
+
+(i) activity in this sitrep: + created, * changed, - closed
+
+*  case 00000000-0000-0000-0000-000000000032 open   certificate   // opened earlier, alert requested in this sitrep
++  case 00000000-0000-0000-0000-00000000000a open   physical_disk // zpool is degraded
+-  case 00000000-0000-0000-0000-000000000046 closed physical_disk // opened earlier, closed in this sitrep
+*- case 00000000-0000-0000-0000-000000000014 closed power_shelf   // PSU was reseated
+   case 00000000-0000-0000-0000-000000000050 closed power_shelf   // closed in an earlier sitrep
+   case 00000000-0000-0000-0000-000000000028 open   saga          // opened earlier, no changes in this sitrep
++- case 00000000-0000-0000-0000-00000000003c closed smf_service   // opened and closed in this sitrep
+
+(i) to view details for a single case, use:
+    $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --case <CASE_ID>
+(i) or, to show details for all cases in this sitrep, use:
+    $ omdb db sitrep show 00000000-0000-0000-0000-000000000001 --all-cases
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001", "--all-cases"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+
+== FAULT MANAGEMENT SITUATION REPORT ===========================================
+ID:                          00000000-0000-0000-0000-000000000001
+parent sitrep ID:            N/A
+created by:                  00000000-0000-0000-0000-000000000004
+created at:                  <REDACTED_TIMESTAMP>
+comment:
+  an example sitrep with cases and problems
+status:                      not committed to the sitrep history
+
+== DIAGNOSIS INPUTS ============================================================
+inventory collection ID:     00000000-0000-0000-0000-00000000001e
+  (i) note: this collection no longer exists (perhaps it has been pruned?)
+  next inv must start after: <REDACTED_TIMESTAMP>
+rendezvous resource generation numbers:
+  alert generation:          1
+  support bundle generation: 1
+  problem generation:        1
+problems in this sitrep:     7
+ereports in this sitrep:     3
+
+== PROBLEMS ====================================================================
+4 active, 3 resolved
+
+(i) activity in this sitrep: + created, * revised, - resolved
+
+   STATE            ID                                   CODE SUMMARY
++    active problem 00000000-0000-0000-0000-000000000064 0001 Degraded ZFS pool on sled BRM42220007 disk N3
+     active problem 00000000-0000-0000-0000-00000000006e 0001 Faulted ZFS pool on sled BRM42220012 disk N5
+-  resolved problem 00000000-0000-0000-0000-000000000078 0001 Faulted disk N0 on sled BRM42220002 has been replaced
+   resolved problem 00000000-0000-0000-0000-000000000082 0001 Faulted disk N9 on sled BRM42220023 has been expunged.
+*    active problem 00000000-0000-0000-0000-00000000008c 0002 3 control plane services on sled BRM42220014 in maintainence
+     active problem 00000000-0000-0000-0000-000000000096 0002 NTP service on sled BRM42220008 in maintainence
++- resolved problem 00000000-0000-0000-0000-0000000000a0 0002 Internal DNS service on sled BRM42220019 in maintainence
 
 == CASES =======================================================================
 
   * case 00000000-0000-0000-0000-00000000000a
-    =========================================
     // zpool is degraded
     diagnosis engine: physical_disk
     opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
-
     ereports:
-    ---------
     * ereport 00000000-0000-0000-0000-000000000003:1
       // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
       class:         ereport.example.disk
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-00000000000b
-
     * ereport 00000000-0000-0000-0000-000000000003:2
       // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
       class:         ereport.example.zpool
       reported by:   913-0000019:BRM42220007 (sled 7  (SP))
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-00000000000c
-
-
     facts:
-    ------
     * fact 00000000-0000-0000-0000-00000000000d
       // zpool health was observed in inventory
       added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
@@ -2781,18 +2890,12 @@ stdout:
         * physical_disk_id: 00000000-0000-0000-0000-00000000000e
         * time_observed: <REDACTED_TIMESTAMP>
         * zpool_id: 00000000-0000-0000-0000-00000000000f
-
-
     alerts requested:
-    -----------------
     * alert 00000000-0000-0000-0000-000000000011
       // tell someone about the zpool
       class:        test.foo, v0
       requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
-
-
     support bundles requested:
-    -------------------------
     * bundle 00000000-0000-0000-0000-000000000012
       // collect everything
       requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
@@ -2803,18 +2906,17 @@ stdout:
         - sp_dumps
         - sp_components
         - ereports(none)
-
-
+    active problems:
+    * problem 00000000-0000-0000-0000-000000000064
+      // the degraded zpool is a problem
+      added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
   * case 00000000-0000-0000-0000-000000000014
-    =========================================
     // PSU was reseated
     diagnosis engine: power_shelf
     opened in sitrep: 00000000-0000-0000-0000-000000000002
     closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
-
     ereports:
-    ---------
     * ereport 00000000-0000-0000-0000-000000000003:3
       // ereport 00000000-0000-0000-0000-000000000003:3 looks relevant
       class:         ereport.example.psu
@@ -2822,7 +2924,98 @@ stdout:
       added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
       assignment ID: 00000000-0000-0000-0000-000000000015
 
+  * case 00000000-0000-0000-0000-000000000028
+    // opened earlier, no changes in this sitrep
+    diagnosis engine: saga
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
 
+  * case 00000000-0000-0000-0000-000000000032
+    // opened earlier,
+    // alert requested in this sitrep
+    diagnosis engine: certificate
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    alerts requested:
+    * alert 00000000-0000-0000-0000-000000000033
+      // the certificate is still bad
+      class:        test.foo, v0
+      requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+  * case 00000000-0000-0000-0000-00000000003c
+    // opened and closed in this sitrep
+    diagnosis engine: smf_service
+    opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+  * case 00000000-0000-0000-0000-000000000046
+    // opened earlier, closed in this sitrep
+    diagnosis engine: physical_disk
+    opened in sitrep: 00000000-0000-0000-0000-000000000002
+    closed in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+
+  * case 00000000-0000-0000-0000-000000000050
+    // closed in an earlier sitrep
+    diagnosis engine: power_shelf
+    opened in sitrep: 00000000-0000-0000-0000-000000000006
+    closed in sitrep: 00000000-0000-0000-0000-000000000002
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "00000000-0000-0000-0000-000000000001", "--case", "00000000-0000-0000-0000-00000000000a"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+case 00000000-0000-0000-0000-00000000000a
+// zpool is degraded
+diagnosis engine: physical_disk
+opened in sitrep: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+ereports:
+* ereport 00000000-0000-0000-0000-000000000003:1
+  // ereport 00000000-0000-0000-0000-000000000003:1 looks relevant
+  class:         ereport.example.disk
+  reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+  added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+  assignment ID: 00000000-0000-0000-0000-00000000000b
+* ereport 00000000-0000-0000-0000-000000000003:2
+  // ereport 00000000-0000-0000-0000-000000000003:2 looks relevant
+  class:         ereport.example.zpool
+  reported by:   913-0000019:BRM42220007 (sled 7  (SP))
+  added in:      00000000-0000-0000-0000-000000000001 <-- this sitrep
+  assignment ID: 00000000-0000-0000-0000-00000000000c
+facts:
+* fact 00000000-0000-0000-0000-00000000000d
+  // zpool health was observed in inventory
+  added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+  * payload:
+    * engine: physical_disk
+    * kind: zpool_unhealthy
+    * last_seen_health: degraded
+    * observed_in_inv: 00000000-0000-0000-0000-000000000010
+    * physical_disk_id: 00000000-0000-0000-0000-00000000000e
+    * time_observed: <REDACTED_TIMESTAMP>
+    * zpool_id: 00000000-0000-0000-0000-00000000000f
+alerts requested:
+* alert 00000000-0000-0000-0000-000000000011
+  // tell someone about the zpool
+  class:        test.foo, v0
+  requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+support bundles requested:
+* bundle 00000000-0000-0000-0000-000000000012
+  // collect everything
+  requested in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
+  data:
+    - reconfigurator
+    - host_info(all)
+    - sled_cubby_info
+    - sp_dumps
+    - sp_components
+    - ereports(none)
+active problems:
+* problem 00000000-0000-0000-0000-000000000064
+  // the degraded zpool is a problem
+  added in: 00000000-0000-0000-0000-000000000001 <-- this sitrep
 
 ---------------------------------------------
 stderr:
