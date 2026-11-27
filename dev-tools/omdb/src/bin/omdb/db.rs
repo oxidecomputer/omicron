@@ -5002,6 +5002,7 @@ async fn cmd_db_instance_info(
     const MIGRATION_ID: &'static str = "migration ID";
     const UPDATER_LOCK: &'static str = "updater lock";
     const MIGRATION_RECORD: &'static str = "migration record";
+    const SHUTDOWN_POLICY: &'static str = "shutdown policy";
     const WIDTH: usize = crate::helpers::const_max_len(&[
         ID,
         PROJECT_ID,
@@ -5027,6 +5028,7 @@ async fn cmd_db_instance_info(
         MIGRATION_ID,
         UPDATER_LOCK,
         MIGRATION_RECORD,
+        SHUTDOWN_POLICY,
     ]);
 
     fn print_multiline_debug(slug: &str, thing: &impl core::fmt::Debug) {
@@ -5056,6 +5058,13 @@ async fn cmd_db_instance_info(
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
     println!("    {BOOT_DISK:>WIDTH$}: {:?}", instance.boot_disk_id);
     print_multiline_debug(AUTO_RESTART, &instance.auto_restart);
+    match instance.shutdown_policy() {
+        Ok(policy) => print_multiline_debug(SHUTDOWN_POLICY, &policy),
+        Err(error) => {
+            println!("/!\\ {SHUTDOWN_POLICY:>WIDTH$}: error: {error}");
+        }
+    }
+
     println!("\n{:=<80}", "== RUNTIME STATE ");
     let InstanceRuntimeState {
         time_updated,
