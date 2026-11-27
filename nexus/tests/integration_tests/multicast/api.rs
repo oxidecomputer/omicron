@@ -84,6 +84,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -116,6 +117,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
     let instance2: Instance =
         object_create(client, &instance_url, &instance2_params).await;
@@ -199,6 +201,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let (instance3, group) = ops::join2(
@@ -335,6 +338,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
     let err = object_create_error(
         client,

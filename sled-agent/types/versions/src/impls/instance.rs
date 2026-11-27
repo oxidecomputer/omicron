@@ -40,11 +40,18 @@ impl std::fmt::Display for VmmStateRequested {
 
 impl VmmStateRequested {
     fn label(&self) -> &str {
+        use crate::latest::instance::InstanceShutdownPolicy::*;
         match self {
             VmmStateRequested::MigrationTarget(_) => "migrating in",
             VmmStateRequested::Running => "running",
-            VmmStateRequested::Stopped => "stopped",
-            VmmStateRequested::Reboot => "reboot",
+            VmmStateRequested::Stopped { method: HardOff } => "stopped",
+            VmmStateRequested::Reboot { method: HardOff } => "reboot",
+            VmmStateRequested::Stopped { method: PowerButton { .. } } => {
+                "acpi-stopped"
+            }
+            VmmStateRequested::Reboot { method: PowerButton { .. } } => {
+                "acpi-reboot"
+            }
         }
     }
 }
@@ -90,8 +97,8 @@ impl VmmStateRequested {
         match self {
             VmmStateRequested::MigrationTarget(_) => false,
             VmmStateRequested::Running => false,
-            VmmStateRequested::Stopped => true,
-            VmmStateRequested::Reboot => false,
+            VmmStateRequested::Stopped { method: _ } => true,
+            VmmStateRequested::Reboot { method: _ } => false,
         }
     }
 }

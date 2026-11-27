@@ -99,6 +99,7 @@ async fn test_multicast_external_ip_scenarios(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: Default::default(),
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -246,6 +247,7 @@ async fn test_multicast_external_ip_scenarios(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: Default::default(),
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -410,6 +412,7 @@ async fn test_multicast_external_ip_scenarios(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: Default::default(),
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -534,6 +537,7 @@ async fn test_multicast_with_floating_ip_basic(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");

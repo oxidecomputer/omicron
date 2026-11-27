@@ -117,6 +117,12 @@ impl FmRendezvous {
             "sweeping support bundle creation markers",
             Self::gc_support_bundle_markers,
         );
+        let problem_marker_gc = self.spawn_op(
+            &sitrep,
+            opctx,
+            "sweeping active problem creation markers",
+            Self::gc_problem_markers,
+        );
 
         const TASKS_SHOULDNT_FAIL: &str = "\
             rendezvous op tasks should never return a `JoinError`. Nexus is \
@@ -133,6 +139,9 @@ impl FmRendezvous {
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
             alert_marker_gc: alert_marker_gc.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundle_marker_gc: support_bundle_marker_gc
+                .await
+                .expect(TASKS_SHOULDNT_FAIL),
+            problem_marker_gc: problem_marker_gc
                 .await
                 .expect(TASKS_SHOULDNT_FAIL),
         };
@@ -596,6 +605,25 @@ impl FmRendezvous {
         Self::marker_gc_status(&opctx.log, result)
     }
 
+    /// Sweep the `rendezvous_problem_created` marker table, using this
+    /// activation's sitrep to decide which rows are still needed.
+    async fn gc_problem_markers(
+        self,
+        sitrep: CurrentSitrep,
+        opctx: OpContext,
+    ) -> MarkerGcStatus {
+        let (_, ref sitrep) = *sitrep;
+        let result = self
+            .datastore
+            .fm_rendezvous_problem_marker_gc(
+                &opctx,
+                sitrep.id(),
+                sitrep.metadata.problem_generation,
+            )
+            .await;
+        Self::marker_gc_status(&opctx.log, result)
+    }
+
     /// Map the outcome of a `rendezvous_*_created` GC sweep into a
     /// [`MarkerGcStatus`].
     fn marker_gc_status(
@@ -642,6 +670,7 @@ mod tests {
     use nexus_types::fm::ereport::Reporter;
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
@@ -730,6 +759,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case1
             .alerts_requested
@@ -757,9 +787,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
 
@@ -835,6 +867,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case2
             .alerts_requested
@@ -875,9 +908,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
 
@@ -1008,6 +1043,7 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             };
             for id in [stale_alert_id, stale_alert2_id] {
                 c.alerts_requested
@@ -1038,9 +1074,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::from_u32(1),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
         datastore
@@ -1063,9 +1101,11 @@ mod tests {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::from_u32(2),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: iddqd::IdOrdMap::new(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(opctx, current_sitrep, None)
@@ -1186,6 +1226,7 @@ mod tests {
                 ereports: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             };
             for id in [stale_bundle_id, stale_bundle2_id] {
                 c.support_bundles_requested
@@ -1214,9 +1255,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
         datastore
@@ -1240,9 +1283,11 @@ mod tests {
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new()
                     .next(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: iddqd::IdOrdMap::new(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(opctx, current_sitrep, None)
@@ -1509,6 +1554,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1532,9 +1578,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
+                problems: Default::default(),
             }
         };
 
@@ -1723,6 +1771,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1746,9 +1795,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
+                problems: Default::default(),
             }
         };
 
@@ -1836,6 +1887,7 @@ mod tests {
                 alerts_requested: iddqd::IdOrdMap::new(),
                 support_bundles_requested: iddqd::IdOrdMap::new(),
                 facts: iddqd::IdOrdMap::new(),
+                problems: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1859,9 +1911,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id,
+                problems: Default::default(),
             }
         };
 
@@ -2033,6 +2087,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case1
             .support_bundles_requested
@@ -2059,9 +2114,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
 
@@ -2172,9 +2229,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
 
@@ -2265,6 +2324,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             support_bundles_requested: iddqd::IdOrdMap::new(),
             facts: iddqd::IdOrdMap::new(),
+            problems: iddqd::IdOrdMap::new(),
         };
         case.support_bundles_requested
             .insert_unique(fm::case::SupportBundleRequest {
@@ -2290,9 +2350,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases,
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             }
         };
 

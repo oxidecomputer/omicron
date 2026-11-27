@@ -97,6 +97,7 @@ async fn create_group_via_instance_join(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -266,6 +267,7 @@ async fn test_silo_user_multicast_permissions(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance2: Instance = NexusRequest::new(
@@ -446,6 +448,7 @@ async fn test_silo_user_multicast_permissions(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let project_instance: Instance = NexusRequest::new(
@@ -517,6 +520,7 @@ async fn test_silo_user_multicast_permissions(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
         multicast_groups: Vec::new(),
     };
     let instance2: Instance = NexusRequest::objects_post(
@@ -1124,6 +1128,7 @@ async fn test_cross_silo_multicast_isolation(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance_a: Instance = NexusRequest::new(
@@ -1163,6 +1168,7 @@ async fn test_cross_silo_multicast_isolation(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance_b: Instance = NexusRequest::new(
@@ -1365,6 +1371,7 @@ async fn test_cross_silo_multicast_isolation(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     NexusRequest::new(
@@ -1497,6 +1504,7 @@ async fn test_both_member_endpoints_have_same_permissions(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
     let instance_url =
         format!("/v1/instances?project={}", project_a.identity.name);

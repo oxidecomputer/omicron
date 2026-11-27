@@ -44,6 +44,7 @@ use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+use nexus_types::instance::VmmRuntimeState;
 use nexus_types::internal_api::params::InstanceMigrateDestination;
 use omicron_common::http_client::internal_http_client;
 // We'll use `InstanceState` frequently, and the code that uses it is already
@@ -251,22 +252,33 @@ impl From<InstanceStateChangeError> for dropshot::HttpError {
 #[derive(Debug)]
 pub(crate) enum InstanceStateChangeRequest {
     Run,
-    Reboot,
-    Stop,
+    Reboot { skip_os_shutdown: bool },
+    Stop { skip_os_shutdown: bool },
     Migrate(InstanceMigrationTargetParams),
 }
 
-impl From<InstanceStateChangeRequest>
-    for sled_agent_client::types::VmmStateRequested
-{
-    fn from(value: InstanceStateChangeRequest) -> Self {
-        match value {
-            InstanceStateChangeRequest::Run => Self::Running,
-            InstanceStateChangeRequest::Reboot => Self::Reboot,
-            InstanceStateChangeRequest::Stop => Self::Stopped,
-            InstanceStateChangeRequest::Migrate(params) => {
-                Self::MigrationTarget(params)
+impl InstanceStateChangeRequest {
+    fn to_vmm(
+        self,
+        shutdown_method: instance::InstanceShutdownPolicy,
+    ) -> sled_agent_client::types::VmmStateRequested {
+        use instance::InstanceShutdownPolicy::HardOff;
+        use sled_agent_client::types::VmmStateRequested as VmmState;
+        match self {
+            Self::Run => VmmState::Running,
+            Self::Reboot { skip_os_shutdown: true } => {
+                VmmState::Reboot { method: HardOff }
             }
+            Self::Reboot { skip_os_shutdown: false } => {
+                VmmState::Reboot { method: shutdown_method }
+            }
+            Self::Stop { skip_os_shutdown: true } => {
+                VmmState::Stopped { method: HardOff }
+            }
+            Self::Stop { skip_os_shutdown: false } => {
+                VmmState::Stopped { method: shutdown_method }
+            }
+            Self::Migrate(params) => VmmState::MigrationTarget(params),
         }
     }
 }
@@ -285,6 +297,14 @@ enum InstanceStateChangeRequestAction {
     /// The instance is not currently incarnated on a sled, so just update its
     /// runtime state in the database without communicating with a sled-agent.
     UpdateRuntime(db::model::InstanceRuntimeState),
+
+    /// The instance has a VMM record, but the VMM record has not yet been
+    /// ensured on a sled. So, first attempt to update the VMM state to cancel
+    /// an ongoing saga, conditionally on the VMM state not changing to one in
+    /// which it is incarnated on the sled. If the update fails because the
+    /// VMM's state has advanced, the required state change action should be
+    /// re-selected based on the new state.
+    CancelIfStillCreating { vmm_id: PropolisUuid, next_state: VmmRuntimeState },
 }
 
 /// What is the higher level operation that is calling
@@ -582,6 +602,7 @@ impl super::Nexus {
             cpu_platform,
             multicast_groups,
             enable_jumbo_frames,
+            shutdown_policy,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -623,19 +644,15 @@ impl super::Nexus {
             None => None,
         };
 
-        let auto_restart_policy = auto_restart_policy.map(Into::into);
-        let ncpus = (*ncpus).into();
-        let memory = (*memory).into();
-        let cpu_platform = cpu_platform.map(Into::into);
-
-        let update = InstanceUpdate {
+        let update = InstanceUpdate::new(
             boot_disk_id,
-            auto_restart_policy,
-            ncpus,
-            memory,
-            cpu_platform,
-            enable_jumbo_frames: *enable_jumbo_frames,
-        };
+            **auto_restart_policy,
+            *ncpus,
+            *memory,
+            **cpu_platform,
+            *enable_jumbo_frames,
+            shutdown_policy.unwrap_or_default(),
+        );
 
         // Update the instance configuration
         let result = self
@@ -1045,6 +1062,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1060,7 +1078,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let state = self
+        let mut state = self
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
@@ -1068,9 +1086,10 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
-                state.instance(),
-                state.vmm(),
-                InstanceStateChangeRequest::Reboot,
+                &authz_instance,
+                &mut state.instance,
+                &mut state.vmm,
+                InstanceStateChangeRequest::Reboot { skip_os_shutdown },
             )
             .await
         {
@@ -1158,6 +1177,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        skip_os_shutdown: bool,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -1173,7 +1193,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let state = self
+        let mut state = self
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
@@ -1181,9 +1201,10 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
-                state.instance(),
-                state.vmm(),
-                InstanceStateChangeRequest::Stop,
+                &authz_instance,
+                &mut state.instance,
+                &mut state.vmm,
+                InstanceStateChangeRequest::Stop { skip_os_shutdown },
             )
             .await
         {
@@ -1246,10 +1267,108 @@ impl super::Nexus {
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
-        let (sled_id, propolis_id) = if let Some(vmm) = vmm_state {
-            (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
-        } else {
-            match effective_state {
+        let (sled_id, propolis_id) = match vmm_state {
+            // GUYS IT'S TIME FOR THE FUNNY ONE: a VMM record exists in the
+            // database, but it is in a state in which it may not yet have been
+            // registered with the sled-agent, and whether or not it exists on
+            // the sled is indeterminate (i.e. because an instance-start saga is
+            // either in progress or is unwinding). If we are trying to stop the
+            // instance, it may now be time to do the Goofy VMM State
+            // Compare-And-Swap Loop Dance, in which we attempt to update the
+            // VMM record in the database into a state which tells the start
+            // saga that it can cancel itself, conditionally on the generation
+            // number not having advanced since.
+            Some(vmm) if vmm.state == db::model::VmmState::Creating => {
+                return match requested {
+                    InstanceStateChangeRequest::Stop { .. } => {
+                        let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+                        let next_state =
+                            vmm.runtime().transition(VmmState::Cancelling);
+                        Ok(InstanceStateChangeRequestAction::CancelIfStillCreating {
+                            vmm_id,
+                            next_state,
+                        })
+                    }
+                    InstanceStateChangeRequest::Run => {
+                        Ok(InstanceStateChangeRequestAction::AlreadyDone)
+                    }
+                    InstanceStateChangeRequest::Reboot { .. } => {
+                        Err(Error::invalid_request(
+                            "cannot reboot an instance until it has started",
+                        ))
+                    }
+                    InstanceStateChangeRequest::Migrate(_) => {
+                        Err(Error::invalid_request(
+                            "cannot migrate an instance until it has started",
+                        ))
+                    }
+                };
+            }
+            // Every other VMM state for which the VMM may not exist
+            // (Cancelling, SagaUnwound, and Destroyed) should *not* be sent to
+            // the sled-agent, because the sled-agent will not know what VMM
+            // we're talking about. These states should behave as though the
+            // instance is in the `Stopping` state.
+            Some(vmm) if vmm.state.may_not_exist() => {
+                return match requested {
+                    InstanceStateChangeRequest::Run => {
+                        Err(Error::invalid_request(&format!(
+                            "cannot run an instance in state {effective_state} \
+                             with no VMM",
+                        )))
+                    }
+
+                    // Since SagaUnwound is a Failed-like state, we will let
+                    // you move the instance to `Stopped` now by setting the
+                    // state to `NoVmm` and unlinking the `propolis_id`.
+                    InstanceStateChangeRequest::Stop { .. }
+                        if vmm.state == db::model::VmmState::SagaUnwound =>
+                    {
+                        return Ok(
+                            InstanceStateChangeRequestAction::UpdateRuntime(
+                                db::model::InstanceRuntimeState {
+                                    // We can unlink a SagaUnwound VMM safely
+                                    // without having to do any further cleanup,
+                                    // the VMM and its virtual provisioning
+                                    // records will be cleaned up by the
+                                    // abandoned_vmm_reaper task.
+                                    propolis_id: None,
+                                    ..instance_state
+                                        .runtime()
+                                        .with_new_nexus_state(
+                                            db::model::InstanceState::NoVmm,
+                                        )
+                                },
+                            ),
+                        );
+                    }
+                    // In the other nonexistent states, we already appear to be
+                    // Stopped, so if you're trying to stop it, we shall just
+                    // say we are still stopped.
+                    InstanceStateChangeRequest::Stop { .. } => {
+                        Ok(InstanceStateChangeRequestAction::AlreadyDone)
+                    }
+                    InstanceStateChangeRequest::Reboot { .. } => {
+                        Err(Error::invalid_request(&format!(
+                            "cannot reboot an instance in state \
+                             {effective_state} with no VMM",
+                        )))
+                    }
+                    InstanceStateChangeRequest::Migrate(_) => {
+                        Err(Error::invalid_request(&format!(
+                            "cannot migrate an instance in state \
+                             {effective_state} with no VMM",
+                        )))
+                    }
+                };
+            }
+            // The VMM record is in a state where thee VMM is expected to exist
+            // on the sled, so the request must be directed to the sled-agent.
+            Some(vmm) => {
+                (vmm.sled_id(), PropolisUuid::from_untyped_uuid(vmm.id))
+            }
+            // The instance hath no active VMM.
+            None => match effective_state {
                 // If there's no active sled because the instance is stopped,
                 // allow requests to stop to succeed silently for idempotency,
                 // but reject requests to do anything else.
@@ -1260,12 +1379,12 @@ impl super::Nexus {
                             effective_state
                         )));
                     }
-                    InstanceStateChangeRequest::Stop => {
+                    InstanceStateChangeRequest::Stop { .. } => {
                         return Ok(
                             InstanceStateChangeRequestAction::AlreadyDone,
                         );
                     }
-                    InstanceStateChangeRequest::Reboot => {
+                    InstanceStateChangeRequest::Reboot { .. } => {
                         return Err(Error::invalid_request(&format!(
                             "cannot reboot an instance in state {} with no VMM",
                             effective_state
@@ -1304,7 +1423,7 @@ impl super::Nexus {
                 InstanceState::Failed
                     if matches!(
                         requested,
-                        InstanceStateChangeRequest::Stop
+                        InstanceStateChangeRequest::Stop { .. }
                     ) =>
                 {
                     // As discussed above, this shouldn't happen, so return an
@@ -1375,14 +1494,18 @@ impl super::Nexus {
                         // run instances in this state; these requests are fine
                         // and require no work on our part.
                         InstanceStateChangeRequest::Run
-                        | InstanceStateChangeRequest::Reboot => {
+                        | InstanceStateChangeRequest::Reboot {
+                            skip_os_shutdown: _,
+                        } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::AlreadyDone,
                             );
                         }
                         // Stopping an instance in this state is fine; we'll
                         // stop trying to reincarnate it.
-                        InstanceStateChangeRequest::Stop => {
+                        InstanceStateChangeRequest::Stop {
+                            skip_os_shutdown: _,
+                        } => {
                             return Ok(
                                 InstanceStateChangeRequestAction::UpdateRuntime(
                                     instance_state
@@ -1416,7 +1539,7 @@ impl super::Nexus {
                         "instance is active but not resident on a sled",
                     ));
                 }
-            }
+            },
         };
 
         // The instance has an active sled. Allow the sled agent to decide how
@@ -1426,18 +1549,20 @@ impl super::Nexus {
         // TODO(#2825): Failed instances should be allowed to stop. See above.
         let allowed = match requested {
             InstanceStateChangeRequest::Run
-            | InstanceStateChangeRequest::Reboot
-            | InstanceStateChangeRequest::Stop => match effective_state {
-                InstanceState::Creating
-                | InstanceState::Starting
-                | InstanceState::Running
-                | InstanceState::Stopping
-                | InstanceState::Stopped
-                | InstanceState::Rebooting
-                | InstanceState::Migrating => true,
-                InstanceState::Repairing | InstanceState::Failed => false,
-                InstanceState::Destroyed => false,
-            },
+            | InstanceStateChangeRequest::Reboot { .. }
+            | InstanceStateChangeRequest::Stop { .. } => {
+                match effective_state {
+                    InstanceState::Creating
+                    | InstanceState::Starting
+                    | InstanceState::Running
+                    | InstanceState::Stopping
+                    | InstanceState::Stopped
+                    | InstanceState::Rebooting
+                    | InstanceState::Migrating => true,
+                    InstanceState::Repairing | InstanceState::Failed => false,
+                    InstanceState::Destroyed => false,
+                }
+            }
             InstanceStateChangeRequest::Migrate(_) => match effective_state {
                 InstanceState::Running
                 | InstanceState::Rebooting
@@ -1465,81 +1590,193 @@ impl super::Nexus {
         }
     }
 
+    /// Requests a state change for an instance, given the current state of the
+    /// instance record and its active VMM record.
+    ///
+    /// Depending on the current state of the instance and VMM record and the
+    /// state change requested, this function may send a request to the
+    /// sled-agent for the sled on which the instance's active VMM is located,
+    /// modify the instance or VMM records in the database *without* sending a
+    /// request to a sled (if the instance is not currently incarnated on a
+    /// sled), or do nothing (if the instance is already in the requested
+    /// state). If the instance cannot currently transition to the requested
+    /// state (and is not already in that state), or if an error occurs while
+    /// attempting to perform the state change, this function will return an
+    /// error.
+    ///
+    /// If the request races with a concurrent update and must be retried,
+    /// `prev_instance_state` and `prev_vmm_state` are overwritten with the
+    /// refetched records. This may occur if a start saga is in progress when
+    /// the state change is requested. Therefore, when this function returns,
+    /// the pointed values will represent the state of the instance and VMM
+    /// records which were used to select the *final* state change action this
+    /// function performed. Thus, if the caller wishes to make additional
+    /// changes to the instance or VMM records (such as in order to transition a
+    /// VMM record to `Failed` if this function returns an error), they can
+    /// continue to use the pointed values, because their generation numbers
+    /// will be updated if the records in the database have changed.
     pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
-        prev_instance_state: &db::model::Instance,
-        prev_vmm_state: &Option<db::model::Vmm>,
+        authz_instance: &authz::Instance,
+        prev_instance_state: &mut db::model::Instance,
+        prev_vmm_state: &mut Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        match Self::select_runtime_change_action(
-            &self.log,
-            prev_instance_state,
-            prev_vmm_state,
-            &requested,
-        )? {
-            InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+        // This is a bit weird: in order to implement the goofy CAS-and-retry
+        // dance necessary to stop a VMM that's in the `Creating` state, we may
+        // retry exactly one attempt to request a state change, if and only if
+        // it is necessary to attempt a database compare-and-swap to cancel a
+        // start saga, and then attempt to send the requested state to the sled
+        // if the VMM process starts before we can cancel it. All other state
+        // changes will not require a second iteration, and should always return
+        // without looping, and a failed CAS should only loop once, because it
+        // will then attempt a non-CAS state change action because the VMM state
+        // will have advanced, and such actions never loop. But, infinite loops
+        // are scary, so we shall nonetheless bound the number of times we loop
+        // and return an internal error if we fall past the end of the loop.
+        let iters =
+            if matches!(requested, InstanceStateChangeRequest::Stop { .. }) {
+                2
+            } else {
+                1
+            };
+        for _ in 0..iters {
+            match Self::select_runtime_change_action(
+                &self.log,
+                prev_instance_state,
+                prev_vmm_state,
+                &requested,
+            )? {
+                InstanceStateChangeRequestAction::AlreadyDone => return Ok(()),
 
-            InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
-                let instance_id =
-                    InstanceUuid::from_untyped_uuid(prev_instance_state.id());
-                let changed = self
-                    .datastore()
-                    .instance_update_runtime(&instance_id, &new_runtime)
-                    .await
-                    .map_err(InstanceStateChangeError::Other)?;
-                if !changed {
-                    // TODO(eliza): perhaps we should refetch the instance here
-                    // and return Ok if it was in the desired state...
-                    Err(InstanceStateChangeError::Other(Error::conflict(
-                        "The instance was previously in a state that allowed \
-                         the requested state change, but the instance's state \
-                          changed before the request could be completed",
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-
-            InstanceStateChangeRequestAction::SendToSled {
-                sled_id,
-                propolis_id,
-            } => {
-                let sa = self.sled_client(&sled_id).await?;
-                let instance_put_result = sa
-                    .vmm_put_state(
-                        &propolis_id,
-                        &VmmPutStateBody { state: requested.into() },
-                    )
-                    .await
-                    .map(|res| res.into_inner().updated_runtime.map(Into::into))
-                    .map_err(|e| SledAgentInstanceError(e));
-
-                // If the operation succeeded, write the instance state back,
-                // returning any subsequent errors that occurred during that
-                // write.
-                //
-                // If the operation failed, kick the sled agent error back up to
-                // the caller to let it decide how to handle it.
-                //
-                // When creating the zone for the first time, we just get
-                // Ok(None) here, in which case, there's nothing to write back.
-                match instance_put_result {
-                    Ok(Some(ref state)) => self
-                        .notify_vmm_updated(opctx, propolis_id, state)
+                InstanceStateChangeRequestAction::UpdateRuntime(
+                    new_runtime,
+                ) => {
+                    let instance_id = InstanceUuid::from_untyped_uuid(
+                        prev_instance_state.id(),
+                    );
+                    let changed = self
+                        .datastore()
+                        .instance_update_runtime(&instance_id, &new_runtime)
                         .await
-                        .map_err(Into::into)
-                        // Here, we don't actually care if the VMM generation
-                        // number we attempted to write to the DB was stale or
-                        // not. If it was out of date, that's fine, something
-                        // else has already advanced the state past the one we
-                        // observed, and we can just move on.
-                        .map(|_| ()),
-                    Ok(None) => Ok(()),
-                    Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
+                        .map_err(InstanceStateChangeError::Other)?;
+                    return if !changed {
+                        // TODO(eliza): perhaps we should refetch the instance here
+                        // and return Ok if it was in the desired state...
+                        Err(InstanceStateChangeError::Other(Error::conflict(
+                            "The instance was previously in a state that allowed \
+                            the requested state change, but the instance's state \
+                            changed before the request could be completed",
+                        )))
+                    } else {
+                        Ok(())
+                    };
+                }
+
+                InstanceStateChangeRequestAction::SendToSled {
+                    sled_id,
+                    propolis_id,
+                } => {
+                    let sa = self.sled_client(&sled_id).await?;
+                    let instance_put_result = sa
+                        .vmm_put_state(
+                            &propolis_id,
+                            &VmmPutStateBody {
+                                state: requested.to_vmm(
+                                    prev_instance_state
+                                        .shutdown_policy()
+                                        .map_err(
+                                            InstanceStateChangeError::Other,
+                                        )?,
+                                ),
+                            },
+                        )
+                        .await
+                        .map(|res| {
+                            res.into_inner().updated_runtime.map(Into::into)
+                        })
+                        .map_err(|e| SledAgentInstanceError(e));
+
+                    // If the operation succeeded, write the instance state back,
+                    // returning any subsequent errors that occurred during that
+                    // write.
+                    //
+                    // If the operation failed, kick the sled agent error back up to
+                    // the caller to let it decide how to handle it.
+                    //
+                    // When creating the zone for the first time, we just get
+                    // Ok(None) here, in which case, there's nothing to write back.
+                    return match instance_put_result {
+                        Ok(Some(ref state)) => self
+                            .notify_vmm_updated(opctx, propolis_id, state)
+                            .await
+                            .map_err(Into::into)
+                            // Here, we don't actually care if the VMM generation
+                            // number we attempted to write to the DB was stale or
+                            // not. If it was out of date, that's fine, something
+                            // else has already advanced the state past the one we
+                            // observed, and we can just move on.
+                            .map(|_| ()),
+                        Ok(None) => Ok(()),
+                        Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
+                    };
+                }
+
+                // The instance has an active VMM *record* in the database, but
+                // the VMM record was in the `Creating` state, indicating that a
+                // start saga is in progress for this instance and the VMM
+                // process may not yet have been started by the sled-agent. In
+                // this case, we must not attempt to communicate with the
+                // sled-agent, because it may not yet know it's supposed to be
+                // running that VMM. Instead, we must attempt to stop the
+                // instance by modifying the *VMM record* in such a way that
+                // will cause the start saga to unwind, *conditionally on the
+                // generation number*. If the write to the VMM record fails
+                // because the generation number has advanced, we must re-fetch
+                // the instance and VMM records and try again: the instance may
+                // now exist on the sled and we can therefore attempt the state
+                // change by communicating with the sled-agent.
+                InstanceStateChangeRequestAction::CancelIfStillCreating {
+                    vmm_id,
+                    next_state,
+                } => {
+                    let changed = self
+                        .datastore()
+                        .vmm_update_runtime(&vmm_id, &next_state)
+                        .await
+                        // TODO(eliza): if the VMM is NotFound, the whole thing
+                        // has gotten weird, what do we do?
+                        .map_err(InstanceStateChangeError::Other)?;
+                    if changed {
+                        // ladies and gentlemen, we got him!
+                        return Ok(());
+                    } else {
+                        // if at first you don't succeed,
+                        // `select_runtime_change_action` and try again!
+                        let current = self
+                            .datastore()
+                            .instance_fetch_with_vmm(&opctx, &authz_instance)
+                            .await
+                            .map_err(InstanceStateChangeError::Other)?;
+                        *prev_instance_state = current.instance;
+                        *prev_vmm_state = current.vmm;
+                    }
                 }
             }
         }
+
+        // As discussed above, this *really* shouldn't happen, but is better
+        // than looping forever.
+        Err(InstanceStateChangeError::Other(Error::InternalError {
+            internal_message: format!(
+                "attempting to change instance {}'s state required more than \
+                 {iters} retries, this is a bug! the final instance state was: \
+                 {prev_instance_state:?} and the VMM state was: \
+                 {prev_vmm_state:?}",
+                authz_instance.id(),
+            ),
+        }))
     }
 
     /// Modifies the runtime state of the Instance as requested.  This generally
@@ -2341,10 +2578,13 @@ impl super::Nexus {
                 | DbVmmState::Stopping
                 | DbVmmState::Stopped
                 | DbVmmState::Failed
-                | DbVmmState::Creating => Err(Error::invalid_request(format!(
-                    "cannot connect to serial console of instance in state \"{}\"",
-                    state.effective_state(),
-                ))),
+                | DbVmmState::Creating
+                | DbVmmState::Cancelling => {
+                    Err(Error::invalid_request(format!(
+                        "cannot connect to serial console of instance in state \"{}\"",
+                        state.effective_state(),
+                    )))
+                }
 
                 DbVmmState::Destroyed | DbVmmState::SagaUnwound => {
                     Err(Error::invalid_request(
@@ -3225,6 +3465,7 @@ mod tests {
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
+    use instance::InstanceShutdownPolicy;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
@@ -3357,6 +3598,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -3498,7 +3740,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a SledEvacuating instance should be allowed");
         let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
@@ -3520,7 +3762,7 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.nexus_state = DbInstanceState::SledEvacuating;
         for requested in [
-            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Reboot { skip_os_shutdown: true },
             InstanceStateChangeRequest::Run,
         ] {
             let action = Nexus::select_runtime_change_action(
@@ -3577,7 +3819,7 @@ mod tests {
             &logctx.log,
             &instance,
             &Some(vmm),
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a rebooting instance with a VMM should be allowed");
         match action {
@@ -3602,7 +3844,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a Failed instance should be allowed");
         let InstanceStateChangeRequestAction::UpdateRuntime(rt) = action else {
@@ -3627,7 +3869,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect("stopping a stopped instance should succeed");
         assert!(
@@ -3646,7 +3888,7 @@ mod tests {
         instance.nexus_state = DbInstanceState::NoVmm;
         for requested in [
             InstanceStateChangeRequest::Run,
-            InstanceStateChangeRequest::Reboot,
+            InstanceStateChangeRequest::Reboot { skip_os_shutdown: true },
             InstanceStateChangeRequest::Migrate(
                 InstanceMigrationTargetParams {
                     src_propolis_addr: "[::1]:12400".parse().unwrap(),
@@ -3681,7 +3923,7 @@ mod tests {
             &logctx.log,
             &instance,
             &None,
-            &InstanceStateChangeRequest::Stop,
+            &InstanceStateChangeRequest::Stop { skip_os_shutdown: true },
         )
         .expect_err("changing state of a Creating instance should fail");
         assert!(
@@ -3716,6 +3958,7 @@ mod tests {
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
             enable_jumbo_frames,
+            shutdown_policy: InstanceShutdownPolicy::default(),
         };
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let project_id = ProjectUuid::new_v4();

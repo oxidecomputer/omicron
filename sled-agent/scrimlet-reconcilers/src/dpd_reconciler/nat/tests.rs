@@ -371,7 +371,8 @@ async fn proptest_full_reconciliation() {
             tag: OMICRON_DPD_TAG.to_owned(),
             log: logctx.log.clone(),
         },
-    );
+    )
+    .expect("built dpd client");
     let rt = tokio::runtime::Handle::current();
 
     let one_test_invocation = async |input: TestInput| {

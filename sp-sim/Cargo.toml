@@ -22,6 +22,7 @@ iddqd.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
+oxide-update-engine-types.workspace = true  # for merge_anyhow_list
 serde.workspace = true
 ciborium.workspace = true
 ciborium-ll.workspace = true
@@ -32,6 +33,7 @@ slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tokio-util = { workspace = true, features = ["join-map", "rt"] }
 toml.workspace = true
 omicron-workspace-hack.workspace = true
 nix.workspace = true

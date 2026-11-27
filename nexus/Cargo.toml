@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [build-dependencies]
+omicron-pins.workspace = true
 omicron-rpaths.workspace = true
 
 [dependencies]

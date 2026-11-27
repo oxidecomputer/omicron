@@ -682,6 +682,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -1252,6 +1253,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
             auto_restart_policy: None,
             anti_affinity_groups: Vec::new(),
             enable_jumbo_frames: false,
+            shutdown_policy: Default::default(),
             cpu_platform: None,
             multicast_groups: Vec::new(),
         },
@@ -1330,6 +1332,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
             },
         ]),
         enable_jumbo_frames: false,
+        shutdown_policy: Nullable(None),
     };
 
     NexusRequest::new(
@@ -1446,6 +1449,7 @@ async fn test_instance_create_with_ssm_multicast_groups(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
         cpu_platform: None,
         // Key part: SSM group with source_ips via MulticastGroupJoinSpec
         multicast_groups: vec![MulticastGroupJoinSpec {
@@ -1545,6 +1549,7 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
         cpu_platform: None,
         multicast_groups: vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
@@ -1596,6 +1601,7 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
+        shutdown_policy: Default::default(),
         cpu_platform: None,
         multicast_groups: vec![], // No multicast groups init
     };
@@ -1621,6 +1627,7 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
             ip_version: None,
         }]),
         enable_jumbo_frames: false,
+        shutdown_policy: Nullable(None),
     };
 
     let update_url =

@@ -18,6 +18,7 @@ mod update;
 mod vpd;
 
 pub use anyhow::Result;
+use anyhow::anyhow;
 use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
@@ -26,17 +27,23 @@ pub use gimlet::FAKE_GIMLET_MODEL;
 pub use gimlet::Gimlet;
 pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;
+use oxide_update_engine_types::spec::merge_anyhow_list;
 pub use psc::FAKE_PSC_MODEL;
 pub use psc::Psc;
 pub use psc::SIM_PSC_BOARD;
 pub use server::logger;
 pub use sidecar::FAKE_SIDECAR_MODEL;
+pub use sidecar::NUM_IGNITION_TARGETS;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use sidecar::Sidecar;
 pub use slog::Logger;
+use sp::SimRackTaskName;
+use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::task::JoinError;
+use tokio_util::task::JoinMap;
 pub use update::HostFlashHashCompletionSender;
 pub use update::HostFlashHashPolicy;
 
@@ -139,17 +146,27 @@ pub struct SimRack {
     pub sidecars: Vec<Sidecar>,
     pub gimlets: Vec<Gimlet>,
     pub pscs: Vec<Psc>,
+    /// All the tasks owned by this simulated rack.
+    ///
+    /// The default behavior of [`JoinMap`] is to abort running tasks on drop.
+    tasks: JoinMap<SimRackTaskName, ()>,
 }
 
 impl SimRack {
     pub async fn start(config: &Config, log: &Logger) -> Result<Self> {
+        let rack_ignition_state =
+            sidecar::RackIgnitionState::new(&config.simulated_sps);
+        let mut tasks = JoinMap::new();
+
         let mut sidecars =
             Vec::with_capacity(config.simulated_sps.sidecar.len());
         for (i, sidecar) in config.simulated_sps.sidecar.iter().enumerate() {
             sidecars.push(
                 Sidecar::spawn(
-                    config,
                     sidecar,
+                    i,
+                    rack_ignition_state.sidecar_handle(i),
+                    &mut tasks,
                     log.new(slog::o!("slot" => format!("sidecar {}", i))),
                 )
                 .await?,
@@ -166,6 +183,9 @@ impl SimRack {
                     // For now, just use the fastest version (assume contents
                     // are always hashed).
                     HostFlashHashPolicy::assume_already_hashed(),
+                    i,
+                    rack_ignition_state.gimlet_handle(i),
+                    &mut tasks,
                     log.new(slog::o!("slot" => format!("gimlet {}", i))),
                 )
                 .await?,
@@ -175,10 +195,19 @@ impl SimRack {
         let mut pscs = Vec::with_capacity(config.simulated_sps.psc.len());
         for (i, psc) in config.simulated_sps.psc.iter().enumerate() {
             let log = log.new(slog::o!("slot" => format!("PSC {i}")));
-            pscs.push(Psc::spawn(psc, log).await?);
+            pscs.push(
+                Psc::spawn(
+                    psc,
+                    i,
+                    rack_ignition_state.psc_handle(i),
+                    &mut tasks,
+                    log,
+                )
+                .await?,
+            );
         }
 
-        Ok(Self { sidecars, gimlets, pscs })
+        Ok(Self { sidecars, gimlets, pscs, tasks })
     }
 
     pub fn ignition_controller(&self) -> &Sidecar {
@@ -191,5 +220,52 @@ impl SimRack {
     /// Returns the total number of SPs in the simulated rack.
     pub fn num_sps(&self) -> usize {
         self.gimlets.len() + self.pscs.len() + self.sidecars.len()
+    }
+
+    /// Tears down the simulated rack.
+    ///
+    /// Returns `Ok(())` if teardown succeeded, or `Err(_)` if there were any
+    /// panics or other errors.
+    pub async fn teardown(mut self) -> Result<()> {
+        self.tasks.abort_all();
+
+        // Tasks finish in an arbitrary order. Keying errors by task name and
+        // storing them in an ordered map ensures a deterministic order for
+        // errors.
+        let mut errors = BTreeMap::new();
+        while let Some((name, result)) = self.tasks.join_next().await {
+            match result {
+                // We still hold a reference to the command sender, so the task
+                // should not have exited by itself.
+                Ok(()) => {
+                    let error =
+                        anyhow!("simulated SP {name} exited before teardown");
+                    errors.insert(name, error);
+                }
+                Err(error) => record_join_error(&mut errors, name, error),
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(merge_anyhow_list(errors.into_values()))
+        }
+    }
+}
+
+fn record_join_error(
+    errors: &mut BTreeMap<SimRackTaskName, anyhow::Error>,
+    name: SimRackTaskName,
+    error: JoinError,
+) {
+    // A JoinError is either a panic or a cancellation. Ignore cancellations
+    // because currently the only reason they can happen is due to our teardown.
+    //
+    // JoinError's Display impl includes the task id and panic message.
+    if error.is_panic() {
+        let error = anyhow::Error::new(error)
+            .context(format!("simulated SP {name} panicked"));
+        errors.insert(name, error);
     }
 }
