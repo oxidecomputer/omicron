@@ -67,7 +67,19 @@ WaitingForUpdate(HandoffFinal)
 Unknown(PlannerNotYetRun)
     summary: Unknown: the system is determining next steps
 
-Unknown(PlannerFailed { error: "blueprint planning is disabled" })
-    summary: Unknown: planner error
-    support details: planner error: blueprint planning is disabled
+Unknown(PlannerFailed(Disabled))
+    summary: Unknown: automatic system changes are disabled
+    support details: blueprint planning is disabled
+
+Unknown(PlannerFailed(ConfigNotYetLoaded))
+    summary: Unknown: the system is determining next steps
+    support details: reconfigurator config not yet loaded
+
+Unknown(PlannerFailed(LimitReached { limit: 20000 }))
+    summary: Unknown: automatic system changes have stopped
+    support details: blueprint planning stopped because the system has reached its limit of 20000 blueprints
+
+Unknown(PlannerFailed(Error("failed to assemble planning input")))
+    summary: Unknown: error determining next steps
+    support details: planner error: failed to assemble planning input
 

@@ -2230,7 +2230,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         target: BlueprintTarget,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BlueprintTargetSetError> {
         let conn = self.pool_connection_authorized(opctx).await?;
         Self::blueprint_target_set_current_on_connection(&conn, opctx, target)
             .await
@@ -2242,7 +2242,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         target: BlueprintTarget,
-    ) -> Result<(), Error> {
+    ) -> Result<(), BlueprintTargetSetError> {
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
@@ -2254,9 +2254,7 @@ impl DataStore {
         )
         .execute_async(conn)
         .await
-        .map_err(|e| {
-            Error::from(decode_target_insert_error(target.target_id, e))
-        })?;
+        .map_err(|e| decode_target_insert_error(target.target_id, e))?;
 
         Ok(())
     }
@@ -3272,34 +3270,49 @@ fn authz_blueprint_from_id(blueprint_id: BlueprintUuid) -> authz::Blueprint {
     )
 }
 
-/// Errors related to inserting a target blueprint
-#[derive(Debug)]
-enum InsertTargetError {
+/// Errors returned by [`DataStore::blueprint_target_set_current`]
+#[derive(Debug, Error, PartialEq)]
+pub enum BlueprintTargetSetError {
     /// The requested target blueprint ID does not exist in the blueprint table.
+    #[error("blueprint {0} does not exist")]
     NoSuchBlueprint(BlueprintUuid),
     /// The requested target blueprint's parent does not match the current
     /// target.
+    ///
+    /// This is expected when multiple Nexus instances plan concurrently from
+    /// the same parent blueprint and another one made its blueprint the target
+    /// first.
+    #[error(
+        "blueprint {0}'s parent blueprint is not the current target blueprint"
+    )]
     ParentNotTarget(BlueprintUuid),
     /// Any other error
-    Other(DieselError),
+    #[error(transparent)]
+    Other(Error),
 }
 
-impl From<InsertTargetError> for Error {
-    fn from(value: InsertTargetError) -> Self {
+impl From<Error> for BlueprintTargetSetError {
+    fn from(error: Error) -> Self {
+        BlueprintTargetSetError::Other(error)
+    }
+}
+
+impl From<BlueprintTargetSetError> for Error {
+    fn from(value: BlueprintTargetSetError) -> Self {
         match value {
-            InsertTargetError::NoSuchBlueprint(id) => Error::not_found_by_id(
-                ResourceType::Blueprint,
-                id.as_untyped_uuid(),
-            ),
-            InsertTargetError::ParentNotTarget(id) => {
+            BlueprintTargetSetError::NoSuchBlueprint(id) => {
+                Error::not_found_by_id(
+                    ResourceType::Blueprint,
+                    id.as_untyped_uuid(),
+                )
+            }
+            BlueprintTargetSetError::ParentNotTarget(id) => {
                 Error::invalid_request(format!(
                     "Blueprint {id}'s parent blueprint is not the current \
                      target blueprint"
                 ))
             }
-            InsertTargetError::Other(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
+            BlueprintTargetSetError::Other(e) => e,
         }
     }
 }
@@ -3321,19 +3334,22 @@ const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-targ
 fn decode_target_insert_error(
     target_id: BlueprintUuid,
     err: DieselError,
-) -> InsertTargetError {
+) -> BlueprintTargetSetError {
     match err {
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
         {
-            InsertTargetError::NoSuchBlueprint(target_id)
+            BlueprintTargetSetError::NoSuchBlueprint(target_id)
         }
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
         {
-            InsertTargetError::ParentNotTarget(target_id)
+            BlueprintTargetSetError::ParentNotTarget(target_id)
         }
-        other => InsertTargetError::Other(other),
+        other => BlueprintTargetSetError::Other(public_error_from_diesel(
+            other,
+            ErrorHandler::Server,
+        )),
     }
 }
 
@@ -4651,9 +4667,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            Error::from(InsertTargetError::NoSuchBlueprint(
-                nonexistent_blueprint_id
-            ))
+            BlueprintTargetSetError::NoSuchBlueprint(nonexistent_blueprint_id)
         );
 
         // There should be no current target; this is never expected in a real
@@ -4722,7 +4736,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            Error::from(InsertTargetError::ParentNotTarget(blueprint2.id))
+            BlueprintTargetSetError::ParentNotTarget(blueprint2.id)
         );
 
         // There should be no current target; this is never expected in a real
@@ -4765,7 +4779,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            Error::from(InsertTargetError::ParentNotTarget(blueprint1.id))
+            BlueprintTargetSetError::ParentNotTarget(blueprint1.id)
         );
         let err = datastore
             .blueprint_target_set_current(&opctx, bp2_target)
@@ -4773,7 +4787,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            Error::from(InsertTargetError::ParentNotTarget(blueprint2.id))
+            BlueprintTargetSetError::ParentNotTarget(blueprint2.id)
         );
 
         // Create a child of blueprint3, and ensure when we set it as the target

@@ -924,6 +924,7 @@ impl DataStore {
                     )
                     .await
                     .map_err(|e| {
+                        let e = Error::from(e);
                         error!(
                             log,
                             "Initializing Rack: Failed to set blueprint \

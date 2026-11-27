@@ -21,12 +21,16 @@ use nexus_db_model::saga_types::Saga;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OperatorStatus;
+use nexus_types::deployment::OperatorStatusDescription;
+use nexus_types::deployment::QuiesceInfo;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::TargetRelease;
 use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::BlueprintPlannerLatest;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::Zpool;
@@ -87,13 +91,15 @@ const STUCK_UPDATE_THRESHOLD: TimeDelta = TimeDelta::minutes(20);
 #[derive(Clone)]
 pub struct UpdateStatusHandle {
     latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+    latest_planner: watch::Receiver<BlueprintPlannerLatest>,
 }
 
 impl UpdateStatusHandle {
     pub fn new(
         latest_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+        latest_planner: watch::Receiver<BlueprintPlannerLatest>,
     ) -> Self {
-        Self { latest_blueprint }
+        Self { latest_blueprint, latest_planner }
     }
 }
 
@@ -669,13 +675,41 @@ impl super::Nexus {
             )
             .await?;
 
+        let notes = self.operator_notes();
+
         Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
             time_last_step_planned,
             suspended,
             contact_support,
+            notes,
         })
+    }
+
+    /// Returns operator notes based on this Nexus's most recent planner
+    /// activation
+    fn operator_notes(&self) -> update::OperatorNotes {
+        let quiesce_state = self.quiesce.state();
+        let (time_updated, status) = {
+            // We borrow from the watch channel within this small block because
+            // the lock is held until this value is dropped.
+            let latest = self.update_status.latest_planner.borrow();
+            let time_updated = latest.time_updated();
+            let status = OperatorStatus::from_planner(
+                &latest,
+                QuiesceInfo::Known(&quiesce_state),
+            );
+            (time_updated, status)
+        };
+        let OperatorStatusDescription { summary, support_details } =
+            status.describe();
+        update::OperatorNotes {
+            time_updated,
+            status: update::OperatorStatus::from(&status),
+            status_summary: summary,
+            status_support_details: Nullable(support_details),
+        }
     }
 
     /// Identify known reasons why we would want a customer to call support

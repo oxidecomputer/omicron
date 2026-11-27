@@ -175,7 +175,7 @@ impl super::Nexus {
             // Try to cancel the dropbox deposit.  This information is
             // useless now.  It's not a problem if this doesn't work.
             debug_dropbox_writer.cancel().await;
-            return Err(error);
+            return Err(error.into());
         }
 
         // We've got a new target.
