@@ -485,7 +485,9 @@ pub fn run_analyze(
         SitrepBuilderRng::from_seed("disk-analyze"),
     );
     crate::diagnosis::analyze(&mut builder).expect("analyze ok");
-    let (sitrep, report) = builder.build(OmicronZoneUuid::new_v4(), Utc::now());
+    let (sitrep, report) = builder
+        .build(OmicronZoneUuid::new_v4(), Utc::now())
+        .expect("sitrep should build");
     assert_analysis_preserves_slippy_clean(&sitrep, input.parent_sitrep());
     (sitrep, report)
 }

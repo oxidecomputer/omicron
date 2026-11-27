@@ -468,8 +468,9 @@ mod tests {
             SitrepBuilderRng::from_seed(seed),
         );
         analyze(&mut builder).expect("analyze ok");
-        let (sitrep, report) =
-            builder.build(OmicronZoneUuid::new_v4(), Utc::now());
+        let (sitrep, report) = builder
+            .build(OmicronZoneUuid::new_v4(), Utc::now())
+            .expect("sitrep should build");
         eprintln!("\n--- analysis ---\n{}", report.display_multiline(0));
         for case in &sitrep.cases {
             eprintln!("{}", case.display_indented(0, None));

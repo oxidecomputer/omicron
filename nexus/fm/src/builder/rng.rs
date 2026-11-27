@@ -16,6 +16,8 @@ use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::FactKind;
 use omicron_uuid_kinds::FactUuid;
+use omicron_uuid_kinds::ProblemKind;
+use omicron_uuid_kinds::ProblemUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -44,7 +46,6 @@ impl SitrepBuilderRng {
 
     pub fn new_from_parent(mut parent: StdRng) -> Self {
         let case_rng = TypedUuidRng::from_parent_rng(&mut parent, "case");
-
         Self { parent, case_rng }
     }
 
@@ -58,6 +59,12 @@ impl SitrepBuilderRng {
         let case_id = self.case_rng.next();
         let rng = CaseBuilderRng::new(case_id, self);
         (case_id, rng)
+    }
+
+    pub(super) fn problem_builder_rng(&mut self) -> ProblemBuilderRng {
+        let problem_rng =
+            TypedUuidRng::from_parent_rng(&mut self.parent, "active-problem");
+        ProblemBuilderRng { problem_rng }
     }
 }
 
@@ -109,5 +116,16 @@ impl CaseBuilderRng {
 
     pub(super) fn next_fact(&mut self) -> FactUuid {
         self.fact_rng.next()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProblemBuilderRng {
+    pub problem_rng: TypedUuidRng<ProblemKind>,
+}
+
+impl ProblemBuilderRng {
+    pub(super) fn next_active_problem(&mut self) -> ProblemUuid {
+        self.problem_rng.next()
     }
 }

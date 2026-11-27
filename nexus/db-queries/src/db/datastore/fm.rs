@@ -3854,6 +3854,7 @@ mod tests {
                 sitrep.metadata.comment
             ),
             cases: Default::default(),
+            active_problems: Default::default(),
         };
         model::fm::SitrepAnalysisReport::new(
             &input_report,
@@ -4505,6 +4506,7 @@ mod tests {
                 sitrep_id: ghost_sitrep_id,
                 comment: "spooky ghost analysis report".to_string(),
                 cases: Default::default(),
+                active_problems: Default::default(),
             };
             model::fm::SitrepAnalysisReport::new(
                 &input_report,

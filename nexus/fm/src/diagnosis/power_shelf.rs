@@ -504,6 +504,7 @@ impl Restart {
                                 ereport.class(),
                             ),
                         )
+                        .map(|_| ())
                     } else {
                         Ok(())
                     }
@@ -527,6 +528,7 @@ impl Restart {
                                 ereport.class(),
                             ),
                         )
+                        .map(|_| ())
                     } else {
                         Ok(())
                     }
@@ -1025,8 +1027,9 @@ mod tests {
             SitrepBuilderRng::from_seed("power-shelf-analyze"),
         );
         analyze(&mut builder).expect("power shelf analysis should succeed");
-        let (sitrep, report) =
-            builder.build(OmicronZoneUuid::new_v4(), Utc::now());
+        let (sitrep, report) = builder
+            .build(OmicronZoneUuid::new_v4(), Utc::now())
+            .expect("sitrep should build");
         eprintln!("\n--- analysis report ---\n{}", report.display_multiline(0));
         eprintln!("\n--- sitrep! ---\n");
         let mut seen_any_cases = false;

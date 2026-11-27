@@ -520,7 +520,9 @@ mod tests {
             SitrepBuilderRng::from_seed("saga-analyze"),
         );
         analyze(&mut builder).expect("analyze ok");
-        builder.build(OmicronZoneUuid::new_v4(), Utc::now())
+        builder
+            .build(OmicronZoneUuid::new_v4(), Utc::now())
+            .expect("sitrep should build")
     }
 
     /// A saga fact found in a sitrep, paired with its decoded [`SagaFact`]
