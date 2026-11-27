@@ -1216,7 +1216,7 @@ pub struct PackageConfig {
     pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
-    /// Multicast feature configuration
+    /// Multicast configuration
     #[serde(default)]
     pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy

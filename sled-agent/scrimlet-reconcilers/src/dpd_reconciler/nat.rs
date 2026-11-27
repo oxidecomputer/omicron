@@ -447,7 +447,8 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
 
         while let Some(ip) = stream_addresses.try_next().await? {
             self.assemble_entries_from_stream(
-                self.client.nat_ipv4_list_stream(&ip, SINGLE_REQUEST_LIMIT),
+                self.client
+                    .nat_ipv4_list_stream(&ip.address, SINGLE_REQUEST_LIMIT),
                 &mut counts,
             )
             .await?;
@@ -476,7 +477,8 @@ impl<'a> CurrentDpdEntriesAssembler<'a> {
 
         while let Some(ip) = stream_addresses.try_next().await? {
             self.assemble_entries_from_stream(
-                self.client.nat_ipv6_list_stream(&ip, SINGLE_REQUEST_LIMIT),
+                self.client
+                    .nat_ipv6_list_stream(&ip.address, SINGLE_REQUEST_LIMIT),
                 &mut counts,
             )
             .await?;

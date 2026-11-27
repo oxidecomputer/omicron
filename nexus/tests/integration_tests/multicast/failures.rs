@@ -37,13 +37,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::InstanceState;
-use nexus_types::external_api::instance::{
-    ExternalIpCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment,
-};
 use nexus_types::external_api::multicast::{
-    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
-    MulticastGroupMember,
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
 use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
 use sled_agent_types::early_networking::SwitchSlot;
