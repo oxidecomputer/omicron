@@ -1197,6 +1197,11 @@ impl InstanceRunner {
         // conclude that a cleanly-stopped instance has gone missing and should
         // be restarted.
         ticket.deregister();
+        info!(
+            self.log,
+            "deregistered VMM from instance manager";
+            "vmm_id" => ?ticket.id()
+        );
 
         // Okay, now that we've terminated the instance, drain any outstanding
         // requests in the queue, so that they see an error indicating that the
