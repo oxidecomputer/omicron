@@ -224,13 +224,8 @@ impl super::Nexus {
             .await?;
 
         // Create the set of members from returned sleds
-        let members: BTreeSet<_> = sleds
-            .iter()
-            .map(|sled| BaseboardId {
-                part_number: sled.part_number().to_string(),
-                serial_number: sled.serial_number().to_string(),
-            })
-            .collect();
+        let members: BTreeSet<_> =
+            sleds.iter().map(|sled| sled.baseboard_id()).collect();
 
         // Create a proposed configuration for the upgrade and save it to the DB
         let proposed = ProposedTrustQuorumConfig::upgrade_from_lrtq(

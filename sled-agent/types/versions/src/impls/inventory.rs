@@ -34,8 +34,9 @@ use crate::latest::inventory::{
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SledCpuFamily, SourceNatConfig,
     SourceNatConfigGeneric, SourceNatConfigV4, SourceNatConfigV6,
-    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline,
-    ZoneArtifactInventory, ZoneKind, ZoneSnatConfig, ZpoolHealth,
+    SvcEnabledNotOnlineState, SvcState, SvcsEnabledNotOnline, WicketSshAuth,
+    WicketSshAuthKind, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
+    ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -869,6 +870,7 @@ impl Default for OmicronSledConfig {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
             update_disposition: OmicronSledUpdateDisposition::Available,
+            wicket_ssh_auth: WicketSshAuth::initial(),
         }
     }
 }
@@ -1372,6 +1374,40 @@ impl InstanceManagerStatus {
             ),
             num_registered_vmms,
         }
+    }
+}
+
+impl WicketSshAuth {
+    /// Stringify this setting suitably for internal debugging output (e.g.,
+    /// inventory collection and blueprint display).
+    pub fn display(&self) -> WicketSshAuthDisplay<'_> {
+        WicketSshAuthDisplay(self)
+    }
+}
+
+pub struct WicketSshAuthDisplay<'a>(&'a WicketSshAuth);
+
+impl fmt::Display for WicketSshAuthDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let WicketSshAuth { generation, kind } = self.0;
+
+        match kind {
+            WicketSshAuthKind::Unauthenticated => write!(f, "unauthenticated")?,
+            WicketSshAuthKind::PublicKeys {
+                authorized_keys,
+                allow_support_keys,
+            } => {
+                let s = if authorized_keys.len() == 1 { "" } else { "s" };
+                write!(
+                    f,
+                    "authenticated, {} operator key{s}, support {}allowed",
+                    authorized_keys.len(),
+                    if *allow_support_keys { "" } else { "not " }
+                )?;
+            }
+        }
+
+        write!(f, " (generation {generation})")
     }
 }
 

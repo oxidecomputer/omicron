@@ -60,6 +60,7 @@ use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::OmicronPhysicalDiskConfig;
 use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::OmicronSledUpdateDisposition;
+use sled_agent_types::inventory::WicketSshAuth;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -91,6 +92,7 @@ mod blueprint_display;
 mod clickhouse;
 pub mod execution;
 mod network_resources;
+mod operator_status;
 mod planning_input;
 pub mod planning_report;
 mod reconfigurator_config;
@@ -121,6 +123,12 @@ pub use network_resources::OmicronZoneNicEntry;
 pub use network_resources::OmicronZoneNicIp;
 pub use network_resources::ZoneExternalSnatError;
 use omicron_common::api::external::Error;
+pub use operator_status::OperatorStatus;
+pub use operator_status::OperatorStatusDescription;
+pub use operator_status::QuiesceInfo;
+pub use operator_status::SledEvacuationProgress;
+pub use operator_status::UnknownReason;
+pub use operator_status::UpdateWait;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
@@ -1912,6 +1920,10 @@ impl BlueprintSledConfig {
             host_phase_2: self.host_phase_2.into(),
             measurements: self.measurements.into(),
             update_disposition: self.update_disposition.into(),
+            // TODO omicron#11821 This should come from `BlueprintSledConfig`
+            // (which itself should get it from the db). For now, fill in the
+            // same initial value every sled-agent always has.
+            wicket_ssh_auth: WicketSshAuth::initial(),
         }
     }
 

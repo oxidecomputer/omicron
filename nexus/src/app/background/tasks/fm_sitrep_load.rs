@@ -193,6 +193,7 @@ mod test {
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
@@ -227,9 +228,11 @@ mod test {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
@@ -296,9 +299,11 @@ mod test {
                 next_inv_min_time_started: Utc::now(),
                 alert_generation: SitrepAlertGeneration::new(),
                 support_bundle_generation: SitrepSupportBundleGeneration::new(),
+                problem_generation: SitrepProblemGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
+            problems: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, sitrep2.clone(), None)

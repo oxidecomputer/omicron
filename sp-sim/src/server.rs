@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::config::NetworkConfig;
 use crate::ereport;
 use crate::ereport::EreportState;
+use crate::sidecar::SpIgnitionHandle;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
@@ -171,27 +172,21 @@ pub fn logger(config: &Config) -> Result<Logger> {
     Ok(log)
 }
 
-// TODO: This doesn't need to return Result anymore
 pub(crate) async fn handle_request<'a, H: SimSpHandler>(
     handler: &mut H,
-    recv: Result<(&[u8], SocketAddrV6)>,
+    data: &[u8],
+    addr: SocketAddrV6,
     out: &'a mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     responsiveness: Responsiveness,
     port_num: H::VLanId,
-) -> Result<Option<(&'a [u8], SocketAddrV6)>>
-where
-    H::VLanId: std::fmt::Debug,
-{
+) -> Option<(&'a [u8], SocketAddrV6)> {
     match responsiveness {
         Responsiveness::Responsive => (), // proceed
         Responsiveness::Unresponsive => {
             // pretend to be unresponsive - drop this packet
-            return Ok(None);
+            return None;
         }
     }
-
-    let (data, addr) =
-        recv.with_context(|| format!("recv on {:?}", port_num))?;
 
     let should_respond = Arc::new(AtomicBool::new(true));
 
@@ -206,7 +201,7 @@ where
     let response = sp_impl::handle_message(sender, data, handler, out)
         .map(|n| (&out[..n], addr));
 
-    if should_respond.load(Ordering::SeqCst) { Ok(response) } else { Ok(None) }
+    if should_respond.load(Ordering::SeqCst) { response } else { None }
 }
 
 pub(crate) trait SimSpHandler: SpHandler {
@@ -246,9 +241,11 @@ pub(crate) struct UdpTask<H> {
     udp1: UdpServer,
     ereport_servers: Option<[UdpServer; 2]>,
     ereport_state: EreportState,
+    ignition_handle: SpIgnitionHandle,
     handler: Arc<TokioMutex<H>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
+    log: Logger,
 }
 
 impl<H> UdpTask<H>
@@ -261,8 +258,10 @@ where
         servers: [UdpServer; 2],
         ereport_servers: Option<[UdpServer; 2]>,
         ereport_state: EreportState,
+        ignition_handle: SpIgnitionHandle,
         handler: Arc<TokioMutex<H>>,
         commands: mpsc::UnboundedReceiver<Command>,
+        log: Logger,
     ) -> (Self, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let responses_sent_count = watch::Sender::new(0);
@@ -273,9 +272,11 @@ where
                 udp1,
                 ereport_servers,
                 ereport_state,
+                ignition_handle,
                 handler,
                 commands,
                 responses_sent_count,
+                log,
             },
             responses_sent_count_rx,
         )
@@ -307,13 +308,27 @@ where
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
+                    // A receive error means that the host socket is broken (and
+                    // not, for example, that the simulated SP is off or
+                    // unresponsive). If it happens, end the UDP task.
+                    let (data, addr) = recv0
+                        .with_context(|| format!("recv on {:?}", SpPort::One))?;
+
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Mgs(SpPort::One),
+                        addr,
+                    ) {
+                        continue;
+                    }
                     if let Some((resp, addr)) = handle_request(
                         &mut *self.handler.lock().await,
-                        recv0,
+                        data,
+                        addr,
                         &mut out_buf,
                         responsiveness,
                         SpPort::One,
-                    ).await? {
+                    ).await {
                         throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
@@ -321,13 +336,27 @@ where
                 }
 
                 recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
+                    // A receive error means that the host socket is broken (and
+                    // not, for example, that the simulated SP is off or
+                    // unresponsive). If it happens, end the UDP task.
+                    let (data, addr) = recv1
+                        .with_context(|| format!("recv on {:?}", SpPort::Two))?;
+
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Mgs(SpPort::Two),
+                        addr,
+                    ) {
+                        continue;
+                    }
                     if let Some((resp, addr)) = handle_request(
                         &mut *self.handler.lock().await,
-                        recv1,
+                        data,
+                        addr,
                         &mut out_buf,
                         responsiveness,
                         SpPort::Two,
-                    ).await? {
+                    ).await {
                         throttle_count -= 1;
                         self.udp1.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
@@ -336,16 +365,42 @@ where
 
                 recv = self.ereport_state.recv_request(ereport0) => {
                     let (req, addr, sock) = recv?;
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Ereport,
+                        addr,
+                    ) {
+                        continue;
+                    }
+                    // Note a divergence here: when a real SP is powered off,
+                    // its buffered ereports are lost, and it comes back with a
+                    // new restart ID. Our simulated SP retains ereport state
+                    // across a power cycle, though.
+                    //
+                    // TODO: Resolve this divergence. Calling
+                    // EreportState::pretend_to_restart should do it, though
+                    // that is edge-triggered so it'll need to be handled with
+                    // some care.
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
                 recv = self.ereport_state.recv_request(ereport1) => {
                     let (req, addr, sock) = recv?;
+                    if self.ignition_handle.drop_if_powered_off(
+                        &self.log,
+                        RequestKind::Ereport,
+                        addr,
+                    ) {
+                        continue;
+                    }
                     let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
+                // (This arm is deliberately not gated on ignition power, since
+                // it is a test command channel and not part of the simulated
+                // system.)
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
                     let command = match command {
@@ -377,5 +432,46 @@ where
                 }
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RequestKind {
+    Mgs(SpPort),
+    Ereport,
+}
+
+impl SpIgnitionHandle {
+    fn drop_if_powered_off(
+        &self,
+        log: &Logger,
+        kind: RequestKind,
+        src_addr: SocketAddrV6,
+    ) -> bool {
+        // If an SP is powered off by Ignition, it won't be able to answer any
+        // requests. Simulate that here by dropping the request.
+        //
+        // There's a small race here: Ignition can power the SP off just after
+        // this check passes, so a request that arrived just before the
+        // power-off might still be answered. It doesn't matter for our tests,
+        // though.
+        if self.is_powered() {
+            return false;
+        }
+        match kind {
+            RequestKind::Mgs(port) => debug!(
+                log,
+                "SP powered off by Ignition controller; dropping request";
+                "port" => ?port,
+                "src_addr" => %src_addr,
+            ),
+            RequestKind::Ereport => debug!(
+                log,
+                "SP powered off by Ignition controller; \
+                 dropping ereport request";
+                "src_addr" => %src_addr,
+            ),
+        }
+        true
     }
 }

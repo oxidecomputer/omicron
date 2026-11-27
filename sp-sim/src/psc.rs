@@ -16,7 +16,10 @@ use crate::pmbus_rails::PmbusRails;
 use crate::sensors::Sensors;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::sidecar::SpIgnitionHandle;
 use crate::sp;
+use crate::sp::SimRackTaskName;
+use crate::sp::SimSpSlot;
 use crate::task_dumps::TaskDumps;
 use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
@@ -68,6 +71,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio_util::task::JoinMap;
 
 pub const SIM_PSC_BOARD: &str = "SimPscSp";
 
@@ -145,7 +149,13 @@ impl SimulatedSp for Psc {
 }
 
 impl Psc {
-    pub async fn spawn(psc: &PscConfig, log: Logger) -> Result<Self> {
+    pub(crate) async fn spawn(
+        psc: &PscConfig,
+        index: usize,
+        ignition_handle: SpIgnitionHandle,
+        tasks: &mut JoinMap<SimRackTaskName, ()>,
+        log: Logger,
+    ) -> Result<Self> {
         info!(log, "setting up simulated PSC");
 
         let baseboard_vpd =
@@ -183,7 +193,7 @@ impl Psc {
             let handler = Handler::new(
                 baseboard_vpd,
                 psc.common.components.clone(),
-                log,
+                log.clone(),
                 psc.common.old_rot_state,
                 update_state,
             );
@@ -191,7 +201,11 @@ impl Psc {
                 servers,
                 ereport_servers,
                 ereport_state,
+                ignition_handle,
                 handler,
+                SimSpSlot::Psc(index),
+                tasks,
+                &log,
             );
 
             Ok(Self { sp })

@@ -541,6 +541,7 @@ mod tests {
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
     use omicron_generation_kinds::SitrepAlertGeneration;
+    use omicron_generation_kinds::SitrepProblemGeneration;
     use omicron_generation_kinds::SitrepSupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SitrepUuid;
@@ -609,9 +610,11 @@ mod tests {
                     alert_generation: SitrepAlertGeneration::new(),
                     support_bundle_generation:
                         SitrepSupportBundleGeneration::new(),
+                    problem_generation: SitrepProblemGeneration::new(),
                 },
                 cases: Default::default(),
                 ereports_by_id: Default::default(),
+                problems: Default::default(),
             },
         ))
     }

@@ -2,10 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use gateway_types::component::SpIdentifier;
+use gateway_types::component::SpType;
 use omicron_common::backoff::{self, BackoffError};
 use omicron_common::http_client::internal_http_client;
 use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, o};
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
@@ -124,6 +127,35 @@ impl GatewayClient {
         )
         .await
     }
+}
+
+pub fn local_switch_slot(
+    id: &SpIdentifier,
+) -> Result<SwitchSlot, LocalSwitchSlotError> {
+    match (id.typ, id.slot) {
+        (SpType::Switch, 0) => Ok(SwitchSlot::Switch0),
+        (SpType::Switch, 1) => Ok(SwitchSlot::Switch1),
+        (SpType::Switch, slot) => {
+            Err(LocalSwitchSlotError::NoSuchSwitchSlot { slot })
+        }
+        (typ @ (SpType::Sled | SpType::Power), slot) => {
+            Err(LocalSwitchSlotError::NotASwitch { typ, slot })
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum LocalSwitchSlotError {
+    #[error(
+        "MGS reported its local switch as switch slot {slot}, but a rack has \
+         only switch slots 0 and 1"
+    )]
+    NoSuchSwitchSlot { slot: u16 },
+    #[error(
+        "MGS reported its local switch as {typ:?} slot {slot}, which is not a \
+         switch"
+    )]
+    NotASwitch { typ: SpType, slot: u16 },
 }
 
 /// A map of [`RackUuid`]s to [`GatewayClient`]s.

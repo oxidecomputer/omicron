@@ -637,12 +637,35 @@ impl CollectionBuilder {
         source: &str,
         inventory: Inventory,
     ) -> Result<(), anyhow::Error> {
-        let sled_id = inventory.sled_id;
+        let Inventory {
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard_id,
+            rack_id,
+            usable_hardware_threads,
+            usable_physical_ram,
+            cpu_family,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            instance_manager_status,
+            file_source_resolver,
+            smf_services_enabled_not_online,
+            reference_measurements,
+            fmd,
+            // TODO omicron#11821 We should store the wicket SSH auth status in
+            // inventory in the DB. For now just drop it; reading inventory will
+            // fill in a dummy value.
+            wicket_ssh_auth_status: _,
+        } = inventory;
 
-        let baseboard_id = Some(Self::normalize_item(
-            &mut self.baseboards,
-            inventory.baseboard_id,
-        ));
+        let baseboard_id =
+            Some(Self::normalize_item(&mut self.baseboards, baseboard_id));
 
         // Socket addresses come through the OpenAPI spec as strings, which
         // means they don't get validated when everything else does.  This
@@ -651,36 +674,30 @@ impl CollectionBuilder {
         let time_collected = now_db_precision();
         let sled = SledAgent {
             source: source.to_string(),
-            sled_agent_address: inventory.sled_agent_address,
-            sled_role: inventory.sled_role,
+            sled_agent_address,
+            sled_role,
             baseboard_id,
-            rack_id: inventory.rack_id,
-            usable_hardware_threads: inventory.usable_hardware_threads,
-            usable_physical_ram: inventory.usable_physical_ram,
-            cpu_family: inventory.cpu_family,
-            reservoir_size: inventory.reservoir_size,
+            rack_id,
+            usable_hardware_threads,
+            usable_physical_ram,
+            cpu_family,
+            reservoir_size,
             time_collected,
             sled_id,
-            disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
-            zpools: inventory
-                .zpools
+            disks: disks.into_iter().map(|d| d.into()).collect(),
+            zpools: zpools
                 .into_iter()
                 .map(|z| Zpool::new(time_collected, z))
                 .collect(),
-            datasets: inventory
-                .datasets
-                .into_iter()
-                .map(|d| d.into())
-                .collect(),
-            ledgered_sled_config: inventory.ledgered_sled_config,
-            reconciler_status: inventory.reconciler_status,
-            last_reconciliation: inventory.last_reconciliation,
-            instance_manager_status: inventory.instance_manager_status,
-            file_source_resolver: inventory.file_source_resolver,
-            smf_services_enabled_not_online: inventory
-                .smf_services_enabled_not_online,
-            reference_measurements: inventory.reference_measurements,
-            fmd: inventory.fmd,
+            datasets: datasets.into_iter().map(|d| d.into()).collect(),
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            instance_manager_status,
+            file_source_resolver,
+            smf_services_enabled_not_online,
+            reference_measurements,
+            fmd,
         };
 
         self.sleds

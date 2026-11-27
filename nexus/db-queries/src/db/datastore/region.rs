@@ -6,6 +6,8 @@
 
 use super::DataStore;
 use super::RunnableQuery;
+use super::count_to_u64;
+use super::physical_disk::ExpungedPhysicalDiskResourcesMap;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
@@ -35,6 +37,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
 use std::net::SocketAddrV6;
@@ -420,6 +424,68 @@ impl DataStore {
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Counts the regions on each expunged physical disk.
+    ///
+    /// This uses the same criteria as
+    /// `find_read_write_regions_on_expunged_physical_disks()` and
+    /// `find_read_only_regions_on_expunged_physical_disks()`, but it returns
+    /// only counts, grouped by physical disk and by whether the regions are
+    /// read-only.  Only physical disks that hold at least one region are
+    /// included.
+    pub(super) async fn count_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<ExpungedPhysicalDiskResourcesMap, Error> {
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        let rows: Vec<(Uuid, String, bool, i64)> = region_dsl::region
+            .inner_join(
+                dataset_dsl::crucible_dataset
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
+            )
+            .inner_join(
+                zpool_dsl::zpool.on(dataset_dsl::pool_id.eq(zpool_dsl::id)),
+            )
+            .inner_join(
+                physical_disk_dsl::physical_disk
+                    .on(zpool_dsl::physical_disk_id.eq(physical_disk_dsl::id)),
+            )
+            .filter(
+                physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged),
+            )
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(zpool_dsl::time_deleted.is_null())
+            .group_by((
+                physical_disk_dsl::id,
+                physical_disk_dsl::serial,
+                region_dsl::read_only,
+            ))
+            .select((
+                physical_disk_dsl::id,
+                physical_disk_dsl::serial,
+                region_dsl::read_only,
+                diesel::dsl::count_star(),
+            ))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut rv = ExpungedPhysicalDiskResourcesMap::default();
+        for (disk_id, disk_serial, read_only, count) in rows {
+            let disk_id = PhysicalDiskUuid::from_untyped_uuid(disk_id);
+            let count = count_to_u64(count)?;
+            if read_only {
+                rv.add_read_only_regions(disk_id, disk_serial, count);
+            } else {
+                rv.add_read_write_regions(disk_id, disk_serial, count);
+            }
+        }
+        Ok(rv)
     }
 
     pub async fn region_set_port(
