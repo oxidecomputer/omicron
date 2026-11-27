@@ -37,7 +37,10 @@ use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{MulticastGroupMember, MulticastGroupMemberState};
+use nexus_db_model::{
+    MulticastGroupMember, MulticastGroupMemberParentKind,
+    MulticastGroupMemberState,
+};
 use omicron_common::api::external;
 
 use crate::db::true_or_cast_error::matches_sentinel;
@@ -321,11 +324,12 @@ impl AttachMemberToGroupStatement {
     ) -> QueryResult<()> {
         // Column order matches schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips
+        // multicast_ip, source_ips, parent_kind
         out.push_sql(
             "INSERT INTO multicast_group_member (\
                  id, time_created, time_modified, external_group_id, \
-                 parent_id, sled_id, state, multicast_ip, source_ips) SELECT ",
+                 parent_id, sled_id, state, multicast_ip, source_ips, \
+                 parent_kind) SELECT ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.new_member_id)?;
         out.push_sql(", ");
@@ -344,6 +348,10 @@ impl AttachMemberToGroupStatement {
         out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
             &self.source_ips_for_insert,
         )?;
+        out.push_sql(", ");
+        out.push_sql(super::member_parent_kind_as_sql_literal(
+            MulticastGroupMemberParentKind::Instance,
+        ));
         out.push_sql(" FROM valid_group CROSS JOIN instance_sled ");
 
         // ON CONFLICT: only update "Left" members, preserve other states
@@ -389,11 +397,11 @@ impl AttachMemberToGroupStatement {
         // Return all columns so caller gets full member record
         // Column order must match schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips
+        // multicast_ip, source_ips, parent_kind
         out.push_sql(
             " RETURNING id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips",
+             version_removed, multicast_ip, source_ips, parent_kind",
         );
         Ok(())
     }
@@ -408,11 +416,11 @@ impl AttachMemberToGroupStatement {
     ) -> QueryResult<()> {
         // Column order must match schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips
+        // multicast_ip, source_ips, parent_kind
         out.push_sql(
             "SELECT id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips \
+             version_removed, multicast_ip, source_ips, parent_kind \
              FROM upserted_member",
         );
         Ok(())

@@ -399,6 +399,11 @@ impl DataStore {
     /// - `Ok(true)` if the group was marked for deletion (no members existed)
     /// - `Ok(false)` if the group still has members (not marked)
     /// - `Err` on database errors
+    ///
+    /// # Parent Kinds
+    ///
+    /// A non-deleted member of any parent kind preserves the group as active
+    /// (see [`nexus_db_model::MulticastGroupMemberParentKind`]).
     pub async fn mark_multicast_group_for_removal_if_no_members(
         &self,
         opctx: &OpContext,

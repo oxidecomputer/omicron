@@ -773,7 +773,7 @@ impl super::Nexus {
         let (.., group_id) =
             group_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .multicast_group_members_list(
+            .multicast_group_instance_members_list(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group_id.id()),
                 pagparams,

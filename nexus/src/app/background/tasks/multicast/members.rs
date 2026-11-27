@@ -106,7 +106,7 @@ use slog::{debug, info, trace, warn};
 use uuid::Uuid;
 
 use nexus_db_model::{
-    DbTypedUuid, MulticastGroup, MulticastGroupMember,
+    DbTypedUuid, MemberParentRef, MulticastGroup, MulticastGroupMember,
     MulticastGroupMemberState, MulticastGroupState, Sled,
 };
 use nexus_db_queries::context::OpContext;
@@ -330,7 +330,26 @@ impl MulticastGroupReconciler {
         let mut processed = 0;
 
         // Get members in various states that need processing
-        let members = self.get_group_members(opctx, group.id()).await?;
+        let mut members = Vec::new();
+        for member in self.get_group_members(opctx, group.id()).await? {
+            match member.parent_ref() {
+                // TODO: Pass the extracted `InstanceUuid` to the batch lookup and
+                // instance handlers when adding legit probe reconciliation pass(es).
+                MemberParentRef::Instance(_) => members.push(member),
+                MemberParentRef::Probe(probe_id) => {
+                    // Nothing writes probe members at this point: a probe
+                    // row would be unexpected here and is worth a warning.
+                    // By ignoring the row, we leave the dataplane state as is.
+                    warn!(
+                        opctx.log,
+                        "ignoring multicast group member with a probe parent";
+                        "member_id" => %member.id,
+                        "probe_id" => %probe_id,
+                        "group_id" => %group.id()
+                    );
+                }
+            }
+        }
 
         // Batch-fetch instance states for all members to avoid N+1 queries
         let instance_states =
@@ -439,8 +458,6 @@ impl MulticastGroupReconciler {
                 .await;
         }
 
-        // For now, all members are instance-based, but this is where we'd
-        // dispatch to different processors for different member types
         let processor = InstanceMemberProcessor;
 
         match member.state {
@@ -1577,6 +1594,11 @@ impl MulticastGroupReconciler {
     /// Returns `MemberPortUnion::Complete` if all "Joined" members were
     /// successfully resolved, or `MemberPortUnion::Partial` if some members
     /// failed to resolve.
+    ///
+    /// # Parent Kinds
+    ///
+    /// Includes "Joined" members of every parent kind. See
+    /// [`nexus_db_model::MulticastGroupMemberParentKind`].
     async fn compute_active_member_ports(
         &self,
         opctx: &OpContext,
@@ -2217,7 +2239,7 @@ impl MulticastGroupReconciler {
         group_id: Uuid,
     ) -> Result<Vec<MulticastGroupMember>, anyhow::Error> {
         self.datastore
-            .multicast_group_members_list_by_id(
+            .multicast_group_members_list(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group_id),
                 &DataPageParams::max_page(),
