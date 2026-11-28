@@ -121,6 +121,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::DnsNameRecords;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
@@ -5753,7 +5754,8 @@ async fn cmd_db_dns_names(
             .await
             .with_context(ctx)?;
         check_limit(&names, limit, ctx);
-        names.sort_by(|(n1, _), (n2, _)| {
+        names.sort_by(|r1, r2| {
+            let (n1, n2) = (&r1.name, &r2.name);
             // A natural sort by name puts records starting with numbers first
             // (which will be some of the uuids), then underscores (the SRV
             // names), and then the letters (the rest of the uuids).  This is
@@ -5769,7 +5771,7 @@ async fn cmd_db_dns_names(
             }
         });
 
-        for (name, mut records) in names {
+        for DnsNameRecords { name, mut records, .. } in names {
             records.sort();
             print_name("", &name, Ok(records));
         }

@@ -14,6 +14,7 @@ use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
@@ -41,6 +42,14 @@ use uuid::Uuid;
 
 // This restriction could be removed by just implementing paginated reads.
 const NMAX_DNS_ZONES: u32 = 10;
+
+/// A DNS name and its records.
+#[derive(Clone, Debug)]
+pub struct DnsNameRecords {
+    pub name: String,
+    pub version_added: Generation,
+    pub records: Vec<DnsRecord>,
+}
 
 impl DataStore {
     /// List all DNS zones in a DNS group (paginated)
@@ -149,43 +158,53 @@ impl DataStore {
 
     /// List all DNS names in the given DNS zone at the given group version
     /// (paginated)
+    ///
+    /// Returns an error if any row's records cannot be decoded.
     pub async fn dns_names_list(
         &self,
         opctx: &OpContext,
         dns_zone_id: Uuid,
         version: Generation,
-        pagparams: &DataPageParams<'_, String>,
-    ) -> ListResultVec<(String, Vec<DnsRecord>)> {
+        pagparams: &DataPageParams<'_, (String, Generation)>,
+    ) -> ListResultVec<DnsNameRecords> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use nexus_db_schema::schema::dns_name::dsl;
-        Ok(paginated(dsl::dns_name, dsl::name, pagparams)
-            .filter(dsl::dns_zone_id.eq(dns_zone_id))
-            .filter(dsl::version_added.le(version))
-            .filter(
-                dsl::version_removed
-                    .is_null()
-                    .or(dsl::version_removed.gt(version)),
-            )
-            .select(DnsName::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .into_iter()
-            .filter_map(|n: DnsName| match n.records() {
-                Ok(records) => Some((n.name, records)),
-                Err(error) => {
-                    warn!(
-                        opctx.log,
-                        "failed to deserialize dns_name records: {:#}",
-                        error;
-                        "dns_zone_id" => n.dns_zone_id.to_string(),
-                        "name" => n.name.to_string(),
-                        "version_added" => n.version_added.to_string(),
-                    );
-                    None
-                }
+        let rows = paginated_multicolumn(
+            dsl::dns_name,
+            // The primary key for this table is (dns_zone_id, name, version).
+            // Filter by dns_zone_id and paginate by (name, version_added).
+            (dsl::name, dsl::version_added),
+            pagparams,
+        )
+        .filter(dsl::dns_zone_id.eq(dns_zone_id))
+        .filter(dsl::version_added.le(version))
+        .filter(
+            dsl::version_removed.is_null().or(dsl::version_removed.gt(version)),
+        )
+        .select(DnsName::as_select())
+        .load_async::<DnsName>(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        // If a row cannot be decoded, we fail the whole read rather than
+        // skipping it. This is a bit fragile, since it uses runtime JSON
+        // parsing rather than modelling state as db rows, but we've verified as
+        // of 2026-11 that Nexus shouldn't have written bad data into the
+        // database. But we should consider switching over to real relational
+        // data at some point.
+        rows.into_iter()
+            .map(|n| {
+                let records = n.records().internal_context(format!(
+                    "decoding records for DNS name {:?} \
+                     (zone {}, version added {})",
+                    n.name, n.dns_zone_id, *n.version_added,
+                ))?;
+                Ok(DnsNameRecords {
+                    name: n.name,
+                    version_added: n.version_added,
+                    records,
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// Read the latest complete DNS configuration for a DNS group
@@ -266,8 +285,12 @@ impl DataStore {
                         &p.current_pagparams(),
                     )
                     .await?;
-                paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
-                zone_records.extend(names_batch);
+                paginator = p.found_batch(&names_batch, &|n| {
+                    (n.name.clone(), n.version_added)
+                });
+                zone_records.extend(
+                    names_batch.into_iter().map(|n| (n.name, n.records)),
+                );
             }
 
             debug!(log, "found all DNS names for zone";
@@ -963,6 +986,90 @@ mod test {
             .await
             .expect("failed to read DNS config with batch size 1");
         assert_eq!(dns_config_batch_1, dns_config);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_read_dns_config_rejects_undecodable_names() {
+        let logctx = dev::test_setup_log(
+            "test_read_dns_config_rejects_undecodable_names",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let records = |last: u16| {
+            vec![DnsRecord::Aaaa(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, last))]
+        };
+        let initial = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            "dummy.oxide.internal",
+            "test suite",
+            "test suite",
+            HashMap::from([
+                ("aaa".to_string(), records(1)),
+                ("bbb".to_string(), records(2)),
+                ("ccc".to_string(), records(3)),
+                ("ddd".to_string(), records(4)),
+            ]),
+        );
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            DataStore::load_dns_data(&conn, initial)
+                .await
+                .expect("loaded initial DNS zone");
+
+            let zones = datastore
+                .dns_zones_list_all(&opctx, DnsGroup::Internal)
+                .await
+                .expect("listed DNS zones");
+            assert_eq!(zones.len(), 1, "one internal DNS zone");
+
+            // Corrupt the record data for "aaa".
+            use diesel::ExpressionMethods;
+            use nexus_db_schema::schema::dns_name::dsl;
+            let nupdated = diesel::update(dsl::dns_name)
+                .filter(dsl::dns_zone_id.eq(zones[0].id))
+                .filter(dsl::name.eq("aaa"))
+                .set(
+                    dsl::dns_record_data
+                        .eq(serde_json::json!({ "not": "a record list" })),
+                )
+                .execute_async(&*conn)
+                .await
+                .expect("corrupted record data");
+            assert_eq!(nupdated, 1, "exactly one dns_name row corrupted");
+        }
+
+        let version = datastore
+            .dns_group_latest_version(&opctx, DnsGroup::Internal)
+            .await
+            .expect("read latest DNS version");
+        for batch_size in [1, 2, 100] {
+            let error = datastore
+                .dns_config_read_version(
+                    &opctx,
+                    &opctx.log.clone(),
+                    NonZeroU32::new(batch_size).unwrap(),
+                    &version,
+                )
+                .await
+                .expect_err("reading DNS config with a corrupted row fails");
+            let Error::InternalError { internal_message } = &error else {
+                panic!(
+                    "expected an internal error with batch size \
+                     {batch_size}, got: {error:?}"
+                );
+            };
+            assert!(
+                internal_message.contains(r#"DNS name "aaa""#)
+                    && internal_message
+                        .contains("failed to deserialize DNS record"),
+                "error with batch size {batch_size} names the corrupted row \
+                 and the decode failure: {internal_message}",
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

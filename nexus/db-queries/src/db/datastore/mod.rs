@@ -174,6 +174,7 @@ pub use disk::Disk;
 pub use disk::LocalStorageAllocation;
 pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
+pub use dns::DnsNameRecords;
 pub use dns::DnsVersionUpdateBuilder;
 pub use external_ip::FloatingIpAllocation;
 pub use external_subnet::ExternalSubnetBeginOpResult;
