@@ -197,7 +197,7 @@ toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", featu
 toml_parser = { version = "1.1.2" }
 tough = { git = "https://github.com/oxidecomputer/tough", branch = "oxide/develop", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", rev = "f3b8f10795aa4865cc63638c03d05a64bd7c105f", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
 url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
@@ -401,7 +401,7 @@ toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", featu
 toml_parser = { version = "1.1.2" }
 tough = { git = "https://github.com/oxidecomputer/tough", branch = "oxide/develop", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", default-features = false, features = ["hubtools", "proptest", "schemars"] }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", rev = "f3b8f10795aa4865cc63638c03d05a64bd7c105f", default-features = false, features = ["hubtools", "proptest", "schemars"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
 url = { version = "2.5.8", features = ["serde"] }
 usdt = { version = "0.6.0" }
