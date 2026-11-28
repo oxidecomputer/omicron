@@ -3,6 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Interface for paginating database queries.
+//!
+//! For more information about pagination, see [Database Pagination] (also
+//! available as `docs/db-pagination.adoc` at the root of the repository.)
+//!
+//! [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 
 use crate::db::raw_query_builder::QueryBuilder;
 
@@ -24,6 +29,11 @@ use ref_cast::RefCast;
 use std::num::NonZeroU32;
 
 /// Uses `pagparams` to list a subset of rows in `query`, ordered by `column`.
+///
+/// For more information about pagination, see [Database Pagination] (also
+/// available as `docs/db-pagination.adoc` at the root of the repository.)
+///
+/// [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 pub fn paginated<T, C, M>(
     query: T,
     column: C,
@@ -98,10 +108,15 @@ where
     }
 }
 
-/// Uses `pagparams` to list a subset of rows in `query`, ordered by `c1, and
-/// then by `c2.
+/// Uses `pagparams` to list a subset of rows in `query`, ordered by `c1`, and
+/// then by `c2`.
 ///
 /// This is a two-column variation of the [`paginated`] function.
+///
+/// For more information about pagination, see [Database Pagination] (also
+/// available as `docs/db-pagination.adoc` at the root of the repository.)
+///
+/// [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
 // NOTE: This function could probably be made generic over an arbitrary number
 // of columns, but that'll either require modifying Diesel (to make "tuples of
 // columns" implement a subset of ExpressionMethods) or making a macro to generate
@@ -160,7 +175,7 @@ where
 
 // We'd like to be able to call:
 //
-//  c1.eq(v1).and(c2.gt(v2))
+//  c1.eq(v1).and(c2.gt(v2)).or(c1.gt(v1))
 //
 // This means "c1.eq(v1)" must implement BoolExpressionMethods, and
 // satisfy the requirements of the ".and" method.
@@ -169,36 +184,27 @@ where
     Eq<C1, M1>: Expression<SqlType = Bool>,
 // The RHS (c2.gt(v2)) must be a boolean expression:
     Gt<C2, M2>: Expression<SqlType = Bool>,
-// Putting it together, we should be able to filter by LHS.and(RHS):
+// The other side of the OR (c1.gt(v1)) must be a boolean expression:
+    Gt<C1, M1>: Expression<SqlType = Bool>,
+// Putting it together, we should be able to filter by
+// "c1.eq(v1).and(c2.gt(v2)).or(c1.gt(v1))":
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
-            And<Eq<C1, M1>, Gt<C2, M2>>,
+            Or<And<Eq<C1, M1>, Gt<C2, M2>>, Gt<C1, M1>>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 
 // We'd also like to be able to call:
 //
-//  c1.eq(v1).and(c2.lt(v2))
+//  c1.eq(v1).and(c2.lt(v2)).or(c1.lt(v1))
 //
-// We've already defined the bound on the LHS, so we add the equivalent
-// bounds on the RHS for the "Less than" variant.
+// We've already defined the bound on c1.eq(v1), so we add the equivalent
+// bounds for the "Less than" variant.
     Lt<C2, M2>: Expression<SqlType = Bool>,
+    Lt<C1, M1>: Expression<SqlType = Bool>,
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
-            And<Eq<C1, M1>, Lt<C2, M2>>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-
-// Necessary for "query.or_filter(c1.gt(v1))"
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            Gt<C1, M1>,
-            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
-        >,
-// Necessary for "query.or_filter(c1.lt(v1))"
-    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
-        query_methods::OrFilterDsl<
-            Lt<C1, M1>,
+            Or<And<Eq<C1, M1>, Lt<C2, M2>>, Lt<C1, M1>>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 {
@@ -211,17 +217,203 @@ where
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
             if let Some((v1, v2)) = marker {
-                query = query.filter(c1.eq(v1.clone()).and(c2.gt(v2)));
-                query = query.or_filter(c1.gt(v1));
+                // We add the whole marker condition in one filter call so that
+                // it's ANDed with any conditions already in the WHERE clause.
+                // If we used or_filter for the later branches, those existing
+                // conditions would apply only to the first branch.
+                //
+                // (The type bounds also prevent this from happening by
+                // disallowing any already-filtered queries from being passed
+                // in. This is defense in depth.)
+                query = query
+                    .filter(c1.eq(v1.clone()).and(c2.gt(v2)).or(c1.gt(v1)));
             }
             query.order(c1.asc()).then_order_by(c2.asc())
         }
         dropshot::PaginationOrder::Descending => {
             if let Some((v1, v2)) = marker {
-                query = query.filter(c1.eq(v1.clone()).and(c2.lt(v2)));
-                query = query.or_filter(c1.lt(v1));
+                query = query
+                    .filter(c1.eq(v1.clone()).and(c2.lt(v2)).or(c1.lt(v1)));
             }
             query.order(c1.desc()).then_order_by(c2.desc())
+        }
+    }
+}
+
+/// Uses `pagparams` to list a subset of rows in `query`, ordered by (`c1`,
+/// `c2`, `c3`).
+///
+/// This is a three-column variation of the [`paginated`] function.
+///
+/// For more information about pagination, see [Database Pagination] (also
+/// available as `docs/db-pagination.adoc` at the root of the repository.)
+///
+/// [Database Pagination]: https://oxidecomputer.github.io/omicron/docs/db-pagination
+pub fn paginated_multicolumn3<T, C1, C2, C3, M1, M2, M3>(
+    query: T,
+    (c1, c2, c3): (C1, C2, C3),
+    pagparams: &DataPageParams<'_, (M1, M2, M3)>,
+) -> <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output
+where
+// T is a table^H^H^H^H^Hquery source which can create a BoxedQuery.
+    T: QuerySource,
+    T: AsQuery,
+    <T as QuerySource>::DefaultSelection:
+        Expression<SqlType = <T as AsQuery>::SqlType>,
+    T::Query: query_methods::BoxedDsl<'static, Pg>,
+// Required for...everything.
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output: QueryDsl,
+// C1, C2 & C3 are columns which appear in T.
+    C1: 'static + Column + Copy + ExpressionMethods,
+    C2: 'static + Column + Copy + ExpressionMethods,
+    C3: 'static + Column + Copy + ExpressionMethods,
+// Required to compare the columns with the marker types.
+    C1::SqlType: SqlType,
+    C2::SqlType: SqlType,
+    C3::SqlType: SqlType,
+    M1: Clone + AsExpression<C1::SqlType>,
+    M2: Clone + AsExpression<C2::SqlType>,
+    M3: Clone + AsExpression<C3::SqlType>,
+// Necessary for `query.limit(...)`
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::LimitDsl<
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for "query.order(c1.desc())"
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrderDsl<
+            Desc<C1>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for "query.order(...).then_order_by(c2.desc())"
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::ThenOrderDsl<
+            Desc<C2>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for "query.order(...).then_order_by(...).then_order_by(c3.desc())"
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::ThenOrderDsl<
+            Desc<C3>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for "query.order(c1.asc())"
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrderDsl<
+            Asc<C1>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for "query.order(...).then_order_by(c2.asc())"
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::ThenOrderDsl<
+            Asc<C2>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+// Necessary for "query.order(...).then_order_by(...).then_order_by(c3.asc())"
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::ThenOrderDsl<
+            Asc<C3>,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+
+// We'd like to be able to call:
+//
+//  c1.eq(v1).and(c2.eq(v2)).and(c3.gt(v3))
+//      .or(c1.eq(v1).and(c2.gt(v2)))
+//      .or(c1.gt(v1))
+//
+// This means each of "c1.eq(v1)", "c2.eq(v2)" and "c3.gt(v3)" must be a
+// boolean expression:
+    Eq<C1, M1>: Expression<SqlType = Bool>,
+    Eq<C2, M2>: Expression<SqlType = Bool>,
+    Gt<C3, M3>: Expression<SqlType = Bool>,
+// The later branches of the OR (c1.eq(v1).and(c2.gt(v2)) and c1.gt(v1))
+// must also be boolean expressions:
+    Gt<C2, M2>: Expression<SqlType = Bool>,
+    Gt<C1, M1>: Expression<SqlType = Bool>,
+// Putting it together, we should be able to filter by
+// "c1.eq(v1).and(c2.eq(v2)).and(c3.gt(v3))
+//      .or(c1.eq(v1).and(c2.gt(v2)))
+//      .or(c1.gt(v1))":
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::FilterDsl<
+            Or<
+                Or<
+                    And<And<Eq<C1, M1>, Eq<C2, M2>>, Gt<C3, M3>>,
+                    And<Eq<C1, M1>, Gt<C2, M2>>,
+                >,
+                Gt<C1, M1>,
+            >,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+
+// We'd also like to be able to call:
+//
+//  c1.eq(v1).and(c2.eq(v2)).and(c3.lt(v3))
+//      .or(c1.eq(v1).and(c2.lt(v2)))
+//      .or(c1.lt(v1))
+//
+// We've already defined the bounds on the equality terms, so we add the
+// equivalent bounds for the "Less than" variant.
+    Lt<C3, M3>: Expression<SqlType = Bool>,
+    Lt<C2, M2>: Expression<SqlType = Bool>,
+    Lt<C1, M1>: Expression<SqlType = Bool>,
+    <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::FilterDsl<
+            Or<
+                Or<
+                    And<And<Eq<C1, M1>, Eq<C2, M2>>, Lt<C3, M3>>,
+                    And<Eq<C1, M1>, Lt<C2, M2>>,
+                >,
+                Lt<C1, M1>,
+            >,
+            Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
+        >,
+{
+    use query_methods::BoxedDsl;
+    let mut query = query
+        .as_query()
+        .internal_into_boxed()
+        .limit(pagparams.limit.get().into());
+    let marker = pagparams.marker.map(|m| m.clone());
+    match pagparams.direction {
+        dropshot::PaginationOrder::Ascending => {
+            if let Some((v1, v2, v3)) = marker {
+                // We add the whole marker condition in one filter call so that
+                // it's ANDed with any conditions already in the WHERE clause.
+                // If we used or_filter for the later branches, those existing
+                // conditions would apply only to the first branch.
+                //
+                // (The type bounds also prevent this from happening by
+                // disallowing any already-filtered queries from being passed
+                // in. This is defense in depth.)
+                query = query.filter(
+                    c1.eq(v1.clone())
+                        .and(c2.eq(v2.clone()))
+                        .and(c3.gt(v3))
+                        .or(c1.eq(v1.clone()).and(c2.gt(v2)))
+                        .or(c1.gt(v1)),
+                );
+            }
+            query
+                .order(c1.asc())
+                .then_order_by(c2.asc())
+                .then_order_by(c3.asc())
+        }
+        dropshot::PaginationOrder::Descending => {
+            if let Some((v1, v2, v3)) = marker {
+                query = query.filter(
+                    c1.eq(v1.clone())
+                        .and(c2.eq(v2.clone()))
+                        .and(c3.lt(v3))
+                        .or(c1.eq(v1.clone()).and(c2.lt(v2)))
+                        .or(c1.lt(v1)),
+                );
+            }
+            query
+                .order(c1.desc())
+                .then_order_by(c2.desc())
+                .then_order_by(c3.desc())
         }
     }
 }
@@ -577,6 +769,15 @@ mod test {
             test_phone_numbers (user_id, phone_number) {
                 user_id -> Uuid,
                 phone_number -> Int8,
+            }
+        }
+
+        table! {
+            test_triples (tag, a, b, c) {
+                a -> Int8,
+                b -> Int8,
+                c -> Int8,
+                tag -> Int8,
             }
         }
 
@@ -964,6 +1165,170 @@ mod test {
             dbg!(&observed),
             &[((2, 3), 42), ((3, 1), 50), ((3, 1), 51), ((3, 1), 52)]
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[derive(
+        Clone, Copy, Debug, Queryable, Insertable, PartialEq, Selectable,
+    )]
+    #[diesel(table_name = schema::test_triples)]
+    struct Triple {
+        a: i64,
+        b: i64,
+        c: i64,
+        tag: i64,
+    }
+
+    impl Triple {
+        fn key(&self) -> (i64, i64, i64) {
+            (self.a, self.b, self.c)
+        }
+    }
+
+    /// Generate every (a, b, c) where each can be 1..=3, and insert it into the
+    /// database.
+    ///
+    /// Rows share both one-column and two-column prefixes at every page
+    /// boundary.
+    async fn populate_triples(pool: &db::Pool) -> Vec<Triple> {
+        use schema::test_triples::dsl;
+
+        let conn = pool.claim().await.unwrap();
+        conn.batch_execute_async(
+            "CREATE TABLE test_triples (
+                a INT NOT NULL,
+                b INT NOT NULL,
+                c INT NOT NULL,
+                tag INT NOT NULL,
+                PRIMARY KEY (tag, a, b, c)
+            );
+
+            CREATE UNIQUE INDEX ON test_triples (a, b, c);",
+        )
+        .await
+        .unwrap();
+
+        let mut triples = Vec::new();
+        for a in 1..=3 {
+            for b in 1..=3 {
+                for c in 1..=3 {
+                    triples.push(Triple { a, b, c, tag: (a + b + c) % 2 });
+                }
+            }
+        }
+        diesel::insert_into(dsl::test_triples)
+            .values(triples.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        triples
+    }
+
+    async fn list_triples(
+        pool: &db::Pool,
+        batch_size: u32,
+        direction: PaginationOrder,
+        tag: Option<i64>,
+    ) -> Vec<Triple> {
+        use schema::test_triples::dsl;
+
+        let conn = pool.claim().await.unwrap();
+        let mut all = Vec::new();
+        let mut paginator =
+            Paginator::new(NonZeroU32::new(batch_size).unwrap(), direction);
+        while let Some(p) = paginator.next() {
+            let mut query = paginated_multicolumn3(
+                dsl::test_triples,
+                (dsl::a, dsl::b, dsl::c),
+                &p.current_pagparams(),
+            );
+            if let Some(tag) = tag {
+                query = query.filter(dsl::tag.eq(tag));
+            }
+            let batch: Vec<Triple> = query
+                .select(Triple::as_select())
+                .load_async(&*conn)
+                .await
+                .unwrap();
+            paginator = p.found_batch(&batch, &|t: &Triple| t.key());
+            all.extend(batch);
+        }
+        all
+    }
+
+    #[tokio::test]
+    async fn test_paginated_multicolumn3() {
+        let logctx = dev::test_setup_log("test_paginated_multicolumn3");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        let ascending = populate_triples(&pool).await;
+        let mut descending = ascending.clone();
+        descending.reverse();
+
+        for batch_size in [1, 2, 4, 27, 100] {
+            assert_eq!(
+                list_triples(
+                    &pool,
+                    batch_size,
+                    PaginationOrder::Ascending,
+                    None
+                )
+                .await,
+                ascending,
+                "ascending, batch size {batch_size}",
+            );
+            assert_eq!(
+                list_triples(
+                    &pool,
+                    batch_size,
+                    PaginationOrder::Descending,
+                    None
+                )
+                .await,
+                descending,
+                "descending, batch size {batch_size}",
+            );
+
+            for tag in [0, 1] {
+                let expected_asc: Vec<_> = ascending
+                    .iter()
+                    .copied()
+                    .filter(|t| t.tag == tag)
+                    .collect();
+                let expected_desc: Vec<_> = descending
+                    .iter()
+                    .copied()
+                    .filter(|t| t.tag == tag)
+                    .collect();
+                assert_eq!(
+                    list_triples(
+                        &pool,
+                        batch_size,
+                        PaginationOrder::Ascending,
+                        Some(tag),
+                    )
+                    .await,
+                    expected_asc,
+                    "ascending, batch size {batch_size}, \
+                     later filter tag = {tag}",
+                );
+                assert_eq!(
+                    list_triples(
+                        &pool,
+                        batch_size,
+                        PaginationOrder::Descending,
+                        Some(tag),
+                    )
+                    .await,
+                    expected_desc,
+                    "descending, batch size {batch_size}, \
+                     later filter tag = {tag}",
+                );
+            }
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
