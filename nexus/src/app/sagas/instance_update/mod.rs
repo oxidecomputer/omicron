@@ -3470,11 +3470,9 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         switch_slot: SwitchSlot,
     ) -> dpd_client::Client {
-        let dendrite_guard = cptestctx.dendrite.read().unwrap();
-        let port = dendrite_guard
-            .get(&switch_slot)
-            .expect("dendrite should be present for this switch slot")
-            .port();
+        let port = cptestctx
+            .dendrite_port(switch_slot)
+            .expect("dendrite should be present for this switch slot");
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
             log: cptestctx.logctx.log.new(o!(

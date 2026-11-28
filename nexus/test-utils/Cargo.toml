@@ -59,6 +59,7 @@ oxnet.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 pretty_assertions.workspace = true
+scopeguard.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
