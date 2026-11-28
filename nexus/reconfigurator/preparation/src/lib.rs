@@ -566,7 +566,7 @@ pub async fn reconfigurator_state_load(
             .blueprints_list(opctx, &p.current_pagparams())
             .await
             .context("listing blueprints")?;
-        paginator = p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| {
+        paginator = p.found_batch(&batch, &|b: &BlueprintMetadata| {
             b.id.into_untyped_uuid()
         });
         blueprint_ids.extend(batch);
